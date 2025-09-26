@@ -196,11 +196,81 @@ Please respond naturally while trying to collect any missing information. If thi
         // Try to match answers to questions
         const lowerMessage = message.toLowerCase();
         
-        // Simple pattern matching for questions
-        if (customer.question1.question.includes('horses') && /\d+/.test(message)) {
+        // Question 1: Horses (look for numbers)
+        if (!customer.question1.answered && /\d+/.test(message) && 
+            (lowerMessage.includes('horse') || lowerMessage.includes('have'))) {
             customerDB.updateCustomer(customer.phone, {
                 question1: { ...customer.question1, answer: message, answered: true }
             });
+        }
+        
+        // Question 2: Stable type (look for stable-related keywords)
+        if (!customer.question2.answered && 
+            (lowerMessage.includes('stable') || lowerMessage.includes('stall') || 
+             lowerMessage.includes('individual') || lowerMessage.includes('group'))) {
+            customerDB.updateCustomer(customer.phone, {
+                question2: { ...customer.question2, answer: message, answered: true }
+            });
+        }
+        
+        // Question 3: Budget (look for money-related keywords)
+        if (!customer.question3.answered && 
+            (lowerMessage.includes('budget') || lowerMessage.includes('£') || 
+             lowerMessage.includes('pound') || lowerMessage.includes('cost') ||
+             /\d+/.test(message))) {
+            customerDB.updateCustomer(customer.phone, {
+                question3: { ...customer.question3, answer: message, answered: true }
+            });
+        }
+        
+        // Question 4: Timeline (look for time-related keywords)
+        if (!customer.question4.answered && 
+            (lowerMessage.includes('timeline') || lowerMessage.includes('when') || 
+             lowerMessage.includes('month') || lowerMessage.includes('week') ||
+             lowerMessage.includes('urgent') || lowerMessage.includes('soon'))) {
+            customerDB.updateCustomer(customer.phone, {
+                question4: { ...customer.question4, answer: message, answered: true }
+            });
+        }
+        
+        // Check if all questions are answered
+        const allQuestionsAnswered = customer.question1.answered && 
+                                   customer.question2.answered && 
+                                   customer.question3.answered && 
+                                   customer.question4.answered;
+        
+        if (allQuestionsAnswered && customer.conversationStage !== 'completed') {
+            // Close the conversation
+            customerDB.updateCustomer(customer.phone, {
+                conversationStage: 'completed',
+                lastContact: new Date().toISOString()
+            });
+            
+            // Send completion message
+            const completionMessage = `Thank you for providing all the information! 
+
+Here's what you've told us:
+• Horses: ${customer.question1.answer}
+• Stable type: ${customer.question2.answer}
+• Budget: ${customer.question3.answer}
+• Timeline: ${customer.question4.answer}
+
+Our team will review your requirements and contact you within 24 hours with a detailed proposal.
+
+Thank you for your interest in our stable services! 🐎`;
+
+            // Send completion message
+            const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            if (twilioClient) {
+                await twilioClient.messages.create({
+                    body: completionMessage,
+                    from: To,
+                    to: From
+                });
+                
+                console.log(`✅ Conversation completed for customer ${customer.id}`);
+                return; // Don't send the regular AI response
+            }
         }
 
         return response;
