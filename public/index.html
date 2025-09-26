@@ -3538,7 +3538,8 @@
                 openaiKey: openaiKeyElement?.value || '',
                 assistantId: assistantIdElement?.value || '',
                 aiModel: document.getElementById('settingsAiModel')?.value || 'gpt-3.5-turbo',
-                aiEnabled: document.getElementById('settingsAiEnabled')?.checked || false
+                aiEnabled: document.getElementById('settingsAiEnabled')?.checked || false,
+                testMode: document.getElementById('settingsTestMode')?.checked || false
             };
             
             console.log('AI settings to save:', aiSettings);
@@ -3547,6 +3548,29 @@
             Object.keys(aiSettings).forEach(key => {
                 localStorage.setItem(key, aiSettings[key]);
                 console.log(`Saved ${key}:`, aiSettings[key]);
+            });
+            
+            // Send AI enabled/test mode to server
+            fetch('/api/ai-settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    aiEnabled: aiSettings.aiEnabled,
+                    testMode: aiSettings.testMode
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('AI settings saved to server:', data.settings);
+                } else {
+                    console.error('Error saving AI settings to server:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving AI settings to server:', error);
             });
             
             // Verify what was actually saved
@@ -3576,7 +3600,8 @@
                 openaiKey: openaiKeyElement?.value || '',
                 assistantId: assistantIdElement?.value || '',
                 aiModel: document.getElementById('settingsAiModel')?.value || 'gpt-3.5-turbo',
-                aiEnabled: document.getElementById('settingsAiEnabled')?.checked || false
+                aiEnabled: document.getElementById('settingsAiEnabled')?.checked || false,
+                testMode: document.getElementById('settingsTestMode')?.checked || false
             };
             
             console.log('AI settings to save silently:', aiSettings);
@@ -3585,6 +3610,29 @@
             Object.keys(aiSettings).forEach(key => {
                 localStorage.setItem(key, aiSettings[key]);
                 console.log(`Silently saved ${key}:`, aiSettings[key]);
+            });
+            
+            // Send AI enabled/test mode to server silently
+            fetch('/api/ai-settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    aiEnabled: aiSettings.aiEnabled,
+                    testMode: aiSettings.testMode
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('AI settings saved to server silently:', data.settings);
+                } else {
+                    console.error('Error saving AI settings to server silently:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving AI settings to server silently:', error);
             });
             
             // Verify what was actually saved
@@ -4153,6 +4201,37 @@
             }
         };
 
+        window.loadAISettings = () => {
+            // Load AI settings from server
+            fetch('/api/ai-settings')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.settings) {
+                    const settings = data.settings;
+                    
+                    // Update the checkboxes
+                    const aiEnabledElement = document.getElementById('settingsAiEnabled');
+                    const testModeElement = document.getElementById('settingsTestMode');
+                    
+                    if (aiEnabledElement) {
+                        aiEnabledElement.checked = settings.aiEnabled;
+                    }
+                    if (testModeElement) {
+                        testModeElement.checked = settings.testMode;
+                    }
+                    
+                    // Update status indicators
+                    updateSettingsAIStatus(settings.aiEnabled);
+                    updateSettingsTestModeStatus(settings.testMode);
+                    
+                    console.log('AI settings loaded from server:', settings);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading AI settings from server:', error);
+            });
+        };
+
         // Global function for clearing current chat
         window.clearCurrentChat = () => {
             if (!window.aiChatManager) {
@@ -4322,6 +4401,9 @@
             
             // Load special offers
             loadSpecialOffer();
+            
+            // Load AI settings from server
+            loadAISettings();
             
             const savedQuestions = localStorage.getItem('customQuestions');
             if (savedQuestions) {

@@ -20,6 +20,12 @@ app.use(express.static('public'));
 // Special Offers Storage
 let specialOffer = null;
 
+// AI Settings Storage
+let aiSettings = {
+    aiEnabled: true, // Default to enabled
+    testMode: false
+};
+
 // Customer Database (In production, use proper database)
 class CustomerDatabase {
     constructor() {
@@ -446,11 +452,11 @@ app.post('/webhook/sms', async (req, res) => {
             });
         }
 
-        // Generate AI response with customer context
+        // Generate AI response with customer context (only if AI is enabled)
         const assistantId = process.env.OPENAI_ASSISTANT_ID;
         const openaiKey = process.env.OPENAI_API_KEY;
         
-        if (assistantId && openaiKey) {
+        if (assistantId && openaiKey && aiSettings.aiEnabled) {
             try {
                 const aiResponse = await generateAssistantResponse(
                     Body, 
@@ -470,6 +476,14 @@ app.post('/webhook/sms', async (req, res) => {
                     
                     console.log(`🤖 Auto-replied to customer ${customer.id}: "${aiResponse}"`);
                 }
+            } catch (error) {
+                console.error('❌ Error generating AI response:', error);
+            }
+        } else if (!aiSettings.aiEnabled) {
+            console.log(`🚫 AI responses disabled - not replying to ${From}`);
+        } else {
+            console.log(`⚠️ AI credentials missing - not replying to ${From}`);
+        }
 
                 // Update conversation stage
                 customerDB.updateCustomer(normalizedPhone, {
@@ -635,6 +649,42 @@ app.post('/api/special-offer', (req, res) => {
         
     } catch (error) {
         console.error('Error saving special offer:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+
+// AI Settings API endpoints
+app.get('/api/ai-settings', (req, res) => {
+    res.json({
+        success: true,
+        settings: aiSettings
+    });
+});
+
+app.post('/api/ai-settings', (req, res) => {
+    try {
+        const { aiEnabled, testMode } = req.body;
+        
+        // Update AI settings
+        aiSettings = {
+            aiEnabled: aiEnabled !== undefined ? aiEnabled : aiSettings.aiEnabled,
+            testMode: testMode !== undefined ? testMode : aiSettings.testMode,
+            updated: new Date().toISOString()
+        };
+        
+        console.log('🤖 AI settings updated:', aiSettings);
+        
+        res.json({
+            success: true,
+            message: 'AI settings saved successfully',
+            settings: aiSettings
+        });
+        
+    } catch (error) {
+        console.error('Error saving AI settings:', error);
         res.status(500).json({
             success: false,
             error: 'Internal server error'
