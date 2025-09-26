@@ -1712,20 +1712,28 @@
                 <!-- Twilio Settings Section -->
                 <div class="settings-section">
                     <h2>🔧 Twilio Configuration</h2>
+                    <div style="background: #e8f5e8; padding: 10px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
+                        <strong>✅ Credentials Loaded from Railway</strong><br>
+                        Your Twilio and OpenAI credentials are automatically loaded from Railway's secure environment variables. 
+                        No need to enter them manually - they're already configured and working!
+                    </div>
                     <div class="settings-grid">
                         <div class="settings-group">
                             <h3>📱 Account Details</h3>
                             <div class="settings-input-group">
                                 <label>Account SID:</label>
-                                <input type="text" id="settingsAccountSid" placeholder="ACxxx...">
+                                <input type="text" id="settingsAccountSid" placeholder="ACxxx..." readonly>
+                                <small style="color: #666; font-size: 0.8em;">✅ Loaded from Railway environment variables</small>
                             </div>
                             <div class="settings-input-group">
                                 <label>Auth Token:</label>
-                                <input type="password" id="settingsAuthToken" placeholder="Token...">
+                                <input type="password" id="settingsAuthToken" placeholder="Token..." readonly>
+                                <small style="color: #666; font-size: 0.8em;">✅ Loaded from Railway environment variables</small>
                             </div>
                             <div class="settings-input-group">
                                 <label>From Number:</label>
-                                <input type="text" id="settingsFromNumber" placeholder="+1234567890">
+                                <input type="text" id="settingsFromNumber" placeholder="+1234567890" readonly>
+                                <small style="color: #666; font-size: 0.8em;">✅ Loaded from Railway environment variables</small>
                             </div>
                         </div>
                     </div>
@@ -1739,16 +1747,13 @@
                             <h3>🧠 OpenAI Settings</h3>
                             <div class="settings-input-group">
                                 <label>OpenAI API Key:</label>
-                                <input type="password" id="settingsOpenaiKey" placeholder="sk-...">
+                                <input type="password" id="settingsOpenaiKey" placeholder="sk-..." readonly>
+                                <small style="color: #666; font-size: 0.8em;">✅ Loaded from Railway environment variables</small>
                             </div>
                             <div class="settings-input-group">
                                 <label>OpenAI Assistant ID:</label>
-                                <input type="text" id="settingsAssistantId" placeholder="asst_...">
-                                <small class="help-text">
-                                    <a href="https://platform.openai.com/assistants" target="_blank" style="color: #4CAF50;">
-                                        📖 How to create an OpenAI Assistant
-                                    </a>
-                                </small>
+                                <input type="text" id="settingsAssistantId" placeholder="asst_..." readonly>
+                                <small style="color: #666; font-size: 0.8em;">✅ Loaded from Railway environment variables</small>
                             </div>
                             <div class="settings-input-group">
                                 <label>AI Model:</label>
