@@ -1506,6 +1506,140 @@
             box-shadow: 0 2px 6px rgba(244, 67, 54, 0.3) !important;
         }
 
+        /* Special Offers Section Styling */
+        .special-offers-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .special-offers-section h2 {
+            color: #2c3e50;
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            text-align: center;
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .special-offers-section h3 {
+            color: #34495e;
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #3498db;
+        }
+
+        .special-offers-section .settings-input-group {
+            margin-bottom: 15px;
+        }
+
+        .special-offers-section label {
+            color: #2c3e50;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        .special-offers-section input[type="text"],
+        .special-offers-section input[type="date"],
+        .special-offers-section textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #bdc3c7;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .special-offers-section input[type="text"]:focus,
+        .special-offers-section input[type="date"]:focus,
+        .special-offers-section textarea:focus {
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+            outline: none;
+        }
+
+        .special-offers-section textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+
+        .special-offers-section input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            accent-color: #3498db;
+        }
+
+        .special-offers-section small {
+            color: #7f8c8d;
+            font-size: 0.8rem;
+            font-style: italic;
+        }
+
+        .save-offer-btn {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 12px 24px !important;
+            font-size: 0.95rem !important;
+            font-weight: 600 !important;
+            border-radius: 8px !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3) !important;
+            width: 100% !important;
+            margin-top: 10px !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+        }
+
+        .save-offer-btn:hover {
+            background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%) !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 16px rgba(39, 174, 96, 0.4) !important;
+        }
+
+        .save-offer-btn:active {
+            transform: translateY(0) !important;
+            box-shadow: 0 3px 8px rgba(39, 174, 96, 0.3) !important;
+        }
+
+        .offer-status-indicator {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+        }
+
+        .offer-status-active {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .offer-status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
         .conversation-item {
             padding: 12px;
             margin-bottom: 8px;
@@ -1813,11 +1947,11 @@
                 </div>
 
                 <!-- Special Offers Section -->
-                <div class="settings-section">
+                <div class="special-offers-section">
                     <h2>🎯 Special Offers Management</h2>
                     <div class="settings-grid">
                         <div class="settings-group">
-                            <h3>📢 Current Special Offer</h3>
+                            <h3>📢 Current Special Offer <span id="offerStatus" class="offer-status-indicator offer-status-inactive">Inactive</span></h3>
                             <div class="settings-input-group">
                                 <label>Offer Title:</label>
                                 <input type="text" id="specialOfferTitle" placeholder="e.g., Spring Stable Special">
@@ -1839,11 +1973,13 @@
                                 <input type="text" id="specialOfferContact" placeholder="e.g., Call 01234 567890 or email info@company.com">
                             </div>
                             <div class="settings-input-group">
-                                <label>Active:</label>
-                                <input type="checkbox" id="specialOfferActive" checked>
-                                <small style="color: #666; font-size: 0.8em;">Enable this special offer</small>
+                                <label>
+                                    <input type="checkbox" id="specialOfferActive" checked>
+                                    Active Offer
+                                </label>
+                                <small>Enable this special offer for customers</small>
                             </div>
-                            <button class="button" onclick="saveSpecialOffer()" style="background: #4CAF50; color: white;">💾 Save Special Offer</button>
+                            <button class="save-offer-btn" onclick="saveSpecialOffer()">💾 Save Special Offer</button>
                         </div>
                     </div>
                 </div>
@@ -3942,6 +4078,7 @@
             .then(data => {
                 if (data.success) {
                     showNotification('Special offer saved successfully!', 'success');
+                    updateOfferStatus(offerData);
                 } else {
                     showNotification('Error saving special offer: ' + data.error, 'error');
                 }
@@ -3964,6 +4101,7 @@
                     document.getElementById('specialOfferExpiry').value = offerData.expiry || '';
                     document.getElementById('specialOfferContact').value = offerData.contact || '';
                     document.getElementById('specialOfferActive').checked = offerData.active !== false;
+                    updateOfferStatus(offerData);
                 } catch (error) {
                     console.error('Error loading special offer:', error);
                 }
@@ -3981,6 +4119,7 @@
                     document.getElementById('specialOfferExpiry').value = offerData.expiry || '';
                     document.getElementById('specialOfferContact').value = offerData.contact || '';
                     document.getElementById('specialOfferActive').checked = offerData.active !== false;
+                    updateOfferStatus(offerData);
                     
                     // Update localStorage with server data
                     localStorage.setItem('specialOffer', JSON.stringify(offerData));
@@ -3989,6 +4128,29 @@
             .catch(error => {
                 console.error('Error loading special offer from server:', error);
             });
+        };
+
+        window.updateOfferStatus = (offerData) => {
+            const statusElement = document.getElementById('offerStatus');
+            if (!statusElement) return;
+
+            if (!offerData || !offerData.active || !offerData.title) {
+                statusElement.textContent = 'Inactive';
+                statusElement.className = 'offer-status-indicator offer-status-inactive';
+                return;
+            }
+
+            // Check if offer has expired
+            const today = new Date();
+            const expiryDate = new Date(offerData.expiry);
+            
+            if (expiryDate <= today) {
+                statusElement.textContent = 'Expired';
+                statusElement.className = 'offer-status-indicator offer-status-inactive';
+            } else {
+                statusElement.textContent = 'Active';
+                statusElement.className = 'offer-status-indicator offer-status-active';
+            }
         };
 
         // Global function for clearing current chat
