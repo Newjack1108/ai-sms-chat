@@ -1812,6 +1812,42 @@
                     </div>
                 </div>
 
+                <!-- Special Offers Section -->
+                <div class="settings-section">
+                    <h2>🎯 Special Offers Management</h2>
+                    <div class="settings-grid">
+                        <div class="settings-group">
+                            <h3>📢 Current Special Offer</h3>
+                            <div class="settings-input-group">
+                                <label>Offer Title:</label>
+                                <input type="text" id="specialOfferTitle" placeholder="e.g., Spring Stable Special">
+                            </div>
+                            <div class="settings-input-group">
+                                <label>Offer Description:</label>
+                                <textarea id="specialOfferDescription" placeholder="Describe your special offer details..." rows="3"></textarea>
+                            </div>
+                            <div class="settings-input-group">
+                                <label>Discount/Details:</label>
+                                <input type="text" id="specialOfferDiscount" placeholder="e.g., 20% off, Free consultation, etc.">
+                            </div>
+                            <div class="settings-input-group">
+                                <label>Expiry Date:</label>
+                                <input type="date" id="specialOfferExpiry">
+                            </div>
+                            <div class="settings-input-group">
+                                <label>Contact Info:</label>
+                                <input type="text" id="specialOfferContact" placeholder="e.g., Call 01234 567890 or email info@company.com">
+                            </div>
+                            <div class="settings-input-group">
+                                <label>Active:</label>
+                                <input type="checkbox" id="specialOfferActive" checked>
+                                <small style="color: #666; font-size: 0.8em;">Enable this special offer</small>
+                            </div>
+                            <button class="button" onclick="saveSpecialOffer()" style="background: #4CAF50; color: white;">💾 Save Special Offer</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Question Configuration Section -->
                 <div class="settings-section">
                     <h2>❓ Question Configuration</h2>
@@ -3865,6 +3901,96 @@
             }, 3000);
         };
 
+        // Special Offers Management
+        window.saveSpecialOffer = () => {
+            const offerData = {
+                title: document.getElementById('specialOfferTitle').value,
+                description: document.getElementById('specialOfferDescription').value,
+                discount: document.getElementById('specialOfferDiscount').value,
+                expiry: document.getElementById('specialOfferExpiry').value,
+                contact: document.getElementById('specialOfferContact').value,
+                active: document.getElementById('specialOfferActive').checked,
+                created: new Date().toISOString()
+            };
+
+            // Validate required fields
+            if (!offerData.title || !offerData.description || !offerData.expiry) {
+                showNotification('Please fill in all required fields (Title, Description, Expiry Date)', 'error');
+                return;
+            }
+
+            // Check if expiry date is in the future
+            const expiryDate = new Date(offerData.expiry);
+            const today = new Date();
+            if (expiryDate <= today) {
+                showNotification('Expiry date must be in the future', 'error');
+                return;
+            }
+
+            // Save to localStorage
+            localStorage.setItem('specialOffer', JSON.stringify(offerData));
+            
+            // Send to server
+            fetch('/api/special-offer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(offerData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Special offer saved successfully!', 'success');
+                } else {
+                    showNotification('Error saving special offer: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving special offer:', error);
+                showNotification('Error saving special offer', 'error');
+            });
+        };
+
+        window.loadSpecialOffer = () => {
+            // Load from localStorage first
+            const savedOffer = localStorage.getItem('specialOffer');
+            if (savedOffer) {
+                try {
+                    const offerData = JSON.parse(savedOffer);
+                    document.getElementById('specialOfferTitle').value = offerData.title || '';
+                    document.getElementById('specialOfferDescription').value = offerData.description || '';
+                    document.getElementById('specialOfferDiscount').value = offerData.discount || '';
+                    document.getElementById('specialOfferExpiry').value = offerData.expiry || '';
+                    document.getElementById('specialOfferContact').value = offerData.contact || '';
+                    document.getElementById('specialOfferActive').checked = offerData.active !== false;
+                } catch (error) {
+                    console.error('Error loading special offer:', error);
+                }
+            }
+
+            // Also load from server
+            fetch('/api/special-offer')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.offer) {
+                    const offerData = data.offer;
+                    document.getElementById('specialOfferTitle').value = offerData.title || '';
+                    document.getElementById('specialOfferDescription').value = offerData.description || '';
+                    document.getElementById('specialOfferDiscount').value = offerData.discount || '';
+                    document.getElementById('specialOfferExpiry').value = offerData.expiry || '';
+                    document.getElementById('specialOfferContact').value = offerData.contact || '';
+                    document.getElementById('specialOfferActive').checked = offerData.active !== false;
+                    
+                    // Update localStorage with server data
+                    localStorage.setItem('specialOffer', JSON.stringify(offerData));
+                }
+            })
+            .catch(error => {
+                console.error('Error loading special offer from server:', error);
+            });
+        };
+
         // Global function for clearing current chat
         window.clearCurrentChat = () => {
             if (!window.aiChatManager) {
@@ -4031,6 +4157,9 @@
         document.addEventListener('DOMContentLoaded', async () => {
             // Load environment variables first
             await loadEnvironmentVariables();
+            
+            // Load special offers
+            loadSpecialOffer();
             
             const savedQuestions = localStorage.getItem('customQuestions');
             if (savedQuestions) {

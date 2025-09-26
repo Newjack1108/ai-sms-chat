@@ -17,6 +17,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
+// Special Offers Storage
+let specialOffer = null;
+
 // Customer Database (In production, use proper database)
 class CustomerDatabase {
     constructor() {
@@ -159,8 +162,17 @@ async function generateAssistantResponse(message, customer, openaiKey, assistant
             customerDB.updateCustomer(customer.phone, { assistantThreadId: threadId });
         }
 
+        // Check for special offer mentions
+        const lowerMessage = message.toLowerCase();
+        const isAskingAboutOffers = lowerMessage.includes('offer') || 
+                                   lowerMessage.includes('special') || 
+                                   lowerMessage.includes('deal') || 
+                                   lowerMessage.includes('discount') || 
+                                   lowerMessage.includes('promotion') ||
+                                   lowerMessage.includes('sale');
+
         // Create enhanced context for assistant
-        const customerContext = `
+        let customerContext = `
 Customer Profile:
 - Name: ${customer.name || 'Unknown'}
 - Phone: ${customer.phone}
@@ -181,6 +193,26 @@ Current Message: "${message}"
 
 Please respond naturally while trying to collect any missing information. If this appears to answer one of the questions above, note it in your response.
         `;
+
+        // Add special offer information if customer is asking about offers and we have an active offer
+        if (isAskingAboutOffers && specialOffer && specialOffer.active) {
+            const today = new Date();
+            const expiryDate = new Date(specialOffer.expiry);
+            
+            if (expiryDate > today) {
+                customerContext += `
+
+SPECIAL OFFER AVAILABLE:
+- Title: ${specialOffer.title}
+- Description: ${specialOffer.description}
+- Discount/Details: ${specialOffer.discount}
+- Expires: ${expiryDate.toLocaleDateString()}
+- Contact: ${specialOffer.contact}
+
+IMPORTANT: If the customer is asking about offers, deals, discounts, or specials, make sure to mention this special offer in your response. Be enthusiastic but professional about the offer.
+                `;
+            }
+        }
 
         // Add context message to thread
         await addMessageToThread(openaiKey, threadId, customerContext + "\n\nCustomer message: " + message);
@@ -557,6 +589,58 @@ app.get('/api/env', (req, res) => {
         OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
         OPENAI_ASSISTANT_ID: process.env.OPENAI_ASSISTANT_ID || ''
     });
+});
+
+// Special Offer API endpoints
+app.get('/api/special-offer', (req, res) => {
+    res.json({
+        success: true,
+        offer: specialOffer
+    });
+});
+
+app.post('/api/special-offer', (req, res) => {
+    try {
+        const offerData = req.body;
+        
+        // Validate required fields
+        if (!offerData.title || !offerData.description || !offerData.expiry) {
+            return res.status(400).json({
+                success: false,
+                error: 'Title, description, and expiry date are required'
+            });
+        }
+        
+        // Check if expiry date is in the future
+        const expiryDate = new Date(offerData.expiry);
+        const today = new Date();
+        if (expiryDate <= today) {
+            return res.status(400).json({
+                success: false,
+                error: 'Expiry date must be in the future'
+            });
+        }
+        
+        // Save the special offer
+        specialOffer = {
+            ...offerData,
+            updated: new Date().toISOString()
+        };
+        
+        console.log('🎯 Special offer updated:', specialOffer.title);
+        
+        res.json({
+            success: true,
+            message: 'Special offer saved successfully'
+        });
+        
+    } catch (error) {
+        console.error('Error saving special offer:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
 });
 
 // Serve main interface
