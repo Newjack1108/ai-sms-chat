@@ -476,6 +476,17 @@ app.post('/api/configure-questions', (req, res) => {
     });
 });
 
+// Serve environment variables to frontend
+app.get('/api/env', (req, res) => {
+    res.json({
+        TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || '',
+        TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || '',
+        TWILIO_FROM_NUMBER: process.env.TWILIO_FROM_NUMBER || '',
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
+        OPENAI_ASSISTANT_ID: process.env.OPENAI_ASSISTANT_ID || ''
+    });
+});
+
 // Serve main interface
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));

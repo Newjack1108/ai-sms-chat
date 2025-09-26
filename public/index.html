@@ -2762,11 +2762,11 @@
 
             getSettings() {
                 const settings = {
-                    accountSid: document.getElementById('settingsAccountSid')?.value || document.getElementById('accountSid')?.value || localStorage.getItem('accountSid') || '',
-                    authToken: document.getElementById('settingsAuthToken')?.value || document.getElementById('authToken')?.value || localStorage.getItem('authToken') || '',
-                    fromNumber: document.getElementById('settingsFromNumber')?.value || document.getElementById('fromNumber')?.value || localStorage.getItem('fromNumber') || '',
-                    openaiKey: document.getElementById('settingsOpenaiKey')?.value || document.getElementById('openaiKey')?.value || localStorage.getItem('openaiKey') || '',
-                    assistantId: document.getElementById('settingsAssistantId')?.value || document.getElementById('assistantId')?.value || localStorage.getItem('assistantId') || '',
+                    accountSid: document.getElementById('settingsAccountSid')?.value || document.getElementById('accountSid')?.value || localStorage.getItem('accountSid') || window.env?.TWILIO_ACCOUNT_SID || '',
+                    authToken: document.getElementById('settingsAuthToken')?.value || document.getElementById('authToken')?.value || localStorage.getItem('authToken') || window.env?.TWILIO_AUTH_TOKEN || '',
+                    fromNumber: document.getElementById('settingsFromNumber')?.value || document.getElementById('fromNumber')?.value || localStorage.getItem('fromNumber') || window.env?.TWILIO_FROM_NUMBER || '',
+                    openaiKey: document.getElementById('settingsOpenaiKey')?.value || document.getElementById('openaiKey')?.value || localStorage.getItem('openaiKey') || window.env?.OPENAI_API_KEY || '',
+                    assistantId: document.getElementById('settingsAssistantId')?.value || document.getElementById('assistantId')?.value || localStorage.getItem('assistantId') || window.env?.OPENAI_ASSISTANT_ID || '',
                     aiModel: document.getElementById('settingsAiModel')?.value || document.getElementById('aiModel')?.value || localStorage.getItem('aiModel') || 'gpt-3.5-turbo',
                     aiEnabled: document.getElementById('settingsAiEnabled')?.checked ?? document.getElementById('aiEnabled')?.checked ?? (localStorage.getItem('aiEnabled') === 'true')
                 };
@@ -3828,7 +3828,23 @@
 
 
         // Load saved questions on page load
-        document.addEventListener('DOMContentLoaded', () => {
+        // Load environment variables from server
+        async function loadEnvironmentVariables() {
+            try {
+                const response = await fetch('/api/env');
+                const env = await response.json();
+                window.env = env;
+                console.log('Environment variables loaded:', env);
+            } catch (error) {
+                console.log('Could not load environment variables:', error);
+                window.env = {};
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Load environment variables first
+            await loadEnvironmentVariables();
+            
             const savedQuestions = localStorage.getItem('customQuestions');
             if (savedQuestions) {
                 const questions = JSON.parse(savedQuestions);
