@@ -3066,6 +3066,10 @@
                     settingsTestMode: document.getElementById('settingsTestMode')
                 };
 
+                // Temporarily disable auto-save while populating fields
+                const originalAutoSaveHandler = window.autoSaveHandler;
+                window.autoSaveHandler = () => {}; // Disable auto-save temporarily
+                
                 if (elements.settingsAccountSid) elements.settingsAccountSid.value = settings.accountSid;
                 if (elements.settingsAuthToken) elements.settingsAuthToken.value = settings.authToken;
                 if (elements.settingsFromNumber) elements.settingsFromNumber.value = settings.fromNumber;
@@ -3076,6 +3080,11 @@
                 if (elements.settingsTestMode) elements.settingsTestMode.checked = settings.testMode;
                 
                 console.log('Settings populated in dashboard');
+                
+                // Re-enable auto-save after a short delay
+                setTimeout(() => {
+                    window.autoSaveHandler = originalAutoSaveHandler;
+                }, 1000);
                 
                 // Add auto-save listeners for all settings fields
                 addAutoSaveListeners();
@@ -3229,13 +3238,32 @@
             });
         }
         
-        // Auto-save handler
+        // Auto-save handler with debounce
+        let saveTimeout;
         function autoSaveHandler(event) {
             console.log(`Auto-saving due to change in: ${event.target.id}`);
-            saveSettingsToStorage();
+            
+            // Clear existing timeout
+            if (saveTimeout) {
+                clearTimeout(saveTimeout);
+            }
+            
+            // Debounce the save operation
+            saveTimeout = setTimeout(() => {
+                saveSettingsToStorage();
+            }, 500); // Wait 500ms after last change
         }
 
+        // Flag to prevent multiple save notifications
+        let isSaving = false;
+        
         function saveSettingsToStorage() {
+            if (isSaving) {
+                console.log('Save already in progress, skipping...');
+                return;
+            }
+            
+            isSaving = true;
             console.log('Saving settings...');
             
             const settings = {
@@ -3262,6 +3290,11 @@
             
             // Update AI status
             updateSettingsAIStatus(settings.aiEnabled);
+            
+            // Reset saving flag after a short delay
+            setTimeout(() => {
+                isSaving = false;
+            }, 1000);
 
             // Also update the chat interface settings (only if elements exist)
             const accountSidElement = document.getElementById('accountSid');
