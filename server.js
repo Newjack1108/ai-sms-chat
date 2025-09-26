@@ -485,15 +485,10 @@ app.post('/webhook/sms', async (req, res) => {
             console.log(`⚠️ AI credentials missing - not replying to ${From}`);
         }
 
-                // Update conversation stage
-                customerDB.updateCustomer(normalizedPhone, {
-                    conversationStage: 'active'
-                });
-
-            } catch (error) {
-                console.error('❌ Auto-response error:', error);
-            }
-        }
+        // Update conversation stage
+        customerDB.updateCustomer(normalizedPhone, {
+            conversationStage: 'active'
+        });
         
         res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
         
