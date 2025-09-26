@@ -26,6 +26,14 @@ let aiSettings = {
     testMode: false
 };
 
+// Initialize global custom questions
+global.customQuestions = {
+    q1: "How many horses do you currently have?",
+    q2: "What type of stable configuration interests you most?",
+    q3: "What's your budget range for this project?",
+    q4: "What's your ideal timeline for completion?"
+};
+
 // Customer Database (In production, use proper database)
 class CustomerDatabase {
     constructor() {
@@ -570,6 +578,14 @@ app.put('/api/customers/:phone', (req, res) => {
     } else {
         res.status(404).json({ success: false, error: 'Customer not found' });
     }
+});
+
+// Get current questions configuration
+app.get('/api/configure-questions', (req, res) => {
+    res.json({
+        success: true,
+        questions: global.customQuestions
+    });
 });
 
 // Update questions configuration

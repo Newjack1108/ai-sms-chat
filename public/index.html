@@ -4070,19 +4070,30 @@
                 q4: document.getElementById('q4').value
             };
             
+            // Save to localStorage
             localStorage.setItem('customQuestions', JSON.stringify(questions));
             
-            // Show success message
-            const notification = document.createElement('div');
-            notification.className = 'success';
-            notification.textContent = 'Questions saved successfully!';
-            
-            const sidebar = document.querySelector('.sidebar');
-            sidebar.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
+            // Also send to server to update the default questions
+            fetch('/api/configure-questions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ questions: questions })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Server response:', data);
+                if (data.success) {
+                    showNotification('Questions saved successfully!', 'success');
+                } else {
+                    showNotification('Error saving questions: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving questions:', error);
+                showNotification('Error saving questions', 'error');
+            });
         };
 
         // Special Offers Management
@@ -4229,6 +4240,36 @@
             })
             .catch(error => {
                 console.error('Error loading AI settings from server:', error);
+            });
+        };
+
+        window.loadQuestions = () => {
+            // Load questions from server
+            fetch('/api/configure-questions')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.questions) {
+                    const questions = data.questions;
+                    
+                    // Update the question input fields
+                    const q1Element = document.getElementById('q1');
+                    const q2Element = document.getElementById('q2');
+                    const q3Element = document.getElementById('q3');
+                    const q4Element = document.getElementById('q4');
+                    
+                    if (q1Element) q1Element.value = questions.q1 || '';
+                    if (q2Element) q2Element.value = questions.q2 || '';
+                    if (q3Element) q3Element.value = questions.q3 || '';
+                    if (q4Element) q4Element.value = questions.q4 || '';
+                    
+                    // Update localStorage with server data
+                    localStorage.setItem('customQuestions', JSON.stringify(questions));
+                    
+                    console.log('Questions loaded from server:', questions);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading questions from server:', error);
             });
         };
 
@@ -4404,6 +4445,9 @@
             
             // Load AI settings from server
             loadAISettings();
+            
+            // Load questions from server
+            loadQuestions();
             
             const savedQuestions = localStorage.getItem('customQuestions');
             if (savedQuestions) {
