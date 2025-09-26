@@ -226,7 +226,6 @@ IMPORTANT: If the customer is asking about offers, deals, discounts, or specials
         customerDB.extractInfoFromChat(message, customer);
 
         // Try to match answers to questions
-        const lowerMessage = message.toLowerCase();
         
         // Question 1: Horses (look for numbers)
         if (!customer.question1.answered && /\d+/.test(message) && 
