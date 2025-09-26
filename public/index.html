@@ -1641,6 +1641,10 @@
 
             <div class="conversations-section">
                 <h3>💬 Conversations</h3>
+                <div class="conversation-controls" style="margin-bottom: 10px;">
+                    <button class="button" onclick="clearCurrentChat()" style="background: #f44336; color: white; padding: 5px 10px; font-size: 0.8rem; margin-right: 5px;">🗑️ Clear Current</button>
+                    <button class="button" onclick="clearAllChats()" style="background: #ff9800; color: white; padding: 5px 10px; font-size: 0.8rem;">🧹 Clear All</button>
+                </div>
                 <div id="conversationsList">
                     <!-- Conversations will be populated here -->
                 </div>
@@ -3850,6 +3854,97 @@
                 notification.remove();
             }, 3000);
         };
+
+        // Global function for clearing current chat
+        window.clearCurrentChat = () => {
+            if (!window.aiChatManager) {
+                alert('Chat manager not initialized');
+                return;
+            }
+            
+            const currentRecipient = window.aiChatManager.selectedRecipient;
+            if (!currentRecipient) {
+                alert('No conversation selected');
+                return;
+            }
+            
+            if (confirm(`Are you sure you want to clear the conversation with ${currentRecipient}?`)) {
+                // Clear the conversation
+                window.aiChatManager.conversations.delete(currentRecipient);
+                window.aiChatManager.saveConversations();
+                
+                // Clear the chat display
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = '';
+                }
+                
+                // Update conversations list
+                window.aiChatManager.renderConversations();
+                
+                // Show success message
+                showNotification('Conversation cleared successfully!', 'success');
+            }
+        };
+        
+        // Global function for clearing all chats
+        window.clearAllChats = () => {
+            if (!window.aiChatManager) {
+                alert('Chat manager not initialized');
+                return;
+            }
+            
+            if (confirm('Are you sure you want to clear ALL conversations? This cannot be undone.')) {
+                // Clear all conversations
+                window.aiChatManager.conversations.clear();
+                window.aiChatManager.saveConversations();
+                
+                // Clear the chat display
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer) {
+                    messagesContainer.innerHTML = '';
+                }
+                
+                // Update conversations list
+                window.aiChatManager.renderConversations();
+                
+                // Reset selected recipient
+                window.aiChatManager.selectedRecipient = null;
+                
+                // Update chat title
+                const chatTitle = document.getElementById('chatTitle');
+                if (chatTitle) {
+                    chatTitle.textContent = 'Select a conversation';
+                }
+                
+                // Show success message
+                showNotification('All conversations cleared successfully!', 'success');
+            }
+        };
+        
+        // Helper function to show notifications
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 5px;
+                z-index: 1000;
+                font-weight: bold;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            `;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
 
         // Global function for saving settings questions
         window.saveSettingsQuestions = () => {
