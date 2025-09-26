@@ -2779,16 +2779,27 @@
                 console.log('getSettings() debug:', {
                     settingsAccountSid: document.getElementById('settingsAccountSid')?.value || 'element not found',
                     localStorage_accountSid: localStorage.getItem('accountSid') || 'not in localStorage',
-                    final_accountSid: settings.accountSid || 'empty'
+                    env_accountSid: window.env?.TWILIO_ACCOUNT_SID || 'not in env',
+                    final_accountSid: settings.accountSid || 'empty',
+                    allSettings: settings
                 });
                 
                 return settings;
             }
 
             validateTwilioSettings(settings) {
-                return settings.accountSid && 
-                       settings.authToken && 
-                       settings.fromNumber;
+                const hasAccountSid = settings.accountSid && settings.accountSid.trim() !== '';
+                const hasAuthToken = settings.authToken && settings.authToken.trim() !== '';
+                const hasFromNumber = settings.fromNumber && settings.fromNumber.trim() !== '';
+                
+                console.log('Twilio validation check:', {
+                    accountSid: hasAccountSid ? 'Set' : 'Missing',
+                    authToken: hasAuthToken ? 'Set' : 'Missing', 
+                    fromNumber: hasFromNumber ? 'Set' : 'Missing',
+                    settings: settings
+                });
+                
+                return hasAccountSid && hasAuthToken && hasFromNumber;
             }
 
             validateAISettings(settings) {
@@ -3044,13 +3055,13 @@
             // Check integration status
             checkIntegrationStatus();
             
-            // Load settings from localStorage and populate settings dashboard
+            // Load settings from localStorage and environment variables
             const settings = {
-                accountSid: localStorage.getItem('accountSid') || '',
-                authToken: localStorage.getItem('authToken') || '',
-                fromNumber: localStorage.getItem('fromNumber') || '',
-                openaiKey: localStorage.getItem('openaiKey') || '',
-                assistantId: localStorage.getItem('assistantId') || '',
+                accountSid: localStorage.getItem('accountSid') || window.env?.TWILIO_ACCOUNT_SID || '',
+                authToken: localStorage.getItem('authToken') || window.env?.TWILIO_AUTH_TOKEN || '',
+                fromNumber: localStorage.getItem('fromNumber') || window.env?.TWILIO_FROM_NUMBER || '',
+                openaiKey: localStorage.getItem('openaiKey') || window.env?.OPENAI_API_KEY || '',
+                assistantId: localStorage.getItem('assistantId') || window.env?.OPENAI_ASSISTANT_ID || '',
                 aiModel: localStorage.getItem('aiModel') || 'gpt-3.5-turbo',
                 aiEnabled: localStorage.getItem('aiEnabled') === 'true',
                 testMode: localStorage.getItem('testMode') === 'true'
