@@ -2669,11 +2669,7 @@
             async checkForNewMessages() {
                 try {
                     const settings = this.getSettings();
-                    console.log('Current settings for message check:', {
-                        accountSid: settings.accountSid ? 'Set' : 'Not set',
-                        authToken: settings.authToken ? 'Set' : 'Not set', 
-                        fromNumber: settings.fromNumber ? 'Set' : 'Not set'
-                    });
+                    // Message check logging removed for production
                     
                     if (!this.validateTwilioSettings(settings)) {
                         console.log('Twilio settings not configured, skipping message check');
@@ -2780,13 +2776,7 @@
                     aiEnabled: document.getElementById('settingsAiEnabled')?.checked ?? document.getElementById('aiEnabled')?.checked ?? (localStorage.getItem('aiEnabled') === 'true')
                 };
                 
-                console.log('getSettings() debug:', {
-                    settingsAccountSid: document.getElementById('settingsAccountSid')?.value || 'element not found',
-                    localStorage_accountSid: localStorage.getItem('accountSid') || 'not in localStorage',
-                    env_accountSid: window.env?.TWILIO_ACCOUNT_SID || 'not in env',
-                    final_accountSid: settings.accountSid || 'empty',
-                    allSettings: settings
-                });
+                // Debug logging removed for production
                 
                 return settings;
             }
@@ -2796,12 +2786,7 @@
                 const hasAuthToken = settings.authToken && settings.authToken.trim() !== '';
                 const hasFromNumber = settings.fromNumber && settings.fromNumber.trim() !== '';
                 
-                console.log('Twilio validation check:', {
-                    accountSid: hasAccountSid ? 'Set' : 'Missing',
-                    authToken: hasAuthToken ? 'Set' : 'Missing', 
-                    fromNumber: hasFromNumber ? 'Set' : 'Missing',
-                    settings: settings
-                });
+                // Validation logging removed for production
                 
                 return hasAccountSid && hasAuthToken && hasFromNumber;
             }
