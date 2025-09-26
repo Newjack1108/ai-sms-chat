@@ -459,16 +459,24 @@ app.post('/webhook/sms', async (req, res) => {
         const { Body, From, To, MessageSid } = req.body;
         
         console.log(`📥 Incoming SMS from ${From}: "${Body}"`);
+        console.log(`📥 Full webhook payload:`, req.body);
         
         const normalizedPhone = normalizePhoneNumber(From);
+        console.log(`📥 Normalized phone: ${normalizedPhone}`);
         
         // Get or create customer
         let customer = customerDB.getCustomer(normalizedPhone);
+        console.log(`📥 Existing customer found:`, customer ? 'Yes' : 'No');
+        
         if (!customer) {
+            console.log(`📥 Creating new customer for phone: ${normalizedPhone}`);
             customer = customerDB.createCustomer({
                 phone: normalizedPhone,
                 source: 'inbound_sms'
             });
+            console.log(`📥 New customer created:`, customer);
+        } else {
+            console.log(`📥 Using existing customer:`, customer.id);
         }
 
         // Generate AI response with customer context (only if AI is enabled)
@@ -803,6 +811,16 @@ app.post('/api/ai-settings', (req, res) => {
             error: 'Internal server error'
         });
     }
+});
+
+// Test endpoint to verify server is working
+app.get('/test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Server is working!',
+        timestamp: new Date().toISOString(),
+        customers: customerDB.getAllCustomers().length
+    });
 });
 
 // Serve main interface
