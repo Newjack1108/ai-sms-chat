@@ -3853,6 +3853,8 @@
 
         // Global function for saving settings questions
         window.saveSettingsQuestions = () => {
+            console.log('Saving questions...');
+            
             const questions = {
                 q1: document.getElementById('settingsQ1').value,
                 q2: document.getElementById('settingsQ2').value,
@@ -3860,19 +3862,68 @@
                 q4: document.getElementById('settingsQ4').value
             };
             
+            console.log('Questions to save:', questions);
+            
+            // Save to localStorage
             localStorage.setItem('customQuestions', JSON.stringify(questions));
             
-            // Show success message
-            const notification = document.createElement('div');
-            notification.className = 'success';
-            notification.textContent = 'Questions saved successfully!';
-            
-            const settingsDashboard = document.querySelector('.settings-dashboard');
-            settingsDashboard.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
+            // Also send to server to update the default questions
+            fetch('/api/configure-questions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ questions: questions })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Server response:', data);
+                
+                // Show success message
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #4CAF50;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 5px;
+                    z-index: 1000;
+                    font-weight: bold;
+                `;
+                notification.textContent = 'Questions saved successfully!';
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            })
+            .catch(error => {
+                console.error('Error saving questions:', error);
+                
+                // Show error message
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #f44336;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 5px;
+                    z-index: 1000;
+                    font-weight: bold;
+                `;
+                notification.textContent = 'Error saving questions!';
+                
+                document.body.appendChild(notification);
+                
+                setTimeout(() => {
+                    notification.remove();
+                }, 3000);
+            });
         };
 
 

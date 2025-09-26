@@ -62,22 +62,22 @@ class CustomerDatabase {
             
             // Default questions (editable via admin)
             question1: { 
-                question: "How many horses do you currently have?", 
+                question: global.customQuestions?.q1 || "How many horses do you currently have?", 
                 answer: null,
                 answered: false 
             },
             question2: { 
-                question: "What type of stable configuration interests you most?", 
+                question: global.customQuestions?.q2 || "What type of stable configuration interests you most?", 
                 answer: null,
                 answered: false 
             },
             question3: { 
-                question: "What's your budget range for this project?", 
+                question: global.customQuestions?.q3 || "What's your budget range for this project?", 
                 answer: null,
                 answered: false 
             },
             question4: { 
-                question: "What's your ideal timeline for completion?", 
+                question: global.customQuestions?.q4 || "What's your ideal timeline for completion?", 
                 answer: null,
                 answered: false 
             },
@@ -536,8 +536,10 @@ app.put('/api/customers/:phone', (req, res) => {
 app.post('/api/configure-questions', (req, res) => {
     const { questions } = req.body;
     
-    // In a real app, you'd save this configuration
-    // For now, we'll just return success
+    // Store the custom questions globally
+    global.customQuestions = questions;
+    
+    console.log('Custom questions updated:', questions);
     
     res.json({
         success: true,
