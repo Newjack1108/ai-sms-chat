@@ -124,6 +124,17 @@ class CustomerDatabase {
         return customer;
     }
 
+    deleteCustomer(phone) {
+        const customer = this.customers.get(phone);
+        if (customer) {
+            this.customers.delete(phone);
+            this.conversationThreads.delete(phone);
+            this.saveData();
+            return true;
+        }
+        return false;
+    }
+
     getCustomer(phone) {
         return this.customers.get(phone);
     }
@@ -577,6 +588,97 @@ app.put('/api/customers/:phone', (req, res) => {
         res.json({ success: true, customer });
     } else {
         res.status(404).json({ success: false, error: 'Customer not found' });
+    }
+});
+
+app.delete('/api/customers/:phone', (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        const deleted = customerDB.deleteCustomer(phone);
+        
+        if (deleted) {
+            res.json({ success: true, message: 'Customer deleted successfully' });
+        } else {
+            res.status(404).json({ success: false, error: 'Customer not found' });
+        }
+    } catch (error) {
+        console.error('Error deleting customer:', error);
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
+app.get('/api/customers/export', (req, res) => {
+    try {
+        const customers = customerDB.getAllCustomers();
+        
+        // Filter customers ready for CRM export (complete profiles)
+        const exportReadyCustomers = customers.filter(customer => {
+            const hasBasicInfo = customer.name && customer.email;
+            const hasAllAnswers = customer.question1.answered && customer.question2.answered && 
+                                customer.question3.answered && customer.question4.answered;
+            return hasBasicInfo && hasAllAnswers;
+        });
+        
+        console.log(`Exporting ${exportReadyCustomers.length} customers to CRM`);
+        
+        res.json({
+            success: true,
+            message: `Exported ${exportReadyCustomers.length} customers to CRM`,
+            customers: exportReadyCustomers,
+            total: exportReadyCustomers.length
+        });
+        
+    } catch (error) {
+        console.error('Error exporting customers:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+
+app.get('/api/customers/export/csv', (req, res) => {
+    try {
+        const customers = customerDB.getAllCustomers();
+        
+        // Create CSV header
+        const csvHeader = 'Name,Phone,Email,Postcode,Source,Question1,Answer1,Question2,Answer2,Question3,Answer3,Question4,Answer4,Created,LastContact,Status\n';
+        
+        // Create CSV rows
+        const csvRows = customers.map(customer => {
+            const row = [
+                `"${customer.name || ''}"`,
+                `"${customer.phone}"`,
+                `"${customer.email || ''}"`,
+                `"${customer.postcode || ''}"`,
+                `"${customer.source}"`,
+                `"${customer.question1.question}"`,
+                `"${customer.question1.answer || ''}"`,
+                `"${customer.question2.question}"`,
+                `"${customer.question2.answer || ''}"`,
+                `"${customer.question3.question}"`,
+                `"${customer.question3.answer || ''}"`,
+                `"${customer.question4.question}"`,
+                `"${customer.question4.answer || ''}"`,
+                `"${customer.created}"`,
+                `"${customer.lastContact || ''}"`,
+                `"${customer.conversationStage}"`
+            ];
+            return row.join(',');
+        }).join('\n');
+        
+        const csvContent = csvHeader + csvRows;
+        
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="customers_${new Date().toISOString().split('T')[0]}.csv"`);
+        res.send(csvContent);
+        
+    } catch (error) {
+        console.error('Error generating CSV:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
     }
 });
 

@@ -1640,6 +1640,203 @@
             border: 1px solid #f5c6cb;
         }
 
+        /* Customer Profiles Styling */
+        .customer-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-item {
+            text-align: center;
+            flex: 1;
+        }
+
+        .stat-number {
+            display: block;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            font-weight: 500;
+        }
+
+        .customer-actions {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .customer-list-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .customer-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .customer-profile {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .customer-profile:hover {
+            background: #e9ecef;
+            border-color: #3498db;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
+        }
+
+        .customer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .customer-name {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 1.1rem;
+        }
+
+        .customer-status {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-complete {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-incomplete {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-new {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .customer-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .customer-field {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .customer-field label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .customer-field input {
+            padding: 6px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background: white;
+        }
+
+        .customer-field input:focus {
+            border-color: #3498db;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1);
+        }
+
+        .customer-questions {
+            margin-top: 10px;
+        }
+
+        .question-field {
+            margin-bottom: 8px;
+        }
+
+        .question-field label {
+            display: block;
+            font-size: 0.8rem;
+            color: #6c757d;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .question-field input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background: white;
+        }
+
+        .question-field input:focus {
+            border-color: #3498db;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1);
+        }
+
+        .customer-actions-row {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .customer-actions-row button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-save {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-save:hover {
+            background: #218838;
+        }
+
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #c82333;
+        }
+
         .conversation-item {
             padding: 12px;
             margin-bottom: 8px;
@@ -1980,6 +2177,45 @@
                                 <small>Enable this special offer for customers</small>
                             </div>
                             <button class="save-offer-btn" onclick="saveSpecialOffer()">💾 Save Special Offer</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Customer Profiles Section -->
+                <div class="settings-section">
+                    <h2>👥 Customer Profiles & CRM Export</h2>
+                    <div class="settings-grid">
+                        <div class="settings-group">
+                            <h3>📊 Customer Database</h3>
+                            <div class="customer-stats">
+                                <div class="stat-item">
+                                    <span class="stat-number" id="totalCustomers">0</span>
+                                    <span class="stat-label">Total Customers</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-number" id="completedProfiles">0</span>
+                                    <span class="stat-label">Complete Profiles</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-number" id="exportReady">0</span>
+                                    <span class="stat-label">Ready for CRM</span>
+                                </div>
+                            </div>
+                            <div class="customer-actions">
+                                <button class="button" onclick="refreshCustomerList()" style="background: #3498db; color: white; margin-right: 10px;">🔄 Refresh</button>
+                                <button class="button" onclick="exportToCRM()" style="background: #27ae60; color: white; margin-right: 10px;">📤 Export to CRM</button>
+                                <button class="button" onclick="downloadCustomerData()" style="background: #9b59b6; color: white;">💾 Download CSV</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="customer-list-container">
+                        <h3>📋 Customer List</h3>
+                        <div class="customer-search">
+                            <input type="text" id="customerSearch" placeholder="Search customers by name, phone, or email..." style="width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <div id="customerList" class="customer-list">
+                            <!-- Customer profiles will be populated here -->
                         </div>
                     </div>
                 </div>
@@ -4273,6 +4509,217 @@
             });
         };
 
+        // Customer Profile Management
+        window.loadCustomerProfiles = () => {
+            fetch('/api/customers')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    renderCustomerList(data.customers);
+                    updateCustomerStats(data.customers);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading customers:', error);
+            });
+        };
+
+        window.renderCustomerList = (customers) => {
+            const customerList = document.getElementById('customerList');
+            if (!customerList) return;
+
+            customerList.innerHTML = '';
+
+            customers.forEach(customer => {
+                const customerDiv = document.createElement('div');
+                customerDiv.className = 'customer-profile';
+                customerDiv.innerHTML = `
+                    <div class="customer-header">
+                        <div class="customer-name">${customer.name || 'Unknown Customer'}</div>
+                        <div class="customer-status ${getCustomerStatusClass(customer)}">${getCustomerStatus(customer)}</div>
+                    </div>
+                    <div class="customer-details">
+                        <div class="customer-field">
+                            <label>Name:</label>
+                            <input type="text" value="${customer.name || ''}" onchange="updateCustomerField('${customer.phone}', 'name', this.value)">
+                        </div>
+                        <div class="customer-field">
+                            <label>Phone:</label>
+                            <input type="text" value="${customer.phone}" readonly>
+                        </div>
+                        <div class="customer-field">
+                            <label>Email:</label>
+                            <input type="email" value="${customer.email || ''}" onchange="updateCustomerField('${customer.phone}', 'email', this.value)">
+                        </div>
+                        <div class="customer-field">
+                            <label>Postcode:</label>
+                            <input type="text" value="${customer.postcode || ''}" onchange="updateCustomerField('${customer.phone}', 'postcode', this.value)">
+                        </div>
+                    </div>
+                    <div class="customer-questions">
+                        <div class="question-field">
+                            <label>Q1: ${customer.question1.question}</label>
+                            <input type="text" value="${customer.question1.answer || ''}" onchange="updateCustomerQuestion('${customer.phone}', 'question1', this.value)">
+                        </div>
+                        <div class="question-field">
+                            <label>Q2: ${customer.question2.question}</label>
+                            <input type="text" value="${customer.question2.answer || ''}" onchange="updateCustomerQuestion('${customer.phone}', 'question2', this.value)">
+                        </div>
+                        <div class="question-field">
+                            <label>Q3: ${customer.question3.question}</label>
+                            <input type="text" value="${customer.question3.answer || ''}" onchange="updateCustomerQuestion('${customer.phone}', 'question3', this.value)">
+                        </div>
+                        <div class="question-field">
+                            <label>Q4: ${customer.question4.question}</label>
+                            <input type="text" value="${customer.question4.answer || ''}" onchange="updateCustomerQuestion('${customer.phone}', 'question4', this.value)">
+                        </div>
+                    </div>
+                    <div class="customer-actions-row">
+                        <button class="btn-save" onclick="saveCustomerProfile('${customer.phone}')">💾 Save</button>
+                        <button class="btn-delete" onclick="deleteCustomer('${customer.phone}')">🗑️ Delete</button>
+                    </div>
+                `;
+                customerList.appendChild(customerDiv);
+            });
+        };
+
+        window.getCustomerStatus = (customer) => {
+            const hasBasicInfo = customer.name && customer.email;
+            const hasAllAnswers = customer.question1.answered && customer.question2.answered && 
+                                customer.question3.answered && customer.question4.answered;
+            
+            if (hasBasicInfo && hasAllAnswers) return 'Complete';
+            if (hasBasicInfo || hasAllAnswers) return 'Incomplete';
+            return 'New';
+        };
+
+        window.getCustomerStatusClass = (customer) => {
+            const status = getCustomerStatus(customer);
+            return `status-${status.toLowerCase()}`;
+        };
+
+        window.updateCustomerStats = (customers) => {
+            const totalCustomers = customers.length;
+            const completedProfiles = customers.filter(c => getCustomerStatus(c) === 'Complete').length;
+            const exportReady = customers.filter(c => {
+                const hasBasicInfo = c.name && c.email;
+                const hasAllAnswers = c.question1.answered && c.question2.answered && 
+                                    c.question3.answered && c.question4.answered;
+                return hasBasicInfo && hasAllAnswers;
+            }).length;
+
+            document.getElementById('totalCustomers').textContent = totalCustomers;
+            document.getElementById('completedProfiles').textContent = completedProfiles;
+            document.getElementById('exportReady').textContent = exportReady;
+        };
+
+        window.updateCustomerField = (phone, field, value) => {
+            fetch(`/api/customers/${phone}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ [field]: value })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log(`Updated ${field} for customer ${phone}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating customer field:', error);
+            });
+        };
+
+        window.updateCustomerQuestion = (phone, questionField, answer) => {
+            const questionData = {
+                [questionField]: {
+                    answer: answer,
+                    answered: answer.trim() !== ''
+                }
+            };
+
+            fetch(`/api/customers/${phone}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(questionData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log(`Updated ${questionField} for customer ${phone}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating customer question:', error);
+            });
+        };
+
+        window.saveCustomerProfile = (phone) => {
+            showNotification('Customer profile saved!', 'success');
+        };
+
+        window.deleteCustomer = (phone) => {
+            if (confirm(`Are you sure you want to delete customer ${phone}?`)) {
+                fetch(`/api/customers/${phone}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showNotification('Customer deleted successfully!', 'success');
+                        loadCustomerProfiles();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error deleting customer:', error);
+                    showNotification('Error deleting customer', 'error');
+                });
+            }
+        };
+
+        window.refreshCustomerList = () => {
+            loadCustomerProfiles();
+            showNotification('Customer list refreshed!', 'success');
+        };
+
+        window.exportToCRM = () => {
+            fetch('/api/customers/export')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Customer data exported to CRM!', 'success');
+                }
+            })
+            .catch(error => {
+                console.error('Error exporting to CRM:', error);
+                showNotification('Error exporting to CRM', 'error');
+            });
+        };
+
+        window.downloadCustomerData = () => {
+            fetch('/api/customers/export/csv')
+            .then(response => response.blob())
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `customers_${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showNotification('Customer data downloaded!', 'success');
+            })
+            .catch(error => {
+                console.error('Error downloading customer data:', error);
+                showNotification('Error downloading customer data', 'error');
+            });
+        };
+
         // Global function for clearing current chat
         window.clearCurrentChat = () => {
             if (!window.aiChatManager) {
@@ -4448,6 +4895,9 @@
             
             // Load questions from server
             loadQuestions();
+            
+            // Load customer profiles
+            loadCustomerProfiles();
             
             const savedQuestions = localStorage.getItem('customQuestions');
             if (savedQuestions) {
