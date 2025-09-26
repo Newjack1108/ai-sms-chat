@@ -1480,6 +1480,32 @@
             font-weight: 600;
         }
 
+        .clear-chat-btn {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%) !important;
+            color: white !important;
+            border: none !important;
+            padding: 8px 12px !important;
+            font-size: 0.85rem !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3) !important;
+            width: 100% !important;
+            margin-bottom: 5px !important;
+        }
+
+        .clear-chat-btn:hover {
+            background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%) !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4) !important;
+        }
+
+        .clear-chat-btn:active {
+            transform: translateY(0) !important;
+            box-shadow: 0 2px 6px rgba(244, 67, 54, 0.3) !important;
+        }
+
         .conversation-item {
             padding: 12px;
             margin-bottom: 8px;
@@ -1642,8 +1668,7 @@
             <div class="conversations-section">
                 <h3>💬 Conversations</h3>
                 <div class="conversation-controls" style="margin-bottom: 10px;">
-                    <button class="button" onclick="clearCurrentChat()" style="background: #f44336; color: white; padding: 5px 10px; font-size: 0.8rem; margin-right: 5px;">🗑️ Clear Current</button>
-                    <button class="button" onclick="clearAllChats()" style="background: #ff9800; color: white; padding: 5px 10px; font-size: 0.8rem;">🧹 Clear All</button>
+                    <button class="button clear-chat-btn" onclick="clearCurrentChat()">🗑️ Clear Current Chat</button>
                 </div>
                 <div id="conversationsList">
                     <!-- Conversations will be populated here -->
@@ -3843,67 +3868,49 @@
         // Global function for clearing current chat
         window.clearCurrentChat = () => {
             if (!window.aiChatManager) {
-                alert('Chat manager not initialized');
+                showNotification('Chat manager not initialized', 'error');
                 return;
             }
             
             const currentRecipient = window.aiChatManager.selectedRecipient;
             if (!currentRecipient) {
-                alert('No conversation selected');
+                showNotification('No conversation selected', 'error');
                 return;
             }
             
             if (confirm(`Are you sure you want to clear the conversation with ${currentRecipient}?`)) {
-                // Clear the conversation
-                window.aiChatManager.conversations.delete(currentRecipient);
-                window.aiChatManager.saveConversations();
-                
-                // Clear the chat display
-                const messagesContainer = document.getElementById('messagesContainer');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = '';
+                try {
+                    // Clear the conversation from memory
+                    window.aiChatManager.conversations.delete(currentRecipient);
+                    
+                    // Save the updated conversations
+                    window.aiChatManager.saveConversations();
+                    
+                    // Clear the chat display
+                    const messagesContainer = document.getElementById('messagesContainer');
+                    if (messagesContainer) {
+                        messagesContainer.innerHTML = '';
+                    }
+                    
+                    // Reset selected recipient
+                    window.aiChatManager.selectedRecipient = null;
+                    
+                    // Update chat title
+                    const chatTitle = document.getElementById('chatTitle');
+                    if (chatTitle) {
+                        chatTitle.textContent = 'Select a conversation';
+                    }
+                    
+                    // Update conversations list
+                    window.aiChatManager.renderConversations();
+                    
+                    // Show success message
+                    showNotification('Conversation cleared successfully!', 'success');
+                    
+                } catch (error) {
+                    console.error('Error clearing conversation:', error);
+                    showNotification('Error clearing conversation', 'error');
                 }
-                
-                // Update conversations list
-                window.aiChatManager.renderConversations();
-                
-                // Show success message
-                showNotification('Conversation cleared successfully!', 'success');
-            }
-        };
-        
-        // Global function for clearing all chats
-        window.clearAllChats = () => {
-            if (!window.aiChatManager) {
-                alert('Chat manager not initialized');
-                return;
-            }
-            
-            if (confirm('Are you sure you want to clear ALL conversations? This cannot be undone.')) {
-                // Clear all conversations
-                window.aiChatManager.conversations.clear();
-                window.aiChatManager.saveConversations();
-                
-                // Clear the chat display
-                const messagesContainer = document.getElementById('messagesContainer');
-                if (messagesContainer) {
-                    messagesContainer.innerHTML = '';
-                }
-                
-                // Update conversations list
-                window.aiChatManager.renderConversations();
-                
-                // Reset selected recipient
-                window.aiChatManager.selectedRecipient = null;
-                
-                // Update chat title
-                const chatTitle = document.getElementById('chatTitle');
-                if (chatTitle) {
-                    chatTitle.textContent = 'Select a conversation';
-                }
-                
-                // Show success message
-                showNotification('All conversations cleared successfully!', 'success');
             }
         };
         
