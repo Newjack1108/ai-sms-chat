@@ -728,6 +728,190 @@ app.get('/api/customers/export/csv', (req, res) => {
     }
 });
 
+// Complete test endpoint: create customer + conversation + AI extraction
+app.post('/api/customers/:phone/test-ai-extraction', async (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        
+        // Step 1: Create customer
+        const customer = customerDB.createCustomer({
+            name: "Test Customer",
+            phone: phone,
+            email: "test@example.com",
+            postcode: "CW1 1AA"
+        });
+
+        // Step 2: Add conversation data
+        customerDB.updateCustomer(phone, {
+            conversationStage: 'active',
+            chatData: {
+                messages: [
+                    {
+                        sender: 'customer',
+                        message: 'Hi, I\'m interested in getting stables built for my horses',
+                        timestamp: new Date(Date.now() - 3600000).toISOString(),
+                        messageId: 'test_msg_1'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'Great! How many horses do you currently have?',
+                        timestamp: new Date(Date.now() - 3500000).toISOString(),
+                        messageId: 'test_msg_2'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I have 3 horses that need proper stabling',
+                        timestamp: new Date(Date.now() - 3400000).toISOString(),
+                        messageId: 'test_msg_3'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'What type of stable configuration interests you most?',
+                        timestamp: new Date(Date.now() - 3300000).toISOString(),
+                        messageId: 'test_msg_4'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I\'m looking for individual stables with American barn style, around £20,000 budget',
+                        timestamp: new Date(Date.now() - 3200000).toISOString(),
+                        messageId: 'test_msg_5'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'Perfect! When do you need the stables completed?',
+                        timestamp: new Date(Date.now() - 3100000).toISOString(),
+                        messageId: 'test_msg_6'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I need them ready by spring next year, so around 6 months from now',
+                        timestamp: new Date(Date.now() - 3000000).toISOString(),
+                        messageId: 'test_msg_7'
+                    }
+                ]
+            }
+        });
+
+        // Step 3: Test AI extraction
+        const updatedCustomer = customerDB.getCustomer(phone);
+        if (!updatedCustomer || !updatedCustomer.chatData?.messages) {
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to create customer with conversation data'
+            });
+        }
+
+        const conversationHistory = updatedCustomer.chatData.messages;
+        const conversationText = conversationHistory.map(msg => 
+            `${msg.sender}: ${msg.message}`
+        ).join('\n');
+
+        // Get current questions
+        const questions = {
+            q1: global.customQuestions?.q1 || "How many horses do you currently have?",
+            q2: global.customQuestions?.q2 || "What type of stable configuration interests you most?",
+            q3: global.customQuestions?.q3 || "What's your budget range for this project?",
+            q4: global.customQuestions?.q4 || "What's your ideal timeline for completion?"
+        };
+
+        // Use OpenAI to extract answers
+        const openaiKey = process.env.OPENAI_API_KEY;
+        if (!openaiKey) {
+            return res.status(500).json({
+                success: false,
+                error: 'OpenAI API key not configured'
+            });
+        }
+
+        const extractionPrompt = `You are an AI assistant that extracts specific information from customer conversations.
+
+CONVERSATION:
+${conversationText}
+
+QUESTIONS TO ANSWER:
+1. ${questions.q1}
+2. ${questions.q2}
+3. ${questions.q3}
+4. ${questions.q4}
+
+Please analyze the conversation and extract the best answers to each question. Look for:
+- Direct answers to the questions
+- Implied answers based on context
+- Numbers, amounts, timeframes, preferences mentioned
+- Any relevant information that could answer these questions
+
+Return your response as a JSON object with this exact format:
+{
+  "question1": {"answer": "extracted answer or null", "answered": true/false},
+  "question2": {"answer": "extracted answer or null", "answered": true/false},
+  "question3": {"answer": "extracted answer or null", "answered": true/false},
+  "question4": {"answer": "extracted answer or null", "answered": true/false}
+}`;
+
+        const openai = new OpenAI({ apiKey: openaiKey });
+        const completion = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: extractionPrompt }],
+            temperature: 0.1
+        });
+
+        const aiResponse = completion.choices[0].message.content;
+        console.log(`🤖 AI Response:`, aiResponse);
+
+        let extractedAnswers;
+        try {
+            extractedAnswers = JSON.parse(aiResponse);
+        } catch (parseError) {
+            console.error('❌ Failed to parse AI response:', parseError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to parse AI response'
+            });
+        }
+
+        // Update customer with extracted answers
+        const updates = {
+            question1: {
+                question: questions.q1,
+                answer: extractedAnswers.question1?.answer || null,
+                answered: extractedAnswers.question1?.answered || false
+            },
+            question2: {
+                question: questions.q2,
+                answer: extractedAnswers.question2?.answer || null,
+                answered: extractedAnswers.question2?.answered || false
+            },
+            question3: {
+                question: questions.q3,
+                answer: extractedAnswers.question3?.answer || null,
+                answered: extractedAnswers.question3?.answered || false
+            },
+            question4: {
+                question: questions.q4,
+                answer: extractedAnswers.question4?.answer || null,
+                answered: extractedAnswers.question4?.answered || false
+            }
+        };
+
+        const finalCustomer = customerDB.updateCustomer(phone, updates);
+
+        res.json({
+            success: true,
+            message: 'Complete AI extraction test completed successfully',
+            customer: finalCustomer,
+            aiResponse: aiResponse,
+            extractedAnswers: extractedAnswers
+        });
+
+    } catch (error) {
+        console.error('Complete AI extraction test error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Simple test endpoint to create a basic customer
 app.post('/api/customers/:phone/create-basic-customer', (req, res) => {
     try {
