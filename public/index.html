@@ -4124,15 +4124,21 @@
             const statusElement = document.getElementById('settingsTestModeStatus');
             const testModeSection = document.getElementById('testModeSection');
             
-            if (isEnabled) {
-                statusElement.textContent = 'ENABLED';
-                statusElement.className = 'settings-status enabled';
-                testModeSection.style.display = 'block';
-                updateTestStatusBadges();
-            } else {
-                statusElement.textContent = 'DISABLED';
-                statusElement.className = 'settings-status disabled';
-                testModeSection.style.display = 'none';
+            if (statusElement) {
+                if (isEnabled) {
+                    statusElement.textContent = 'ENABLED';
+                    statusElement.className = 'settings-status enabled';
+                    if (testModeSection) {
+                        testModeSection.style.display = 'block';
+                    }
+                    updateTestStatusBadges();
+                } else {
+                    statusElement.textContent = 'DISABLED';
+                    statusElement.className = 'settings-status disabled';
+                    if (testModeSection) {
+                        testModeSection.style.display = 'none';
+                    }
+                }
             }
         }
 
@@ -4541,9 +4547,13 @@
                 return hasBasicInfo && hasAllAnswers;
             }).length;
 
-            document.getElementById('totalCustomers').textContent = totalCustomers;
-            document.getElementById('completedProfiles').textContent = completedProfiles;
-            document.getElementById('exportReady').textContent = exportReady;
+            const totalElement = document.getElementById('totalCustomers');
+            const completedElement = document.getElementById('completedProfiles');
+            const exportElement = document.getElementById('exportReady');
+            
+            if (totalElement) totalElement.textContent = totalCustomers;
+            if (completedElement) completedElement.textContent = completedProfiles;
+            if (exportElement) exportElement.textContent = exportReady;
         };
 
         window.updateCustomerField = (phone, field, value) => {
