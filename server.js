@@ -34,24 +34,25 @@ global.customQuestions = {
     q4: "What's your ideal timeline for completion?"
 };
 
-// Load custom questions with multiple fallback methods
+// Load custom questions with Railway-optimized methods
 async function loadCustomQuestions() {
     try {
-        // Try Railway persistent storage first
-        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
-        const questionsPath = `${persistentPath}/custom-questions.json`;
+        // Check environment variables first (Railway's preferred method)
+        const envQuestions = {
+            q1: process.env.CUSTOM_QUESTION_1,
+            q2: process.env.CUSTOM_QUESTION_2,
+            q3: process.env.CUSTOM_QUESTION_3,
+            q4: process.env.CUSTOM_QUESTION_4
+        };
         
-        try {
-            const data = await fs.readFile(questionsPath, 'utf8');
-            const questions = JSON.parse(data);
-            global.customQuestions = questions;
-            console.log('📝 Loaded custom questions from Railway persistent storage:', questions);
+        // If all environment variables are set, use them
+        if (envQuestions.q1 && envQuestions.q2 && envQuestions.q3 && envQuestions.q4) {
+            global.customQuestions = envQuestions;
+            console.log('📝 Loaded custom questions from Railway environment variables:', envQuestions);
             return;
-        } catch (persistentError) {
-            console.log('📝 Railway persistent storage not available, trying local file...');
         }
         
-        // Try local file
+        // Try local file as fallback
         try {
             const data = await fs.readFile('custom-questions.json', 'utf8');
             const questions = JSON.parse(data);
@@ -59,26 +60,10 @@ async function loadCustomQuestions() {
             console.log('📝 Loaded custom questions from local file:', questions);
             return;
         } catch (localError) {
-            console.log('📝 Local file not found, trying environment variables...');
+            console.log('📝 Local file not found, using default questions');
         }
         
-        // Try environment variables as fallback
-        const envQuestions = {
-            q1: process.env.CUSTOM_QUESTION_1 || global.customQuestions.q1,
-            q2: process.env.CUSTOM_QUESTION_2 || global.customQuestions.q2,
-            q3: process.env.CUSTOM_QUESTION_3 || global.customQuestions.q3,
-            q4: process.env.CUSTOM_QUESTION_4 || global.customQuestions.q4
-        };
-        
-        if (envQuestions.q1 !== global.customQuestions.q1 || 
-            envQuestions.q2 !== global.customQuestions.q2 || 
-            envQuestions.q3 !== global.customQuestions.q3 || 
-            envQuestions.q4 !== global.customQuestions.q4) {
-            global.customQuestions = envQuestions;
-            console.log('📝 Loaded custom questions from environment variables:', envQuestions);
-        } else {
-            console.log('📝 Using default questions (no custom questions found)');
-        }
+        console.log('📝 Using default questions (set CUSTOM_QUESTION_1-4 environment variables for custom questions)');
         
     } catch (error) {
         console.error('❌ Error loading custom questions:', error);
@@ -86,27 +71,17 @@ async function loadCustomQuestions() {
     }
 }
 
-// Save custom questions with multiple methods
+// Save custom questions (Railway-optimized)
 async function saveCustomQuestions() {
     try {
-        // Try Railway persistent storage first
-        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
-        const questionsPath = `${persistentPath}/custom-questions.json`;
-        
+        // Try local file (temporary storage)
         try {
-            await fs.writeFile(questionsPath, JSON.stringify(global.customQuestions, null, 2));
-            console.log('📝 Saved custom questions to Railway persistent storage:', global.customQuestions);
-        } catch (persistentError) {
-            console.log('📝 Railway persistent storage failed, trying local file...');
-            
-            // Try local file
-            try {
-                await fs.writeFile('custom-questions.json', JSON.stringify(global.customQuestions, null, 2));
-                console.log('📝 Saved custom questions to local file:', global.customQuestions);
-            } catch (localError) {
-                console.log('📝 Local file save failed, data will be lost on restart');
-                console.log('📝 Consider setting up Railway persistent storage or environment variables');
-            }
+            await fs.writeFile('custom-questions.json', JSON.stringify(global.customQuestions, null, 2));
+            console.log('📝 Saved custom questions to local file:', global.customQuestions);
+            console.log('📝 Note: For permanent storage, set CUSTOM_QUESTION_1-4 environment variables in Railway');
+        } catch (localError) {
+            console.log('📝 Local file save failed, data will be lost on restart');
+            console.log('📝 Set CUSTOM_QUESTION_1-4 environment variables in Railway for permanent storage');
         }
         
     } catch (error) {
@@ -120,30 +95,52 @@ loadCustomQuestions();
 // Railway persistence setup endpoint
 app.post('/api/setup-persistence', async (req, res) => {
     try {
-        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+        // Check environment variables for custom questions
+        const envQuestions = {
+            q1: process.env.CUSTOM_QUESTION_1,
+            q2: process.env.CUSTOM_QUESTION_2,
+            q3: process.env.CUSTOM_QUESTION_3,
+            q4: process.env.CUSTOM_QUESTION_4
+        };
         
-        // Test if we can write to persistent storage
-        const testFile = `${persistentPath}/test-write.json`;
-        await fs.writeFile(testFile, JSON.stringify({ test: true, timestamp: new Date().toISOString() }));
+        const hasEnvQuestions = envQuestions.q1 && envQuestions.q2 && envQuestions.q3 && envQuestions.q4;
         
-        // Clean up test file
-        await fs.unlink(testFile);
+        // Test local file write capability
+        let canWriteFiles = false;
+        try {
+            const testFile = 'test-write.json';
+            await fs.writeFile(testFile, JSON.stringify({ test: true, timestamp: new Date().toISOString() }));
+            await fs.unlink(testFile);
+            canWriteFiles = true;
+        } catch (fileError) {
+            canWriteFiles = false;
+        }
         
         res.json({
             success: true,
-            message: 'Railway persistent storage is working',
-            persistentPath: persistentPath,
+            message: 'Railway persistence status checked',
             environment: {
-                RAILWAY_VOLUME_MOUNT_PATH: process.env.RAILWAY_VOLUME_MOUNT_PATH,
-                NODE_ENV: process.env.NODE_ENV
+                NODE_ENV: process.env.NODE_ENV,
+                hasCustomQuestions: hasEnvQuestions,
+                canWriteFiles: canWriteFiles
+            },
+            customQuestions: hasEnvQuestions ? envQuestions : 'Not set in environment variables',
+            recommendations: {
+                customQuestions: hasEnvQuestions ? 
+                    '✅ Custom questions loaded from environment variables' : 
+                    '⚠️ Set CUSTOM_QUESTION_1-4 environment variables for permanent storage',
+                customerData: canWriteFiles ? 
+                    '✅ Can write customer data to local files (temporary)' : 
+                    '❌ Cannot write files - consider Railway PostgreSQL',
+                nextSteps: hasEnvQuestions ? 
+                    'All set! Your custom questions will persist across restarts.' :
+                    'Add CUSTOM_QUESTION_1-4 environment variables in Railway dashboard'
             }
         });
     } catch (error) {
         res.status(500).json({
             success: false,
-            error: 'Railway persistent storage not available',
-            message: 'Consider setting up Railway persistent volumes or using environment variables',
-            persistentPath: process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp',
+            error: 'Error checking Railway persistence',
             errorDetails: error.message
         });
     }
