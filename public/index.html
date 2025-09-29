@@ -3257,34 +3257,47 @@
             }
 
             setupLoginForm() {
-                const loginForm = document.getElementById('loginForm');
-                const roleOptions = document.querySelectorAll('.role-option');
+                try {
+                    const loginForm = document.getElementById('loginForm');
+                    const roleOptions = document.querySelectorAll('.role-option');
 
-                // Role selection
-                roleOptions.forEach(option => {
-                    option.addEventListener('click', () => {
-                        roleOptions.forEach(opt => opt.classList.remove('selected'));
-                        option.classList.add('selected');
+                    if (!loginForm) {
+                        console.error('Login form not found');
+                        return;
+                    }
+
+                    // Role selection
+                    roleOptions.forEach(option => {
+                        option.addEventListener('click', () => {
+                            roleOptions.forEach(opt => opt.classList.remove('selected'));
+                            option.classList.add('selected');
+                        });
                     });
-                });
 
-                // Login form submission
-                loginForm.addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    this.handleLogin();
-                });
+                    // Login form submission
+                    loginForm.addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        this.handleLogin();
+                    });
+                } catch (error) {
+                    console.error('Error in setupLoginForm:', error);
+                }
             }
 
             handleLogin() {
-                const username = document.getElementById('username').value;
-                const password = document.getElementById('password').value;
-                const selectedRole = document.querySelector('.role-option.selected').dataset.role;
+                try {
+                    const username = document.getElementById('username').value;
+                    const password = document.getElementById('password').value;
+                    const selectedRole = document.querySelector('.role-option.selected').dataset.role;
 
-                // Simple authentication (in production, this would be server-side)
-                if (this.authenticateUser(username, password, selectedRole)) {
-                    this.loginUser(username, selectedRole);
-                } else {
-                    this.showLoginError('Invalid credentials');
+                    // Simple authentication (in production, this would be server-side)
+                    if (this.authenticateUser(username, password, selectedRole)) {
+                        this.loginUser(username, selectedRole);
+                    } else {
+                        this.showLoginError('Invalid credentials');
+                    }
+                } catch (error) {
+                    console.error('Error in handleLogin:', error);
                 }
             }
 
@@ -3302,25 +3315,33 @@
             }
 
             loginUser(username, role) {
-                this.currentUser = { username, role };
-                
-                // Store session
-                sessionStorage.setItem('currentUser', JSON.stringify(this.currentUser));
-                
-                // Update UI
-                document.getElementById('userName').textContent = username;
-                document.getElementById('userRole').textContent = role.toUpperCase();
-                
-                // Show/hide elements based on role
-                this.updateUIForRole(role);
-                
-                // Show main app
-                document.getElementById('loginContainer').style.display = 'none';
-                document.getElementById('appContainer').style.display = 'block';
-                
-                // Initialize chat manager after login
-                if (!window.aiChatManager) {
-                    window.aiChatManager = new AISmsChatManager();
+                try {
+                    this.currentUser = { username, role };
+                    
+                    // Store session
+                    sessionStorage.setItem('currentUser', JSON.stringify(this.currentUser));
+                    
+                    // Update UI with null checks
+                    const userNameElement = document.getElementById('userName');
+                    const userRoleElement = document.getElementById('userRole');
+                    if (userNameElement) userNameElement.textContent = username;
+                    if (userRoleElement) userRoleElement.textContent = role.toUpperCase();
+                    
+                    // Show/hide elements based on role
+                    this.updateUIForRole(role);
+                    
+                    // Show main app
+                    const loginContainer = document.getElementById('loginContainer');
+                    const appContainer = document.getElementById('appContainer');
+                    if (loginContainer) loginContainer.style.display = 'none';
+                    if (appContainer) appContainer.style.display = 'block';
+                    
+                    // Initialize chat manager after login
+                    if (!window.aiChatManager) {
+                        window.aiChatManager = new AISmsChatManager();
+                    }
+                } catch (error) {
+                    console.error('Error in loginUser:', error);
                 }
             }
 
@@ -3339,10 +3360,16 @@
             }
 
             checkExistingSession() {
-                const storedUser = sessionStorage.getItem('currentUser');
-                if (storedUser) {
-                    this.currentUser = JSON.parse(storedUser);
-                    this.loginUser(this.currentUser.username, this.currentUser.role);
+                try {
+                    const storedUser = sessionStorage.getItem('currentUser');
+                    if (storedUser) {
+                        this.currentUser = JSON.parse(storedUser);
+                        this.loginUser(this.currentUser.username, this.currentUser.role);
+                    }
+                } catch (error) {
+                    console.error('Error in checkExistingSession:', error);
+                    // Clear invalid session data
+                    sessionStorage.removeItem('currentUser');
                 }
             }
 
