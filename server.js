@@ -728,6 +728,33 @@ app.get('/api/customers/export/csv', (req, res) => {
     }
 });
 
+// Simple test endpoint to create a basic customer
+app.post('/api/customers/:phone/create-basic-customer', (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        
+        // Create a basic customer
+        const customer = customerDB.createCustomer({
+            name: "Test Customer",
+            phone: phone,
+            email: "test@example.com",
+            postcode: "CW1 1AA"
+        });
+
+        res.json({
+            success: true,
+            message: 'Basic test customer created successfully',
+            customer: customer
+        });
+    } catch (error) {
+        console.error('Create basic customer endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Test endpoint to create a test customer with sample conversation data
 app.post('/api/customers/:phone/create-test-customer', (req, res) => {
     try {
