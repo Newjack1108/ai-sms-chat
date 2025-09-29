@@ -1428,6 +1428,15 @@ Only return the JSON object, no other text.`;
 });
 
 // Get current questions configuration
+// Get questions configuration
+app.get('/api/questions', (req, res) => {
+    res.json({
+        success: true,
+        questions: global.customQuestions
+    });
+});
+
+// Get questions configuration (legacy endpoint)
 app.get('/api/configure-questions', (req, res) => {
     res.json({
         success: true,
