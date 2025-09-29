@@ -1059,49 +1059,61 @@ app.post('/api/customers/:phone/add-test-conversation', (req, res) => {
             });
         }
 
-        // Add sample conversation data
+        // Add sample conversation data that matches the custom questions
         const testMessages = [
             {
                 sender: 'customer',
-                message: 'Hi, I\'m interested in getting stables built for my horses',
+                message: 'Hi, I need a new building for my business',
                 timestamp: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
                 messageId: 'test_msg_1'
             },
             {
                 sender: 'assistant',
-                message: 'Great! How many horses do you currently have?',
+                message: 'Great! What type of building do you require?',
                 timestamp: new Date(Date.now() - 3500000).toISOString(),
                 messageId: 'test_msg_2'
             },
             {
                 sender: 'customer',
-                message: 'I have 3 horses that need proper stabling',
+                message: 'I need a warehouse building for storage, around 5000 sq ft',
                 timestamp: new Date(Date.now() - 3400000).toISOString(),
                 messageId: 'test_msg_3'
             },
             {
                 sender: 'assistant',
-                message: 'What type of stable configuration interests you most?',
+                message: 'How soon do you need your building?',
                 timestamp: new Date(Date.now() - 3300000).toISOString(),
                 messageId: 'test_msg_4'
             },
             {
                 sender: 'customer',
-                message: 'I\'m looking for individual stables with American barn style, around £20,000 budget',
+                message: 'I need it completed within 3 months, by the end of March',
                 timestamp: new Date(Date.now() - 3200000).toISOString(),
                 messageId: 'test_msg_5'
             },
             {
                 sender: 'assistant',
-                message: 'Perfect! When do you need the stables completed?',
+                message: 'Do you need the building to be mobile?',
                 timestamp: new Date(Date.now() - 3100000).toISOString(),
                 messageId: 'test_msg_6'
             },
             {
                 sender: 'customer',
-                message: 'I need them ready by spring next year, so around 6 months from now',
+                message: 'No, it will be a permanent structure on my property',
                 timestamp: new Date(Date.now() - 3000000).toISOString(),
                 messageId: 'test_msg_7'
+            },
+            {
+                sender: 'assistant',
+                message: 'How do you want me to respond, email or phone?',
+                timestamp: new Date(Date.now() - 2900000).toISOString(),
+                messageId: 'test_msg_8'
+            },
+            {
+                sender: 'customer',
+                message: 'Please email me the details and quote',
+                timestamp: new Date(Date.now() - 2800000).toISOString(),
+                messageId: 'test_msg_9'
             }
         ];
 
