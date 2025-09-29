@@ -808,6 +808,70 @@ app.post('/api/customers/:phone/add-test-conversation', (req, res) => {
     }
 });
 
+// Endpoint to sync all customers with current global questions
+app.post('/api/customers/sync-questions', (req, res) => {
+    try {
+        const customers = customerDB.getAllCustomers();
+        const currentQuestions = {
+            q1: global.customQuestions?.q1 || "How many horses do you currently have?",
+            q2: global.customQuestions?.q2 || "What type of stable configuration interests you most?",
+            q3: global.customQuestions?.q3 || "What's your budget range for this project?",
+            q4: global.customQuestions?.q4 || "What's your ideal timeline for completion?"
+        };
+
+        let updatedCount = 0;
+        
+        customers.forEach(customer => {
+            // Check if customer's questions are different from current global questions
+            const needsUpdate = 
+                customer.question1.question !== currentQuestions.q1 ||
+                customer.question2.question !== currentQuestions.q2 ||
+                customer.question3.question !== currentQuestions.q3 ||
+                customer.question4.question !== currentQuestions.q4;
+
+            if (needsUpdate) {
+                customerDB.updateCustomer(customer.phone, {
+                    question1: {
+                        question: currentQuestions.q1,
+                        answer: customer.question1.answer,
+                        answered: customer.question1.answered
+                    },
+                    question2: {
+                        question: currentQuestions.q2,
+                        answer: customer.question2.answer,
+                        answered: customer.question2.answered
+                    },
+                    question3: {
+                        question: currentQuestions.q3,
+                        answer: customer.question3.answer,
+                        answered: customer.question3.answered
+                    },
+                    question4: {
+                        question: currentQuestions.q4,
+                        answer: customer.question4.answer,
+                        answered: customer.question4.answered
+                    }
+                });
+                updatedCount++;
+            }
+        });
+
+        res.json({
+            success: true,
+            message: `Synced questions for ${updatedCount} customers`,
+            totalCustomers: customers.length,
+            updatedCustomers: updatedCount,
+            currentQuestions: currentQuestions
+        });
+    } catch (error) {
+        console.error('Sync questions endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Debug endpoint to check customer conversation data
 app.get('/api/customers/:phone/debug', (req, res) => {
     try {
@@ -888,15 +952,21 @@ app.post('/api/customers/:phone/extract-answers', async (req, res) => {
 
         console.log(`📝 Conversation text being sent to AI:`, conversationText);
 
-        // Get the current questions
+        // Get the current questions from global settings (not customer's stored questions)
         const questions = {
+            q1: global.customQuestions?.q1 || "How many horses do you currently have?",
+            q2: global.customQuestions?.q2 || "What type of stable configuration interests you most?",
+            q3: global.customQuestions?.q3 || "What's your budget range for this project?",
+            q4: global.customQuestions?.q4 || "What's your ideal timeline for completion?"
+        };
+
+        console.log(`❓ Questions being analyzed (from global settings):`, questions);
+        console.log(`❓ Customer's stored questions:`, {
             q1: customer.question1.question,
             q2: customer.question2.question,
             q3: customer.question3.question,
             q4: customer.question4.question
-        };
-
-        console.log(`❓ Questions being analyzed:`, questions);
+        });
 
         // Use OpenAI to extract answers
         const openaiKey = process.env.OPENAI_API_KEY;
@@ -995,25 +1065,25 @@ Only return the JSON object, no other text.`;
             });
         }
 
-        // Update customer with extracted answers
+        // Update customer with extracted answers and current questions
         const updates = {
             question1: {
-                question: questions.q1,
+                question: questions.q1, // Use current global questions
                 answer: extractedAnswers.question1?.answer || customer.question1.answer,
                 answered: extractedAnswers.question1?.answered || customer.question1.answered
             },
             question2: {
-                question: questions.q2,
+                question: questions.q2, // Use current global questions
                 answer: extractedAnswers.question2?.answer || customer.question2.answer,
                 answered: extractedAnswers.question2?.answered || customer.question2.answered
             },
             question3: {
-                question: questions.q3,
+                question: questions.q3, // Use current global questions
                 answer: extractedAnswers.question3?.answer || customer.question3.answer,
                 answered: extractedAnswers.question3?.answered || customer.question3.answered
             },
             question4: {
-                question: questions.q4,
+                question: questions.q4, // Use current global questions
                 answer: extractedAnswers.question4?.answer || customer.question4.answer,
                 answered: extractedAnswers.question4?.answered || customer.question4.answered
             }
