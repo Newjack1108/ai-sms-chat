@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI SMS Chat - Clean Version</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            background: #4CAF50;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .login-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        input, select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status">
+            ✅ AI SMS Chat - Clean Version Working!
+        </div>
+        
+        <h1>🤖 AI SMS Chat Interface</h1>
+        <p>This is a clean, minimal version to test if the basic functionality works.</p>
+        
+        <form class="login-form" id="loginForm">
+            <div class="form-group">
+                <label>Username:</label>
+                <input type="text" id="username" value="admin" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Password:</label>
+                <input type="password" id="password" value="admin123" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Role:</label>
+                <select id="role">
+                    <option value="admin">👑 Admin</option>
+                    <option value="sales">💼 Sales</option>
+                </select>
+            </div>
+            
+            <button type="submit">Login</button>
+        </form>
+        
+        <div id="message" style="margin-top: 20px; padding: 10px; border-radius: 4px; display: none;"></div>
+    </div>
+
+    <script>
+        console.log('Clean version loaded successfully!');
+        
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const role = document.getElementById('role').value;
+            
+            const messageDiv = document.getElementById('message');
+            
+            // Simple validation
+            if (username === 'admin' && password === 'admin123') {
+                messageDiv.style.background = '#4CAF50';
+                messageDiv.style.color = 'white';
+                messageDiv.textContent = `✅ Login successful! Welcome ${username} (${role})`;
+                messageDiv.style.display = 'block';
+                
+                console.log('Login successful:', { username, role });
+            } else {
+                messageDiv.style.background = '#f44336';
+                messageDiv.style.color = 'white';
+                messageDiv.textContent = '❌ Invalid credentials. Try admin/admin123';
+                messageDiv.style.display = 'block';
+                
+                console.log('Login failed');
+            }
+        });
+    </script>
+</body>
+</html>
