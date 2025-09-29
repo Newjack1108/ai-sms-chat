@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>AI-Powered SMS Chat Interface - v2.2 - Cache Bust</title>
+    <title>AI-Powered SMS Chat Interface - v2.3 - Debugging</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -2379,8 +2379,24 @@
     </div>
 
     <script>
-        // VERSION 2.2 - CACHE BUST - Security warning removed and function error fixed
-        console.log('Loading AI SMS Chat Interface v2.2 - Security warning should be gone');
+        // VERSION 2.3 - DEBUGGING - Minimal test version
+        console.log('Loading AI SMS Chat Interface v2.3 - Debugging blank screen issue');
+        
+        // Test if basic JavaScript is working
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded successfully');
+            
+            // Show a simple test message
+            const testDiv = document.createElement('div');
+            testDiv.style.cssText = 'position: fixed; top: 10px; left: 10px; background: red; color: white; padding: 10px; z-index: 9999;';
+            testDiv.textContent = 'JavaScript is working - v2.3';
+            document.body.appendChild(testDiv);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                testDiv.remove();
+            }, 5000);
+        });
         
         class AISmsChatManager {
             constructor() {
