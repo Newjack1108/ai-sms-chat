@@ -34,23 +34,81 @@ global.customQuestions = {
     q4: "What's your ideal timeline for completion?"
 };
 
-// Load custom questions from file on startup
+// Load custom questions with multiple fallback methods
 async function loadCustomQuestions() {
     try {
-        const data = await fs.readFile('custom-questions.json', 'utf8');
-        const questions = JSON.parse(data);
-        global.customQuestions = questions;
-        console.log('📝 Loaded custom questions from file:', questions);
+        // Try Railway persistent storage first
+        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+        const questionsPath = `${persistentPath}/custom-questions.json`;
+        
+        try {
+            const data = await fs.readFile(questionsPath, 'utf8');
+            const questions = JSON.parse(data);
+            global.customQuestions = questions;
+            console.log('📝 Loaded custom questions from Railway persistent storage:', questions);
+            return;
+        } catch (persistentError) {
+            console.log('📝 Railway persistent storage not available, trying local file...');
+        }
+        
+        // Try local file
+        try {
+            const data = await fs.readFile('custom-questions.json', 'utf8');
+            const questions = JSON.parse(data);
+            global.customQuestions = questions;
+            console.log('📝 Loaded custom questions from local file:', questions);
+            return;
+        } catch (localError) {
+            console.log('📝 Local file not found, trying environment variables...');
+        }
+        
+        // Try environment variables as fallback
+        const envQuestions = {
+            q1: process.env.CUSTOM_QUESTION_1 || global.customQuestions.q1,
+            q2: process.env.CUSTOM_QUESTION_2 || global.customQuestions.q2,
+            q3: process.env.CUSTOM_QUESTION_3 || global.customQuestions.q3,
+            q4: process.env.CUSTOM_QUESTION_4 || global.customQuestions.q4
+        };
+        
+        if (envQuestions.q1 !== global.customQuestions.q1 || 
+            envQuestions.q2 !== global.customQuestions.q2 || 
+            envQuestions.q3 !== global.customQuestions.q3 || 
+            envQuestions.q4 !== global.customQuestions.q4) {
+            global.customQuestions = envQuestions;
+            console.log('📝 Loaded custom questions from environment variables:', envQuestions);
+        } else {
+            console.log('📝 Using default questions (no custom questions found)');
+        }
+        
     } catch (error) {
-        console.log('📝 Using default questions (no custom-questions.json found)');
+        console.error('❌ Error loading custom questions:', error);
+        console.log('📝 Using default questions due to error');
     }
 }
 
-// Save custom questions to file
+// Save custom questions with multiple methods
 async function saveCustomQuestions() {
     try {
-        await fs.writeFile('custom-questions.json', JSON.stringify(global.customQuestions, null, 2));
-        console.log('📝 Saved custom questions to file:', global.customQuestions);
+        // Try Railway persistent storage first
+        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+        const questionsPath = `${persistentPath}/custom-questions.json`;
+        
+        try {
+            await fs.writeFile(questionsPath, JSON.stringify(global.customQuestions, null, 2));
+            console.log('📝 Saved custom questions to Railway persistent storage:', global.customQuestions);
+        } catch (persistentError) {
+            console.log('📝 Railway persistent storage failed, trying local file...');
+            
+            // Try local file
+            try {
+                await fs.writeFile('custom-questions.json', JSON.stringify(global.customQuestions, null, 2));
+                console.log('📝 Saved custom questions to local file:', global.customQuestions);
+            } catch (localError) {
+                console.log('📝 Local file save failed, data will be lost on restart');
+                console.log('📝 Consider setting up Railway persistent storage or environment variables');
+            }
+        }
+        
     } catch (error) {
         console.error('❌ Error saving custom questions:', error);
     }
@@ -58,6 +116,61 @@ async function saveCustomQuestions() {
 
 // Load custom questions on startup
 loadCustomQuestions();
+
+// Railway persistence setup endpoint
+app.post('/api/setup-persistence', async (req, res) => {
+    try {
+        const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+        
+        // Test if we can write to persistent storage
+        const testFile = `${persistentPath}/test-write.json`;
+        await fs.writeFile(testFile, JSON.stringify({ test: true, timestamp: new Date().toISOString() }));
+        
+        // Clean up test file
+        await fs.unlink(testFile);
+        
+        res.json({
+            success: true,
+            message: 'Railway persistent storage is working',
+            persistentPath: persistentPath,
+            environment: {
+                RAILWAY_VOLUME_MOUNT_PATH: process.env.RAILWAY_VOLUME_MOUNT_PATH,
+                NODE_ENV: process.env.NODE_ENV
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Railway persistent storage not available',
+            message: 'Consider setting up Railway persistent volumes or using environment variables',
+            persistentPath: process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp',
+            errorDetails: error.message
+        });
+    }
+});
+
+// Force save all data endpoint
+app.post('/api/force-save', async (req, res) => {
+    try {
+        // Force save customers
+        await customerDB.saveData();
+        
+        // Force save custom questions
+        await saveCustomQuestions();
+        
+        res.json({
+            success: true,
+            message: 'All data saved successfully',
+            customers: customerDB.customers.size,
+            questions: global.customQuestions
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
 
 // Customer Database (In production, use proper database)
 class CustomerDatabase {
@@ -69,24 +182,70 @@ class CustomerDatabase {
 
     async loadData() {
         try {
-            const data = await fs.readFile('customers.json', 'utf8');
-            const customerArray = JSON.parse(data);
-            customerArray.forEach(customer => {
-                this.customers.set(customer.phone, customer);
-                if (customer.assistantThreadId) {
-                    this.conversationThreads.set(customer.phone, customer.assistantThreadId);
-                }
-            });
-            console.log(`📊 Loaded ${this.customers.size} customer records`);
+            // Try Railway persistent storage first
+            const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+            const customersPath = `${persistentPath}/customers.json`;
+            
+            try {
+                const data = await fs.readFile(customersPath, 'utf8');
+                const customerArray = JSON.parse(data);
+                customerArray.forEach(customer => {
+                    this.customers.set(customer.phone, customer);
+                    if (customer.assistantThreadId) {
+                        this.conversationThreads.set(customer.phone, customer.assistantThreadId);
+                    }
+                });
+                console.log(`📊 Loaded ${this.customers.size} customer records from Railway persistent storage`);
+                return;
+            } catch (persistentError) {
+                console.log('📊 Railway persistent storage not available, trying local file...');
+            }
+            
+            // Try local file
+            try {
+                const data = await fs.readFile('customers.json', 'utf8');
+                const customerArray = JSON.parse(data);
+                customerArray.forEach(customer => {
+                    this.customers.set(customer.phone, customer);
+                    if (customer.assistantThreadId) {
+                        this.conversationThreads.set(customer.phone, customer.assistantThreadId);
+                    }
+                });
+                console.log(`📊 Loaded ${this.customers.size} customer records from local file`);
+            } catch (localError) {
+                console.log('📊 Starting with empty customer database (no data files found)');
+            }
+            
         } catch (error) {
-            console.log('📊 Starting with empty customer database');
+            console.error('❌ Error loading customer data:', error);
+            console.log('📊 Starting with empty customer database due to error');
         }
     }
 
     async saveData() {
         try {
             const customerArray = Array.from(this.customers.values());
-            await fs.writeFile('customers.json', JSON.stringify(customerArray, null, 2));
+            
+            // Try Railway persistent storage first
+            const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
+            const customersPath = `${persistentPath}/customers.json`;
+            
+            try {
+                await fs.writeFile(customersPath, JSON.stringify(customerArray, null, 2));
+                console.log(`📊 Saved ${customerArray.length} customer records to Railway persistent storage`);
+            } catch (persistentError) {
+                console.log('📊 Railway persistent storage failed, trying local file...');
+                
+                // Try local file
+                try {
+                    await fs.writeFile('customers.json', JSON.stringify(customerArray, null, 2));
+                    console.log(`📊 Saved ${customerArray.length} customer records to local file`);
+                } catch (localError) {
+                    console.log('📊 Local file save failed, customer data will be lost on restart');
+                    console.log('📊 Consider setting up Railway persistent storage');
+                }
+            }
+            
         } catch (error) {
             console.error('❌ Error saving customer data:', error);
         }
