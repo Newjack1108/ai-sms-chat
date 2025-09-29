@@ -728,6 +728,43 @@ app.get('/api/customers/export/csv', (req, res) => {
     }
 });
 
+// Debug endpoint to check customer conversation data
+app.get('/api/customers/:phone/debug', (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        const customer = customerDB.getCustomer(phone);
+        
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Customer not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            customer: {
+                phone: customer.phone,
+                name: customer.name,
+                chatData: customer.chatData,
+                conversationHistory: customer.chatData?.messages || [],
+                questions: {
+                    q1: customer.question1,
+                    q2: customer.question2,
+                    q3: customer.question3,
+                    q4: customer.question4
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Debug endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // AI Answer Extraction Endpoint
 app.post('/api/customers/:phone/extract-answers', async (req, res) => {
     try {
@@ -744,8 +781,14 @@ app.post('/api/customers/:phone/extract-answers', async (req, res) => {
         // Get conversation history from the customer's chat data and any stored messages
         const conversationHistory = customer.chatData?.messages || [];
         
+        console.log(`🤖 AI Extraction for ${phone}:`);
+        console.log(`📊 Customer chatData:`, customer.chatData);
+        console.log(`💬 Conversation history length:`, conversationHistory.length);
+        console.log(`💬 Conversation messages:`, conversationHistory);
+        
         // If no conversation history, return current answers
         if (!conversationHistory || conversationHistory.length === 0) {
+            console.log(`⚠️ No conversation history found for customer ${phone}`);
             return res.json({
                 success: true,
                 message: 'No conversation history found',
@@ -763,6 +806,8 @@ app.post('/api/customers/:phone/extract-answers', async (req, res) => {
             `${msg.sender}: ${msg.message}`
         ).join('\n');
 
+        console.log(`📝 Conversation text being sent to AI:`, conversationText);
+
         // Get the current questions
         const questions = {
             q1: customer.question1.question,
@@ -770,6 +815,8 @@ app.post('/api/customers/:phone/extract-answers', async (req, res) => {
             q3: customer.question3.question,
             q4: customer.question4.question
         };
+
+        console.log(`❓ Questions being analyzed:`, questions);
 
         // Use OpenAI to extract answers
         const openaiKey = process.env.OPENAI_API_KEY;
@@ -792,7 +839,13 @@ QUESTIONS TO ANSWER:
 3. ${questions.q3}
 4. ${questions.q4}
 
-Please analyze the conversation and extract the best answers to each question. If an answer is not clearly provided in the conversation, return null for that question.
+Please analyze the conversation and extract the best answers to each question. Look for:
+- Direct answers to the questions
+- Implied answers based on context
+- Numbers, amounts, timeframes, preferences mentioned
+- Any relevant information that could answer these questions
+
+If an answer is not clearly provided in the conversation, return null for that question.
 
 Respond with a JSON object in this exact format:
 {
@@ -846,12 +899,16 @@ Only return the JSON object, no other text.`;
         const aiResponse = await response.json();
         const extractedText = aiResponse.choices[0].message.content.trim();
         
+        console.log(`🤖 AI Response:`, extractedText);
+        
         // Parse the AI response
         let extractedAnswers;
         try {
             extractedAnswers = JSON.parse(extractedText);
+            console.log(`✅ Parsed AI answers:`, extractedAnswers);
         } catch (parseError) {
-            console.error('Error parsing AI response:', parseError);
+            console.error('❌ Error parsing AI response:', parseError);
+            console.error('❌ Raw AI response:', extractedText);
             return res.status(500).json({
                 success: false,
                 error: 'Failed to parse AI response'
