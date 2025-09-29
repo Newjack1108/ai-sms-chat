@@ -34,6 +34,31 @@ global.customQuestions = {
     q4: "What's your ideal timeline for completion?"
 };
 
+// Load custom questions from file on startup
+async function loadCustomQuestions() {
+    try {
+        const data = await fs.readFile('custom-questions.json', 'utf8');
+        const questions = JSON.parse(data);
+        global.customQuestions = questions;
+        console.log('📝 Loaded custom questions from file:', questions);
+    } catch (error) {
+        console.log('📝 Using default questions (no custom-questions.json found)');
+    }
+}
+
+// Save custom questions to file
+async function saveCustomQuestions() {
+    try {
+        await fs.writeFile('custom-questions.json', JSON.stringify(global.customQuestions, null, 2));
+        console.log('📝 Saved custom questions to file:', global.customQuestions);
+    } catch (error) {
+        console.error('❌ Error saving custom questions:', error);
+    }
+}
+
+// Load custom questions on startup
+loadCustomQuestions();
+
 // Customer Database (In production, use proper database)
 class CustomerDatabase {
     constructor() {
@@ -1411,19 +1436,30 @@ app.get('/api/configure-questions', (req, res) => {
 });
 
 // Update questions configuration
-app.post('/api/configure-questions', (req, res) => {
-    const { questions } = req.body;
-    
-    // Store the custom questions globally
-    global.customQuestions = questions;
-    
-    console.log('Custom questions updated:', questions);
-    
-    res.json({
-        success: true,
-        message: 'Questions configuration updated',
-        questions: questions
-    });
+app.post('/api/configure-questions', async (req, res) => {
+    try {
+        const { questions } = req.body;
+        
+        // Store the custom questions globally
+        global.customQuestions = questions;
+        
+        // Save to file for persistence
+        await saveCustomQuestions();
+        
+        console.log('Custom questions updated and saved:', questions);
+        
+        res.json({
+            success: true,
+            message: 'Questions configuration updated and saved',
+            questions: questions
+        });
+    } catch (error) {
+        console.error('Error updating questions:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update questions'
+        });
+    }
 });
 
 // Serve environment variables to frontend
