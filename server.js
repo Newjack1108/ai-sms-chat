@@ -733,12 +733,17 @@ app.post('/api/customers/:phone/create-test-customer', (req, res) => {
     try {
         const phone = normalizePhoneNumber(req.params.phone);
         
-        // Create a new test customer
-        const testCustomer = {
-            phone: phone,
+
+        // Create the customer using the proper method
+        const createdCustomer = customerDB.createCustomer({
             name: "Test Customer",
+            phone: phone,
             email: "test@example.com",
-            postcode: "CW1 1AA",
+            postcode: "CW1 1AA"
+        });
+
+        // Update the customer with conversation data and custom questions
+        customerDB.updateCustomer(phone, {
             conversationStage: 'active',
             chatData: {
                 messages: [
@@ -785,36 +790,16 @@ app.post('/api/customers/:phone/create-test-customer', (req, res) => {
                         messageId: 'test_msg_7'
                     }
                 ]
-            },
-            question1: {
-                question: global.customQuestions?.q1 || "How many horses do you currently have?",
-                answer: null,
-                answered: false
-            },
-            question2: {
-                question: global.customQuestions?.q2 || "What type of stable configuration interests you most?",
-                answer: null,
-                answered: false
-            },
-            question3: {
-                question: global.customQuestions?.q3 || "What's your budget range for this project?",
-                answer: null,
-                answered: false
-            },
-            question4: {
-                question: global.customQuestions?.q4 || "What's your ideal timeline for completion?",
-                answer: null,
-                answered: false
             }
-        };
+        });
 
-        // Add the customer to the database
-        customerDB.addCustomer(testCustomer);
+        // Get the final customer data
+        const finalCustomer = customerDB.getCustomer(phone);
 
         res.json({
             success: true,
             message: 'Test customer created successfully with conversation data',
-            customer: testCustomer
+            customer: finalCustomer
         });
     } catch (error) {
         console.error('Create test customer endpoint error:', error);
