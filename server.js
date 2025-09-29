@@ -495,13 +495,33 @@ app.post('/webhook/sms', async (req, res) => {
                 // Send response
                 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
                 if (twilioClient) {
-                    await twilioClient.messages.create({
+                    const sentMessage = await twilioClient.messages.create({
                         body: aiResponse,
                         from: To,
                         to: From
                     });
                     
                     console.log(`🤖 Auto-replied to customer ${customer.id}: "${aiResponse}"`);
+                    
+                    // Store AI response message
+                    const aiMessageData = {
+                        sender: 'assistant',
+                        message: aiResponse,
+                        timestamp: new Date().toISOString(),
+                        messageId: sentMessage.sid
+                    };
+                    
+                    // Add AI response to messages
+                    const allMessages = [...updatedMessages, aiMessageData];
+                    
+                    // Update customer with both messages
+                    customerDB.updateCustomer(normalizedPhone, {
+                        conversationStage: 'active',
+                        chatData: {
+                            ...customer.chatData,
+                            messages: allMessages
+                        }
+                    });
                 }
             } catch (error) {
                 console.error('❌ Error generating AI response:', error);
@@ -512,10 +532,28 @@ app.post('/webhook/sms', async (req, res) => {
             console.log(`⚠️ AI credentials missing - not replying to ${From}`);
         }
 
-        // Update conversation stage
-        customerDB.updateCustomer(normalizedPhone, {
-            conversationStage: 'active'
-        });
+        // Store conversation message in customer's chatData (if not already stored by AI response)
+        if (!aiSettings.aiEnabled || !assistantId || !openaiKey) {
+            const messageData = {
+                sender: 'customer',
+                message: Body,
+                timestamp: new Date().toISOString(),
+                messageId: MessageSid
+            };
+
+            // Get existing messages or create new array
+            const existingMessages = customer.chatData?.messages || [];
+            const updatedMessages = [...existingMessages, messageData];
+
+            // Update conversation stage and store message
+            customerDB.updateCustomer(normalizedPhone, {
+                conversationStage: 'active',
+                chatData: {
+                    ...customer.chatData,
+                    messages: updatedMessages
+                }
+            });
+        }
         
         res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
         
@@ -686,6 +724,180 @@ app.get('/api/customers/export/csv', (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Internal server error'
+        });
+    }
+});
+
+// AI Answer Extraction Endpoint
+app.post('/api/customers/:phone/extract-answers', async (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        const customer = customerDB.getCustomer(phone);
+        
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Customer not found'
+            });
+        }
+
+        // Get conversation history from the customer's chat data and any stored messages
+        const conversationHistory = customer.chatData?.messages || [];
+        
+        // If no conversation history, return current answers
+        if (!conversationHistory || conversationHistory.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No conversation history found',
+                extractedAnswers: {
+                    question1: customer.question1,
+                    question2: customer.question2,
+                    question3: customer.question3,
+                    question4: customer.question4
+                }
+            });
+        }
+
+        // Create conversation context for AI
+        const conversationText = conversationHistory.map(msg => 
+            `${msg.sender}: ${msg.message}`
+        ).join('\n');
+
+        // Get the current questions
+        const questions = {
+            q1: customer.question1.question,
+            q2: customer.question2.question,
+            q3: customer.question3.question,
+            q4: customer.question4.question
+        };
+
+        // Use OpenAI to extract answers
+        const openaiKey = process.env.OPENAI_API_KEY;
+        if (!openaiKey) {
+            return res.status(500).json({
+                success: false,
+                error: 'OpenAI API key not configured'
+            });
+        }
+
+        const extractionPrompt = `
+You are analyzing a customer conversation to extract specific answers to predefined questions.
+
+CONVERSATION:
+${conversationText}
+
+QUESTIONS TO ANSWER:
+1. ${questions.q1}
+2. ${questions.q2}
+3. ${questions.q3}
+4. ${questions.q4}
+
+Please analyze the conversation and extract the best answers to each question. If an answer is not clearly provided in the conversation, return null for that question.
+
+Respond with a JSON object in this exact format:
+{
+    "question1": {
+        "answer": "extracted answer or null",
+        "answered": true/false
+    },
+    "question2": {
+        "answer": "extracted answer or null", 
+        "answered": true/false
+    },
+    "question3": {
+        "answer": "extracted answer or null",
+        "answered": true/false
+    },
+    "question4": {
+        "answer": "extracted answer or null",
+        "answered": true/false
+    }
+}
+
+Only return the JSON object, no other text.`;
+
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${openaiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are an expert at analyzing conversations and extracting specific information. Always respond with valid JSON only.'
+                    },
+                    {
+                        role: 'user',
+                        content: extractionPrompt
+                    }
+                ],
+                temperature: 0.1,
+                max_tokens: 1000
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status}`);
+        }
+
+        const aiResponse = await response.json();
+        const extractedText = aiResponse.choices[0].message.content.trim();
+        
+        // Parse the AI response
+        let extractedAnswers;
+        try {
+            extractedAnswers = JSON.parse(extractedText);
+        } catch (parseError) {
+            console.error('Error parsing AI response:', parseError);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to parse AI response'
+            });
+        }
+
+        // Update customer with extracted answers
+        const updates = {
+            question1: {
+                question: questions.q1,
+                answer: extractedAnswers.question1?.answer || customer.question1.answer,
+                answered: extractedAnswers.question1?.answered || customer.question1.answered
+            },
+            question2: {
+                question: questions.q2,
+                answer: extractedAnswers.question2?.answer || customer.question2.answer,
+                answered: extractedAnswers.question2?.answered || customer.question2.answered
+            },
+            question3: {
+                question: questions.q3,
+                answer: extractedAnswers.question3?.answer || customer.question3.answer,
+                answered: extractedAnswers.question3?.answered || customer.question3.answered
+            },
+            question4: {
+                question: questions.q4,
+                answer: extractedAnswers.question4?.answer || customer.question4.answer,
+                answered: extractedAnswers.question4?.answered || customer.question4.answered
+            }
+        };
+
+        const updatedCustomer = customerDB.updateCustomer(phone, updates);
+
+        console.log(`🤖 AI extracted answers for customer ${phone}`);
+
+        res.json({
+            success: true,
+            message: 'Answers extracted successfully',
+            customer: updatedCustomer,
+            extractedAnswers: updates
+        });
+
+    } catch (error) {
+        console.error('Error extracting answers:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
