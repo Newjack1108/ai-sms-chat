@@ -4835,33 +4835,47 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
-            // Remove any security warnings first
-            removeSecurityWarnings();
+            console.log('DOMContentLoaded - Starting initialization...');
             
-            // Load environment variables first
-            await loadEnvironmentVariables();
-            
-            // Load special offers
-            loadSpecialOffer();
-            
-            // Load AI settings from server
-            loadAISettings();
-            
-            // Load questions from server
-            loadQuestions();
-            
-            // Load customer profiles
-            loadCustomerProfiles();
-            
-            const savedQuestions = localStorage.getItem('customQuestions');
-            if (savedQuestions) {
-                const questions = JSON.parse(savedQuestions);
-                Object.keys(questions).forEach(key => {
-                    const element = document.getElementById(key);
-                    if (element) {
-                        element.value = questions[key];
-                    }
-                });
+            try {
+                // Remove any security warnings first
+                removeSecurityWarnings();
+                console.log('Security warnings removed');
+                
+                // Load environment variables first
+                await loadEnvironmentVariables();
+                console.log('Environment variables loaded');
+                
+                // Load special offers
+                loadSpecialOffer();
+                console.log('Special offers loaded');
+                
+                // Load AI settings from server
+                loadAISettings();
+                console.log('AI settings loaded');
+                
+                // Load questions from server
+                loadQuestions();
+                console.log('Questions loaded');
+                
+                // Load customer profiles
+                loadCustomerProfiles();
+                console.log('Customer profiles loaded');
+                
+                const savedQuestions = localStorage.getItem('customQuestions');
+                if (savedQuestions) {
+                    const questions = JSON.parse(savedQuestions);
+                    Object.keys(questions).forEach(key => {
+                        const element = document.getElementById(key);
+                        if (element) {
+                            element.value = questions[key];
+                        }
+                    });
+                }
+                console.log('DOMContentLoaded - Initialization complete!');
+                
+            } catch (error) {
+                console.error('Error during initialization:', error);
             }
         });
 
