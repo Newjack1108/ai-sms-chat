@@ -728,6 +728,103 @@ app.get('/api/customers/export/csv', (req, res) => {
     }
 });
 
+// Test endpoint to create a test customer with sample conversation data
+app.post('/api/customers/:phone/create-test-customer', (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        
+        // Create a new test customer
+        const testCustomer = {
+            phone: phone,
+            name: "Test Customer",
+            email: "test@example.com",
+            postcode: "CW1 1AA",
+            conversationStage: 'active',
+            chatData: {
+                messages: [
+                    {
+                        sender: 'customer',
+                        message: 'Hi, I\'m interested in getting stables built for my horses',
+                        timestamp: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+                        messageId: 'test_msg_1'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'Great! How many horses do you currently have?',
+                        timestamp: new Date(Date.now() - 3500000).toISOString(),
+                        messageId: 'test_msg_2'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I have 3 horses that need proper stabling',
+                        timestamp: new Date(Date.now() - 3400000).toISOString(),
+                        messageId: 'test_msg_3'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'What type of stable configuration interests you most?',
+                        timestamp: new Date(Date.now() - 3300000).toISOString(),
+                        messageId: 'test_msg_4'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I\'m looking for individual stables with American barn style, around £20,000 budget',
+                        timestamp: new Date(Date.now() - 3200000).toISOString(),
+                        messageId: 'test_msg_5'
+                    },
+                    {
+                        sender: 'assistant',
+                        message: 'Perfect! When do you need the stables completed?',
+                        timestamp: new Date(Date.now() - 3100000).toISOString(),
+                        messageId: 'test_msg_6'
+                    },
+                    {
+                        sender: 'customer',
+                        message: 'I need them ready by spring next year, so around 6 months from now',
+                        timestamp: new Date(Date.now() - 3000000).toISOString(),
+                        messageId: 'test_msg_7'
+                    }
+                ]
+            },
+            question1: {
+                question: global.customQuestions?.q1 || "How many horses do you currently have?",
+                answer: null,
+                answered: false
+            },
+            question2: {
+                question: global.customQuestions?.q2 || "What type of stable configuration interests you most?",
+                answer: null,
+                answered: false
+            },
+            question3: {
+                question: global.customQuestions?.q3 || "What's your budget range for this project?",
+                answer: null,
+                answered: false
+            },
+            question4: {
+                question: global.customQuestions?.q4 || "What's your ideal timeline for completion?",
+                answer: null,
+                answered: false
+            }
+        };
+
+        // Add the customer to the database
+        customerDB.addCustomer(testCustomer);
+
+        res.json({
+            success: true,
+            message: 'Test customer created successfully with conversation data',
+            customer: testCustomer
+        });
+    } catch (error) {
+        console.error('Create test customer endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Test endpoint to add sample conversation data
 app.post('/api/customers/:phone/add-test-conversation', (req, res) => {
     try {
