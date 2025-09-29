@@ -3,7 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI-Powered SMS Chat Interface</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>AI-Powered SMS Chat Interface - v2.2 - Cache Bust</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -715,57 +718,6 @@
             color: #C62828;
         }
 
-        /* Security Warning Styles */
-        .security-warning {
-            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
-            border: 2px solid #f39c12;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 12px rgba(243, 156, 18, 0.2);
-        }
-
-        .warning-content h4 {
-            color: #d68910;
-            margin-bottom: 12px;
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        .warning-content p {
-            color: #8b4513;
-            margin-bottom: 12px;
-            font-size: 0.9rem;
-        }
-
-        .warning-content ul {
-            color: #8b4513;
-            margin-bottom: 16px;
-            padding-left: 20px;
-        }
-
-        .warning-content li {
-            margin-bottom: 4px;
-            font-size: 0.85rem;
-        }
-
-        .clear-tokens-btn {
-            background: linear-gradient(135deg, #e74c3c, #c0392b);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 0.85rem;
-            transition: all 0.3s ease;
-        }
-
-        .clear-tokens-btn:hover {
-            background: linear-gradient(135deg, #c0392b, #a93226);
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
-        }
 
         .sidebar {
             width: 320px;
@@ -2069,9 +2021,12 @@
         <!-- Settings Dashboard -->
         <div class="settings-container" id="settingsTab">
             <div class="settings-dashboard">
+                <div style="background: #4CAF50; color: white; padding: 15px; margin-bottom: 20px; border-radius: 8px; text-align: center; font-weight: bold;">
+                    ✅ SECURITY WARNING REMOVED - Version 2.2 - CACHE BUST ✅
+                </div>
                 <!-- Twilio Settings Section -->
                 <div class="settings-section">
-                    <h2>🔧 Twilio Configuration</h2>
+                    <h2>🔧 Twilio Configuration - UPDATED v2.2</h2>
                     <div style="background: #e8f5e8; padding: 10px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #4CAF50;">
                         <strong>✅ Credentials Loaded from Railway</strong><br>
                         Your Twilio and OpenAI credentials are automatically loaded from Railway's secure environment variables. 
@@ -2424,6 +2379,9 @@
     </div>
 
     <script>
+        // VERSION 2.2 - CACHE BUST - Security warning removed and function error fixed
+        console.log('Loading AI SMS Chat Interface v2.2 - Security warning should be gone');
+        
         class AISmsChatManager {
             constructor() {
                 this.conversations = new Map();
@@ -3457,6 +3415,8 @@
             } else if (tabName === 'settings') {
                 document.getElementById('chatTab').style.display = 'none';
                 document.getElementById('settingsTab').style.display = 'block';
+                // Remove any security warnings first
+                removeSecurityWarnings();
                 // Ensure settings are loaded and auto-save is enabled
                 setTimeout(() => {
                     syncSettings();
@@ -3465,11 +3425,22 @@
         };
 
         // Sync settings between chat and settings dashboard
+        // Cache bust: Security warning removed - v2.1
         function syncSettings() {
-            console.log('Syncing settings...');
+            console.log('Syncing settings... v2.1 - Security warning should be gone');
+            console.log('DEBUG: syncSettings called - checking for any security warning creation...');
             
-            // Show security warning
-            showSecurityWarning();
+            // Check if any security warning elements exist
+            const existingWarnings = document.querySelectorAll('.security-warning, [class*="security"], [class*="warning"]');
+            console.log('DEBUG: Found existing warning elements:', existingWarnings.length);
+            existingWarnings.forEach((el, index) => {
+                console.log(`DEBUG: Warning element ${index}:`, el.className, el.textContent.substring(0, 100));
+                // Remove any security warning elements
+                if (el.textContent.includes('Security Notice') || el.textContent.includes('API tokens') || el.textContent.includes('Clear All Tokens')) {
+                    console.log('DEBUG: Removing security warning element:', el);
+                    el.remove();
+                }
+            });
             
             // Update webhook URLs with current domain
             updateWebhookUrls();
@@ -4028,44 +3999,6 @@
             aiChatManager.handleIncomingMessage(body, from, messageId);
         };
 
-        // Security warning for API tokens
-        function showSecurityWarning() {
-            const warning = document.createElement('div');
-            warning.className = 'security-warning';
-            warning.innerHTML = `
-                <div class="warning-content">
-                    <h4>🔒 Security Notice</h4>
-                    <p>Your API tokens are stored locally in your browser. For maximum security:</p>
-                    <ul>
-                        <li>Don't share your browser or computer</li>
-                        <li>Clear tokens when using shared computers</li>
-                        <li>Consider using environment variables for production</li>
-                    </ul>
-                    <button onclick="clearAllTokens()" class="clear-tokens-btn">Clear All Tokens</button>
-                </div>
-            `;
-            
-            const settingsDashboard = document.querySelector('.settings-dashboard');
-            settingsDashboard.insertBefore(warning, settingsDashboard.firstChild);
-        }
-
-        // Clear all stored tokens
-        window.clearAllTokens = () => {
-            if (confirm('Are you sure you want to clear all stored API tokens? This will require you to re-enter them.')) {
-                localStorage.removeItem('accountSid');
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('openaiKey');
-                localStorage.removeItem('assistantId');
-                
-                // Clear form fields
-                document.getElementById('settingsAccountSid').value = '';
-                document.getElementById('settingsAuthToken').value = '';
-                document.getElementById('settingsOpenaiKey').value = '';
-                document.getElementById('settingsAssistantId').value = '';
-                
-                alert('All API tokens have been cleared from local storage.');
-            }
-        };
 
         // Copy webhook URL to clipboard
         window.copyToClipboard = (elementId) => {
@@ -4469,7 +4402,7 @@
                     
                     // Update status indicators
                     updateSettingsAIStatus(settings.aiEnabled);
-                    updateSettingsTestModeStatus(settings.testMode);
+                    updateTestModeStatus(settings.testMode);
                     
                     console.log('AI settings loaded from server:', settings);
                 }
@@ -4883,7 +4816,28 @@
             }
         }
 
+        // Function to remove any security warnings
+        function removeSecurityWarnings() {
+            console.log('DEBUG: Removing any existing security warnings...');
+            const warnings = document.querySelectorAll('*');
+            warnings.forEach(el => {
+                if (el.textContent && (
+                    el.textContent.includes('Security Notice') || 
+                    el.textContent.includes('API tokens are stored locally') ||
+                    el.textContent.includes('Clear All Tokens') ||
+                    el.textContent.includes('Don\'t share your browser') ||
+                    el.textContent.includes('shared computers')
+                )) {
+                    console.log('DEBUG: Found and removing security warning:', el);
+                    el.remove();
+                }
+            });
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
+            // Remove any security warnings first
+            removeSecurityWarnings();
+            
             // Load environment variables first
             await loadEnvironmentVariables();
             
