@@ -728,6 +728,86 @@ app.get('/api/customers/export/csv', (req, res) => {
     }
 });
 
+// Test endpoint to add sample conversation data
+app.post('/api/customers/:phone/add-test-conversation', (req, res) => {
+    try {
+        const phone = normalizePhoneNumber(req.params.phone);
+        const customer = customerDB.getCustomer(phone);
+        
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Customer not found'
+            });
+        }
+
+        // Add sample conversation data
+        const testMessages = [
+            {
+                sender: 'customer',
+                message: 'Hi, I\'m interested in getting stables built for my horses',
+                timestamp: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+                messageId: 'test_msg_1'
+            },
+            {
+                sender: 'assistant',
+                message: 'Great! How many horses do you currently have?',
+                timestamp: new Date(Date.now() - 3500000).toISOString(),
+                messageId: 'test_msg_2'
+            },
+            {
+                sender: 'customer',
+                message: 'I have 3 horses that need proper stabling',
+                timestamp: new Date(Date.now() - 3400000).toISOString(),
+                messageId: 'test_msg_3'
+            },
+            {
+                sender: 'assistant',
+                message: 'What type of stable configuration interests you most?',
+                timestamp: new Date(Date.now() - 3300000).toISOString(),
+                messageId: 'test_msg_4'
+            },
+            {
+                sender: 'customer',
+                message: 'I\'m looking for individual stables with American barn style, around £20,000 budget',
+                timestamp: new Date(Date.now() - 3200000).toISOString(),
+                messageId: 'test_msg_5'
+            },
+            {
+                sender: 'assistant',
+                message: 'Perfect! When do you need the stables completed?',
+                timestamp: new Date(Date.now() - 3100000).toISOString(),
+                messageId: 'test_msg_6'
+            },
+            {
+                sender: 'customer',
+                message: 'I need them ready by spring next year, so around 6 months from now',
+                timestamp: new Date(Date.now() - 3000000).toISOString(),
+                messageId: 'test_msg_7'
+            }
+        ];
+
+        // Update customer with test conversation data
+        const updatedCustomer = customerDB.updateCustomer(phone, {
+            chatData: {
+                messages: testMessages
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Test conversation data added successfully',
+            customer: updatedCustomer
+        });
+    } catch (error) {
+        console.error('Test conversation endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Debug endpoint to check customer conversation data
 app.get('/api/customers/:phone/debug', (req, res) => {
     try {
