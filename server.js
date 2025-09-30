@@ -186,7 +186,7 @@ Thank you for your time! 🐴✨`;
             timestamp: new Date().toISOString()
         };
         messages.push(qualMessage);
-        
+
         res.json({
             success: true,
             message: 'Lead qualified successfully'
@@ -204,7 +204,7 @@ Thank you for your time! 🐴✨`;
 app.post('/api/settings/questions', (req, res) => {
     try {
         const { questions } = req.body;
-        
+
         if (!questions || !Array.isArray(questions) || questions.length !== 4) {
             return res.status(400).json({
                 success: false,
@@ -354,11 +354,11 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
             lead.sentToCRM = true;
             lead.crmSentDate = new Date().toISOString();
 
-        res.json({
-            success: true,
+    res.json({
+        success: true,
                 message: 'Lead sent to CRM successfully'
             });
-        } else {
+    } else {
             res.status(500).json({
                 success: false,
                 error: 'Failed to send to CRM webhook'
@@ -549,7 +549,9 @@ async function sendAIIntroduction(lead) {
 
 I'm your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution for your horses.
 
-To get started, I have a few quick questions to understand your needs better. Let's begin! 🐴`;
+To get started, I have a few quick questions to understand your needs better.
+
+${CUSTOM_QUESTIONS[0]} 🐴`;
 
         await sendSMS(lead.phone, introductionMessage);
         
@@ -564,6 +566,7 @@ To get started, I have a few quick questions to understand your needs better. Le
         messages.push(introMessage);
         
         console.log(`🤖 AI introduction sent to ${lead.name} (${lead.phone})`);
+        console.log(`📝 First question included: ${CUSTOM_QUESTIONS[0]}`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
     }
@@ -572,6 +575,9 @@ To get started, I have a few quick questions to understand your needs better. Le
 // Process AI response using OpenAI Assistant
 async function processAIResponse(lead, userMessage) {
     try {
+        console.log(`🔄 Processing AI response for lead: ${lead.name} (${lead.phone})`);
+        console.log(`📝 User message: "${userMessage}"`);
+        
         // Store incoming message
         const incomingMessage = {
             id: messageIdCounter++,
@@ -584,8 +590,11 @@ async function processAIResponse(lead, userMessage) {
         
         // Check if all questions are answered
         const answeredCount = Object.keys(lead.answers || {}).length;
+        console.log(`📊 Current progress: ${answeredCount}/4 questions answered`);
+        console.log(`📋 Current answers:`, lead.answers);
         
         if (answeredCount >= 4) {
+            console.log(`🎉 All questions answered - qualifying lead`);
             // All questions answered - qualify lead
             const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
 
@@ -615,10 +624,12 @@ Thank you for your time! 🐴✨`;
             return;
         }
         
+        console.log(`🤖 Generating AI response...`);
         // Generate AI response using Assistant
         const aiResponse = await generateAIResponseWithAssistant(lead, userMessage);
         
         if (aiResponse) {
+            console.log(`📤 Sending AI response: "${aiResponse}"`);
             await sendSMS(lead.phone, aiResponse);
             
             // Store AI response
@@ -631,19 +642,25 @@ Thank you for your time! 🐴✨`;
             };
             messages.push(aiMessage);
             
-            console.log(`🤖 AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
+            console.log(`✅ AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
+        } else {
+            console.log(`❌ No AI response generated`);
         }
     } catch (error) {
-        console.error('Error processing AI response:', error);
+        console.error('❌ Error processing AI response:', error);
     }
 }
 
 // Generate AI response using OpenAI Assistant
 async function generateAIResponseWithAssistant(lead, userMessage) {
     try {
+        console.log(`🔍 Checking AI configuration...`);
+        console.log(`🤖 OpenAI Client:`, openaiClient ? 'Available' : 'Not available');
+        console.log(`🆔 Assistant ID:`, assistantId ? assistantId : 'Not set');
+        
         if (!openaiClient || !assistantId) {
             console.log('⚠️ OpenAI Assistant not configured - using fallback response');
-            return generateFallbackResponse(lead, userMessage);
+            return await generateFallbackResponse(lead, userMessage);
         }
         
         // Create a thread for this conversation
@@ -689,10 +706,12 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
 
 // Fallback response when Assistant is not available
 async function generateFallbackResponse(lead, userMessage) {
+    console.log(`🔄 Using fallback response system`);
     const answeredCount = Object.keys(lead.answers || {}).length;
     
     console.log(`📊 Lead progress: ${answeredCount}/${CUSTOM_QUESTIONS.length} questions answered`);
     console.log(`📝 Custom questions:`, CUSTOM_QUESTIONS);
+    console.log(`💬 User message length: ${userMessage.length} characters`);
     
     if (answeredCount < CUSTOM_QUESTIONS.length) {
         const nextQuestion = CUSTOM_QUESTIONS[answeredCount];
@@ -710,17 +729,26 @@ async function generateFallbackResponse(lead, userMessage) {
             lead.status = lead.progress === 100 ? 'qualified' : 'active';
             
             console.log(`✅ Stored answer for question ${answeredCount + 1}: ${userMessage}`);
+            console.log(`📈 Updated progress: ${lead.progress}%`);
+        } else {
+            console.log(`⚠️ User message too short (${userMessage.length} chars), not storing as answer`);
         }
         
         // Ask the next question
         if (answeredCount + 1 < CUSTOM_QUESTIONS.length) {
-            return `Thanks for your response! ${CUSTOM_QUESTIONS[answeredCount + 1]}`;
+            const response = `Thanks for your response! ${CUSTOM_QUESTIONS[answeredCount + 1]}`;
+            console.log(`📤 Fallback response: ${response}`);
+            return response;
         } else {
-            return `Thank you for your response! I have all the information I need. Our team will contact you within 24 hours to discuss your equine stable project. 🐴✨`;
+            const response = `Thank you for your response! I have all the information I need. Our team will contact you within 24 hours to discuss your equine stable project. 🐴✨`;
+            console.log(`📤 Final response: ${response}`);
+            return response;
         }
     }
     
-    return "Thank you for your response! I'll have our team contact you soon.";
+    const response = "Thank you for your response! I'll have our team contact you soon.";
+    console.log(`📤 Default response: ${response}`);
+    return response;
 }
 
 // Update lead progress based on user response
