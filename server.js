@@ -208,10 +208,339 @@ async function initializeApp() {
     }
 }
 
+// ========================================
+// NEW CHAT SYSTEM API ENDPOINTS
+// ========================================
+
+// Get all leads
+app.get('/api/leads', async (req, res) => {
+    try {
+        const customers = await customerDB.getAllCustomers();
+        
+        // Convert customers to leads format
+        const leads = customers.map(customer => ({
+            id: customer.id,
+            name: customer.name || 'Unknown',
+            email: customer.email || '',
+            phone: customer.phone,
+            source: customer.source || 'manual',
+            qualified: customer.qualified || false,
+            question1: customer.question1 || { answered: false, answer: '' },
+            question2: customer.question2 || { answered: false, answer: '' },
+            question3: customer.question3 || { answered: false, answer: '' },
+            question4: customer.question4 || { answered: false, answer: '' },
+            unreadCount: customer.unreadCount || 0,
+            lastMessage: customer.chatData?.messages?.length > 0 ? 
+                customer.chatData.messages[customer.chatData.messages.length - 1] : null
+        }));
+        
+        res.json({
+            success: true,
+            leads: leads
+        });
+    } catch (error) {
+        console.error('Error fetching leads:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Create new lead
+app.post('/api/leads', async (req, res) => {
+    try {
+        const { name, email, phone, source } = req.body;
+        
+        if (!name || !email || !phone) {
+            return res.status(400).json({
+                success: false,
+                error: 'Name, email, and phone are required'
+            });
+        }
+        
+        const normalizedPhone = normalizePhoneNumber(phone);
+        
+        // Check if lead already exists
+        const existingCustomer = await customerDB.getCustomer(normalizedPhone);
+        if (existingCustomer) {
+            return res.status(400).json({
+                success: false,
+                error: 'Lead with this phone number already exists'
+            });
+        }
+        
+        // Create new customer/lead
+        const customer = await customerDB.createCustomer({
+            phone: normalizedPhone,
+            name: name,
+            email: email,
+            source: source || 'manual',
+            conversationStage: 'new'
+        });
+        
+        res.json({
+            success: true,
+            lead: {
+                id: customer.id,
+                name: customer.name,
+                email: customer.email,
+                phone: customer.phone,
+                source: customer.source,
+                qualified: false,
+                question1: { answered: false, answer: '' },
+                question2: { answered: false, answer: '' },
+                question3: { answered: false, answer: '' },
+                question4: { answered: false, answer: '' },
+                unreadCount: 0,
+                lastMessage: null
+            }
+        });
+    } catch (error) {
+        console.error('Error creating lead:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get messages for a lead
+app.get('/api/leads/:leadId/messages', async (req, res) => {
+    try {
+        const { leadId } = req.params;
+        const customer = await customerDB.getCustomer(leadId);
+        
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        const messages = customer.chatData?.messages || [];
+        
+        // Convert to chat format
+        const chatMessages = messages.map(msg => ({
+            id: msg.messageId || `msg_${Date.now()}`,
+            content: msg.message,
+            sender: msg.sender === 'assistant' ? 'assistant' : 'customer',
+            timestamp: msg.timestamp
+        }));
+        
+        res.json({
+            success: true,
+            messages: chatMessages
+        });
+    } catch (error) {
+        console.error('Error fetching messages:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Send message to lead
+app.post('/api/leads/send-message', async (req, res) => {
+    try {
+        const { leadId, content, aiEnabled } = req.body;
+        
+        if (!leadId || !content) {
+            return res.status(400).json({
+                success: false,
+                error: 'Lead ID and content are required'
+            });
+        }
+        
+        const customer = await customerDB.getCustomer(leadId);
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        // Add message to customer's chat data
+        const messageData = {
+            sender: 'assistant',
+            message: content,
+            timestamp: new Date().toISOString(),
+            messageId: `msg_${Date.now()}_${Math.random()}`
+        };
+        
+        const existingMessages = customer.chatData?.messages || [];
+        const updatedMessages = [...existingMessages, messageData];
+        
+        // Update customer with new message
+        await customerDB.updateCustomer(leadId, {
+            chatData: {
+                ...customer.chatData,
+                messages: updatedMessages
+            }
+        });
+        
+        // Send SMS via Twilio
+        const settings = {
+            accountSid: process.env.TWILIO_ACCOUNT_SID,
+            authToken: process.env.TWILIO_AUTH_TOKEN,
+            fromNumber: process.env.TWILIO_FROM_NUMBER
+        };
+        
+        if (settings.accountSid && settings.authToken && settings.fromNumber) {
+            const client = twilio(settings.accountSid, settings.authToken);
+            await client.messages.create({
+                body: content,
+                from: settings.fromNumber,
+                to: customer.phone
+            });
+            
+            console.log(`📤 SMS sent to ${customer.name} (${customer.phone}): "${content}"`);
+        }
+        
+        let aiResponse = null;
+        
+        // Generate AI response if enabled
+        if (aiEnabled && process.env.OPENAI_API_KEY) {
+            try {
+                aiResponse = await generateAIResponse(customer, content);
+                
+                if (aiResponse) {
+                    // Add AI response to messages
+                    const aiMessageData = {
+                        sender: 'customer',
+                        message: aiResponse,
+                        timestamp: new Date().toISOString(),
+                        messageId: `ai_${Date.now()}_${Math.random()}`
+                    };
+                    
+                    const finalMessages = [...updatedMessages, aiMessageData];
+                    
+                    // Update customer with AI response
+                    await customerDB.updateCustomer(leadId, {
+                        chatData: {
+                            ...customer.chatData,
+                            messages: finalMessages
+                        }
+                    });
+                    
+                    console.log(`🤖 AI response generated for ${customer.name}: "${aiResponse}"`);
+                }
+            } catch (aiError) {
+                console.error('Error generating AI response:', aiError);
+            }
+        }
+        
+        res.json({
+            success: true,
+            message: 'Message sent successfully',
+            aiResponse: aiResponse
+        });
+    } catch (error) {
+        console.error('Error sending message:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Check for new messages
+app.get('/api/leads/:leadId/messages/check', async (req, res) => {
+    try {
+        const { leadId } = req.params;
+        const customer = await customerDB.getCustomer(leadId);
+        
+        if (!customer) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        // For now, return empty array - in a real implementation,
+        // this would check for new incoming messages
+        res.json({
+            success: true,
+            newMessages: []
+        });
+    } catch (error) {
+        console.error('Error checking for new messages:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Generate AI response for lead qualification
+async function generateAIResponse(customer, userMessage) {
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+        
+        // Get custom questions
+        const questions = global.customQuestions;
+        
+        // Check which questions are already answered
+        const answeredQuestions = [];
+        const unansweredQuestions = [];
+        
+        ['question1', 'question2', 'question3', 'question4'].forEach((q, index) => {
+            if (customer[q]?.answered) {
+                answeredQuestions.push(`${questions[`q${index + 1}`]}: ${customer[q].answer}`);
+            } else {
+                unansweredQuestions.push(questions[`q${index + 1}`]);
+            }
+        });
+        
+        // Build context for AI
+        let context = `You are a sales assistant helping to qualify leads for an equine stable business. 
+        
+Customer: ${customer.name} (${customer.phone})
+Email: ${customer.email || 'Not provided'}
+
+Already answered questions:
+${answeredQuestions.length > 0 ? answeredQuestions.join('\n') : 'None yet'}
+
+Remaining questions to ask:
+${unansweredQuestions.length > 0 ? unansweredQuestions.join('\n') : 'All questions answered - customer is qualified!'}
+
+Customer's latest message: "${userMessage}"
+
+Your task:
+1. If there are unanswered questions, naturally work them into the conversation
+2. Be friendly, professional, and helpful
+3. Keep responses concise (under 160 characters for SMS)
+4. If all questions are answered, congratulate them and mention next steps
+5. Don't repeat questions that have already been answered
+
+Respond naturally to their message while working toward qualification.`;
+
+        const completion = await openai.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            messages: [
+                { role: 'system', content: context },
+                { role: 'user', content: userMessage }
+            ],
+            max_tokens: 150,
+            temperature: 0.7
+        });
+        
+        return completion.choices[0].message.content.trim();
+    } catch (error) {
+        console.error('Error generating AI response:', error);
+        return null;
+    }
+}
+
 // Start the application
 initializeApp().then(() => {
     app.listen(PORT, () => {
         console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database v2.2.0 Ready!`);
+        console.log(`💬 New Chat Interface: http://localhost:${PORT}/chat.html`);
     });
 }).catch(error => {
     console.error('❌ Failed to start application:', error);
