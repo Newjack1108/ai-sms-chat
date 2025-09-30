@@ -576,7 +576,7 @@ app.post('/api/send-sms', async (req, res) => {
         });
 
         // Update customer
-        customerDB.updateCustomer(normalizedPhone, {
+        await customerDB.updateCustomer(normalizedPhone, {
             conversationStage: 'engaged'
         });
 
@@ -666,7 +666,7 @@ app.post('/webhook/sms', async (req, res) => {
                     const allMessages = [...updatedMessages, aiMessageData];
                     
                     // Update customer with both messages
-                    customerDB.updateCustomer(normalizedPhone, {
+                    await customerDB.updateCustomer(normalizedPhone, {
                         conversationStage: 'active',
                         chatData: {
                             ...customer.chatData,
@@ -697,7 +697,7 @@ app.post('/webhook/sms', async (req, res) => {
             const updatedMessages = [...existingMessages, messageData];
 
             // Update conversation stage and store message
-            customerDB.updateCustomer(normalizedPhone, {
+            await customerDB.updateCustomer(normalizedPhone, {
                 conversationStage: 'active',
                 chatData: {
                     ...customer.chatData,
@@ -1393,7 +1393,7 @@ app.get('/api/customers/:phone/debug', (req, res) => {
 app.post('/api/customers/:phone/extract-answers', async (req, res) => {
     try {
         const phone = normalizePhoneNumber(req.params.phone);
-        const customer = customerDB.getCustomer(phone);
+        const customer = await customerDB.getCustomer(phone);
         
         if (!customer) {
             return res.status(404).json({
@@ -1569,7 +1569,7 @@ Only return the JSON object, no other text.`;
             }
         };
 
-        const updatedCustomer = customerDB.updateCustomer(phone, updates);
+        const updatedCustomer = await customerDB.updateCustomer(phone, updates);
 
         console.log(`🤖 AI extracted answers for customer ${phone}`);
 
