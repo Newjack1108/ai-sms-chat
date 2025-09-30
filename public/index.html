@@ -561,6 +561,98 @@
             background: #ffc107;
             color: #212529;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 15px;
+            padding: 0;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            border-bottom: 1px solid #e9ecef;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px 15px 0 0;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.3em;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            color: white;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.3s ease;
+        }
+
+        .modal-close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-body {
+            padding: 25px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 20px 25px;
+            border-top: 1px solid #e9ecef;
+            background: #f8f9fa;
+            border-radius: 0 0 15px 15px;
+        }
     </style>
 </head>
 <body>
@@ -591,7 +683,12 @@
         <div class="tab-content active" id="chat">
             <div class="chat-container">
                 <div class="leads-sidebar">
-                    <h3>📱 Active Leads</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>📱 Active Leads</h3>
+                        <button class="btn btn-primary" id="add-lead-btn" style="padding: 8px 12px; font-size: 0.9em;">
+                            ➕ Add Lead
+                        </button>
+                    </div>
                     <div id="leads-list">
                         <!-- Leads will be populated here -->
                     </div>
@@ -772,11 +869,57 @@
                 </div>
                 
                 <div class="customers-list">
-                    <h3>👥 All Customers</h3>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>👥 All Customers</h3>
+                        <button class="btn btn-primary" id="add-lead-btn-2" style="padding: 8px 12px; font-size: 0.9em;">
+                            ➕ Add Lead
+                        </button>
+                    </div>
                     <div id="customers-list">
                         <!-- Customers will be populated here -->
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Lead Modal -->
+    <div class="modal" id="add-lead-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>➕ Add New Lead</h3>
+                <button class="modal-close" id="close-add-lead-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="add-lead-form">
+                    <div class="form-group">
+                        <label class="form-label">Name *</label>
+                        <input type="text" class="form-input" id="lead-name-input" placeholder="Enter lead's full name" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Email *</label>
+                        <input type="email" class="form-input" id="lead-email-input" placeholder="Enter lead's email address" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Phone *</label>
+                        <input type="tel" class="form-input" id="lead-phone-input" placeholder="Enter lead's phone number" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Source</label>
+                        <select class="form-input" id="lead-source-input">
+                            <option value="manual">Manual Entry</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="gravity-form">Gravity Form</option>
+                            <option value="website">Website</option>
+                            <option value="referral">Referral</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancel-add-lead">Cancel</button>
+                <button class="btn btn-primary" id="save-add-lead">Add Lead</button>
             </div>
         </div>
     </div>
@@ -1165,6 +1308,13 @@
             document.getElementById('search-customers').addEventListener('input', filterCustomers);
             document.getElementById('filter-status').addEventListener('change', filterCustomers);
             document.getElementById('filter-source').addEventListener('change', filterCustomers);
+
+            // Add lead modal
+            document.getElementById('add-lead-btn').addEventListener('click', showAddLeadModal);
+            document.getElementById('add-lead-btn-2').addEventListener('click', showAddLeadModal);
+            document.getElementById('close-add-lead-modal').addEventListener('click', closeAddLeadModal);
+            document.getElementById('cancel-add-lead').addEventListener('click', closeAddLeadModal);
+            document.getElementById('save-add-lead').addEventListener('click', addLead);
         }
 
         // Qualify lead
@@ -1246,6 +1396,65 @@
             setTimeout(() => {
                 notification.classList.remove('show');
             }, 3000);
+        }
+
+        // Add Lead Modal Functions
+        function showAddLeadModal() {
+            const modal = document.getElementById('add-lead-modal');
+            modal.classList.add('show');
+            
+            // Clear form
+            document.getElementById('add-lead-form').reset();
+        }
+
+        function closeAddLeadModal() {
+            const modal = document.getElementById('add-lead-modal');
+            modal.classList.remove('show');
+        }
+
+        async function addLead() {
+            const name = document.getElementById('lead-name-input').value.trim();
+            const email = document.getElementById('lead-email-input').value.trim();
+            const phone = document.getElementById('lead-phone-input').value.trim();
+            const source = document.getElementById('lead-source-input').value;
+
+            if (!name || !email || !phone) {
+                showNotification('Please fill in all required fields', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/leads', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: name,
+                        email: email,
+                        phone: phone,
+                        source: source
+                    })
+                });
+
+                if (response.ok) {
+                    const newLead = await response.json();
+                    showNotification('Lead added successfully!', 'success');
+                    closeAddLeadModal();
+                    
+                    // Refresh leads list
+                    loadLeads();
+                    
+                    // Select the new lead
+                    selectLead(newLead);
+                } else {
+                    const error = await response.json();
+                    showNotification(error.error || 'Failed to add lead', 'error');
+                }
+            } catch (error) {
+                console.error('Error adding lead:', error);
+                showNotification('Error adding lead', 'error');
+            }
         }
     </script>
 </body>
