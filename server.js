@@ -210,7 +210,7 @@ async function initializeApp() {
 // Start the application
 initializeApp().then(() => {
     app.listen(PORT, () => {
-        console.log(`🚀 AI SMS Chat server running on port ${PORT}`);
+        console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database Ready!`);
     });
 }).catch(error => {
     console.error('❌ Failed to start application:', error);
