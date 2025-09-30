@@ -394,15 +394,26 @@ app.delete('/api/leads/:leadId', (req, res) => {
 // SMS Webhook - Handle incoming messages
 app.post('/webhook/sms', async (req, res) => {
     try {
+        console.log('🔔 Webhook received!');
+        console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+        console.log('📦 Request headers:', JSON.stringify(req.headers, null, 2));
+        
         const { Body, From, To, MessageSid } = req.body;
+        
+        if (!From || !Body) {
+            console.log('❌ Missing required fields in webhook');
+            return res.status(400).send('Missing required fields');
+        }
         
         console.log(`📥 Incoming SMS from ${From}: "${Body}"`);
         
         const normalizedPhone = normalizePhoneNumber(From);
+        console.log(`📞 Normalized phone: ${normalizedPhone}`);
         
         // Get or create lead
         let lead = leads.find(l => l.phone === normalizedPhone);
         if (!lead) {
+            console.log(`👤 Creating new lead for ${normalizedPhone}`);
             lead = {
                 id: leadIdCounter++,
                 name: 'Unknown',
@@ -416,15 +427,85 @@ app.post('/webhook/sms', async (req, res) => {
                 createdAt: new Date().toISOString()
             };
             leads.push(lead);
+        } else {
+            console.log(`👤 Found existing lead: ${lead.name} (${lead.phone})`);
         }
         
         // Process AI response
+        console.log('🤖 Processing AI response...');
         await processAIResponse(lead, Body);
         
+        console.log('✅ Webhook processed successfully');
         res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     } catch (error) {
-        console.error('Error processing webhook:', error);
+        console.error('❌ Error processing webhook:', error);
         res.status(500).send('Error processing webhook');
+    }
+});
+
+// Test webhook endpoint
+app.get('/webhook/test', (req, res) => {
+    res.json({
+        status: 'Webhook endpoint is working',
+        timestamp: new Date().toISOString(),
+        leads: leads.length,
+        messages: messages.length
+    });
+});
+
+// Test webhook with sample data
+app.post('/webhook/test', async (req, res) => {
+    try {
+        console.log('🧪 Test webhook called');
+        
+        // Simulate incoming SMS
+        const testData = {
+            Body: 'Hello, this is a test message',
+            From: '+447809505864',
+            To: process.env.TWILIO_FROM_NUMBER || '+1234567890',
+            MessageSid: 'test-message-sid'
+        };
+        
+        console.log('📦 Test data:', testData);
+        
+        // Process the test message
+        const normalizedPhone = normalizePhoneNumber(testData.From);
+        console.log(`📞 Normalized test phone: ${normalizedPhone}`);
+        
+        // Get or create lead
+        let lead = leads.find(l => l.phone === normalizedPhone);
+        if (!lead) {
+            lead = {
+                id: leadIdCounter++,
+                name: 'Test Lead',
+                email: 'test@example.com',
+                phone: normalizedPhone,
+                source: 'test',
+                status: 'new',
+                progress: 0,
+                qualified: false,
+                answers: {},
+                createdAt: new Date().toISOString()
+            };
+            leads.push(lead);
+        }
+        
+        // Process AI response
+        await processAIResponse(lead, testData.Body);
+        
+        res.json({
+            success: true,
+            message: 'Test webhook processed successfully',
+            lead: lead,
+            totalLeads: leads.length,
+            totalMessages: messages.length
+        });
+    } catch (error) {
+        console.error('❌ Error in test webhook:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 

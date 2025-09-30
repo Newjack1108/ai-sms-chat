@@ -698,6 +698,11 @@
                     <div class="chat-header">
                         <h3 id="chat-title">Select a lead to start chatting</h3>
                         <div id="chat-status"></div>
+                        <div style="margin-top: 10px;">
+                            <button class="btn btn-secondary" id="test-webhook-btn" style="padding: 6px 12px; font-size: 0.8em;">
+                                🧪 Test Webhook
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="chat-messages" id="chat-messages">
@@ -1318,6 +1323,9 @@
             document.getElementById('close-add-lead-modal').addEventListener('click', closeAddLeadModal);
             document.getElementById('cancel-add-lead').addEventListener('click', closeAddLeadModal);
             document.getElementById('save-add-lead').addEventListener('click', addLead);
+
+            // Test webhook
+            document.getElementById('test-webhook-btn').addEventListener('click', testWebhook);
         }
 
         // Qualify lead
@@ -1495,6 +1503,36 @@
             } catch (error) {
                 console.error('Error adding lead:', error);
                 showNotification('Error adding lead', 'error');
+            }
+        }
+
+        // Test webhook function
+        async function testWebhook() {
+            try {
+                showNotification('Testing webhook...', 'warning');
+                
+                const response = await fetch('/webhook/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification('Webhook test successful! Check console for details.', 'success');
+                    console.log('🧪 Webhook test result:', result);
+                    
+                    // Refresh leads list to show the test lead
+                    loadLeads();
+                } else {
+                    const error = await response.json();
+                    showNotification('Webhook test failed: ' + (error.error || 'Unknown error'), 'error');
+                    console.error('❌ Webhook test error:', error);
+                }
+            } catch (error) {
+                console.error('❌ Error testing webhook:', error);
+                showNotification('Error testing webhook', 'error');
             }
         }
     </script>
