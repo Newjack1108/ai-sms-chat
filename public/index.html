@@ -902,7 +902,10 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Phone *</label>
-                        <input type="tel" class="form-input" id="lead-phone-input" placeholder="Enter lead's phone number" required>
+                        <input type="tel" class="form-input" id="lead-phone-input" placeholder="e.g., 07809505864, +447809505864, or +4407809505864" required>
+                        <small style="color: #6c757d; font-size: 0.8em; margin-top: 5px; display: block;">
+                            Supports UK formats: 07809505864, +447809505864, +4407809505864
+                        </small>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Source</label>
@@ -1398,6 +1401,38 @@
             }, 3000);
         }
 
+        // Phone number validation
+        function isValidPhoneNumber(phone) {
+            // Remove all non-digit characters
+            const digits = phone.replace(/\D/g, '');
+            
+            // UK mobile numbers (starting with 7)
+            if (digits.startsWith('44') && digits.length === 12) {
+                return true; // +447809505864
+            }
+            if (digits.startsWith('0') && digits.length === 11) {
+                return true; // 07809505864
+            }
+            if (digits.length === 10 && digits.startsWith('7')) {
+                return true; // 7809505864
+            }
+            
+            // US numbers
+            if (digits.length === 10) {
+                return true; // 10-digit US number
+            }
+            if (digits.startsWith('1') && digits.length === 11) {
+                return true; // +1 US number
+            }
+            
+            // International numbers (10+ digits)
+            if (digits.length >= 10) {
+                return true;
+            }
+            
+            return false;
+        }
+
         // Add Lead Modal Functions
         function showAddLeadModal() {
             const modal = document.getElementById('add-lead-modal');
@@ -1420,6 +1455,12 @@
 
             if (!name || !email || !phone) {
                 showNotification('Please fill in all required fields', 'error');
+                return;
+            }
+
+            // Validate phone number format
+            if (!isValidPhoneNumber(phone)) {
+                showNotification('Please enter a valid phone number (e.g., 07809505864, +447809505864)', 'error');
                 return;
             }
 

@@ -636,12 +636,31 @@ function normalizePhoneNumber(phone) {
     // Remove all non-digit characters
     const digits = phone.replace(/\D/g, '');
     
-    // Add +1 if it's a 10-digit US number
+    console.log(`📞 Normalizing phone: "${phone}" -> digits: "${digits}"`);
+    
+    // Handle UK numbers
+    if (digits.startsWith('44')) {
+        // Already has country code (44)
+        return '+' + digits;
+    } else if (digits.startsWith('0') && digits.length === 11) {
+        // UK number starting with 0 (e.g., 07809505864)
+        return '+44' + digits.substring(1);
+    } else if (digits.length === 10 && digits.startsWith('7')) {
+        // UK mobile without leading 0 (e.g., 7809505864)
+        return '+44' + digits;
+    }
+    
+    // Handle US numbers
     if (digits.length === 10) {
         return '+1' + digits;
     }
     
-    // Add + if it doesn't start with +
+    // Handle numbers that already have country code
+    if (digits.length >= 10) {
+        return '+' + digits;
+    }
+    
+    // Fallback: add + if it doesn't start with +
     if (!phone.startsWith('+')) {
         return '+' + digits;
     }
