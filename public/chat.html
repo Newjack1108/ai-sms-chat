@@ -1184,10 +1184,10 @@
                     // Hide typing indicator
                     hideTypingIndicator();
                     
-                    // If AI is enabled and there's a response, show it
+                    // If AI is enabled and there's a response, show it in the UI
                     if (aiEnabled && result.aiResponse) {
                         setTimeout(() => {
-                            addMessageToUI('customer', result.aiResponse);
+                            addMessageToUI('assistant', result.aiResponse);
                         }, 1000);
                     }
                 } else {

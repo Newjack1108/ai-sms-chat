@@ -420,9 +420,21 @@ app.post('/api/leads/send-message', async (req, res) => {
                 aiResponse = await generateAIResponse(customer, content);
                 
                 if (aiResponse) {
+                    // Send AI response as SMS to customer
+                    if (settings.accountSid && settings.authToken && settings.fromNumber) {
+                        const client = twilio(settings.accountSid, settings.authToken);
+                        await client.messages.create({
+                            body: aiResponse,
+                            from: settings.fromNumber,
+                            to: customer.phone
+                        });
+                        
+                        console.log(`🤖 AI response sent to ${customer.name} (${customer.phone}): "${aiResponse}"`);
+                    }
+                    
                     // Add AI response to messages
                     const aiMessageData = {
-                        sender: 'customer',
+                        sender: 'assistant',
                         message: aiResponse,
                         timestamp: new Date().toISOString(),
                         messageId: `ai_${Date.now()}_${Math.random()}`
@@ -438,7 +450,7 @@ app.post('/api/leads/send-message', async (req, res) => {
                         }
                     });
                     
-                    console.log(`🤖 AI response generated for ${customer.name}: "${aiResponse}"`);
+                    console.log(`🤖 AI response stored in database for ${customer.name}`);
                 }
             } catch (aiError) {
                 console.error('Error generating AI response:', aiError);
