@@ -463,20 +463,46 @@ app.post('/api/leads/send-message', async (req, res) => {
 app.get('/api/leads/:leadId/messages/check', async (req, res) => {
     try {
         const { leadId } = req.params;
+        console.log(`🔍 Checking for new messages for lead: ${leadId}`);
+        
         const customer = await customerDB.getCustomer(leadId);
         
         if (!customer) {
+            console.log(`❌ Customer not found for leadId: ${leadId}`);
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
             });
         }
         
-        // For now, return empty array - in a real implementation,
-        // this would check for new incoming messages
+        console.log(`✅ Found customer: ${customer.name} (${customer.phone})`);
+        
+        // Get the last message timestamp from the request (if provided)
+        const lastCheckTime = req.query.lastCheck || new Date(Date.now() - 60000).toISOString(); // Default to 1 minute ago
+        
+        // Get messages from the customer's chat data
+        const messages = customer.chatData?.messages || [];
+        
+        // Filter messages that are newer than the last check time and from customers (not assistant)
+        const newMessages = messages.filter(msg => {
+            const messageTime = new Date(msg.timestamp);
+            const checkTime = new Date(lastCheckTime);
+            return messageTime > checkTime && msg.sender === 'customer';
+        });
+        
+        console.log(`📱 Found ${newMessages.length} new messages for ${customer.name}`);
+        
+        // Convert to chat format
+        const chatMessages = newMessages.map(msg => ({
+            id: msg.messageId || `msg_${Date.now()}`,
+            content: msg.message,
+            sender: 'customer',
+            timestamp: msg.timestamp
+        }));
+        
         res.json({
             success: true,
-            newMessages: []
+            newMessages: chatMessages
         });
     } catch (error) {
         console.error('Error checking for new messages:', error);

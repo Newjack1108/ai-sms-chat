@@ -842,6 +842,8 @@
                     <p id="chatCustomerPhone">Choose a lead from the sidebar to start chatting</p>
                 </div>
                 <div class="chat-actions">
+                    <button class="chat-btn" id="refreshBtn" onclick="refreshMessages()">🔄 Refresh</button>
+                    <button class="chat-btn" id="testWebhookBtn" onclick="testWebhook()">🔗 Test Webhook</button>
                     <button class="chat-btn" id="aiToggleBtn" onclick="toggleAI()">🤖 AI: ON</button>
                     <button class="chat-btn" id="qualifyBtn" onclick="qualifyLead()" style="display: none;">✅ Qualify Lead</button>
                 </div>
@@ -1291,11 +1293,16 @@
 
         // Check for new messages
         async function checkForNewMessages() {
+            if (!currentLead) return;
+            
             try {
+                console.log(`🔍 Checking for new messages for ${currentLead.name} (${currentLead.phone})`);
                 const response = await fetch(`/api/leads/${currentLead.phone}/messages/check`);
                 const result = await response.json();
                 
                 if (result.success && result.newMessages.length > 0) {
+                    console.log(`📱 Found ${result.newMessages.length} new messages`);
+                    
                     // Add new messages to UI
                     result.newMessages.forEach(msg => {
                         addMessageToUI('customer', msg.content);
@@ -1305,9 +1312,74 @@
                     currentLead.unreadCount = (currentLead.unreadCount || 0) + result.newMessages.length;
                     updateStats();
                     renderLeadsList();
+                    
+                    showNotification(`📱 ${result.newMessages.length} new message(s) received!`, 'success');
+                } else {
+                    console.log(`📱 No new messages for ${currentLead.name}`);
                 }
             } catch (error) {
                 console.error('Error checking for new messages:', error);
+            }
+        }
+
+        // Manual refresh messages
+        async function refreshMessages() {
+            if (!currentLead) {
+                showNotification('Please select a lead first', 'error');
+                return;
+            }
+            
+            showNotification('🔄 Refreshing messages...', 'info');
+            
+            try {
+                // Reload messages from database
+                await loadMessages(currentLead.phone);
+                showNotification('✅ Messages refreshed!', 'success');
+            } catch (error) {
+                console.error('Error refreshing messages:', error);
+                showNotification('❌ Error refreshing messages', 'error');
+            }
+        }
+
+        // Test webhook connection
+        async function testWebhook() {
+            if (!currentLead) {
+                showNotification('Please select a lead first', 'error');
+                return;
+            }
+            
+            showNotification('🔗 Testing webhook connection...', 'info');
+            
+            try {
+                // Test the webhook endpoint with a test message
+                const response = await fetch('/webhook/sms', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        'Body': 'Test message from webhook test',
+                        'From': currentLead.phone,
+                        'To': '+1234567890', // Dummy number
+                        'MessageSid': 'test_' + Date.now()
+                    })
+                });
+                
+                if (response.ok) {
+                    showNotification('✅ Webhook test successful! Check console for details.', 'success');
+                    console.log('✅ Webhook test completed successfully');
+                    
+                    // Refresh messages to see if the test message appeared
+                    setTimeout(() => {
+                        refreshMessages();
+                    }, 1000);
+                } else {
+                    showNotification('❌ Webhook test failed: ' + response.status, 'error');
+                    console.error('❌ Webhook test failed:', response.status);
+                }
+            } catch (error) {
+                console.error('❌ Webhook test error:', error);
+                showNotification('❌ Webhook test failed: ' + error.message, 'error');
             }
         }
 
