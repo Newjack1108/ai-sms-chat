@@ -615,19 +615,41 @@ app.post('/webhook/sms', async (req, res) => {
         const normalizedPhone = normalizePhoneNumber(From);
         console.log(`📥 Normalized phone: ${normalizedPhone}`);
         
-        // Get or create customer
-        let customer = customerDB.getCustomer(normalizedPhone);
+        // Get or create customer first
+        let customer = await customerDB.getCustomer(normalizedPhone);
         console.log(`📥 Existing customer found:`, customer ? 'Yes' : 'No');
         
         if (!customer) {
             console.log(`📥 Creating new customer for phone: ${normalizedPhone}`);
-            customer = customerDB.createCustomer({
+            customer = await customerDB.createCustomer({
                 phone: normalizedPhone,
                 source: 'inbound_sms'
             });
             console.log(`📥 New customer created:`, customer);
         } else {
             console.log(`📥 Using existing customer:`, customer.id);
+        }
+
+        // Check if we've already processed this message (prevent duplicates)
+        const existingMessages = customer?.chatData?.messages || [];
+        const messageAlreadyExists = existingMessages.some(msg => msg.messageId === MessageSid);
+        
+        if (messageAlreadyExists) {
+            console.log(`📥 Message ${MessageSid} already processed - skipping to prevent duplicates`);
+            return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+        }
+
+        // Rate limiting: Check if we've sent a message to this customer in the last 30 seconds
+        const recentMessages = existingMessages.filter(msg => {
+            const messageTime = new Date(msg.timestamp);
+            const now = new Date();
+            const timeDiff = (now - messageTime) / 1000; // seconds
+            return timeDiff < 30 && msg.sender === 'assistant';
+        });
+        
+        if (recentMessages.length > 0) {
+            console.log(`📥 Rate limiting: Customer ${normalizedPhone} received a message less than 30 seconds ago - skipping to prevent spam`);
+            return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
         }
 
         // Generate AI response with customer context (only if AI is enabled)
