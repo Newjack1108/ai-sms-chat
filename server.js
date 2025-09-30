@@ -309,14 +309,20 @@ app.post('/api/leads', async (req, res) => {
 app.get('/api/leads/:leadId/messages', async (req, res) => {
     try {
         const { leadId } = req.params;
+        console.log(`🔍 Looking for lead with ID: ${leadId}`);
+        
+        // Try to find customer by phone number (since that's how they're stored)
         const customer = await customerDB.getCustomer(leadId);
         
         if (!customer) {
+            console.log(`❌ Lead not found: ${leadId}`);
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
             });
         }
+        
+        console.log(`✅ Found customer: ${customer.name} (${customer.phone})`);
         
         const messages = customer.chatData?.messages || [];
         
@@ -345,6 +351,8 @@ app.get('/api/leads/:leadId/messages', async (req, res) => {
 app.post('/api/leads/send-message', async (req, res) => {
     try {
         const { leadId, content, aiEnabled } = req.body;
+        console.log(`📤 Sending message to lead: ${leadId}`);
+        console.log(`📤 Message content: ${content}`);
         
         if (!leadId || !content) {
             return res.status(400).json({
@@ -355,11 +363,17 @@ app.post('/api/leads/send-message', async (req, res) => {
         
         const customer = await customerDB.getCustomer(leadId);
         if (!customer) {
+            console.log(`❌ Customer not found for leadId: ${leadId}`);
+            // Let's also try to get all customers to debug
+            const allCustomers = await customerDB.getAllCustomers();
+            console.log(`📋 Available customers:`, allCustomers.map(c => ({ id: c.id, phone: c.phone, name: c.name })));
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
             });
         }
+        
+        console.log(`✅ Found customer: ${customer.name} (${customer.phone})`);
         
         // Add message to customer's chat data
         const messageData = {

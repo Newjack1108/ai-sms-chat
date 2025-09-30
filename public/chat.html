@@ -118,6 +118,35 @@
             font-size: 18px;
         }
 
+        .view-toggle {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .view-btn {
+            background: none;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #6c757d;
+        }
+
+        .view-btn.active {
+            background: white;
+            color: #2c3e50;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .view-btn:hover:not(.active) {
+            color: #495057;
+        }
+
         .add-lead-btn {
             background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
             color: white;
@@ -390,8 +419,95 @@
 
         .input-container {
             display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-row {
+            display: flex;
             gap: 10px;
             align-items: flex-end;
+        }
+
+        /* Template Section */
+        .template-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #e9ecef;
+        }
+
+        .template-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .template-header h4 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        .template-toggle {
+            background: none;
+            border: none;
+            color: #7f8c8d;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background-color 0.3s ease;
+        }
+
+        .template-toggle:hover {
+            background: #e9ecef;
+        }
+
+        .template-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+        }
+
+        .template-btn {
+            background: white;
+            border: 1px solid #dee2e6;
+            color: #495057;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .template-btn:hover {
+            background: #e3f2fd;
+            border-color: #3498db;
+            color: #1976d2;
+            transform: translateY(-1px);
+        }
+
+        .template-toggle-btn {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+            color: white;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 100px;
+        }
+
+        .template-toggle-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.4);
         }
 
         .message-input {
@@ -706,7 +822,10 @@
 
             <div class="leads-section">
                 <div class="leads-header">
-                    <h3>👥 Leads</h3>
+                    <div class="view-toggle">
+                        <button class="view-btn active" id="leadsViewBtn" onclick="switchView('leads')">👥 Leads</button>
+                        <button class="view-btn" id="customersViewBtn" onclick="switchView('customers')">📋 All Customers</button>
+                    </div>
                     <button class="add-lead-btn" onclick="showAddLeadModal()">+ Add Lead</button>
                 </div>
                 <div class="leads-list" id="leadsList">
@@ -740,15 +859,33 @@
                     <div class="ai-indicator" id="aiIndicator"></div>
                     <span id="aiStatusText">AI Assistant is ready to help qualify leads</span>
                 </div>
+                
+                <!-- Template Messages -->
+                <div class="template-section" id="templateSection" style="display: none;">
+                    <div class="template-header">
+                        <h4>📝 Quick Messages</h4>
+                        <button class="template-toggle" onclick="toggleTemplates()">Hide</button>
+                    </div>
+                    <div class="template-buttons">
+                        <button class="template-btn" onclick="useTemplate('greeting')">👋 Greeting</button>
+                        <button class="template-btn" onclick="useTemplate('qualification')">❓ Qualification</button>
+                        <button class="template-btn" onclick="useTemplate('followup')">📞 Follow-up</button>
+                        <button class="template-btn" onclick="useTemplate('closing')">✅ Closing</button>
+                    </div>
+                </div>
+                
                 <div class="input-container">
-                    <textarea 
-                        class="message-input" 
-                        id="messageInput" 
-                        placeholder="Type your message..."
-                        rows="1"
-                        disabled
-                    ></textarea>
-                    <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                    <div class="input-row">
+                        <button class="template-toggle-btn" onclick="toggleTemplates()" id="templateToggleBtn">📝 Templates</button>
+                        <textarea 
+                            class="message-input" 
+                            id="messageInput" 
+                            placeholder="Type your message..."
+                            rows="1"
+                            disabled
+                        ></textarea>
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -797,8 +934,19 @@
         // Global variables
         let currentLead = null;
         let leads = [];
+        let allCustomers = [];
         let aiEnabled = true;
         let messageCheckInterval = null;
+        let templatesVisible = false;
+        let currentView = 'leads';
+
+        // Template messages
+        const messageTemplates = {
+            greeting: "Hi! Thanks for your interest in our equine stable solutions. I'd love to help you find the perfect setup for your horses. How can I assist you today?",
+            qualification: "To help you find the best stable solution, I have a few quick questions. How many horses do you currently have?",
+            followup: "Thanks for that information! What type of stable configuration interests you most - traditional stables, run-in sheds, or something custom?",
+            closing: "Perfect! Based on what you've shared, I think we have some great options for you. Would you like me to arrange a consultation to discuss your specific needs and timeline?"
+        };
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -839,6 +987,7 @@
                 
                 if (result.success) {
                     leads = result.leads || [];
+                    allCustomers = result.leads || []; // Store all customers for the "All Customers" view
                     renderLeadsList();
                     updateStats();
                 } else {
@@ -849,16 +998,34 @@
             }
         }
 
+        // Switch between leads and all customers view
+        function switchView(view) {
+            currentView = view;
+            
+            // Update button states
+            document.getElementById('leadsViewBtn').classList.toggle('active', view === 'leads');
+            document.getElementById('customersViewBtn').classList.toggle('active', view === 'customers');
+            
+            // Re-render the list
+            renderLeadsList();
+        }
+
         // Render leads list
         function renderLeadsList() {
             const leadsList = document.getElementById('leadsList');
             
-            if (leads.length === 0) {
-                leadsList.innerHTML = '<p style="text-align: center; color: #7f8c8d; padding: 20px;">No leads found. Add your first lead to get started!</p>';
+            // Determine which data to show based on current view
+            const dataToShow = currentView === 'leads' ? leads : allCustomers;
+            
+            if (dataToShow.length === 0) {
+                const message = currentView === 'leads' 
+                    ? 'No leads found. Add your first lead to get started!'
+                    : 'No customers found.';
+                leadsList.innerHTML = `<p style="text-align: center; color: #7f8c8d; padding: 20px;">${message}</p>`;
                 return;
             }
 
-            leadsList.innerHTML = leads.map(lead => {
+            leadsList.innerHTML = dataToShow.map(lead => {
                 const progress = calculateProgress(lead);
                 const unreadCount = lead.unreadCount || 0;
                 
@@ -933,8 +1100,8 @@
             document.getElementById('messageInput').disabled = false;
             document.getElementById('sendBtn').disabled = false;
             
-            // Load messages
-            await loadMessages(leadId);
+            // Load messages using phone number (since that's how they're stored in database)
+            await loadMessages(lead.phone);
             
             // Clear unread count
             lead.unreadCount = 0;
@@ -1003,7 +1170,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        leadId: currentLead.id,
+                        leadId: currentLead.phone, // Use phone number instead of ID
                         content: content,
                         aiEnabled: aiEnabled
                     })
@@ -1125,7 +1292,7 @@
         // Check for new messages
         async function checkForNewMessages() {
             try {
-                const response = await fetch(`/api/leads/${currentLead.id}/messages/check`);
+                const response = await fetch(`/api/leads/${currentLead.phone}/messages/check`);
                 const result = await response.json();
                 
                 if (result.success && result.newMessages.length > 0) {
@@ -1190,6 +1357,40 @@
             } catch (error) {
                 console.error('Error adding lead:', error);
                 showNotification('Error adding lead', 'error');
+            }
+        }
+
+        // Template functions
+        function toggleTemplates() {
+            templatesVisible = !templatesVisible;
+            const templateSection = document.getElementById('templateSection');
+            const toggleBtn = document.getElementById('templateToggleBtn');
+            
+            if (templatesVisible) {
+                templateSection.style.display = 'block';
+                toggleBtn.textContent = '📝 Hide Templates';
+            } else {
+                templateSection.style.display = 'none';
+                toggleBtn.textContent = '📝 Templates';
+            }
+        }
+
+        function useTemplate(templateKey) {
+            const template = messageTemplates[templateKey];
+            if (template) {
+                const messageInput = document.getElementById('messageInput');
+                messageInput.value = template;
+                messageInput.style.height = 'auto';
+                messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+                
+                // Enable send button
+                const sendBtn = document.getElementById('sendBtn');
+                sendBtn.disabled = false;
+                
+                // Focus on input
+                messageInput.focus();
+                
+                showNotification(`Template "${templateKey}" loaded!`, 'success');
             }
         }
 
