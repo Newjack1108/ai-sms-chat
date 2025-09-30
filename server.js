@@ -1,8 +1,9 @@
-// Lead Qualification System - Clean Slate v1.0.0
+// Lead Qualification System - Professional CRM Interface v2.0.0
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
+const OpenAI = require('openai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,14 +20,36 @@ app.use(express.static('public'));
 // Simple in-memory storage for demo (will be replaced with database)
 let leads = [];
 let leadIdCounter = 1;
+let messages = [];
+let messageIdCounter = 1;
 
-// Custom questions for lead qualification
-const CUSTOM_QUESTIONS = {
-    q1: "How many horses do you currently have?",
-    q2: "What type of stable configuration interests you most?",
-    q3: "What's your budget range for this project?",
-    q4: "What's your ideal timeline for completion?"
-};
+// Default custom questions for lead qualification
+let CUSTOM_QUESTIONS = [
+    "How many horses do you currently have?",
+    "What type of stable configuration interests you most?",
+    "What's your budget range for this project?",
+    "What's your ideal timeline for completion?"
+];
+
+// OpenAI Assistant configuration
+let openaiClient = null;
+let assistantId = null;
+
+// Initialize OpenAI client
+function initializeOpenAI() {
+    if (process.env.OPENAI_API_KEY) {
+        openaiClient = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+        assistantId = process.env.OPENAI_ASSISTANT_ID;
+        console.log('🤖 OpenAI client initialized');
+    } else {
+        console.log('⚠️ OpenAI API key not configured');
+    }
+}
+
+// Initialize on startup
+initializeOpenAI();
 
 // ========================================
 // API ENDPOINTS
@@ -35,12 +58,182 @@ const CUSTOM_QUESTIONS = {
 // Get all leads
 app.get('/api/leads', (req, res) => {
     try {
-        res.json({
-            success: true,
-            leads: leads
-        });
+        res.json(leads);
     } catch (error) {
         console.error('Error fetching leads:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get messages for a specific lead
+app.get('/api/leads/:leadId/messages', (req, res) => {
+    try {
+        const { leadId } = req.params;
+        const leadMessages = messages.filter(msg => msg.leadId == leadId);
+        res.json(leadMessages);
+    } catch (error) {
+        console.error('Error fetching messages:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Send message to lead
+app.post('/api/leads/send-message', async (req, res) => {
+    try {
+        const { leadId, message } = req.body;
+        
+        if (!leadId || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Lead ID and message are required'
+            });
+        }
+        
+        const lead = leads.find(l => l.id == leadId);
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        // Store user message
+        const userMessage = {
+            id: messageIdCounter++,
+            leadId: leadId,
+            sender: 'user',
+            content: message,
+            timestamp: new Date().toISOString()
+        };
+        messages.push(userMessage);
+        
+        // Send SMS to customer
+        await sendSMS(lead.phone, message);
+        
+        // Generate AI response
+        const aiResponse = await generateAIResponseWithAssistant(lead, message);
+        
+        if (aiResponse) {
+            // Store AI response
+            const aiMessage = {
+                id: messageIdCounter++,
+                leadId: leadId,
+                sender: 'assistant',
+                content: aiResponse,
+                timestamp: new Date().toISOString()
+            };
+            messages.push(aiMessage);
+            
+            // Send AI response as SMS
+            await sendSMS(lead.phone, aiResponse);
+        }
+        
+        res.json({
+            success: true,
+            aiResponse: aiResponse
+        });
+    } catch (error) {
+        console.error('Error sending message:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Qualify lead
+app.post('/api/leads/:leadId/qualify', async (req, res) => {
+    try {
+        const { leadId } = req.params;
+        
+        const lead = leads.find(l => l.id == leadId);
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        // Mark as qualified
+        lead.qualified = true;
+        lead.status = 'qualified';
+        lead.progress = 100;
+        lead.qualifiedDate = new Date().toISOString();
+        
+        // Send qualification message
+        const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
+
+Based on your answers, I'll have our team prepare a customized proposal for your equine stable project. Someone will contact you within 24 hours to discuss next steps.
+
+Thank you for your time! 🐴✨`;
+
+        await sendSMS(lead.phone, qualificationMessage);
+        
+        // Store qualification message
+        const qualMessage = {
+            id: messageIdCounter++,
+            leadId: leadId,
+            sender: 'assistant',
+            content: qualificationMessage,
+            timestamp: new Date().toISOString()
+        };
+        messages.push(qualMessage);
+        
+        res.json({
+            success: true,
+            message: 'Lead qualified successfully'
+        });
+    } catch (error) {
+        console.error('Error qualifying lead:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Update custom questions
+app.post('/api/settings/questions', (req, res) => {
+    try {
+        const { questions } = req.body;
+        
+        if (!questions || !Array.isArray(questions) || questions.length !== 4) {
+            return res.status(400).json({
+                success: false,
+                error: 'Exactly 4 questions are required'
+            });
+        }
+        
+        CUSTOM_QUESTIONS = questions;
+        
+        res.json({
+            success: true,
+            message: 'Custom questions updated successfully'
+        });
+    } catch (error) {
+        console.error('Error updating questions:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Get custom questions
+app.get('/api/settings/questions', (req, res) => {
+    try {
+        res.json({
+            success: true,
+            questions: CUSTOM_QUESTIONS
+        });
+    } catch (error) {
+        console.error('Error fetching questions:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -52,7 +245,7 @@ app.get('/api/leads', (req, res) => {
 app.post('/api/leads', async (req, res) => {
     try {
         const { name, email, phone, source } = req.body;
-        
+
         if (!name || !email || !phone) {
             return res.status(400).json({
                 success: false,
@@ -81,12 +274,7 @@ app.post('/api/leads', async (req, res) => {
             status: 'new',
             progress: 0,
             qualified: false,
-            questions: {
-                q1: { answered: false, answer: '' },
-                q2: { answered: false, answer: '' },
-                q3: { answered: false, answer: '' },
-                q4: { answered: false, answer: '' }
-            },
+            answers: {},
             createdAt: new Date().toISOString()
         };
         
@@ -94,11 +282,8 @@ app.post('/api/leads', async (req, res) => {
         
         // Send AI introduction message
         await sendAIIntroduction(newLead);
-        
-        res.json({
-            success: true,
-            lead: newLead
-        });
+
+        res.json(newLead);
     } catch (error) {
         console.error('Error creating lead:', error);
         res.status(500).json({
@@ -157,9 +342,9 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
             // Mark as sent to CRM
             lead.sentToCRM = true;
             lead.crmSentDate = new Date().toISOString();
-            
-            res.json({
-                success: true,
+
+        res.json({
+            success: true,
                 message: 'Lead sent to CRM successfully'
             });
         } else {
@@ -227,12 +412,7 @@ app.post('/webhook/sms', async (req, res) => {
                 status: 'new',
                 progress: 0,
                 qualified: false,
-                questions: {
-                    q1: { answered: false, answer: '' },
-                    q2: { answered: false, answer: '' },
-                    q3: { answered: false, answer: '' },
-                    q4: { answered: false, answer: '' }
-                },
+                answers: {},
                 createdAt: new Date().toISOString()
             };
             leads.push(lead);
@@ -263,29 +443,40 @@ To get started, I have a few quick questions to understand your needs better. Le
 
         await sendSMS(lead.phone, introductionMessage);
         
+        // Store introduction message
+        const introMessage = {
+            id: messageIdCounter++,
+            leadId: lead.id,
+            sender: 'assistant',
+            content: introductionMessage,
+            timestamp: new Date().toISOString()
+        };
+        messages.push(introMessage);
+        
         console.log(`🤖 AI introduction sent to ${lead.name} (${lead.phone})`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
     }
 }
 
-// Process AI response
+// Process AI response using OpenAI Assistant
 async function processAIResponse(lead, userMessage) {
     try {
-        // Check which questions are already answered
-        const answeredQuestions = [];
-        const unansweredQuestions = [];
+        // Store incoming message
+        const incomingMessage = {
+            id: messageIdCounter++,
+            leadId: lead.id,
+            sender: 'customer',
+            content: userMessage,
+            timestamp: new Date().toISOString()
+        };
+        messages.push(incomingMessage);
         
-        ['q1', 'q2', 'q3', 'q4'].forEach((q, index) => {
-            if (lead.questions[q]?.answered) {
-                answeredQuestions.push(`${CUSTOM_QUESTIONS[q]}: ${lead.questions[q].answer}`);
-            } else {
-                unansweredQuestions.push(CUSTOM_QUESTIONS[q]);
-            }
-        });
+        // Check if all questions are answered
+        const answeredCount = Object.keys(lead.answers || {}).length;
         
-        // If all questions are answered, send qualification message
-        if (unansweredQuestions.length === 0) {
+        if (answeredCount >= 4) {
+            // All questions answered - qualify lead
             const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
 
 Based on your answers, I'll have our team prepare a customized proposal for your equine stable project. Someone will contact you within 24 hours to discuss next steps.
@@ -293,6 +484,16 @@ Based on your answers, I'll have our team prepare a customized proposal for your
 Thank you for your time! 🐴✨`;
 
             await sendSMS(lead.phone, qualificationMessage);
+            
+            // Store qualification message
+            const qualMessage = {
+                id: messageIdCounter++,
+                leadId: lead.id,
+                sender: 'assistant',
+                content: qualificationMessage,
+                timestamp: new Date().toISOString()
+            };
+            messages.push(qualMessage);
             
             // Mark as qualified
             lead.qualified = true;
@@ -304,11 +505,21 @@ Thank you for your time! 🐴✨`;
             return;
         }
         
-        // Generate AI response for next question
-        const aiResponse = await generateAIResponse(lead, userMessage, unansweredQuestions);
+        // Generate AI response using Assistant
+        const aiResponse = await generateAIResponseWithAssistant(lead, userMessage);
         
         if (aiResponse) {
             await sendSMS(lead.phone, aiResponse);
+            
+            // Store AI response
+            const aiMessage = {
+                id: messageIdCounter++,
+                leadId: lead.id,
+                sender: 'assistant',
+                content: aiResponse,
+                timestamp: new Date().toISOString()
+            };
+            messages.push(aiMessage);
             
             console.log(`🤖 AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
         }
@@ -317,68 +528,85 @@ Thank you for your time! 🐴✨`;
     }
 }
 
-// Generate AI response
-async function generateAIResponse(lead, userMessage, unansweredQuestions) {
+// Generate AI response using OpenAI Assistant
+async function generateAIResponseWithAssistant(lead, userMessage) {
     try {
-        const OpenAI = require('openai');
-        const openai = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY
-        });
-        
-        // Find the next question to ask
-        const nextQuestion = unansweredQuestions[0];
-        const questionKey = Object.keys(CUSTOM_QUESTIONS).find(key => 
-            CUSTOM_QUESTIONS[key] === nextQuestion
-        );
-        
-        const context = `You are a sales assistant helping to qualify leads for an equine stable business.
-
-Customer: ${lead.name} (${lead.phone})
-Email: ${lead.email || 'Not provided'}
-
-Next question to ask: ${nextQuestion}
-
-Customer's latest message: "${userMessage}"
-
-Your task:
-1. Acknowledge their response if it answers the previous question
-2. Ask the next question naturally
-3. Be friendly, professional, and helpful
-4. Keep responses concise (under 160 characters for SMS)
-5. If they haven't answered the previous question clearly, ask for clarification
-
-Respond naturally to their message while asking the next question.`;
-
-        const completion = await openai.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
-            messages: [
-                { role: 'system', content: context },
-                { role: 'user', content: userMessage }
-            ],
-            max_tokens: 150,
-            temperature: 0.7
-        });
-        
-        const response = completion.choices[0].message.content.trim();
-        
-        // Try to extract answer from user message
-        if (userMessage.length > 5) { // Basic check for meaningful response
-            lead.questions[questionKey] = {
-                answered: true,
-                answer: userMessage,
-                answeredDate: new Date().toISOString()
-            };
-            
-            // Update progress
-            const answeredCount = Object.values(lead.questions).filter(q => q.answered).length;
-            lead.progress = Math.round((answeredCount / 4) * 100);
-            lead.status = lead.progress === 100 ? 'qualified' : 'in-progress';
+        if (!openaiClient || !assistantId) {
+            console.log('⚠️ OpenAI Assistant not configured - using fallback response');
+            return generateFallbackResponse(lead, userMessage);
         }
         
-        return response;
+        // Create a thread for this conversation
+        const thread = await openaiClient.beta.threads.create();
+        
+        // Add user message to thread
+        await openaiClient.beta.threads.messages.create(thread.id, {
+            role: 'user',
+            content: userMessage
+        });
+        
+        // Run the assistant
+        const run = await openaiClient.beta.threads.runs.create(thread.id, {
+            assistant_id: assistantId
+        });
+        
+        // Wait for completion
+        let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+        while (runStatus.status !== 'completed') {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+        }
+        
+        // Get the assistant's response
+        const messages = await openaiClient.beta.threads.messages.list(thread.id);
+        const assistantMessage = messages.data[0];
+        
+        if (assistantMessage && assistantMessage.content[0].type === 'text') {
+            const response = assistantMessage.content[0].text.value;
+            
+            // Try to extract answer and update lead progress
+            await updateLeadProgress(lead, userMessage);
+            
+            return response;
+        }
+        
+        return generateFallbackResponse(lead, userMessage);
     } catch (error) {
-        console.error('Error generating AI response:', error);
-        return null;
+        console.error('Error generating AI response with Assistant:', error);
+        return generateFallbackResponse(lead, userMessage);
+    }
+}
+
+// Fallback response when Assistant is not available
+async function generateFallbackResponse(lead, userMessage) {
+    const answeredCount = Object.keys(lead.answers || {}).length;
+    
+    if (answeredCount < CUSTOM_QUESTIONS.length) {
+        const nextQuestion = CUSTOM_QUESTIONS[answeredCount];
+        return `Thanks for your response! ${nextQuestion}`;
+    }
+    
+    return "Thank you for your response! I'll have our team contact you soon.";
+}
+
+// Update lead progress based on user response
+async function updateLeadProgress(lead, userMessage) {
+    try {
+        const answeredCount = Object.keys(lead.answers || {}).length;
+        
+        if (answeredCount < CUSTOM_QUESTIONS.length && userMessage.length > 5) {
+            // Store the answer
+            const questionKey = `question_${answeredCount + 1}`;
+            lead.answers = lead.answers || {};
+            lead.answers[questionKey] = userMessage;
+            
+            // Update progress
+            const newAnsweredCount = Object.keys(lead.answers).length;
+            lead.progress = Math.round((newAnsweredCount / 4) * 100);
+            lead.status = lead.progress === 100 ? 'qualified' : 'active';
+        }
+    } catch (error) {
+        console.error('Error updating lead progress:', error);
     }
 }
 
