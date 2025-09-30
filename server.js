@@ -178,18 +178,28 @@ async function initializeApp() {
     try {
         console.log('🚀 Initializing AI SMS Chat application...');
         
-        // Initialize PostgreSQL database
-        await initializeDatabase();
-        customerDB = new CustomerDatabase();
-        
-        // Load custom questions from database
-        const dbQuestions = await customerDB.getCustomQuestions();
-        if (Object.keys(dbQuestions).length > 0) {
-            global.customQuestions = dbQuestions;
-            console.log('📝 Loaded custom questions from database:', dbQuestions);
+        // Try to initialize PostgreSQL database
+        try {
+            await initializeDatabase();
+            customerDB = new CustomerDatabase();
+            
+            // Load custom questions from database
+            const dbQuestions = await customerDB.getCustomQuestions();
+            if (Object.keys(dbQuestions).length > 0) {
+                global.customQuestions = dbQuestions;
+                console.log('📝 Loaded custom questions from database:', dbQuestions);
+            }
+            
+            console.log('✅ PostgreSQL database connected successfully');
+            
+        } catch (dbError) {
+            console.log('⚠️ PostgreSQL database not available, using fallback file system');
+            console.log('💡 To enable database features, add a PostgreSQL database to your Railway project');
+            
+            // Initialize fallback file-based system
+            customerDB = new FallbackCustomerDatabase();
+            console.log('✅ Application initialized with file-based fallback');
         }
-        
-        console.log('✅ Application initialized successfully');
         
     } catch (error) {
         console.error('❌ Application initialization failed:', error);
@@ -207,7 +217,112 @@ initializeApp().then(() => {
     process.exit(1);
 });
 
-// Legacy methods removed - now using PostgreSQL database
+// Fallback file-based customer database for when PostgreSQL is not available
+class FallbackCustomerDatabase {
+    constructor() {
+        this.customers = new Map();
+        this.loadData();
+    }
+
+    async loadData() {
+        try {
+            const data = await fs.readFile('customers.json', 'utf8');
+            const customerArray = JSON.parse(data);
+            customerArray.forEach(customer => {
+                this.customers.set(customer.phone, customer);
+            });
+            console.log(`📊 Loaded ${this.customers.size} customer records from file`);
+        } catch (error) {
+            console.log('📊 Starting with empty customer database (no data files found)');
+        }
+    }
+
+    async saveData() {
+        try {
+            const customerArray = Array.from(this.customers.values());
+            await fs.writeFile('customers.json', JSON.stringify(customerArray, null, 2));
+            console.log(`📊 Saved ${customerArray.length} customer records to file`);
+        } catch (error) {
+            console.error('❌ Error saving customer data:', error);
+        }
+    }
+
+    async createCustomer(data) {
+        const customer = {
+            id: `cust_${Date.now()}`,
+            name: data.name || null,
+            phone: data.phone,
+            email: data.email || null,
+            postcode: data.postcode || null,
+            source: data.source || 'inbound_sms',
+            sourceDetails: data.sourceDetails || {},
+            
+            // Default questions
+            question1: { 
+                question: global.customQuestions?.q1 || "How many horses do you currently have?", 
+                answer: null,
+                answered: false 
+            },
+            question2: { 
+                question: global.customQuestions?.q2 || "What type of stable configuration interests you most?", 
+                answer: null,
+                answered: false 
+            },
+            question3: { 
+                question: global.customQuestions?.q3 || "What's your budget range for this project?", 
+                answer: null,
+                answered: false 
+            },
+            question4: { 
+                question: global.customQuestions?.q4 || "What's your ideal timeline for completion?", 
+                answer: null,
+                answered: false 
+            },
+
+            chatData: {},
+            conversationStage: 'initial',
+            lastContact: new Date().toISOString(),
+            assistantThreadId: null,
+            priority: 'medium',
+            status: 'active',
+            notes: [],
+            created: new Date().toISOString()
+        };
+
+        this.customers.set(data.phone, customer);
+        await this.saveData();
+        return customer;
+    }
+
+    async updateCustomer(phone, updates) {
+        const customer = this.customers.get(phone);
+        if (customer) {
+            Object.assign(customer, updates);
+            customer.lastContact = new Date().toISOString();
+            await this.saveData();
+            return customer;
+        }
+        return null;
+    }
+
+    async getCustomer(phone) {
+        return this.customers.get(phone);
+    }
+
+    async getAllCustomers() {
+        return Array.from(this.customers.values());
+    }
+
+    async updateCustomQuestions(questions) {
+        global.customQuestions = questions;
+        await saveCustomQuestions();
+        console.log('📝 Custom questions updated in file system');
+    }
+
+    async getCustomQuestions() {
+        return global.customQuestions;
+    }
+}
 
 // Enhanced OpenAI Assistant with CRM context
 async function generateAssistantResponse(message, customer, openaiKey, assistantId) {
