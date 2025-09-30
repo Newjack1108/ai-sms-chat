@@ -1,7 +1,7 @@
 {
   "name": "crm-integrated-sms-system",
-  "version": "3.3.0",
-  "description": "CRM-Integrated SMS System for Equine Stable Leads with AI Assistant",
+  "version": "4.0.0",
+  "description": "Clean Lead Qualification System - AI-powered lead qualification with custom questions",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

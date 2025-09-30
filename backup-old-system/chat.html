@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Chat Interface - Lead Qualification System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 25px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .sidebar-header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .sidebar-header h1 {
+            color: #2c3e50;
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .sidebar-header p {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+
+        /* Lead Stats */
+        .lead-stats {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .lead-stats h3 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        .stat-number {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        /* Lead List */
+        .leads-section {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .leads-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .leads-header h3 {
+            color: #2c3e50;
+            font-size: 18px;
+        }
+
+        .view-toggle {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 2px;
+        }
+
+        .view-btn {
+            background: none;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #6c757d;
+        }
+
+        .view-btn.active {
+            background: white;
+            color: #2c3e50;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .view-btn:hover:not(.active) {
+            color: #495057;
+        }
+
+        .add-lead-btn {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .add-lead-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+        }
+
+        .leads-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .lead-item {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            position: relative;
+        }
+
+        .lead-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        .lead-item.active {
+            border-color: #3498db;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+        }
+
+        .lead-name {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .lead-phone {
+            color: #7f8c8d;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .lead-progress {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: #ecf0f1;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #e74c3c 0%, #f39c12 50%, #27ae60 100%);
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 12px;
+            font-weight: 600;
+            color: #7f8c8d;
+        }
+
+        .lead-status {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-new {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status-progress {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .status-qualified {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+
+        .unread-badge {
+            background: #e74c3c;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Chat Area */
+        .chat-area {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 20px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-customer-info h2 {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+
+        .chat-customer-info p {
+            opacity: 0.8;
+            font-size: 14px;
+        }
+
+        .chat-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .chat-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .chat-btn.qualified {
+            background: #27ae60;
+        }
+
+        .chat-btn.qualified:hover {
+            background: #229954;
+        }
+
+        /* Messages Area */
+        .messages-area {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+            position: relative;
+        }
+
+        .message.customer {
+            background: #f1f3f4;
+            color: #333;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.assistant {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+
+        .typing-indicator {
+            display: none;
+            align-self: flex-end;
+            background: #f1f3f4;
+            padding: 12px 16px;
+            border-radius: 18px;
+            border-bottom-right-radius: 4px;
+            max-width: 70%;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: #7f8c8d;
+            border-radius: 50%;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
+        /* Input Area */
+        .input-area {
+            padding: 20px 25px;
+            border-top: 1px solid #f0f0f0;
+            background: white;
+        }
+
+        .input-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        /* Template Section */
+        .template-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid #e9ecef;
+        }
+
+        .template-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .template-header h4 {
+            margin: 0;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        .template-toggle {
+            background: none;
+            border: none;
+            color: #7f8c8d;
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background-color 0.3s ease;
+        }
+
+        .template-toggle:hover {
+            background: #e9ecef;
+        }
+
+        .template-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+        }
+
+        .template-btn {
+            background: white;
+            border: 1px solid #dee2e6;
+            color: #495057;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .template-btn:hover {
+            background: #e3f2fd;
+            border-color: #3498db;
+            color: #1976d2;
+            transform: translateY(-1px);
+        }
+
+        .template-toggle-btn {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+            color: white;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 100px;
+        }
+
+        .template-toggle-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.4);
+        }
+
+        .message-input {
+            flex: 1;
+            border: 2px solid #f0f0f0;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 14px;
+            resize: none;
+            min-height: 44px;
+            max-height: 120px;
+            font-family: inherit;
+            transition: border-color 0.3s ease;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 80px;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+        }
+
+        .send-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* AI Status */
+        .ai-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .ai-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        .ai-indicator.disabled {
+            background: #e74c3c;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(39, 174, 96, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(39, 174, 96, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(39, 174, 96, 0);
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #7f8c8d;
+            text-align: center;
+        }
+
+        .empty-state h3 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            color: white;
+            font-weight: 600;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        }
+
+        .notification.error {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        .notification.info {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            animation: modalSlideIn 0.3s ease;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 20px 25px;
+            border-radius: 20px 20px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.3s ease;
+        }
+
+        .close:hover {
+            opacity: 0.7;
+        }
+
+        .modal-body {
+            padding: 25px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #f0f0f0;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .modal-footer {
+            padding: 20px 25px;
+            border-top: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+            }
+            
+            .sidebar {
+                max-height: 300px;
+            }
+            
+            .modal-content {
+                margin: 10% auto;
+                width: 95%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>🎯 Sales Chat</h1>
+                <p>Lead Qualification System</p>
+            </div>
+
+            <div class="lead-stats">
+                <h3>📊 Lead Statistics</h3>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-number" id="totalLeads">0</div>
+                        <div class="stat-label">Total Leads</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="qualifiedLeads">0</div>
+                        <div class="stat-label">Qualified</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="activeChats">0</div>
+                        <div class="stat-label">Active Chats</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="unreadMessages">0</div>
+                        <div class="stat-label">Unread</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="leads-section">
+                <div class="leads-header">
+                    <div class="view-toggle">
+                        <button class="view-btn active" id="leadsViewBtn" onclick="switchView('leads')">👥 Leads</button>
+                        <button class="view-btn" id="customersViewBtn" onclick="switchView('customers')">📋 All Customers</button>
+                    </div>
+                    <button class="add-lead-btn" onclick="showAddLeadModal()">+ Add Lead</button>
+                </div>
+                <div class="leads-list" id="leadsList">
+                    <!-- Leads will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat Area -->
+        <div class="chat-area">
+            <div class="chat-header">
+                <div class="chat-customer-info">
+                    <h2 id="chatCustomerName">Select a Lead</h2>
+                    <p id="chatCustomerPhone">Choose a lead from the sidebar to start chatting</p>
+                </div>
+                <div class="chat-actions">
+                    <button class="chat-btn" id="refreshBtn" onclick="refreshMessages()">🔄 Refresh</button>
+                    <button class="chat-btn" id="testWebhookBtn" onclick="testWebhook()">🔗 Test Webhook</button>
+                    <button class="chat-btn" id="aiToggleBtn" onclick="toggleAI()">🤖 AI: ON</button>
+                    <button class="chat-btn" id="qualifyBtn" onclick="qualifyLead()" style="display: none;">✅ Qualify Lead</button>
+                </div>
+            </div>
+
+            <div class="messages-area" id="messagesArea">
+                <div class="empty-state">
+                    <h3>💬 Welcome to Sales Chat</h3>
+                    <p>Select a lead from the sidebar to start a conversation</p>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <div class="ai-status">
+                    <div class="ai-indicator" id="aiIndicator"></div>
+                    <span id="aiStatusText">AI Assistant is ready to help qualify leads</span>
+                </div>
+                
+                <!-- Template Messages -->
+                <div class="template-section" id="templateSection" style="display: none;">
+                    <div class="template-header">
+                        <h4>📝 Quick Messages</h4>
+                        <button class="template-toggle" onclick="toggleTemplates()">Hide</button>
+                    </div>
+                    <div class="template-buttons">
+                        <button class="template-btn" onclick="useTemplate('greeting')">👋 Greeting</button>
+                        <button class="template-btn" onclick="useTemplate('qualification')">❓ Qualification</button>
+                        <button class="template-btn" onclick="useTemplate('followup')">📞 Follow-up</button>
+                        <button class="template-btn" onclick="useTemplate('closing')">✅ Closing</button>
+                    </div>
+                </div>
+                
+                <div class="input-container">
+                    <div class="input-row">
+                        <button class="template-toggle-btn" onclick="toggleTemplates()" id="templateToggleBtn">📝 Templates</button>
+                        <textarea 
+                            class="message-input" 
+                            id="messageInput" 
+                            placeholder="Type your message..."
+                            rows="1"
+                            disabled
+                        ></textarea>
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Lead Modal -->
+    <div id="addLeadModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>➕ Add New Lead</h3>
+                <span class="close" onclick="closeAddLeadModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="addLeadForm">
+                    <div class="form-group">
+                        <label for="leadName">Name *</label>
+                        <input type="text" id="leadName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="leadEmail">Email *</label>
+                        <input type="email" id="leadEmail" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="leadPhone">Phone Number *</label>
+                        <input type="tel" id="leadPhone" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="leadSource">Source</label>
+                        <select id="leadSource">
+                            <option value="manual">Manual Entry</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="gravity_form">Gravity Form</option>
+                            <option value="website">Website</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAddLeadModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="addLead()">Add Lead</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentLead = null;
+        let leads = [];
+        let allCustomers = [];
+        let aiEnabled = true;
+        let messageCheckInterval = null;
+        let templatesVisible = false;
+        let currentView = 'leads';
+
+        // Template messages
+        const messageTemplates = {
+            greeting: "Hi! Thanks for your interest in our equine stable solutions. I'd love to help you find the perfect setup for your horses. How can I assist you today?",
+            qualification: "To help you find the best stable solution, I have a few quick questions. How many horses do you currently have?",
+            followup: "Thanks for that information! What type of stable configuration interests you most - traditional stables, run-in sheds, or something custom?",
+            closing: "Perfect! Based on what you've shared, I think we have some great options for you. Would you like me to arrange a consultation to discuss your specific needs and timeline?"
+        };
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            loadLeads();
+            setupEventListeners();
+            startMessageCheck();
+        });
+
+        // Setup event listeners
+        function setupEventListeners() {
+            const messageInput = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+
+            messageInput.addEventListener('input', function() {
+                // Auto-resize textarea
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                
+                // Enable/disable send button
+                sendBtn.disabled = !this.value.trim() || !currentLead;
+            });
+
+            messageInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!sendBtn.disabled) {
+                        sendMessage();
+                    }
+                }
+            });
+        }
+
+        // Load leads from database
+        async function loadLeads() {
+            try {
+                const response = await fetch('/api/leads');
+                const result = await response.json();
+                
+                if (result.success) {
+                    leads = result.leads || [];
+                    allCustomers = result.leads || []; // Store all customers for the "All Customers" view
+                    renderLeadsList();
+                    updateStats();
+                } else {
+                    console.error('Failed to load leads:', result.error);
+                }
+            } catch (error) {
+                console.error('Error loading leads:', error);
+            }
+        }
+
+        // Switch between leads and all customers view
+        function switchView(view) {
+            currentView = view;
+            
+            // Update button states
+            document.getElementById('leadsViewBtn').classList.toggle('active', view === 'leads');
+            document.getElementById('customersViewBtn').classList.toggle('active', view === 'customers');
+            
+            // Re-render the list
+            renderLeadsList();
+        }
+
+        // Render leads list
+        function renderLeadsList() {
+            const leadsList = document.getElementById('leadsList');
+            
+            // Determine which data to show based on current view
+            const dataToShow = currentView === 'leads' ? leads : allCustomers;
+            
+            if (dataToShow.length === 0) {
+                const message = currentView === 'leads' 
+                    ? 'No leads found. Add your first lead to get started!'
+                    : 'No customers found.';
+                leadsList.innerHTML = `<p style="text-align: center; color: #7f8c8d; padding: 20px;">${message}</p>`;
+                return;
+            }
+
+            leadsList.innerHTML = dataToShow.map(lead => {
+                const progress = calculateProgress(lead);
+                const unreadCount = lead.unreadCount || 0;
+                
+                return `
+                    <div class="lead-item ${currentLead?.id === lead.id ? 'active' : ''}" onclick="selectLead('${lead.id}')">
+                        <div class="lead-name">${lead.name}</div>
+                        <div class="lead-phone">${lead.phone}</div>
+                        <div class="lead-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%"></div>
+                            </div>
+                            <span class="progress-text">${progress}%</span>
+                        </div>
+                        <div class="lead-status">
+                            <span class="status-badge ${getStatusClass(lead)}">${getStatusText(lead)}</span>
+                            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Calculate qualification progress
+        function calculateProgress(lead) {
+            const questions = ['question1', 'question2', 'question3', 'question4'];
+            const answered = questions.filter(q => lead[q]?.answered).length;
+            return Math.round((answered / 4) * 100);
+        }
+
+        // Get status class
+        function getStatusClass(lead) {
+            const progress = calculateProgress(lead);
+            if (progress === 100) return 'status-qualified';
+            if (progress > 0) return 'status-progress';
+            return 'status-new';
+        }
+
+        // Get status text
+        function getStatusText(lead) {
+            const progress = calculateProgress(lead);
+            if (progress === 100) return 'Qualified';
+            if (progress > 0) return 'In Progress';
+            return 'New';
+        }
+
+        // Update statistics
+        function updateStats() {
+            const totalLeads = leads.length;
+            const qualifiedLeads = leads.filter(lead => calculateProgress(lead) === 100).length;
+            const activeChats = leads.filter(lead => lead.lastMessage).length;
+            const unreadMessages = leads.reduce((sum, lead) => sum + (lead.unreadCount || 0), 0);
+
+            document.getElementById('totalLeads').textContent = totalLeads;
+            document.getElementById('qualifiedLeads').textContent = qualifiedLeads;
+            document.getElementById('activeChats').textContent = activeChats;
+            document.getElementById('unreadMessages').textContent = unreadMessages;
+        }
+
+        // Select a lead
+        async function selectLead(leadId) {
+            const lead = leads.find(l => l.id === leadId);
+            if (!lead) return;
+
+            currentLead = lead;
+            renderLeadsList();
+            
+            // Update chat header
+            document.getElementById('chatCustomerName').textContent = lead.name;
+            document.getElementById('chatCustomerPhone').textContent = lead.phone;
+            
+            // Enable input
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            
+            // Load messages using phone number (since that's how they're stored in database)
+            await loadMessages(lead.phone);
+            
+            // Clear unread count
+            lead.unreadCount = 0;
+            updateStats();
+        }
+
+        // Load messages for a lead
+        async function loadMessages(leadId) {
+            try {
+                const response = await fetch(`/api/leads/${leadId}/messages`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    renderMessages(result.messages);
+                }
+            } catch (error) {
+                console.error('Error loading messages:', error);
+            }
+        }
+
+        // Render messages
+        function renderMessages(messages) {
+            const messagesArea = document.getElementById('messagesArea');
+            
+            if (messages.length === 0) {
+                messagesArea.innerHTML = `
+                    <div class="empty-state">
+                        <h3>💬 Start the conversation</h3>
+                        <p>Send your first message to begin qualifying this lead</p>
+                    </div>
+                `;
+                return;
+            }
+
+            messagesArea.innerHTML = messages.map(msg => `
+                <div class="message ${msg.sender}">
+                    <div>${msg.content}</div>
+                    <div class="message-time">${formatTime(msg.timestamp)}</div>
+                </div>
+            `).join('');
+            
+            // Scroll to bottom
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        // Send message
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const content = messageInput.value.trim();
+            
+            if (!content || !currentLead) return;
+
+            // Add message to UI immediately
+            addMessageToUI('assistant', content);
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            document.getElementById('sendBtn').disabled = true;
+
+            // Show typing indicator
+            showTypingIndicator();
+
+            try {
+                const response = await fetch('/api/leads/send-message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        leadId: currentLead.phone, // Use phone number instead of ID
+                        content: content,
+                        aiEnabled: aiEnabled
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Hide typing indicator
+                    hideTypingIndicator();
+                    
+                    // If AI is enabled and there's a response, show it in the UI
+                    if (aiEnabled && result.aiResponse) {
+                        setTimeout(() => {
+                            addMessageToUI('assistant', result.aiResponse);
+                        }, 1000);
+                    }
+                } else {
+                    hideTypingIndicator();
+                    showNotification('Failed to send message: ' + result.error, 'error');
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                console.error('Error sending message:', error);
+                showNotification('Error sending message', 'error');
+            }
+        }
+
+        // Add message to UI
+        function addMessageToUI(sender, content) {
+            const messagesArea = document.getElementById('messagesArea');
+            
+            // Remove empty state if present
+            const emptyState = messagesArea.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            messageDiv.innerHTML = `
+                <div>${content}</div>
+                <div class="message-time">${formatTime(new Date())}</div>
+            `;
+            
+            messagesArea.appendChild(messageDiv);
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        // Show typing indicator
+        function showTypingIndicator() {
+            const messagesArea = document.getElementById('messagesArea');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'typing-indicator';
+            typingDiv.id = 'typingIndicator';
+            typingDiv.innerHTML = `
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
+            
+            messagesArea.appendChild(typingDiv);
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        // Hide typing indicator
+        function hideTypingIndicator() {
+            const typingIndicator = document.getElementById('typingIndicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+        }
+
+        // Toggle AI
+        function toggleAI() {
+            aiEnabled = !aiEnabled;
+            const btn = document.getElementById('aiToggleBtn');
+            const indicator = document.getElementById('aiIndicator');
+            const statusText = document.getElementById('aiStatusText');
+            
+            if (aiEnabled) {
+                btn.textContent = '🤖 AI: ON';
+                btn.style.background = 'rgba(255, 255, 255, 0.2)';
+                indicator.classList.remove('disabled');
+                statusText.textContent = 'AI Assistant is ready to help qualify leads';
+            } else {
+                btn.textContent = '🤖 AI: OFF';
+                btn.style.background = 'rgba(231, 76, 60, 0.8)';
+                indicator.classList.add('disabled');
+                statusText.textContent = 'AI Assistant is disabled - manual responses only';
+            }
+        }
+
+        // Qualify lead
+        function qualifyLead() {
+            if (!currentLead) return;
+            
+            if (confirm(`Mark ${currentLead.name} as qualified?`)) {
+                // Update lead status
+                currentLead.qualified = true;
+                updateStats();
+                renderLeadsList();
+                showNotification('Lead marked as qualified!', 'success');
+            }
+        }
+
+        // Start message checking
+        function startMessageCheck() {
+            // Check for new messages every 5 seconds
+            messageCheckInterval = setInterval(async () => {
+                if (currentLead) {
+                    await checkForNewMessages();
+                }
+            }, 5000);
+        }
+
+        // Check for new messages
+        async function checkForNewMessages() {
+            if (!currentLead) return;
+            
+            try {
+                console.log(`🔍 Checking for new messages for ${currentLead.name} (${currentLead.phone})`);
+                const response = await fetch(`/api/leads/${currentLead.phone}/messages/check`);
+                const result = await response.json();
+                
+                if (result.success && result.newMessages.length > 0) {
+                    console.log(`📱 Found ${result.newMessages.length} new messages`);
+                    
+                    // Add new messages to UI
+                    result.newMessages.forEach(msg => {
+                        addMessageToUI('customer', msg.content);
+                    });
+                    
+                    // Update unread count
+                    currentLead.unreadCount = (currentLead.unreadCount || 0) + result.newMessages.length;
+                    updateStats();
+                    renderLeadsList();
+                    
+                    showNotification(`📱 ${result.newMessages.length} new message(s) received!`, 'success');
+                } else {
+                    console.log(`📱 No new messages for ${currentLead.name}`);
+                }
+            } catch (error) {
+                console.error('Error checking for new messages:', error);
+            }
+        }
+
+        // Manual refresh messages
+        async function refreshMessages() {
+            if (!currentLead) {
+                showNotification('Please select a lead first', 'error');
+                return;
+            }
+            
+            showNotification('🔄 Refreshing messages...', 'info');
+            
+            try {
+                // Reload messages from database
+                await loadMessages(currentLead.phone);
+                showNotification('✅ Messages refreshed!', 'success');
+            } catch (error) {
+                console.error('Error refreshing messages:', error);
+                showNotification('❌ Error refreshing messages', 'error');
+            }
+        }
+
+        // Test webhook connection
+        async function testWebhook() {
+            if (!currentLead) {
+                showNotification('Please select a lead first', 'error');
+                return;
+            }
+            
+            showNotification('🔗 Testing webhook connection...', 'info');
+            
+            try {
+                // Test the webhook endpoint with a test message
+                const response = await fetch('/webhook/sms', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        'Body': 'Test message from webhook test',
+                        'From': currentLead.phone,
+                        'To': '+1234567890', // Dummy number
+                        'MessageSid': 'test_' + Date.now()
+                    })
+                });
+                
+                if (response.ok) {
+                    showNotification('✅ Webhook test successful! Check console for details.', 'success');
+                    console.log('✅ Webhook test completed successfully');
+                    
+                    // Refresh messages to see if the test message appeared
+                    setTimeout(() => {
+                        refreshMessages();
+                    }, 1000);
+                } else {
+                    showNotification('❌ Webhook test failed: ' + response.status, 'error');
+                    console.error('❌ Webhook test failed:', response.status);
+                }
+            } catch (error) {
+                console.error('❌ Webhook test error:', error);
+                showNotification('❌ Webhook test failed: ' + error.message, 'error');
+            }
+        }
+
+        // Show add lead modal
+        function showAddLeadModal() {
+            document.getElementById('addLeadModal').style.display = 'block';
+        }
+
+        // Close add lead modal
+        function closeAddLeadModal() {
+            document.getElementById('addLeadModal').style.display = 'none';
+            document.getElementById('addLeadForm').reset();
+        }
+
+        // Add new lead
+        async function addLead() {
+            const form = document.getElementById('addLeadForm');
+            const formData = new FormData(form);
+            
+            const leadData = {
+                name: document.getElementById('leadName').value,
+                email: document.getElementById('leadEmail').value,
+                phone: document.getElementById('leadPhone').value,
+                source: document.getElementById('leadSource').value
+            };
+            
+            try {
+                const response = await fetch('/api/leads', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(leadData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    leads.push(result.lead);
+                    renderLeadsList();
+                    updateStats();
+                    closeAddLeadModal();
+                    showNotification('Lead added successfully!', 'success');
+                } else {
+                    showNotification('Failed to add lead: ' + result.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error adding lead:', error);
+                showNotification('Error adding lead', 'error');
+            }
+        }
+
+        // Template functions
+        function toggleTemplates() {
+            templatesVisible = !templatesVisible;
+            const templateSection = document.getElementById('templateSection');
+            const toggleBtn = document.getElementById('templateToggleBtn');
+            
+            if (templatesVisible) {
+                templateSection.style.display = 'block';
+                toggleBtn.textContent = '📝 Hide Templates';
+            } else {
+                templateSection.style.display = 'none';
+                toggleBtn.textContent = '📝 Templates';
+            }
+        }
+
+        function useTemplate(templateKey) {
+            const template = messageTemplates[templateKey];
+            if (template) {
+                const messageInput = document.getElementById('messageInput');
+                messageInput.value = template;
+                messageInput.style.height = 'auto';
+                messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+                
+                // Enable send button
+                const sendBtn = document.getElementById('sendBtn');
+                sendBtn.disabled = false;
+                
+                // Focus on input
+                messageInput.focus();
+                
+                showNotification(`Template "${templateKey}" loaded!`, 'success');
+            }
+        }
+
+        // Utility functions
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 100);
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    document.body.removeChild(notification);
+                }, 300);
+            }, 3000);
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('addLeadModal');
+            if (event.target === modal) {
+                closeAddLeadModal();
+            }
+        }
+    </script>
+</body>
+</html>
