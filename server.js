@@ -59,7 +59,7 @@ initializeOpenAI();
 app.get('/api/leads', (req, res) => {
     try {
         res.json(leads);
-    } catch (error) {
+        } catch (error) {
         console.error('Error fetching leads:', error);
         res.status(500).json({
             success: false,
@@ -74,7 +74,7 @@ app.get('/api/leads/:leadId/messages', (req, res) => {
         const { leadId } = req.params;
         const leadMessages = messages.filter(msg => msg.leadId == leadId);
         res.json(leadMessages);
-    } catch (error) {
+        } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({
             success: false,
@@ -244,9 +244,13 @@ app.get('/api/settings/questions', (req, res) => {
 // Create new lead
 app.post('/api/leads', async (req, res) => {
     try {
+        console.log('📝 Creating new lead...');
+        console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+
         const { name, email, phone, source } = req.body;
 
         if (!name || !email || !phone) {
+            console.log('❌ Missing required fields');
             return res.status(400).json({
                 success: false,
                 error: 'Name, email, and phone are required'
@@ -280,8 +284,13 @@ app.post('/api/leads', async (req, res) => {
         
         leads.push(newLead);
         
-        // Send AI introduction message
-        await sendAIIntroduction(newLead);
+        // Send AI introduction message (don't fail the request if this fails)
+        try {
+            await sendAIIntroduction(newLead);
+        } catch (introError) {
+            console.error('Error sending AI introduction:', introError);
+            // Don't fail the lead creation if introduction fails
+        }
 
         res.json(newLead);
     } catch (error) {
@@ -377,7 +386,7 @@ app.delete('/api/leads/:leadId', (req, res) => {
         
         // Remove lead from array
         leads.splice(leadIndex, 1);
-        
+
         res.json({
             success: true,
             message: 'Lead deleted successfully'

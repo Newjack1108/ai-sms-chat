@@ -1011,26 +1011,39 @@
             leads.forEach(lead => {
                 const leadItem = document.createElement('div');
                 leadItem.className = 'lead-item';
+                leadItem.dataset.leadId = lead.id;
                 leadItem.innerHTML = `
                     <div class="lead-name">${lead.name || 'Unknown'}</div>
                     <div class="lead-phone">${lead.phone}</div>
                     <div class="lead-status status-${lead.status}">${lead.status}</div>
                 `;
                 
-                leadItem.addEventListener('click', () => selectLead(lead));
+                leadItem.addEventListener('click', (event) => selectLead(lead, event));
                 leadsList.appendChild(leadItem);
             });
         }
 
         // Select a lead for chatting
-        function selectLead(lead) {
+        function selectLead(lead, event = null) {
             currentLead = lead;
             
             // Update active lead in sidebar
             document.querySelectorAll('.lead-item').forEach(item => {
                 item.classList.remove('active');
             });
-            event.target.closest('.lead-item').classList.add('active');
+            
+            // Only try to add active class if we have an event (clicked from sidebar)
+            if (event && event.target) {
+                event.target.closest('.lead-item').classList.add('active');
+            } else {
+                // If called programmatically, find the lead item by data attribute
+                const leadItems = document.querySelectorAll('.lead-item');
+                leadItems.forEach(item => {
+                    if (item.dataset.leadId == lead.id) {
+                        item.classList.add('active');
+                    }
+                });
+            }
 
             // Update chat header
             document.getElementById('chat-title').textContent = `Chatting with ${lead.name}`;
