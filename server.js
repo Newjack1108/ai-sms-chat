@@ -191,6 +191,7 @@ async function initializeApp() {
             }
             
             console.log('✅ PostgreSQL database connected successfully');
+            console.log('🗄️ Database tables initialized: customers, customer_questions, chat_messages, custom_questions');
             
         } catch (dbError) {
             console.log('⚠️ PostgreSQL database not available, using fallback file system');
@@ -210,7 +211,7 @@ async function initializeApp() {
 // Start the application
 initializeApp().then(() => {
     app.listen(PORT, () => {
-        console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database Ready!`);
+        console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database v2.1.0 Ready!`);
     });
 }).catch(error => {
     console.error('❌ Failed to start application:', error);
