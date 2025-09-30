@@ -4,6 +4,7 @@ const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
 const fs = require('fs').promises;
+const { initializeDatabase, CustomerDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -169,86 +170,45 @@ app.post('/api/force-save', async (req, res) => {
     }
 });
 
-// Customer Database (In production, use proper database)
-class CustomerDatabase {
-    constructor() {
-        this.customers = new Map(); // phone -> customer data
-        this.conversationThreads = new Map(); // phone -> threadId
-        this.loadData();
-    }
+// Initialize PostgreSQL database
+let customerDB;
 
-    async loadData() {
-        try {
-            // Try Railway persistent storage first
-            const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
-            const customersPath = `${persistentPath}/customers.json`;
-            
-            try {
-                const data = await fs.readFile(customersPath, 'utf8');
-                const customerArray = JSON.parse(data);
-                customerArray.forEach(customer => {
-                    this.customers.set(customer.phone, customer);
-                    if (customer.assistantThreadId) {
-                        this.conversationThreads.set(customer.phone, customer.assistantThreadId);
-                    }
-                });
-                console.log(`📊 Loaded ${this.customers.size} customer records from Railway persistent storage`);
-                return;
-            } catch (persistentError) {
-                console.log('📊 Railway persistent storage not available, trying local file...');
-            }
-            
-            // Try local file
-            try {
-                const data = await fs.readFile('customers.json', 'utf8');
-                const customerArray = JSON.parse(data);
-                customerArray.forEach(customer => {
-                    this.customers.set(customer.phone, customer);
-                    if (customer.assistantThreadId) {
-                        this.conversationThreads.set(customer.phone, customer.assistantThreadId);
-                    }
-                });
-                console.log(`📊 Loaded ${this.customers.size} customer records from local file`);
-            } catch (localError) {
-                console.log('📊 Starting with empty customer database (no data files found)');
-            }
-            
-        } catch (error) {
-            console.error('❌ Error loading customer data:', error);
-            console.log('📊 Starting with empty customer database due to error');
+// Initialize database on startup
+async function initializeApp() {
+    try {
+        console.log('🚀 Initializing AI SMS Chat application...');
+        
+        // Initialize PostgreSQL database
+        await initializeDatabase();
+        customerDB = new CustomerDatabase();
+        
+        // Load custom questions from database
+        const dbQuestions = await customerDB.getCustomQuestions();
+        if (Object.keys(dbQuestions).length > 0) {
+            global.customQuestions = dbQuestions;
+            console.log('📝 Loaded custom questions from database:', dbQuestions);
         }
+        
+        console.log('✅ Application initialized successfully');
+        
+    } catch (error) {
+        console.error('❌ Application initialization failed:', error);
+        process.exit(1);
     }
+}
 
-    async saveData() {
-        try {
-            const customerArray = Array.from(this.customers.values());
-            
-            // Try Railway persistent storage first
-            const persistentPath = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/tmp';
-            const customersPath = `${persistentPath}/customers.json`;
-            
-            try {
-                await fs.writeFile(customersPath, JSON.stringify(customerArray, null, 2));
-                console.log(`📊 Saved ${customerArray.length} customer records to Railway persistent storage`);
-            } catch (persistentError) {
-                console.log('📊 Railway persistent storage failed, trying local file...');
-                
-                // Try local file
-                try {
-                    await fs.writeFile('customers.json', JSON.stringify(customerArray, null, 2));
-                    console.log(`📊 Saved ${customerArray.length} customer records to local file`);
-                } catch (localError) {
-                    console.log('📊 Local file save failed, customer data will be lost on restart');
-                    console.log('📊 Consider setting up Railway persistent storage');
-                }
-            }
-            
-        } catch (error) {
-            console.error('❌ Error saving customer data:', error);
-        }
-    }
+// Start the application
+initializeApp().then(() => {
+    app.listen(PORT, () => {
+        console.log(`🚀 AI SMS Chat server running on port ${PORT}`);
+    });
+}).catch(error => {
+    console.error('❌ Failed to start application:', error);
+    process.exit(1);
+});
 
-    createCustomer(data) {
+// Legacy method for backward compatibility (will be removed)
+function createCustomer(data) {
         const customer = {
             id: `cust_${Date.now()}`,
             name: data.name || null,
@@ -521,7 +481,7 @@ Thank you for your interest in our stable services! 🐎`;
 // API Endpoints
 
 // Lead import from Facebook/Gravity Forms
-app.post('/api/import-lead', (req, res) => {
+app.post('/api/import-lead', async (req, res) => {
     try {
         const { name, phone, email, postcode, source, sourceDetails, customData } = req.body;
 
@@ -535,7 +495,7 @@ app.post('/api/import-lead', (req, res) => {
         const normalizedPhone = normalizePhoneNumber(phone);
         
         // Check if customer exists
-        let customer = customerDB.getCustomer(normalizedPhone);
+        let customer = await customerDB.getCustomer(normalizedPhone);
         
         if (customer) {
             // Update existing customer
@@ -543,10 +503,10 @@ app.post('/api/import-lead', (req, res) => {
             if (customData) {
                 updates.chatData = { ...customer.chatData, ...customData };
             }
-            customer = customerDB.updateCustomer(normalizedPhone, updates);
+            customer = await customerDB.updateCustomer(normalizedPhone, updates);
         } else {
             // Create new customer
-            customer = customerDB.createCustomer({
+            customer = await customerDB.createCustomer({
                 name,
                 phone: normalizedPhone,
                 email,
@@ -791,30 +751,54 @@ app.get('/api/messages', async (req, res) => {
 });
 
 // Customer management endpoints
-app.get('/api/customers', (req, res) => {
-    const customers = customerDB.getAllCustomers();
-    res.json({
-        success: true,
-        customers: customers,
-        total: customers.length
-    });
-});
-
-app.get('/api/customers/:phone', (req, res) => {
-    const customer = customerDB.getCustomer(normalizePhoneNumber(req.params.phone));
-    if (customer) {
-        res.json({ success: true, customer });
-    } else {
-        res.status(404).json({ success: false, error: 'Customer not found' });
+app.get('/api/customers', async (req, res) => {
+    try {
+        const customers = await customerDB.getAllCustomers();
+        res.json({
+            success: true,
+            customers: customers,
+            total: customers.length
+        });
+    } catch (error) {
+        console.error('Error getting customers:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-app.put('/api/customers/:phone', (req, res) => {
-    const customer = customerDB.updateCustomer(normalizePhoneNumber(req.params.phone), req.body);
-    if (customer) {
-        res.json({ success: true, customer });
-    } else {
-        res.status(404).json({ success: false, error: 'Customer not found' });
+app.get('/api/customers/:phone', async (req, res) => {
+    try {
+        const customer = await customerDB.getCustomer(normalizePhoneNumber(req.params.phone));
+        if (customer) {
+            res.json({ success: true, customer });
+        } else {
+            res.status(404).json({ success: false, error: 'Customer not found' });
+        }
+    } catch (error) {
+        console.error('Error getting customer:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+app.put('/api/customers/:phone', async (req, res) => {
+    try {
+        const customer = await customerDB.updateCustomer(normalizePhoneNumber(req.params.phone), req.body);
+        if (customer) {
+            res.json({ success: true, customer });
+        } else {
+            res.status(404).json({ success: false, error: 'Customer not found' });
+        }
+    } catch (error) {
+        console.error('Error updating customer:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
@@ -1620,14 +1604,14 @@ app.post('/api/configure-questions', async (req, res) => {
         // Store the custom questions globally
         global.customQuestions = questions;
         
-        // Save to file for persistence
-        await saveCustomQuestions();
+        // Save to database for persistence
+        await customerDB.updateCustomQuestions(questions);
         
-        console.log('Custom questions updated and saved:', questions);
+        console.log('Custom questions updated and saved to database:', questions);
         
         res.json({
             success: true,
-            message: 'Questions configuration updated and saved',
+            message: 'Questions configuration updated and saved to database',
             questions: questions
         });
     } catch (error) {
@@ -1885,10 +1869,4 @@ function normalizePhoneNumber(phone) {
     return normalized;
 }
 
-// Start server
-app.listen(PORT, () => {
-    console.log('🚀 CRM-Integrated SMS System Started!');
-    console.log(`📱 Interface: http://localhost:${PORT}`);
-    console.log(`📊 Customer Database: ${customerDB.customers.size} records`);
-    console.log(`🎯 Lead Import: POST /api/import-lead`);
-});
+// Server startup is now handled in initializeApp()
