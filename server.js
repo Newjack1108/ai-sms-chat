@@ -3,7 +3,6 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
-const { initializeDatabase, CustomerDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,8 +16,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Initialize database
-let customerDB;
+// Simple in-memory storage for demo (will be replaced with database)
+let leads = [];
+let leadIdCounter = 1;
 
 // Custom questions for lead qualification
 const CUSTOM_QUESTIONS = {
@@ -28,50 +28,13 @@ const CUSTOM_QUESTIONS = {
     q4: "What's your ideal timeline for completion?"
 };
 
-// Initialize application
-async function initializeApp() {
-    try {
-        console.log('🚀 Initializing Lead Qualification System...');
-        
-        // Initialize database
-        await initializeDatabase();
-        customerDB = new CustomerDatabase();
-        
-        console.log('✅ Database initialized successfully');
-        console.log('🎯 Lead Qualification System ready!');
-    } catch (error) {
-        console.error('❌ Failed to initialize application:', error);
-        throw error;
-    }
-}
-
 // ========================================
 // API ENDPOINTS
 // ========================================
 
 // Get all leads
-app.get('/api/leads', async (req, res) => {
+app.get('/api/leads', (req, res) => {
     try {
-        const customers = await customerDB.getAllCustomers();
-        
-        // Convert customers to leads format
-        const leads = customers.map(customer => ({
-            id: customer.id,
-            name: customer.name || 'Unknown',
-            email: customer.email || '',
-            phone: customer.phone,
-            source: customer.source || 'manual',
-            status: getLeadStatus(customer),
-            progress: calculateProgress(customer),
-            questions: {
-                q1: customer.question1 || { answered: false, answer: '' },
-                q2: customer.question2 || { answered: false, answer: '' },
-                q3: customer.question3 || { answered: false, answer: '' },
-                q4: customer.question4 || { answered: false, answer: '' }
-            },
-            createdAt: customer.createdAt || new Date().toISOString()
-        }));
-        
         res.json({
             success: true,
             leads: leads
@@ -100,44 +63,41 @@ app.post('/api/leads', async (req, res) => {
         const normalizedPhone = normalizePhoneNumber(phone);
         
         // Check if lead already exists
-        const existingCustomer = await customerDB.getCustomer(normalizedPhone);
-        if (existingCustomer) {
+        const existingLead = leads.find(lead => lead.phone === normalizedPhone);
+        if (existingLead) {
             return res.status(400).json({
                 success: false,
                 error: 'Lead with this phone number already exists'
             });
         }
         
-        // Create new customer/lead
-        const customer = await customerDB.createCustomer({
-            phone: normalizedPhone,
+        // Create new lead
+        const newLead = {
+            id: leadIdCounter++,
             name: name,
             email: email,
+            phone: normalizedPhone,
             source: source || 'manual',
-            conversationStage: 'new',
-            qualified: false
-        });
+            status: 'new',
+            progress: 0,
+            qualified: false,
+            questions: {
+                q1: { answered: false, answer: '' },
+                q2: { answered: false, answer: '' },
+                q3: { answered: false, answer: '' },
+                q4: { answered: false, answer: '' }
+            },
+            createdAt: new Date().toISOString()
+        };
+        
+        leads.push(newLead);
         
         // Send AI introduction message
-        await sendAIIntroduction(customer);
+        await sendAIIntroduction(newLead);
         
         res.json({
             success: true,
-            lead: {
-                id: customer.id,
-                name: customer.name,
-                email: customer.email,
-                phone: customer.phone,
-                source: customer.source,
-                status: 'new',
-                progress: 0,
-                questions: {
-                    q1: { answered: false, answer: '' },
-                    q2: { answered: false, answer: '' },
-                    q3: { answered: false, answer: '' },
-                    q4: { answered: false, answer: '' }
-                }
-            }
+            lead: newLead
         });
     } catch (error) {
         console.error('Error creating lead:', error);
@@ -160,8 +120,8 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
             });
         }
         
-        const customer = await customerDB.getCustomer(leadId);
-        if (!customer) {
+        const lead = leads.find(l => l.id == leadId);
+        if (!lead) {
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
@@ -170,17 +130,17 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
         
         // Prepare CRM data
         const crmData = {
-            name: customer.name,
-            email: customer.email,
-            phone: customer.phone,
-            source: customer.source,
+            name: lead.name,
+            email: lead.email,
+            phone: lead.phone,
+            source: lead.source,
             qualified: true,
             qualificationDate: new Date().toISOString(),
             answers: {
-                question1: customer.question1?.answer || '',
-                question2: customer.question2?.answer || '',
-                question3: customer.question3?.answer || '',
-                question4: customer.question4?.answer || ''
+                question1: lead.questions.q1.answer || '',
+                question2: lead.questions.q2.answer || '',
+                question3: lead.questions.q3.answer || '',
+                question4: lead.questions.q4.answer || ''
             }
         };
         
@@ -195,10 +155,8 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
         
         if (response.ok) {
             // Mark as sent to CRM
-            await customerDB.updateCustomer(leadId, {
-                sentToCRM: true,
-                crmSentDate: new Date().toISOString()
-            });
+            lead.sentToCRM = true;
+            lead.crmSentDate = new Date().toISOString();
             
             res.json({
                 success: true,
@@ -220,20 +178,20 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
 });
 
 // Delete lead
-app.delete('/api/leads/:leadId', async (req, res) => {
+app.delete('/api/leads/:leadId', (req, res) => {
     try {
         const { leadId } = req.params;
         
-        const customer = await customerDB.getCustomer(leadId);
-        if (!customer) {
+        const leadIndex = leads.findIndex(l => l.id == leadId);
+        if (leadIndex === -1) {
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
             });
         }
         
-        // Delete customer from database
-        await customerDB.deleteCustomer(leadId);
+        // Remove lead from array
+        leads.splice(leadIndex, 1);
         
         res.json({
             success: true,
@@ -257,44 +215,31 @@ app.post('/webhook/sms', async (req, res) => {
         
         const normalizedPhone = normalizePhoneNumber(From);
         
-        // Get or create customer
-        let customer = await customerDB.getCustomer(normalizedPhone);
-        if (!customer) {
-            customer = await customerDB.createCustomer({
+        // Get or create lead
+        let lead = leads.find(l => l.phone === normalizedPhone);
+        if (!lead) {
+            lead = {
+                id: leadIdCounter++,
+                name: 'Unknown',
+                email: '',
                 phone: normalizedPhone,
-                source: 'inbound_sms'
-            });
+                source: 'inbound_sms',
+                status: 'new',
+                progress: 0,
+                qualified: false,
+                questions: {
+                    q1: { answered: false, answer: '' },
+                    q2: { answered: false, answer: '' },
+                    q3: { answered: false, answer: '' },
+                    q4: { answered: false, answer: '' }
+                },
+                createdAt: new Date().toISOString()
+            };
+            leads.push(lead);
         }
-        
-        // Check for duplicate messages
-        const existingMessages = customer.chatData?.messages || [];
-        const messageExists = existingMessages.some(msg => msg.messageId === MessageSid);
-        
-        if (messageExists) {
-            console.log(`📥 Message ${MessageSid} already processed - skipping`);
-            return res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-        }
-        
-        // Add incoming message to chat data
-        const messageData = {
-            sender: 'customer',
-            message: Body,
-            timestamp: new Date().toISOString(),
-            messageId: MessageSid
-        };
-        
-        const updatedMessages = [...existingMessages, messageData];
-        
-        // Update customer with new message
-        await customerDB.updateCustomer(normalizedPhone, {
-            chatData: {
-                ...customer.chatData,
-                messages: updatedMessages
-            }
-        });
         
         // Process AI response
-        await processAIResponse(customer, Body);
+        await processAIResponse(lead, Body);
         
         res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     } catch (error) {
@@ -308,52 +253,34 @@ app.post('/webhook/sms', async (req, res) => {
 // ========================================
 
 // Send AI introduction message
-async function sendAIIntroduction(customer) {
+async function sendAIIntroduction(lead) {
     try {
-        const introductionMessage = `Hi ${customer.name}! 👋 
+        const introductionMessage = `Hi ${lead.name}! 👋 
 
 I'm your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution for your horses.
 
 To get started, I have a few quick questions to understand your needs better. Let's begin! 🐴`;
 
-        await sendSMS(customer.phone, introductionMessage);
+        await sendSMS(lead.phone, introductionMessage);
         
-        // Add introduction to chat data
-        const messageData = {
-            sender: 'assistant',
-            message: introductionMessage,
-            timestamp: new Date().toISOString(),
-            messageId: `intro_${Date.now()}`
-        };
-        
-        const existingMessages = customer.chatData?.messages || [];
-        const updatedMessages = [...existingMessages, messageData];
-        
-        await customerDB.updateCustomer(customer.phone, {
-            chatData: {
-                ...customer.chatData,
-                messages: updatedMessages
-            }
-        });
-        
-        console.log(`🤖 AI introduction sent to ${customer.name} (${customer.phone})`);
+        console.log(`🤖 AI introduction sent to ${lead.name} (${lead.phone})`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
     }
 }
 
 // Process AI response
-async function processAIResponse(customer, userMessage) {
+async function processAIResponse(lead, userMessage) {
     try {
         // Check which questions are already answered
         const answeredQuestions = [];
         const unansweredQuestions = [];
         
-        ['question1', 'question2', 'question3', 'question4'].forEach((q, index) => {
-            if (customer[q]?.answered) {
-                answeredQuestions.push(`${CUSTOM_QUESTIONS[`q${index + 1}`]}: ${customer[q].answer}`);
+        ['q1', 'q2', 'q3', 'q4'].forEach((q, index) => {
+            if (lead.questions[q]?.answered) {
+                answeredQuestions.push(`${CUSTOM_QUESTIONS[q]}: ${lead.questions[q].answer}`);
             } else {
-                unansweredQuestions.push(CUSTOM_QUESTIONS[`q${index + 1}`]);
+                unansweredQuestions.push(CUSTOM_QUESTIONS[q]);
             }
         });
         
@@ -365,43 +292,25 @@ Based on your answers, I'll have our team prepare a customized proposal for your
 
 Thank you for your time! 🐴✨`;
 
-            await sendSMS(customer.phone, qualificationMessage);
+            await sendSMS(lead.phone, qualificationMessage);
             
             // Mark as qualified
-            await customerDB.updateCustomer(customer.phone, {
-                qualified: true,
-                qualifiedDate: new Date().toISOString()
-            });
+            lead.qualified = true;
+            lead.qualifiedDate = new Date().toISOString();
+            lead.status = 'qualified';
+            lead.progress = 100;
             
-            console.log(`🎉 Lead qualified: ${customer.name} (${customer.phone})`);
+            console.log(`🎉 Lead qualified: ${lead.name} (${lead.phone})`);
             return;
         }
         
         // Generate AI response for next question
-        const aiResponse = await generateAIResponse(customer, userMessage, unansweredQuestions);
+        const aiResponse = await generateAIResponse(lead, userMessage, unansweredQuestions);
         
         if (aiResponse) {
-            await sendSMS(customer.phone, aiResponse);
+            await sendSMS(lead.phone, aiResponse);
             
-            // Add AI response to chat data
-            const messageData = {
-                sender: 'assistant',
-                message: aiResponse,
-                timestamp: new Date().toISOString(),
-                messageId: `ai_${Date.now()}`
-            };
-            
-            const existingMessages = customer.chatData?.messages || [];
-            const updatedMessages = [...existingMessages, messageData];
-            
-            await customerDB.updateCustomer(customer.phone, {
-                chatData: {
-                    ...customer.chatData,
-                    messages: updatedMessages
-                }
-            });
-            
-            console.log(`🤖 AI response sent to ${customer.name} (${customer.phone}): "${aiResponse}"`);
+            console.log(`🤖 AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
         }
     } catch (error) {
         console.error('Error processing AI response:', error);
@@ -409,7 +318,7 @@ Thank you for your time! 🐴✨`;
 }
 
 // Generate AI response
-async function generateAIResponse(customer, userMessage, unansweredQuestions) {
+async function generateAIResponse(lead, userMessage, unansweredQuestions) {
     try {
         const OpenAI = require('openai');
         const openai = new OpenAI({
@@ -418,14 +327,14 @@ async function generateAIResponse(customer, userMessage, unansweredQuestions) {
         
         // Find the next question to ask
         const nextQuestion = unansweredQuestions[0];
-        const questionNumber = Object.keys(CUSTOM_QUESTIONS).find(key => 
+        const questionKey = Object.keys(CUSTOM_QUESTIONS).find(key => 
             CUSTOM_QUESTIONS[key] === nextQuestion
         );
         
         const context = `You are a sales assistant helping to qualify leads for an equine stable business.
 
-Customer: ${customer.name} (${customer.phone})
-Email: ${customer.email || 'Not provided'}
+Customer: ${lead.name} (${lead.phone})
+Email: ${lead.email || 'Not provided'}
 
 Next question to ask: ${nextQuestion}
 
@@ -454,13 +363,16 @@ Respond naturally to their message while asking the next question.`;
         
         // Try to extract answer from user message
         if (userMessage.length > 5) { // Basic check for meaningful response
-            await customerDB.updateCustomer(customer.phone, {
-                [questionNumber]: {
-                    answered: true,
-                    answer: userMessage,
-                    answeredDate: new Date().toISOString()
-                }
-            });
+            lead.questions[questionKey] = {
+                answered: true,
+                answer: userMessage,
+                answeredDate: new Date().toISOString()
+            };
+            
+            // Update progress
+            const answeredCount = Object.values(lead.questions).filter(q => q.answered).length;
+            lead.progress = Math.round((answeredCount / 4) * 100);
+            lead.status = lead.progress === 100 ? 'qualified' : 'in-progress';
         }
         
         return response;
@@ -473,6 +385,11 @@ Respond naturally to their message while asking the next question.`;
 // Send SMS
 async function sendSMS(to, message) {
     try {
+        if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_FROM_NUMBER) {
+            console.log('⚠️ Twilio credentials not configured - SMS not sent');
+            return;
+        }
+        
         const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         await client.messages.create({
             body: message,
@@ -504,27 +421,10 @@ function normalizePhoneNumber(phone) {
     return phone;
 }
 
-function calculateProgress(customer) {
-    const questions = ['question1', 'question2', 'question3', 'question4'];
-    const answered = questions.filter(q => customer[q]?.answered).length;
-    return Math.round((answered / 4) * 100);
-}
-
-function getLeadStatus(customer) {
-    const progress = calculateProgress(customer);
-    if (progress === 100) return 'qualified';
-    if (progress > 0) return 'in-progress';
-    return 'new';
-}
-
-// Start the application
-initializeApp().then(() => {
-    app.listen(PORT, () => {
-        console.log(`🚀 Lead Qualification System running on port ${PORT}`);
-        console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
-        console.log(`🌐 Web Interface: http://localhost:${PORT}`);
-    });
-}).catch(error => {
-    console.error('❌ Failed to start application:', error);
-    process.exit(1);
+// Start the server
+app.listen(PORT, () => {
+    console.log(`🚀 Lead Qualification System running on port ${PORT}`);
+    console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
+    console.log(`🌐 Web Interface: http://localhost:${PORT}`);
+    console.log(`🎯 Clean, simple lead qualification system ready!`);
 });
