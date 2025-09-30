@@ -43,6 +43,8 @@ function initializeOpenAI() {
         });
         assistantId = process.env.OPENAI_ASSISTANT_ID;
         console.log('🤖 OpenAI client initialized');
+        console.log('🔑 OpenAI API Key:', process.env.OPENAI_API_KEY ? 'Set' : 'Not set');
+        console.log('🆔 Assistant ID:', assistantId ? assistantId : 'Not set');
     } else {
         console.log('⚠️ OpenAI API key not configured');
     }
@@ -462,6 +464,24 @@ app.get('/webhook/test', (req, res) => {
     });
 });
 
+// Configuration status endpoint
+app.get('/api/config/status', (req, res) => {
+    res.json({
+        openai: {
+            apiKey: process.env.OPENAI_API_KEY ? 'Set' : 'Not set',
+            assistantId: process.env.OPENAI_ASSISTANT_ID ? process.env.OPENAI_ASSISTANT_ID : 'Not set',
+            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo'
+        },
+        twilio: {
+            accountSid: process.env.TWILIO_ACCOUNT_SID ? 'Set' : 'Not set',
+            authToken: process.env.TWILIO_AUTH_TOKEN ? 'Set' : 'Not set',
+            fromNumber: process.env.TWILIO_FROM_NUMBER ? process.env.TWILIO_FROM_NUMBER : 'Not set'
+        },
+        customQuestions: CUSTOM_QUESTIONS,
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Test webhook with sample data
 app.post('/webhook/test', async (req, res) => {
     try {
@@ -671,9 +691,33 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
 async function generateFallbackResponse(lead, userMessage) {
     const answeredCount = Object.keys(lead.answers || {}).length;
     
+    console.log(`📊 Lead progress: ${answeredCount}/${CUSTOM_QUESTIONS.length} questions answered`);
+    console.log(`📝 Custom questions:`, CUSTOM_QUESTIONS);
+    
     if (answeredCount < CUSTOM_QUESTIONS.length) {
         const nextQuestion = CUSTOM_QUESTIONS[answeredCount];
-        return `Thanks for your response! ${nextQuestion}`;
+        console.log(`❓ Asking question ${answeredCount + 1}: ${nextQuestion}`);
+        
+        // Store the answer if it's meaningful
+        if (userMessage.length > 5) {
+            const questionKey = `question_${answeredCount + 1}`;
+            lead.answers = lead.answers || {};
+            lead.answers[questionKey] = userMessage;
+            
+            // Update progress
+            const newAnsweredCount = Object.keys(lead.answers).length;
+            lead.progress = Math.round((newAnsweredCount / 4) * 100);
+            lead.status = lead.progress === 100 ? 'qualified' : 'active';
+            
+            console.log(`✅ Stored answer for question ${answeredCount + 1}: ${userMessage}`);
+        }
+        
+        // Ask the next question
+        if (answeredCount + 1 < CUSTOM_QUESTIONS.length) {
+            return `Thanks for your response! ${CUSTOM_QUESTIONS[answeredCount + 1]}`;
+        } else {
+            return `Thank you for your response! I have all the information I need. Our team will contact you within 24 hours to discuss your equine stable project. 🐴✨`;
+        }
     }
     
     return "Thank you for your response! I'll have our team contact you soon.";

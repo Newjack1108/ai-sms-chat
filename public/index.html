@@ -702,6 +702,9 @@
                             <button class="btn btn-secondary" id="test-webhook-btn" style="padding: 6px 12px; font-size: 0.8em;">
                                 🧪 Test Webhook
                             </button>
+                            <button class="btn btn-secondary" id="check-config-btn" style="padding: 6px 12px; font-size: 0.8em; margin-left: 5px;">
+                                ⚙️ Check Config
+                            </button>
                         </div>
                     </div>
                     
@@ -1339,6 +1342,9 @@
 
             // Test webhook
             document.getElementById('test-webhook-btn').addEventListener('click', testWebhook);
+
+            // Check config
+            document.getElementById('check-config-btn').addEventListener('click', checkConfig);
         }
 
         // Qualify lead
@@ -1546,6 +1552,35 @@
             } catch (error) {
                 console.error('❌ Error testing webhook:', error);
                 showNotification('Error testing webhook', 'error');
+            }
+        }
+
+        // Check configuration function
+        async function checkConfig() {
+            try {
+                showNotification('Checking configuration...', 'warning');
+                
+                const response = await fetch('/api/config/status');
+                
+                if (response.ok) {
+                    const config = await response.json();
+                    console.log('⚙️ Configuration Status:', config);
+                    
+                    let message = 'Configuration Status:\n';
+                    message += `OpenAI API Key: ${config.openai.apiKey}\n`;
+                    message += `Assistant ID: ${config.openai.assistantId}\n`;
+                    message += `Twilio Account SID: ${config.twilio.accountSid}\n`;
+                    message += `Twilio From Number: ${config.twilio.fromNumber}\n`;
+                    message += `Custom Questions: ${config.customQuestions.length} configured`;
+                    
+                    showNotification('Configuration checked! See console for details.', 'success');
+                    alert(message);
+                } else {
+                    showNotification('Failed to check configuration', 'error');
+                }
+            } catch (error) {
+                console.error('❌ Error checking configuration:', error);
+                showNotification('Error checking configuration', 'error');
             }
         }
     </script>
