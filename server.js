@@ -1,4 +1,4 @@
-// CRM-Enhanced Equine SMS Server
+// CRM-Enhanced Equine SMS Server - PostgreSQL Database v2.1.0
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -211,7 +211,7 @@ async function initializeApp() {
 // Start the application
 initializeApp().then(() => {
     app.listen(PORT, () => {
-        console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database v2.1.0 Ready!`);
+        console.log(`🚀 AI SMS Chat server running on port ${PORT} - PostgreSQL Database v2.2.0 Ready!`);
     });
 }).catch(error => {
     console.error('❌ Failed to start application:', error);
@@ -1880,3 +1880,14 @@ function normalizePhoneNumber(phone) {
 }
 
 // Server startup is now handled in initializeApp()
+
+// Test endpoint to verify deployment
+app.get('/api/deployment-test', (req, res) => {
+    res.json({
+        success: true,
+        version: '2.1.0',
+        database: 'PostgreSQL',
+        timestamp: new Date().toISOString(),
+        message: 'PostgreSQL Database v2.1.0 is deployed and working!'
+    });
+});
