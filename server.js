@@ -23,13 +23,16 @@ let leadIdCounter = 1;
 let messages = [];
 let messageIdCounter = 1;
 
-// Default custom questions for lead qualification
+// Default custom questions for lead qualification (can be updated via API)
 let CUSTOM_QUESTIONS = [
+    "What type of building do you require?",
     "How many horses do you currently have?",
     "What type of stable configuration interests you most?",
-    "What's your budget range for this project?",
-    "What's your ideal timeline for completion?"
+    "What's your budget range for this project?"
 ];
+
+// Assistant name (can be updated via API)
+let ASSISTANT_NAME = "Oscar";
 
 // OpenAI Assistant configuration
 let openaiClient = null;
@@ -200,26 +203,51 @@ Thank you for your time! 🐴✨`;
     }
 });
 
-// Update custom questions
-app.post('/api/settings/questions', (req, res) => {
+// Update all settings (custom questions, assistant name, etc.)
+app.post('/api/settings', (req, res) => {
     try {
-        const { questions } = req.body;
-
-        if (!questions || !Array.isArray(questions) || questions.length !== 4) {
-            return res.status(400).json({
-                success: false,
-                error: 'Exactly 4 questions are required'
-            });
+        const { customQuestions, assistantName } = req.body;
+        
+        console.log('📝 Updating settings...');
+        console.log('   Custom Questions:', customQuestions);
+        console.log('   Assistant Name:', assistantName);
+        
+        // Update custom questions if provided
+        if (customQuestions && Array.isArray(customQuestions)) {
+            if (customQuestions.length !== 4) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Exactly 4 questions are required'
+                });
+            }
+            
+            // Filter out empty questions
+            const validQuestions = customQuestions.filter(q => q && q.trim().length > 0);
+            if (validQuestions.length !== 4) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'All 4 questions must be filled out'
+                });
+            }
+            
+            CUSTOM_QUESTIONS = customQuestions;
+            console.log('✅ Custom questions updated');
         }
         
-        CUSTOM_QUESTIONS = questions;
+        // Update assistant name if provided
+        if (assistantName && assistantName.trim().length > 0) {
+            ASSISTANT_NAME = assistantName.trim();
+            console.log('✅ Assistant name updated to:', ASSISTANT_NAME);
+        }
         
         res.json({
             success: true,
-            message: 'Custom questions updated successfully'
+            message: 'Settings updated successfully',
+            customQuestions: CUSTOM_QUESTIONS,
+            assistantName: ASSISTANT_NAME
         });
     } catch (error) {
-        console.error('Error updating questions:', error);
+        console.error('Error updating settings:', error);
         res.status(500).json({
             success: false,
             error: error.message
@@ -227,20 +255,35 @@ app.post('/api/settings/questions', (req, res) => {
     }
 });
 
-// Get custom questions
-app.get('/api/settings/questions', (req, res) => {
+// Get current settings
+app.get('/api/settings', (req, res) => {
     try {
         res.json({
             success: true,
-            questions: CUSTOM_QUESTIONS
+            customQuestions: CUSTOM_QUESTIONS,
+            assistantName: ASSISTANT_NAME
         });
     } catch (error) {
-        console.error('Error fetching questions:', error);
+        console.error('Error fetching settings:', error);
         res.status(500).json({
             success: false,
             error: error.message
         });
     }
+});
+
+// Legacy endpoints for backward compatibility
+app.post('/api/settings/questions', (req, res) => {
+    const { questions } = req.body;
+    req.body.customQuestions = questions;
+    return app._router.handle(req, res);
+});
+
+app.get('/api/settings/questions', (req, res) => {
+    res.json({
+        success: true,
+        questions: CUSTOM_QUESTIONS
+    });
 });
 
 // Create new lead
@@ -547,7 +590,7 @@ async function sendAIIntroduction(lead) {
     try {
         const introductionMessage = `Hi ${lead.name}! 👋 
 
-I'm your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution.
+I'm ${ASSISTANT_NAME}, your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution.
 
 ${CUSTOM_QUESTIONS[0]}`;
 
@@ -563,7 +606,7 @@ ${CUSTOM_QUESTIONS[0]}`;
         };
         messages.push(introMessage);
         
-        console.log(`🤖 AI introduction sent to ${lead.name} (${lead.phone})`);
+        console.log(`🤖 ${ASSISTANT_NAME} introduction sent to ${lead.name} (${lead.phone})`);
         console.log(`📝 First question from custom questions: ${CUSTOM_QUESTIONS[0]}`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
@@ -676,7 +719,7 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
         }
         
         // Build instructions for the Assistant
-        let contextInstructions = `You are helping to qualify a lead named ${lead.name} for an equine stable project.
+        let contextInstructions = `You are ${ASSISTANT_NAME}, helping to qualify a lead named ${lead.name} for an equine stable project.
 
 CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask about anything else:
 

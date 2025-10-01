@@ -1261,7 +1261,30 @@
             settings = newSettings;
             customQuestions = newSettings.customQuestions;
 
-            showNotification('Settings saved successfully!', 'success');
+            // Also send custom questions to the server
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        customQuestions: newSettings.customQuestions,
+                        assistantName: 'Oscar' // Using the assistant name from your OpenAI Assistant
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('✅ Settings saved to server:', result);
+                    showNotification('Settings saved successfully!', 'success');
+                } else {
+                    showNotification('Settings saved locally, but failed to sync to server', 'warning');
+                }
+            } catch (error) {
+                console.error('Error syncing settings to server:', error);
+                showNotification('Settings saved locally, but failed to sync to server', 'warning');
+            }
         }
 
         // Load customers
