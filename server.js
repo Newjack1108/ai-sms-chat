@@ -750,6 +750,8 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
         const unansweredQuestions = [];
         const gatheredInfo = [];
         
+        console.log(`📋 Building AI context with current answers:`, JSON.stringify(lead.answers, null, 2));
+        
         for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
             const questionKey = `question_${i + 1}`;
             const q = CUSTOM_QUESTIONS[i];
@@ -757,8 +759,10 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
             
             if (lead.answers && lead.answers[questionKey]) {
                 gatheredInfo.push(`${questionText}: ${lead.answers[questionKey]}`);
+                console.log(`   ✅ Question ${i + 1} already answered: ${lead.answers[questionKey]}`);
             } else {
                 unansweredQuestions.push(q);
+                console.log(`   ❓ Question ${i + 1} still needs answer: ${questionText}`);
             }
         }
         
@@ -775,28 +779,28 @@ CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask a
 
 ${questionsText}
 
-INFORMATION ALREADY GATHERED:
-${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet - this is the customer\'s first message'}
+✅ INFORMATION ALREADY GATHERED (DO NOT ASK THESE AGAIN):
+${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet'}
 
-STILL NEED ANSWERS FOR:
+❓ STILL NEED ANSWERS FOR (ASK ONLY THESE):
 ${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => {
     const questionText = typeof q === 'object' ? q.question : q;
     const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? q.possibleAnswers : '';
     return `${i + 1}. ${questionText}${possibleAnswers ? '\n   Look for: ' + possibleAnswers : ''}`;
 }).join('\n') : 'All information gathered!'}
 
-STRICT RULES:
-1. NEVER ask a question if you already have the answer (check "INFORMATION ALREADY GATHERED")
-2. NEVER ask follow-up questions about the same topic - accept the first answer and MOVE ON
-3. ANY answer to a question counts as answered - don't dig deeper
-4. If customer says "yes", "no", or gives any response, that IS the answer - move to next question
-5. ONLY ask about the "STILL NEED ANSWERS FOR" items - one at a time
-6. Keep responses very brief (under 100 characters)
-7. When all 4 questions are answered, thank them and say someone will contact them
+STRICT RULES (FOLLOW EXACTLY):
+1. CHECK "INFORMATION ALREADY GATHERED" - if a question is listed there, it's ALREADY ANSWERED. DO NOT ASK IT AGAIN.
+2. ONLY ask questions from "STILL NEED ANSWERS FOR" section
+3. Accept any response as a valid answer - don't ask follow-up questions
+4. Brief acknowledgment (2-3 words) + next question
+5. Keep total response under 100 characters
+6. Move to the NEXT unanswered question immediately
 
-Customer's latest message: "${userMessage}"
+Customer's message: "${userMessage}"
 
-Acknowledge their answer briefly and ask about the NEXT unanswered question. DO NOT ask follow-up questions about the same topic.`;
+Brief response format: "[2-3 word acknowledgment] [Next unanswered question]"
+Example: "Got it! Does your building need to be mobile?"`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
@@ -859,8 +863,8 @@ Acknowledge their answer briefly and ask about the NEXT unanswered question. DO 
             
             console.log(`✅ Assistant response received: "${response}"`);
             
-            // Try to extract answers from the user's message using AI
-            await extractAnswersFromConversation(lead, userMessage, response);
+            // Note: Answer extraction now happens BEFORE AI response generation (line 654-671)
+            // This ensures the AI sees the stored answer in its context and doesn't ask again
             
             return response;
         }

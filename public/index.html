@@ -1203,7 +1203,11 @@
                 const questionDiv = document.createElement('div');
                 questionDiv.className = 'question-item';
                 
-                const question = customQuestions[i - 1] || `Question ${i}`;
+                // Extract question text from object or use string directly
+                const questionData = customQuestions[i - 1];
+                const question = questionData 
+                    ? (typeof questionData === 'object' ? questionData.question : questionData)
+                    : `Question ${i}`;
                 const answer = currentLead.answers ? currentLead.answers[`question_${i}`] : null;
                 
                 if (answer) {
