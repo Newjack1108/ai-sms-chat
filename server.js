@@ -354,8 +354,8 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
             lead.sentToCRM = true;
             lead.crmSentDate = new Date().toISOString();
 
-    res.json({
-        success: true,
+        res.json({
+            success: true,
                 message: 'Lead sent to CRM successfully'
             });
     } else {
@@ -377,7 +377,7 @@ app.post('/api/leads/send-to-crm', async (req, res) => {
 app.delete('/api/leads/:leadId', (req, res) => {
     try {
         const { leadId } = req.params;
-        
+
         const leadIndex = leads.findIndex(l => l.id == leadId);
         if (leadIndex === -1) {
             return res.status(404).json({
@@ -448,7 +448,7 @@ app.post('/webhook/sms', async (req, res) => {
         
         console.log('✅ Webhook processed successfully');
         res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-    } catch (error) {
+            } catch (error) {
         console.error('❌ Error processing webhook:', error);
         res.status(500).send('Error processing webhook');
     }
@@ -521,7 +521,7 @@ app.post('/webhook/test', async (req, res) => {
         
         // Process AI response
         await processAIResponse(lead, testData.Body);
-        
+
         res.json({
             success: true,
             message: 'Test webhook processed successfully',
@@ -547,11 +547,9 @@ async function sendAIIntroduction(lead) {
     try {
         const introductionMessage = `Hi ${lead.name}! 👋 
 
-I'm your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution for your horses.
+I'm your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution.
 
-To get started, I have a few quick questions to understand your needs better.
-
-${CUSTOM_QUESTIONS[0]} 🐴`;
+${CUSTOM_QUESTIONS[0]}`;
 
         await sendSMS(lead.phone, introductionMessage);
         
@@ -566,7 +564,7 @@ ${CUSTOM_QUESTIONS[0]} 🐴`;
         messages.push(introMessage);
         
         console.log(`🤖 AI introduction sent to ${lead.name} (${lead.phone})`);
-        console.log(`📝 First question included: ${CUSTOM_QUESTIONS[0]}`);
+        console.log(`📝 First question from custom questions: ${CUSTOM_QUESTIONS[0]}`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
     }
@@ -680,24 +678,31 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
         // Build instructions for the Assistant
         let contextInstructions = `You are helping to qualify a lead named ${lead.name} for an equine stable project.
 
-IMPORTANT INFORMATION TO GATHER (these are the key questions you need answers to):
-${CUSTOM_QUESTIONS.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask about anything else:
+
+1. ${CUSTOM_QUESTIONS[0]}
+2. ${CUSTOM_QUESTIONS[1]}
+3. ${CUSTOM_QUESTIONS[2]}
+4. ${CUSTOM_QUESTIONS[3]}
 
 INFORMATION ALREADY GATHERED:
-${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet'}
+${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet - this is the customer\'s first message'}
 
-STILL NEED TO FIND OUT:
-${unansweredQuestions.length > 0 ? unansweredQuestions.join('\n') : 'All information gathered!'}
+STILL NEED ANSWERS FOR:
+${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n') : 'All information gathered!'}
 
-Your task:
-1. Have a natural, helpful conversation about their equine stable needs
-2. During the conversation, naturally gather the information listed above
-3. Don't ask questions word-for-word - weave them into natural conversation
-4. Answer any questions they have about stables, horses, or the project
-5. Be friendly, professional, and knowledgeable about equine facilities
-6. When you've gathered all the information, let them know someone will contact them soon
+STRICT RULES:
+1. NEVER ask a question if you already have the answer (check "INFORMATION ALREADY GATHERED")
+2. NEVER ask about topics not in the 4 questions above
+3. ONLY ask about the "STILL NEED ANSWERS FOR" items
+4. Weave questions naturally into conversation - don't ask word-for-word
+5. Answer any questions the customer has about equine stables
+6. Keep responses concise (under 160 characters for SMS)
+7. When all 4 questions are answered, thank them and say someone will contact them
 
-Customer's latest message: "${userMessage}"`;
+Customer's latest message: "${userMessage}"
+
+Respond naturally to their message while gathering ONE piece of missing information.`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
@@ -708,7 +713,15 @@ Customer's latest message: "${userMessage}"`;
             content: contextInstructions
         });
         
-        console.log(`📋 Context sent to Assistant with ${unansweredQuestions.length} questions remaining`);
+        console.log(`📋 Context sent to Assistant:`);
+        console.log(`   ✅ Already answered: ${answeredCount}/4 questions`);
+        console.log(`   ❓ Still need: ${unansweredQuestions.length} answers`);
+        if (gatheredInfo.length > 0) {
+            console.log(`   📊 Gathered info:`, gatheredInfo);
+        }
+        if (unansweredQuestions.length > 0) {
+            console.log(`   🎯 Next to gather:`, unansweredQuestions);
+        }
         
         // Run the assistant
         const run = await openaiClient.beta.threads.runs.create(thread.id, {
