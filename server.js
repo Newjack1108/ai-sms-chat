@@ -838,8 +838,8 @@ async function processAIResponse(lead, userMessage) {
                 lead.status = 'active'; // Update local object
             }
             
-            // Generate friendly conversational response
-            const aiResponse = await generateQualifiedChatResponse(lead, userMessage);
+            // Generate friendly conversational response using Assistant API
+            const aiResponse = await generateQualifiedChatResponseWithAssistant(lead, userMessage);
             
             if (aiResponse) {
                 console.log(`📤 Sending chat response: "${aiResponse}"`);
@@ -1182,6 +1182,95 @@ ${Object.entries(lead.answers || {}).map(([key, value], i) => {
         
     } catch (error) {
         console.error('❌ Error generating qualified chat response:', error);
+        console.error('❌ Error details:', error.message);
+        console.log('⚠️ Falling back to simple response due to error above');
+        return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
+    }
+}
+
+// Generate conversational response for qualified leads using Assistant API
+async function generateQualifiedChatResponseWithAssistant(lead, userMessage) {
+    try {
+        console.log(`💬 Generating qualified chat response with Assistant...`);
+        console.log(`   OpenAI Client: ${openaiClient ? 'Available' : 'NOT AVAILABLE'}`);
+        console.log(`   Assistant ID: ${assistantId ? assistantId : 'NOT SET'}`);
+        
+        if (!openaiClient || !assistantId) {
+            console.log('⚠️ OpenAI Assistant not configured - using simple response');
+            return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
+        }
+        
+        // Build context for post-qualification chat using Assistant
+        const chatInstructions = `CUSTOMER STATUS: This customer (${lead.name}) has already completed the qualification process. All 4 qualification questions have been answered and they've been informed that our team will contact them within 24 hours.
+
+YOUR ROLE NOW: Answer any questions they have about our services, opening hours, products, or anything else. Be helpful, conversational, and natural. This is FREE CHAT MODE - not qualification mode.
+
+THEIR QUALIFICATION INFO (for context):
+${Object.entries(lead.answers || {}).map(([key, value], i) => {
+    const q = CUSTOM_QUESTIONS[i];
+    const questionText = typeof q === 'object' ? q.question : q;
+    return `- ${questionText}: ${value}`;
+}).join('\n')}
+
+Customer's message: "${userMessage}"
+
+Respond naturally and helpfully. Answer their specific questions about our business, services, opening hours, etc. Be conversational and warm.`;
+
+        // Create a thread for this conversation
+        const thread = await openaiClient.beta.threads.create();
+        
+        // Add the message to thread
+        await openaiClient.beta.threads.messages.create(thread.id, {
+            role: 'user',
+            content: chatInstructions
+        });
+        
+        console.log(`📋 Chat context sent to Assistant for qualified lead`);
+        
+        // Run the assistant
+        const run = await openaiClient.beta.threads.runs.create(thread.id, {
+            assistant_id: assistantId
+        });
+        
+        // Wait for completion with timeout
+        console.log(`⏳ Waiting for Assistant chat response...`);
+        let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+        let attempts = 0;
+        const maxAttempts = 30;
+        
+        while (runStatus.status !== 'completed' && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+            attempts++;
+            
+            if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+                console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
+                console.log(`❌ Last error:`, JSON.stringify(runStatus.last_error, null, 2));
+                console.log(`❌ Full run status:`, JSON.stringify(runStatus, null, 2));
+                throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
+            }
+        }
+        
+        if (attempts >= maxAttempts) {
+            throw new Error('Assistant response timeout');
+        }
+        
+        console.log(`✅ Assistant chat completed in ${attempts} seconds`);
+        
+        // Get the assistant's response
+        const messages = await openaiClient.beta.threads.messages.list(thread.id);
+        const assistantMessage = messages.data[0];
+        
+        if (assistantMessage && assistantMessage.content[0].type === 'text') {
+            const response = assistantMessage.content[0].text.value;
+            console.log(`✅ Chat response received: "${response}"`);
+            return response;
+        }
+        
+        console.log(`❌ No valid assistant message found`);
+        return "You're welcome! Our team will be in touch with you soon. Feel free to ask if you have any other questions!";
+    } catch (error) {
+        console.error('❌ Error generating qualified chat response with Assistant:', error);
         console.error('❌ Error details:', error.message);
         console.log('⚠️ Falling back to simple response due to error above');
         return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
