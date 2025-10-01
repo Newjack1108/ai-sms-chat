@@ -724,9 +724,16 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
 CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask about anything else:
 
 1. ${CUSTOM_QUESTIONS[0]}
+   Example answers: "Mobile building", "Static building", "Permanent structure", "Portable unit"
+
 2. ${CUSTOM_QUESTIONS[1]}
+   Example answers: Any number or description
+
 3. ${CUSTOM_QUESTIONS[2]}
+   Example answers: Any budget amount or range
+
 4. ${CUSTOM_QUESTIONS[3]}
+   Example answers: Any timeframe or date
 
 INFORMATION ALREADY GATHERED:
 ${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet - this is the customer\'s first message'}
@@ -736,16 +743,16 @@ ${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => `${i + 1}. 
 
 STRICT RULES:
 1. NEVER ask a question if you already have the answer (check "INFORMATION ALREADY GATHERED")
-2. NEVER ask about topics not in the 4 questions above
-3. ONLY ask about the "STILL NEED ANSWERS FOR" items
-4. Weave questions naturally into conversation - don't ask word-for-word
-5. Answer any questions the customer has about equine stables
-6. Keep responses concise (under 160 characters for SMS)
+2. NEVER ask follow-up questions about the same topic - accept the first answer and MOVE ON
+3. ANY answer to a question counts as answered - don't dig deeper
+4. If customer says "yes", "no", or gives any response, that IS the answer - move to next question
+5. ONLY ask about the "STILL NEED ANSWERS FOR" items - one at a time
+6. Keep responses very brief (under 100 characters)
 7. When all 4 questions are answered, thank them and say someone will contact them
 
 Customer's latest message: "${userMessage}"
 
-Respond naturally to their message while gathering ONE piece of missing information.`;
+Acknowledge their answer briefly and ask about the NEXT unanswered question. DO NOT ask follow-up questions about the same topic.`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
@@ -907,11 +914,13 @@ ${unansweredQuestions.map(q => `${q.number}. ${q.question}`).join('\n')}
 
 CUSTOMER MESSAGE: "${userMessage}"
 
+IMPORTANT: Accept ANY response as an answer. Even "yes", "no", "maybe", or short responses count as valid answers.
+
 For each question that has an answer in the customer's message, respond with:
-ANSWER_${q.number}: [the specific answer]
+ANSWER_${q.number}: [the customer's exact response]
 
 If the customer's message doesn't answer a question, don't include it.
-Be specific and extract the actual information provided.`;
+Accept the first answer given - don't wait for more details.`;
 
         const completion = await openaiClient.chat.completions.create({
             model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
