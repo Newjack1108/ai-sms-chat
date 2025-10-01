@@ -572,6 +572,49 @@
             background: rgba(255, 255, 255, 0.3);
         }
 
+        .customer-ai-btn {
+            position: absolute;
+            top: 15px;
+            right: 50px;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            opacity: 0;
+            z-index: 10;
+        }
+
+        .customer-item:hover .customer-ai-btn {
+            opacity: 1;
+        }
+
+        .customer-ai-btn:hover {
+            background: #0056b3;
+            transform: scale(1.05);
+        }
+
+        .customer-ai-btn.paused {
+            background: #ffc107;
+        }
+
+        .customer-ai-btn.paused:hover {
+            background: #e0a800;
+        }
+
+        .customer-item.selected .customer-ai-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .customer-item.selected .customer-ai-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
         .customer-item {
             position: relative;
         }
@@ -723,6 +766,39 @@
         }
 
         .customer-list-item.selected .list-delete-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .list-ai-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+            margin-right: 8px;
+        }
+
+        .list-ai-btn:hover {
+            background: #0056b3;
+            transform: scale(1.05);
+        }
+
+        .list-ai-btn.paused {
+            background: #ffc107;
+        }
+
+        .list-ai-btn.paused:hover {
+            background: #e0a800;
+        }
+
+        .customer-list-item.selected .list-ai-btn {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .customer-list-item.selected .list-ai-btn:hover {
             background: rgba(255, 255, 255, 0.3);
         }
 
@@ -1637,6 +1713,9 @@
                 
                 customerDiv.innerHTML = `
                     <button class="customer-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️ Delete</button>
+                    <button class="customer-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})">
+                        ${customer.ai_paused ? '⏸️ Resume' : '🤖 Pause'}
+                    </button>
                     <div class="customer-name">${customer.name || 'Unknown'}</div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
@@ -1708,6 +1787,9 @@
                         <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source || 'Unknown'}</div>
                     </div>
                     <div class="list-customer-actions">
+                        <button class="list-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})" title="${customer.ai_paused ? 'Resume AI' : 'Pause AI'}">
+                            ${customer.ai_paused ? '⏸️' : '🤖'}
+                        </button>
                         <button class="list-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️</button>
                     </div>
                 `;
@@ -1855,6 +1937,43 @@
             } catch (error) {
                 console.error('Error deleting customer:', error);
                 showNotification('Error deleting customer', 'error');
+            }
+        }
+
+        // Toggle AI pause/resume for a customer
+        async function toggleAI(event, customerId, isPaused) {
+            event.stopPropagation(); // Prevent card selection when clicking button
+            
+            const customer = customers.find(c => c.id === customerId);
+            if (!customer) return;
+            
+            const action = isPaused === 'true' ? 'unpause' : 'pause';
+            const actionText = isPaused === 'true' ? 'resume' : 'pause';
+            
+            try {
+                const response = await fetch(`/api/leads/${customerId}/${action}-ai`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification(`AI ${actionText}d for ${customer.name}`, 'success');
+                    
+                    // Update local customer data
+                    customer.ai_paused = isPaused === 'true' ? 0 : 1;
+                    
+                    // Refresh customer list to show updated button
+                    if (customerView === 'card') {
+                        renderCustomersList();
+                    } else {
+                        renderCustomersListView();
+                    }
+                } else {
+                    showNotification(`Failed to ${actionText} AI for ${customer.name}`, 'error');
+                }
+            } catch (error) {
+                console.error(`Error ${action}ing AI:`, error);
+                showNotification(`Error ${action}ing AI`, 'error');
             }
         }
 

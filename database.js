@@ -27,6 +27,7 @@ function initializeDatabase() {
             progress INTEGER DEFAULT 0,
             qualified INTEGER DEFAULT 0,
             archived INTEGER DEFAULT 0,
+            ai_paused INTEGER DEFAULT 0,
             answers TEXT,
             qualifiedDate TEXT,
             createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -72,8 +73,8 @@ initializeDatabase();
 const statements = {
     // Lead operations
     createLead: db.prepare(`
-        INSERT INTO leads (phone, name, email, source, status, progress, qualified, answers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, answers)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     
     getLeadByPhone: db.prepare(`
@@ -91,7 +92,7 @@ const statements = {
     updateLead: db.prepare(`
         UPDATE leads 
         SET name = ?, email = ?, status = ?, progress = ?, qualified = ?, 
-            answers = ?, qualifiedDate = ?, lastContact = CURRENT_TIMESTAMP
+            ai_paused = ?, answers = ?, qualifiedDate = ?, lastContact = CURRENT_TIMESTAMP
         WHERE id = ?
     `),
     
@@ -147,6 +148,7 @@ class LeadDatabase {
                 data.status || 'new',
                 data.progress || 0,
                 data.qualified || 0,
+                data.ai_paused || 0,
                 answers
             );
             
@@ -217,6 +219,7 @@ class LeadDatabase {
                 data.status,
                 data.progress,
                 data.qualified ? 1 : 0,
+                data.ai_paused ? 1 : 0,
                 answers,
                 data.qualifiedDate || null,
                 id
@@ -390,6 +393,62 @@ class LeadDatabase {
         } catch (error) {
             console.error('❌ Error getting assistant name:', error);
             return null;
+        }
+    }
+
+    // Pause AI for a lead
+    static pauseAI(leadId) {
+        try {
+            const lead = this.getLeadById(leadId);
+            if (!lead) {
+                console.error(`❌ Lead not found: ${leadId}`);
+                return false;
+            }
+            
+            statements.updateLead.run(
+                lead.name,
+                lead.email,
+                lead.status,
+                lead.progress,
+                lead.qualified ? 1 : 0,
+                1,    // ai_paused = true
+                lead.answers ? JSON.stringify(lead.answers) : '{}',
+                lead.qualifiedDate,
+                leadId
+            );
+            console.log(`⏸️ AI paused for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error pausing AI:', error);
+            return false;
+        }
+    }
+
+    // Unpause AI for a lead
+    static unpauseAI(leadId) {
+        try {
+            const lead = this.getLeadById(leadId);
+            if (!lead) {
+                console.error(`❌ Lead not found: ${leadId}`);
+                return false;
+            }
+            
+            statements.updateLead.run(
+                lead.name,
+                lead.email,
+                lead.status,
+                lead.progress,
+                lead.qualified ? 1 : 0,
+                0,    // ai_paused = false
+                lead.answers ? JSON.stringify(lead.answers) : '{}',
+                lead.qualifiedDate,
+                leadId
+            );
+            console.log(`▶️ AI unpaused for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error unpausing AI:', error);
+            return false;
         }
     }
 }

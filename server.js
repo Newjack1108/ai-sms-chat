@@ -481,6 +481,120 @@ app.delete('/api/leads/:leadId', (req, res) => {
     }
 });
 
+// Pause AI for a lead
+app.post('/api/leads/:leadId/pause-ai', (req, res) => {
+    try {
+        const { leadId } = req.params;
+        
+        const success = LeadDatabase.pauseAI(parseInt(leadId));
+        if (success) {
+            res.json({ success: true, message: 'AI paused successfully' });
+        } else {
+            res.status(404).json({ success: false, message: 'Lead not found' });
+        }
+    } catch (error) {
+        console.error('Error pausing AI:', error);
+        res.status(500).json({ success: false, message: 'Error pausing AI' });
+    }
+});
+
+// Unpause AI for a lead
+app.post('/api/leads/:leadId/unpause-ai', (req, res) => {
+    try {
+        const { leadId } = req.params;
+        
+        const success = LeadDatabase.unpauseAI(parseInt(leadId));
+        if (success) {
+            res.json({ success: true, message: 'AI unpaused successfully' });
+        } else {
+            res.status(404).json({ success: false, message: 'Lead not found' });
+        }
+    } catch (error) {
+        console.error('Error unpausing AI:', error);
+        res.status(500).json({ success: false, message: 'Error unpausing AI' });
+    }
+});
+
+// Reactivate lead from external source (Gravity Forms, Facebook Lead Gen, etc.)
+app.post('/api/leads/reactivate', async (req, res) => {
+    try {
+        const { phone, source, name, email } = req.body;
+        
+        if (!phone) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phone number is required'
+            });
+        }
+        
+        const normalizedPhone = normalizePhoneNumber(phone);
+        console.log(`🔄 Reactivating lead from external source: ${normalizedPhone}`);
+        console.log(`📦 Source: ${source || 'external'}`);
+        
+        // Check if lead exists
+        let lead = LeadDatabase.checkExistingCustomer(normalizedPhone);
+        
+        if (lead) {
+            // Update existing lead
+            console.log(`👤 Found existing lead: ${lead.name} (ID: ${lead.id})`);
+            
+            // Update lead data and unpause AI
+            LeadDatabase.updateLead(lead.id, {
+                name: name || lead.name,
+                email: email || lead.email,
+                status: 'active',
+                progress: lead.progress,
+                qualified: lead.qualified,
+                ai_paused: 0, // Unpause AI
+                answers: lead.answers,
+                qualifiedDate: lead.qualifiedDate
+            });
+            
+            // Update last contact time
+            LeadDatabase.updateLastContact(lead.id);
+            
+            console.log(`✅ Lead reactivated: ${lead.name} - AI unpaused`);
+            
+            res.json({
+                success: true,
+                message: 'Lead reactivated successfully',
+                leadId: lead.id,
+                action: 'reactivated'
+            });
+        } else {
+            // Create new lead
+            console.log(`🆕 Creating new lead from external source: ${normalizedPhone}`);
+            
+            lead = LeadDatabase.createLead({
+                phone: normalizedPhone,
+                name: name || 'Unknown',
+                email: email || '',
+                source: source || 'external',
+                status: 'new',
+                progress: 0,
+                qualified: false,
+                ai_paused: 0
+            });
+            
+            console.log(`✅ New lead created from external source: ${lead.name} (ID: ${lead.id})`);
+            
+            res.json({
+                success: true,
+                message: 'New lead created successfully',
+                leadId: lead.id,
+                action: 'created'
+            });
+        }
+    } catch (error) {
+        console.error('Error reactivating lead:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error reactivating lead',
+            error: error.message
+        });
+    }
+});
+
 // SMS Webhook - Handle incoming messages
 app.post('/webhook/sms', async (req, res) => {
     try {
@@ -693,6 +807,13 @@ async function processAIResponse(lead, userMessage) {
     try {
         console.log(`🔄 Processing AI response for lead: ${lead.name} (${lead.phone})`);
         console.log(`📝 User message: "${userMessage}"`);
+        
+        // Check if AI is paused for this lead
+        if (lead.ai_paused === 1 || lead.ai_paused === true) {
+            console.log(`⏸️ AI is paused for this lead - no response will be sent`);
+            console.log(`📝 Message stored but no AI response generated`);
+            return; // Exit without sending AI response
+        }
         
         // Store incoming message in database
         LeadDatabase.createMessage(lead.id, 'customer', userMessage);
