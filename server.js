@@ -1,9 +1,10 @@
-// Lead Qualification System - Professional CRM Interface v2.0.0
+// Lead Qualification System - Professional CRM Interface v5.5.0 with Database Persistence
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
 const OpenAI = require('openai');
+const { LeadDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,11 +18,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// Simple in-memory storage for demo (will be replaced with database)
-let leads = [];
-let leadIdCounter = 1;
-let messages = [];
-let messageIdCounter = 1;
+// Database is now persistent - no more in-memory storage
+console.log('💾 Using SQLite database for persistent storage');
 
 // Default custom questions for lead qualification (can be updated via API)
 let CUSTOM_QUESTIONS = [
@@ -75,8 +73,9 @@ initializeOpenAI();
 // Get all leads
 app.get('/api/leads', (req, res) => {
     try {
+        const leads = LeadDatabase.getAllLeads();
         res.json(leads);
-        } catch (error) {
+    } catch (error) {
         console.error('Error fetching leads:', error);
         res.status(500).json({
             success: false,
@@ -89,9 +88,9 @@ app.get('/api/leads', (req, res) => {
 app.get('/api/leads/:leadId/messages', (req, res) => {
     try {
         const { leadId } = req.params;
-        const leadMessages = messages.filter(msg => msg.leadId == leadId);
+        const leadMessages = LeadDatabase.getMessagesByLeadId(parseInt(leadId));
         res.json(leadMessages);
-        } catch (error) {
+    } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({
             success: false,
@@ -112,7 +111,7 @@ app.post('/api/leads/send-message', async (req, res) => {
             });
         }
         
-        const lead = leads.find(l => l.id == leadId);
+        const lead = LeadDatabase.getLeadById(parseInt(leadId));
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -120,15 +119,8 @@ app.post('/api/leads/send-message', async (req, res) => {
             });
         }
         
-        // Store user message
-        const userMessage = {
-            id: messageIdCounter++,
-            leadId: leadId,
-            sender: 'user',
-            content: message,
-            timestamp: new Date().toISOString()
-        };
-        messages.push(userMessage);
+        // Store user message in database
+        LeadDatabase.createMessage(parseInt(leadId), 'user', message);
         
         // Send SMS to customer
         await sendSMS(lead.phone, message);
@@ -137,15 +129,8 @@ app.post('/api/leads/send-message', async (req, res) => {
         const aiResponse = await generateAIResponseWithAssistant(lead, message);
         
         if (aiResponse) {
-            // Store AI response
-            const aiMessage = {
-                id: messageIdCounter++,
-                leadId: leadId,
-                sender: 'assistant',
-                content: aiResponse,
-                timestamp: new Date().toISOString()
-            };
-            messages.push(aiMessage);
+            // Store AI response in database
+            LeadDatabase.createMessage(parseInt(leadId), 'assistant', aiResponse);
             
             // Send AI response as SMS
             await sendSMS(lead.phone, aiResponse);
@@ -167,9 +152,9 @@ app.post('/api/leads/send-message', async (req, res) => {
 // Qualify lead
 app.post('/api/leads/:leadId/qualify', async (req, res) => {
     try {
-        const { leadId } = req.params;
+        const { leadId} = req.params;
         
-        const lead = leads.find(l => l.id == leadId);
+        const lead = LeadDatabase.getLeadById(parseInt(leadId));
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -177,11 +162,14 @@ app.post('/api/leads/:leadId/qualify', async (req, res) => {
             });
         }
         
-        // Mark as qualified
-        lead.qualified = true;
-        lead.status = 'qualified';
-        lead.progress = 100;
-        lead.qualifiedDate = new Date().toISOString();
+        // Mark as qualified in database
+        LeadDatabase.updateLead(parseInt(leadId), {
+            ...lead,
+            qualified: true,
+            status: 'qualified',
+            progress: 100,
+            qualifiedDate: new Date().toISOString()
+        });
         
         // Send qualification message
         const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
@@ -324,8 +312,8 @@ app.post('/api/leads', async (req, res) => {
 
         const normalizedPhone = normalizePhoneNumber(phone);
         
-        // Check if lead already exists
-        const existingLead = leads.find(lead => lead.phone === normalizedPhone);
+        // Check if lead already exists in database
+        const existingLead = LeadDatabase.checkExistingCustomer(normalizedPhone);
         if (existingLead) {
             return res.status(400).json({
                 success: false,
@@ -333,21 +321,19 @@ app.post('/api/leads', async (req, res) => {
             });
         }
         
-        // Create new lead
-        const newLead = {
-            id: leadIdCounter++,
+        // Create new lead in database
+        const newLead = LeadDatabase.createLead({
+            phone: normalizedPhone,
             name: name,
             email: email,
-            phone: normalizedPhone,
             source: source || 'manual',
             status: 'new',
             progress: 0,
             qualified: false,
-            answers: {},
-            createdAt: new Date().toISOString()
-        };
+            answers: {}
+        });
         
-        leads.push(newLead);
+        console.log(`✅ Lead created with ID: ${newLead.id}`);
         
         // Send AI introduction message (don't fail the request if this fails)
         try {
@@ -441,16 +427,16 @@ app.delete('/api/leads/:leadId', (req, res) => {
     try {
         const { leadId } = req.params;
 
-        const leadIndex = leads.findIndex(l => l.id == leadId);
-        if (leadIndex === -1) {
+        const lead = LeadDatabase.getLeadById(parseInt(leadId));
+        if (!lead) {
             return res.status(404).json({
                 success: false,
                 error: 'Lead not found'
             });
         }
         
-        // Remove lead from array
-        leads.splice(leadIndex, 1);
+        // Permanently delete lead from database (includes cascade delete of messages)
+        LeadDatabase.deleteLead(parseInt(leadId));
 
         res.json({
             success: true,
@@ -484,25 +470,33 @@ app.post('/webhook/sms', async (req, res) => {
         const normalizedPhone = normalizePhoneNumber(From);
         console.log(`📞 Normalized phone: ${normalizedPhone}`);
         
-        // Get or create lead
-        let lead = leads.find(l => l.phone === normalizedPhone);
+        // Check if customer already exists in database
+        let lead = LeadDatabase.checkExistingCustomer(normalizedPhone);
+        
         if (!lead) {
-            console.log(`👤 Creating new lead for ${normalizedPhone}`);
-            lead = {
-                id: leadIdCounter++,
+            // New customer - create in database
+            console.log(`🆕 Creating new lead for ${normalizedPhone}`);
+            lead = LeadDatabase.createLead({
+                phone: normalizedPhone,
                 name: 'Unknown',
                 email: '',
-                phone: normalizedPhone,
                 source: 'inbound_sms',
                 status: 'new',
                 progress: 0,
                 qualified: false,
-                answers: {},
-                createdAt: new Date().toISOString()
-            };
-            leads.push(lead);
+                answers: {}
+            });
+            console.log(`✅ New lead created with ID: ${lead.id}`);
         } else {
-            console.log(`👤 Found existing lead: ${lead.name} (${lead.phone})`);
+            // Returning customer - load conversation history
+            console.log(`🔄 Existing customer found: ${lead.name} (ID: ${lead.id})`);
+            console.log(`   Status: ${lead.status}, Progress: ${lead.progress}%`);
+            
+            const messageHistory = LeadDatabase.getConversationHistory(lead.id);
+            console.log(`   📜 Loaded ${messageHistory.length} previous messages`);
+            
+            // Update last contact time
+            LeadDatabase.updateLastContact(lead.id);
         }
         
         // Process AI response
@@ -618,15 +612,8 @@ ${firstQuestion}`;
 
         await sendSMS(lead.phone, introductionMessage);
         
-        // Store introduction message
-        const introMessage = {
-            id: messageIdCounter++,
-            leadId: lead.id,
-            sender: 'assistant',
-            content: introductionMessage,
-            timestamp: new Date().toISOString()
-        };
-        messages.push(introMessage);
+        // Store introduction message in database
+        LeadDatabase.createMessage(lead.id, 'assistant', introductionMessage);
         
         console.log(`🤖 ${ASSISTANT_NAME} introduction sent to ${lead.name} (${lead.phone})`);
         console.log(`📝 First question from custom questions: ${CUSTOM_QUESTIONS[0]}`);
@@ -641,15 +628,8 @@ async function processAIResponse(lead, userMessage) {
         console.log(`🔄 Processing AI response for lead: ${lead.name} (${lead.phone})`);
         console.log(`📝 User message: "${userMessage}"`);
         
-        // Store incoming message
-        const incomingMessage = {
-            id: messageIdCounter++,
-            leadId: lead.id,
-            sender: 'customer',
-            content: userMessage,
-            timestamp: new Date().toISOString()
-        };
-        messages.push(incomingMessage);
+        // Store incoming message in database
+        LeadDatabase.createMessage(lead.id, 'customer', userMessage);
         
         // Check if lead is already qualified - if so, enter free chat mode
         if (lead.qualified === true || lead.status === 'qualified') {
@@ -662,15 +642,8 @@ async function processAIResponse(lead, userMessage) {
                 console.log(`📤 Sending chat response: "${aiResponse}"`);
                 await sendSMS(lead.phone, aiResponse);
                 
-                // Store AI response
-                const aiMessage = {
-                    id: messageIdCounter++,
-                    leadId: lead.id,
-                    sender: 'assistant',
-                    content: aiResponse,
-                    timestamp: new Date().toISOString()
-                };
-                messages.push(aiMessage);
+                // Store AI response in database
+                LeadDatabase.createMessage(lead.id, 'assistant', aiResponse);
                 
                 console.log(`✅ Chat response sent to ${lead.name} (${lead.phone})`);
             }
@@ -692,6 +665,17 @@ async function processAIResponse(lead, userMessage) {
             lead.progress = Math.round((newAnsweredCount / 4) * 100);
             lead.status = lead.progress === 100 ? 'qualified' : 'active';
             
+            // Save to database
+            LeadDatabase.updateLead(lead.id, {
+                name: lead.name,
+                email: lead.email,
+                status: lead.status,
+                progress: lead.progress,
+                qualified: lead.qualified,
+                answers: lead.answers,
+                qualifiedDate: lead.qualifiedDate
+            });
+            
             console.log(`✅ Stored answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
             console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
         }
@@ -712,21 +696,25 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
 
             await sendSMS(lead.phone, qualificationMessage);
             
-            // Store qualification message
-            const qualMessage = {
-                id: messageIdCounter++,
-                leadId: lead.id,
-                sender: 'assistant',
-                content: qualificationMessage,
-                timestamp: new Date().toISOString()
-            };
-            messages.push(qualMessage);
+            // Store qualification message in database
+            LeadDatabase.createMessage(lead.id, 'assistant', qualificationMessage);
             
             // Mark as qualified
             lead.qualified = true;
             lead.qualifiedDate = new Date().toISOString();
             lead.status = 'qualified';
             lead.progress = 100;
+            
+            // Update in database
+            LeadDatabase.updateLead(lead.id, {
+                name: lead.name,
+                email: lead.email,
+                status: lead.status,
+                progress: lead.progress,
+                qualified: true,
+                answers: lead.answers,
+                qualifiedDate: lead.qualifiedDate
+            });
             
             console.log(`🎉 Lead qualified: ${lead.name} (${lead.phone})`);
             return;
@@ -740,15 +728,8 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
             console.log(`📤 Sending AI response: "${aiResponse}"`);
             await sendSMS(lead.phone, aiResponse);
             
-            // Store AI response
-            const aiMessage = {
-                id: messageIdCounter++,
-                leadId: lead.id,
-                sender: 'assistant',
-                content: aiResponse,
-                timestamp: new Date().toISOString()
-            };
-            messages.push(aiMessage);
+            // Store AI response in database
+            LeadDatabase.createMessage(lead.id, 'assistant', aiResponse);
             
             console.log(`✅ AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
         } else {
