@@ -951,8 +951,16 @@ function normalizePhoneNumber(phone) {
 
 // Start the server
 app.listen(PORT, () => {
-    console.log(`🚀 Lead Qualification System running on port ${PORT}`);
+    console.log(`🚀 Lead Qualification System v5.1.0 running on port ${PORT}`);
     console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
     console.log(`🌐 Web Interface: http://localhost:${PORT}`);
-    console.log(`🎯 Clean, simple lead qualification system ready!`);
+    console.log(`🎯 Natural AI conversation system ready!`);
+    console.log(`\n📊 Configuration Summary:`);
+    console.log(`   OpenAI API Key: ${process.env.OPENAI_API_KEY ? '✅ Set' : '❌ Not set'}`);
+    console.log(`   Assistant ID: ${process.env.OPENAI_ASSISTANT_ID ? `✅ ${process.env.OPENAI_ASSISTANT_ID}` : '❌ Not set'}`);
+    console.log(`   Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? '✅ Set' : '❌ Not set'}`);
+    console.log(`   Twilio From Number: ${process.env.TWILIO_FROM_NUMBER || '❌ Not set'}`);
+    console.log(`\n🎯 Custom Questions:`);
+    CUSTOM_QUESTIONS.forEach((q, i) => console.log(`   ${i + 1}. ${q}`));
+    console.log('\n');
 });

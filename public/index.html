@@ -945,6 +945,7 @@
         let customers = [];
         let settings = {};
         let customQuestions = [];
+        let messageCheckInterval = null;
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -953,6 +954,7 @@
             loadLeads();
             loadCustomers();
             setupEventListeners();
+            startMessagePolling();
         });
 
         // Tab functionality
@@ -1581,6 +1583,51 @@
             } catch (error) {
                 console.error('❌ Error checking configuration:', error);
                 showNotification('Error checking configuration', 'error');
+            }
+        }
+
+        // Start polling for new messages
+        function startMessagePolling() {
+            // Check for new messages every 3 seconds
+            messageCheckInterval = setInterval(() => {
+                if (currentLead) {
+                    checkForNewMessages();
+                }
+            }, 3000);
+            console.log('📱 Message polling started (every 3 seconds)');
+        }
+
+        // Stop polling for new messages
+        function stopMessagePolling() {
+            if (messageCheckInterval) {
+                clearInterval(messageCheckInterval);
+                messageCheckInterval = null;
+                console.log('⏹️ Message polling stopped');
+            }
+        }
+
+        // Check for new messages for current lead
+        async function checkForNewMessages() {
+            if (!currentLead) return;
+            
+            try {
+                const response = await fetch(`/api/leads/${currentLead.id}/messages`);
+                if (response.ok) {
+                    const messages = await response.json();
+                    const chatMessages = document.getElementById('chat-messages');
+                    const currentMessageCount = chatMessages.querySelectorAll('.message').length;
+                    
+                    // Only update if message count changed
+                    if (messages.length !== currentMessageCount) {
+                        console.log(`📬 New messages detected: ${messages.length} total`);
+                        renderMessages(messages);
+                        
+                        // Also refresh the leads list to update status
+                        loadLeads();
+                    }
+                }
+            } catch (error) {
+                // Silently fail - don't spam console with errors
             }
         }
     </script>
