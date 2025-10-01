@@ -888,38 +888,18 @@ async function generateFallbackResponse(lead, userMessage) {
     console.log(`📝 Custom questions:`, CUSTOM_QUESTIONS);
     console.log(`💬 User message length: ${userMessage.length} characters`);
     
+    // Note: Answer storage happens in processAIResponse() before this function is called
+    // Do NOT store answers here to avoid duplicate storage
+    
     if (answeredCount < CUSTOM_QUESTIONS.length) {
         const q = CUSTOM_QUESTIONS[answeredCount];
         const nextQuestion = typeof q === 'object' ? q.question : q;
         console.log(`❓ Asking question ${answeredCount + 1}: ${nextQuestion}`);
         
-        // Store the answer if it's meaningful
-        if (userMessage.length > 5) {
-            const questionKey = `question_${answeredCount + 1}`;
-            lead.answers = lead.answers || {};
-            lead.answers[questionKey] = userMessage;
-            
-            // Update progress
-            const newAnsweredCount = Object.keys(lead.answers).length;
-            lead.progress = Math.round((newAnsweredCount / 4) * 100);
-            lead.status = lead.progress === 100 ? 'qualified' : 'active';
-            
-            console.log(`✅ Stored answer for question ${answeredCount + 1}: ${userMessage}`);
-            console.log(`📈 Updated progress: ${lead.progress}%`);
-        } else {
-            console.log(`⚠️ User message too short (${userMessage.length} chars), not storing as answer`);
-        }
-        
         // Ask the next question
-        if (answeredCount + 1 < CUSTOM_QUESTIONS.length) {
-            const nextQ = CUSTOM_QUESTIONS[answeredCount + 1];
-            const nextQuestionText = typeof nextQ === 'object' ? nextQ.question : nextQ;
-            const response = `Thanks for your response! ${nextQuestionText}`;
+        if (answeredCount < CUSTOM_QUESTIONS.length) {
+            const response = `Thanks! ${nextQuestion}`;
             console.log(`📤 Fallback response: ${response}`);
-            return response;
-        } else {
-            const response = `Thank you for your response! I have all the information I need. Our team will contact you within 24 hours to discuss your equine stable project. 🐴✨`;
-            console.log(`📤 Final response: ${response}`);
             return response;
         }
     }
