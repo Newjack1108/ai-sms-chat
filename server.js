@@ -651,7 +651,26 @@ async function processAIResponse(lead, userMessage) {
         };
         messages.push(incomingMessage);
         
-        // Check if all questions are answered
+        // FIRST: Extract answer from user message BEFORE generating AI response
+        console.log(`🔍 Extracting answer BEFORE generating response...`);
+        const answeredCountBefore = Object.keys(lead.answers || {}).length;
+        
+        // Simple answer storage for current unanswered question
+        if (answeredCountBefore < CUSTOM_QUESTIONS.length && userMessage.trim().length > 0) {
+            const questionKey = `question_${answeredCountBefore + 1}`;
+            lead.answers = lead.answers || {};
+            lead.answers[questionKey] = userMessage;
+            
+            // Update progress
+            const newAnsweredCount = Object.keys(lead.answers).length;
+            lead.progress = Math.round((newAnsweredCount / 4) * 100);
+            lead.status = lead.progress === 100 ? 'qualified' : 'active';
+            
+            console.log(`✅ Stored answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
+            console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
+        }
+        
+        // Check if all questions are answered NOW (after storing answer)
         const answeredCount = Object.keys(lead.answers || {}).length;
         console.log(`📊 Current progress: ${answeredCount}/4 questions answered`);
         console.log(`📋 Current answers:`, lead.answers);
