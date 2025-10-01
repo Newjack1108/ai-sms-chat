@@ -983,99 +983,57 @@ async function generateFallbackResponse(lead, userMessage) {
     return response;
 }
 
-// Generate conversational response for qualified leads
+// Generate conversational response for qualified leads (using Chat Completions API for reliability)
 async function generateQualifiedChatResponse(lead, userMessage) {
     try {
         console.log(`💬 Generating qualified chat response...`);
         console.log(`   OpenAI Client: ${openaiClient ? 'Available' : 'NOT AVAILABLE'}`);
-        console.log(`   Assistant ID: ${assistantId ? assistantId : 'NOT SET'}`);
         
-        if (!openaiClient || !assistantId) {
-            console.log('⚠️ OpenAI Assistant not configured - using simple response');
-            console.log('   This means the assistant cannot answer questions - check your OPENAI_API_KEY and OPENAI_ASSISTANT_ID env vars');
+        if (!openaiClient) {
+            console.log('⚠️ OpenAI client not configured - using simple response');
             return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
         }
         
-        // Build context for post-qualification chat
-        const chatInstructions = `You are ${ASSISTANT_NAME}, an AI assistant from CSGB Cheshire Stables specializing in equine stable solutions.
+        // Build system prompt for conversational AI
+        const systemPrompt = `You are ${ASSISTANT_NAME}, a friendly AI assistant from CSGB Cheshire Stables.
 
-SITUATION: This customer (${lead.name}) has already completed the qualification process. All 4 qualification questions have been answered and they've been informed that our team will contact them within 24 hours.
+This customer has already completed qualification and been told our team will contact them within 24 hours.
 
-YOUR ROLE NOW:
-- Answer any questions they have about equine stables, buildings, or our services
-- Be friendly, helpful, and conversational
-- Keep responses brief and natural (under 150 characters when possible)
-- Reassure them that our team will be in touch soon
-- Handle thank you messages gracefully without repeating the qualification message
+Guidelines:
+- Answer questions about equine stables, buildings, and services naturally
+- Keep responses brief (under 160 characters when possible for SMS)
+- Be warm and helpful
+- For "thank you" messages, acknowledge warmly and briefly
+- Reassure them the team will be in touch soon
+- Use British English
+- Don't repeat qualification information
 
-THEIR QUALIFICATION INFO (for context):
+Their requirements (for context):
 ${Object.entries(lead.answers || {}).map(([key, value], i) => {
     const q = CUSTOM_QUESTIONS[i];
     const questionText = typeof q === 'object' ? q.question : q;
     return `- ${questionText}: ${value}`;
-}).join('\n')}
+}).join('\n')}`;
 
-Customer's message: "${userMessage}"
-
-Respond naturally and helpfully. If they say "thank you", "thanks", or similar, acknowledge it warmly without repeating qualification details.`;
-
-        // Create a thread for this conversation
-        const thread = await openaiClient.beta.threads.create();
-        
-        // Add the message to thread
-        await openaiClient.beta.threads.messages.create(thread.id, {
-            role: 'user',
-            content: chatInstructions
+        // Use Chat Completions API (more reliable than Assistant API for simple responses)
+        console.log(`📋 Sending chat request to OpenAI...`);
+        const completion = await openaiClient.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage }
+            ],
+            max_tokens: 200,
+            temperature: 0.7
         });
         
-        console.log(`📋 Chat context sent to Assistant for qualified lead`);
+        const response = completion.choices[0].message.content.trim();
+        console.log(`✅ Chat response received: "${response}"`);
+        return response;
         
-        // Run the assistant
-        const run = await openaiClient.beta.threads.runs.create(thread.id, {
-            assistant_id: assistantId
-        });
-        
-        // Wait for completion with timeout
-        console.log(`⏳ Waiting for Assistant chat response...`);
-        let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
-        let attempts = 0;
-        const maxAttempts = 30;
-        
-        while (runStatus.status !== 'completed' && attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
-            attempts++;
-            
-            if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-                console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
-                console.log(`❌ Last error:`, JSON.stringify(runStatus.last_error, null, 2));
-                console.log(`❌ Full run status:`, JSON.stringify(runStatus, null, 2));
-                throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
-            }
-        }
-        
-        if (attempts >= maxAttempts) {
-            throw new Error('Assistant response timeout');
-        }
-        
-        console.log(`✅ Assistant chat completed in ${attempts} seconds`);
-        
-        // Get the assistant's response
-        const messages = await openaiClient.beta.threads.messages.list(thread.id);
-        const assistantMessage = messages.data[0];
-        
-        if (assistantMessage && assistantMessage.content[0].type === 'text') {
-            const response = assistantMessage.content[0].text.value;
-            console.log(`✅ Chat response received: "${response}"`);
-            return response;
-        }
-        
-        console.log(`❌ No valid assistant message found`);
-        return "You're welcome! Our team will be in touch with you soon. Feel free to ask if you have any other questions!";
     } catch (error) {
         console.error('❌ Error generating qualified chat response:', error);
         console.error('❌ Error details:', error.message);
-        console.error('❌ Error stack:', error.stack);
         console.log('⚠️ Falling back to simple response due to error above');
         return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
     }
