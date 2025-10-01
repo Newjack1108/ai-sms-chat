@@ -483,6 +483,13 @@
             color: white;
         }
 
+        .customer-item.selected .customer-name,
+        .customer-item.selected .customer-details,
+        .customer-item.selected .customer-status,
+        .customer-item.selected .customer-answers {
+            color: white !important;
+        }
+
         .customer-name {
             font-weight: 600;
             font-size: 1.2em;
@@ -493,6 +500,41 @@
             color: #6c757d;
             font-size: 0.9em;
             margin-bottom: 10px;
+        }
+
+        .customer-answers {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+            font-size: 0.9em;
+        }
+
+        .customer-item.selected .customer-answers {
+            border-top-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .customer-answers .answer-item {
+            margin-bottom: 8px;
+            padding: 5px 0;
+        }
+
+        .customer-answers .answer-label {
+            font-weight: 600;
+            margin-bottom: 3px;
+            color: #495057;
+        }
+
+        .customer-item.selected .customer-answers .answer-label {
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .customer-answers .answer-value {
+            color: #212529;
+            margin-left: 10px;
+        }
+
+        .customer-item.selected .customer-answers .answer-value {
+            color: white;
         }
 
         .customer-status {
@@ -1363,14 +1405,44 @@
             customers.forEach(customer => {
                 const customerDiv = document.createElement('div');
                 customerDiv.className = 'customer-item';
+                
+                // Build answers HTML
+                let answersHTML = '';
+                if (customer.answers && Object.keys(customer.answers).length > 0) {
+                    answersHTML = '<div class="customer-answers">';
+                    answersHTML += '<div style="font-weight: 600; margin-bottom: 10px;">📝 Qualification Answers:</div>';
+                    
+                    for (let i = 1; i <= 4; i++) {
+                        const questionKey = `question_${i}`;
+                        const answer = customer.answers[questionKey];
+                        
+                        if (answer) {
+                            const questionData = customQuestions[i - 1];
+                            const questionText = questionData 
+                                ? (typeof questionData === 'object' ? questionData.question : questionData)
+                                : `Question ${i}`;
+                            
+                            answersHTML += `
+                                <div class="answer-item">
+                                    <div class="answer-label">Q${i}: ${questionText}</div>
+                                    <div class="answer-value">→ ${answer}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    answersHTML += '</div>';
+                }
+                
                 customerDiv.innerHTML = `
                     <div class="customer-name">${customer.name || 'Unknown'}</div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
                         📧 ${customer.email || 'No email'}<br>
-                        📍 ${customer.source || 'Unknown source'}
+                        📍 ${customer.source || 'Unknown source'}<br>
+                        📊 Progress: ${customer.progress || 0}%
                     </div>
                     <div class="customer-status status-${customer.status}">${customer.status}</div>
+                    ${answersHTML}
                 `;
                 
                 customerDiv.addEventListener('click', () => {
@@ -1467,14 +1539,44 @@
             filteredCustomers.forEach(customer => {
                 const customerDiv = document.createElement('div');
                 customerDiv.className = 'customer-item';
+                
+                // Build answers HTML
+                let answersHTML = '';
+                if (customer.answers && Object.keys(customer.answers).length > 0) {
+                    answersHTML = '<div class="customer-answers">';
+                    answersHTML += '<div style="font-weight: 600; margin-bottom: 10px;">📝 Qualification Answers:</div>';
+                    
+                    for (let i = 1; i <= 4; i++) {
+                        const questionKey = `question_${i}`;
+                        const answer = customer.answers[questionKey];
+                        
+                        if (answer) {
+                            const questionData = customQuestions[i - 1];
+                            const questionText = questionData 
+                                ? (typeof questionData === 'object' ? questionData.question : questionData)
+                                : `Question ${i}`;
+                            
+                            answersHTML += `
+                                <div class="answer-item">
+                                    <div class="answer-label">Q${i}: ${questionText}</div>
+                                    <div class="answer-value">→ ${answer}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    answersHTML += '</div>';
+                }
+                
                 customerDiv.innerHTML = `
                     <div class="customer-name">${customer.name || 'Unknown'}</div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
                         📧 ${customer.email || 'No email'}<br>
-                        📍 ${customer.source || 'Unknown source'}
+                        📍 ${customer.source || 'Unknown source'}<br>
+                        📊 Progress: ${customer.progress || 0}%
                     </div>
                     <div class="customer-status status-${customer.status}">${customer.status}</div>
+                    ${answersHTML}
                 `;
                 
                 customerDiv.addEventListener('click', () => {
