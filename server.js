@@ -914,7 +914,8 @@ Example: "Got it! Does your building need to be mobile?"`;
             
             if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
                 console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
-                console.log(`❌ Error:`, runStatus.last_error);
+                console.log(`❌ Last error:`, JSON.stringify(runStatus.last_error, null, 2));
+                console.log(`❌ Full run status:`, JSON.stringify(runStatus, null, 2));
                 throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
             }
         }
@@ -1047,7 +1048,9 @@ Respond naturally and helpfully. If they say "thank you", "thanks", or similar, 
             
             if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
                 console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
-                throw new Error(`Assistant run ${runStatus.status}`);
+                console.log(`❌ Last error:`, JSON.stringify(runStatus.last_error, null, 2));
+                console.log(`❌ Full run status:`, JSON.stringify(runStatus, null, 2));
+                throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
             }
         }
         
