@@ -540,6 +540,41 @@ app.get('/api/config/status', (req, res) => {
     });
 });
 
+// Database status endpoint (for debugging)
+app.get('/api/database/status', (req, res) => {
+    try {
+        const leads = LeadDatabase.getAllLeads();
+        const totalMessages = leads.reduce((sum, lead) => {
+            const messages = LeadDatabase.getMessagesByLeadId(lead.id);
+            return sum + messages.length;
+        }, 0);
+        
+        res.json({
+            success: true,
+            database: 'SQLite',
+            totalLeads: leads.length,
+            totalMessages: totalMessages,
+            leads: leads.map(lead => ({
+                id: lead.id,
+                name: lead.name,
+                phone: lead.phone,
+                status: lead.status,
+                progress: lead.progress,
+                qualified: lead.qualified,
+                answeredQuestions: Object.keys(lead.answers || {}).length,
+                createdAt: lead.createdAt
+            })),
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error getting database status:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Test webhook with sample data
 app.post('/webhook/test', async (req, res) => {
     try {
