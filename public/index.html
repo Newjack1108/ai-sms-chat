@@ -826,24 +826,28 @@
                         Configure the 4 questions that AI will ask to qualify leads. These are the only questions that will be used for qualification.
                     </p>
                     
-                    <div class="question-input">
-                        <div class="question-number">1</div>
-                        <input type="text" class="form-input" id="question-1" placeholder="Enter question 1...">
+                    <div style="margin-bottom: 25px;">
+                        <div class="question-number" style="margin-bottom: 10px;">1</div>
+                        <input type="text" class="form-input" id="question-1" placeholder="Enter question 1..." style="margin-bottom: 10px;">
+                        <textarea class="form-input form-textarea" id="answers-1" placeholder="Possible answers (e.g., Double, Single, Stables, Field shelter, Barn, 24ft, 12ft, 36ft, tack room)" style="min-height: 60px;"></textarea>
                     </div>
                     
-                    <div class="question-input">
-                        <div class="question-number">2</div>
-                        <input type="text" class="form-input" id="question-2" placeholder="Enter question 2...">
+                    <div style="margin-bottom: 25px;">
+                        <div class="question-number" style="margin-bottom: 10px;">2</div>
+                        <input type="text" class="form-input" id="question-2" placeholder="Enter question 2..." style="margin-bottom: 10px;">
+                        <textarea class="form-input form-textarea" id="answers-2" placeholder="Possible answers (e.g., skids, mobile, towable, yes, moveable, steel skid, wooden skids)" style="min-height: 60px;"></textarea>
                     </div>
                     
-                    <div class="question-input">
-                        <div class="question-number">3</div>
-                        <input type="text" class="form-input" id="question-3" placeholder="Enter question 3...">
+                    <div style="margin-bottom: 25px;">
+                        <div class="question-number" style="margin-bottom: 10px;">3</div>
+                        <input type="text" class="form-input" id="question-3" placeholder="Enter question 3..." style="margin-bottom: 10px;">
+                        <textarea class="form-input form-textarea" id="answers-3" placeholder="Possible answers (e.g., ASAP, week, weeks, tbc, TBC, month, months, next year, day, days)" style="min-height: 60px;"></textarea>
                     </div>
                     
-                    <div class="question-input">
-                        <div class="question-number">4</div>
-                        <input type="text" class="form-input" id="question-4" placeholder="Enter question 4...">
+                    <div style="margin-bottom: 25px;">
+                        <div class="question-number" style="margin-bottom: 10px;">4</div>
+                        <input type="text" class="form-input" id="question-4" placeholder="Enter question 4..." style="margin-bottom: 10px;">
+                        <textarea class="form-input form-textarea" id="answers-4" placeholder="Possible answers (e.g., blank, unsure, not, any postcode format)" style="min-height: 60px;"></textarea>
                     </div>
                     
                     <button class="btn btn-primary" id="save-settings" style="margin-top: 20px;">
@@ -1235,7 +1239,16 @@
                 // Load custom questions
                 customQuestions = settings.customQuestions || [];
                 for (let i = 1; i <= 4; i++) {
-                    document.getElementById(`question-${i}`).value = customQuestions[i - 1] || '';
+                    const question = customQuestions[i - 1];
+                    if (typeof question === 'object') {
+                        // New format with possible answers
+                        document.getElementById(`question-${i}`).value = question.question || '';
+                        document.getElementById(`answers-${i}`).value = question.possibleAnswers || '';
+                    } else {
+                        // Old format (just question string)
+                        document.getElementById(`question-${i}`).value = question || '';
+                        document.getElementById(`answers-${i}`).value = '';
+                    }
                 }
             }
         }
@@ -1252,10 +1265,22 @@
                 crmWebhook: document.getElementById('crm-webhook').value,
                 crmKey: document.getElementById('crm-key').value,
                 customQuestions: [
-                    document.getElementById('question-1').value,
-                    document.getElementById('question-2').value,
-                    document.getElementById('question-3').value,
-                    document.getElementById('question-4').value
+                    {
+                        question: document.getElementById('question-1').value,
+                        possibleAnswers: document.getElementById('answers-1').value
+                    },
+                    {
+                        question: document.getElementById('question-2').value,
+                        possibleAnswers: document.getElementById('answers-2').value
+                    },
+                    {
+                        question: document.getElementById('question-3').value,
+                        possibleAnswers: document.getElementById('answers-3').value
+                    },
+                    {
+                        question: document.getElementById('question-4').value,
+                        possibleAnswers: document.getElementById('answers-4').value
+                    }
                 ]
             };
 

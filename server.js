@@ -25,10 +25,22 @@ let messageIdCounter = 1;
 
 // Default custom questions for lead qualification (can be updated via API)
 let CUSTOM_QUESTIONS = [
-    "What type of building do you require?",
-    "How many horses do you currently have?",
-    "What type of stable configuration interests you most?",
-    "What's your budget range for this project?"
+    {
+        question: "What type of building do you require?",
+        possibleAnswers: "Double, Single, Stables, Stable, Field shelter, Barn, 24ft, 12ft, 36ft, tack room"
+    },
+    {
+        question: "Does your building need to be mobile?",
+        possibleAnswers: "skids, mobile, towable, yes, moveable, steel skid, wooden skids, no, static"
+    },
+    {
+        question: "How soon do you need the building?",
+        possibleAnswers: "ASAP, asap, week, weeks, tbc, TBC, month, months, next year, day, days, don't mind, anytime, not fussed"
+    },
+    {
+        question: "Did you supply the postcode where the building is to be installed?",
+        possibleAnswers: "blank, unsure, not, any postcode format (lowercase and uppercase)"
+    }
 ];
 
 // Assistant name (can be updated via API)
@@ -221,8 +233,16 @@ app.post('/api/settings', (req, res) => {
                 });
             }
             
-            // Filter out empty questions
-            const validQuestions = customQuestions.filter(q => q && q.trim().length > 0);
+            // Validate questions
+            const validQuestions = customQuestions.filter(q => {
+                if (typeof q === 'object') {
+                    return q.question && q.question.trim().length > 0;
+                } else if (typeof q === 'string') {
+                    return q.trim().length > 0;
+                }
+                return false;
+            });
+            
             if (validQuestions.length !== 4) {
                 return res.status(400).json({
                     success: false,
@@ -231,7 +251,7 @@ app.post('/api/settings', (req, res) => {
             }
             
             CUSTOM_QUESTIONS = customQuestions;
-            console.log('✅ Custom questions updated');
+            console.log('✅ Custom questions updated with possible answers');
         }
         
         // Update assistant name if provided
@@ -301,7 +321,7 @@ app.post('/api/leads', async (req, res) => {
                 error: 'Name, email, and phone are required'
             });
         }
-        
+
         const normalizedPhone = normalizePhoneNumber(phone);
         
         // Check if lead already exists
@@ -351,7 +371,7 @@ app.post('/api/leads', async (req, res) => {
 app.post('/api/leads/send-to-crm', async (req, res) => {
     try {
         const { leadId, crmWebhook } = req.body;
-        
+
         if (!leadId || !crmWebhook) {
             return res.status(400).json({
                 success: false,
@@ -588,11 +608,13 @@ app.post('/webhook/test', async (req, res) => {
 // Send AI introduction message
 async function sendAIIntroduction(lead) {
     try {
+        const firstQuestion = typeof CUSTOM_QUESTIONS[0] === 'object' ? CUSTOM_QUESTIONS[0].question : CUSTOM_QUESTIONS[0];
+        
         const introductionMessage = `Hi ${lead.name}! 👋 
 
 I'm ${ASSISTANT_NAME}, your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution.
 
-${CUSTOM_QUESTIONS[0]}`;
+${firstQuestion}`;
 
         await sendSMS(lead.phone, introductionMessage);
         
@@ -711,35 +733,38 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
         
         for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
             const questionKey = `question_${i + 1}`;
+            const q = CUSTOM_QUESTIONS[i];
+            const questionText = typeof q === 'object' ? q.question : q;
+            
             if (lead.answers && lead.answers[questionKey]) {
-                gatheredInfo.push(`${CUSTOM_QUESTIONS[i]}: ${lead.answers[questionKey]}`);
+                gatheredInfo.push(`${questionText}: ${lead.answers[questionKey]}`);
             } else {
-                unansweredQuestions.push(CUSTOM_QUESTIONS[i]);
+                unansweredQuestions.push(q);
             }
         }
         
         // Build instructions for the Assistant
+        const questionsText = CUSTOM_QUESTIONS.map((q, i) => {
+            const questionText = typeof q === 'object' ? q.question : q;
+            const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? q.possibleAnswers : 'Any response';
+            return `${i + 1}. ${questionText}\n   Possible answers: ${possibleAnswers}`;
+        }).join('\n\n');
+        
         let contextInstructions = `You are ${ASSISTANT_NAME}, helping to qualify a lead named ${lead.name} for an equine stable project.
 
 CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask about anything else:
 
-1. ${CUSTOM_QUESTIONS[0]}
-   Example answers: "Mobile building", "Static building", "Permanent structure", "Portable unit"
-
-2. ${CUSTOM_QUESTIONS[1]}
-   Example answers: Any number or description
-
-3. ${CUSTOM_QUESTIONS[2]}
-   Example answers: Any budget amount or range
-
-4. ${CUSTOM_QUESTIONS[3]}
-   Example answers: Any timeframe or date
+${questionsText}
 
 INFORMATION ALREADY GATHERED:
 ${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet - this is the customer\'s first message'}
 
 STILL NEED ANSWERS FOR:
-${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n') : 'All information gathered!'}
+${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => {
+    const questionText = typeof q === 'object' ? q.question : q;
+    const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? q.possibleAnswers : '';
+    return `${i + 1}. ${questionText}${possibleAnswers ? '\n   Look for: ' + possibleAnswers : ''}`;
+}).join('\n') : 'All information gathered!'}
 
 STRICT RULES:
 1. NEVER ask a question if you already have the answer (check "INFORMATION ALREADY GATHERED")
@@ -841,7 +866,8 @@ async function generateFallbackResponse(lead, userMessage) {
     console.log(`💬 User message length: ${userMessage.length} characters`);
     
     if (answeredCount < CUSTOM_QUESTIONS.length) {
-        const nextQuestion = CUSTOM_QUESTIONS[answeredCount];
+        const q = CUSTOM_QUESTIONS[answeredCount];
+        const nextQuestion = typeof q === 'object' ? q.question : q;
         console.log(`❓ Asking question ${answeredCount + 1}: ${nextQuestion}`);
         
         // Store the answer if it's meaningful
@@ -863,7 +889,9 @@ async function generateFallbackResponse(lead, userMessage) {
         
         // Ask the next question
         if (answeredCount + 1 < CUSTOM_QUESTIONS.length) {
-            const response = `Thanks for your response! ${CUSTOM_QUESTIONS[answeredCount + 1]}`;
+            const nextQ = CUSTOM_QUESTIONS[answeredCount + 1];
+            const nextQuestionText = typeof nextQ === 'object' ? nextQ.question : nextQ;
+            const response = `Thanks for your response! ${nextQuestionText}`;
             console.log(`📤 Fallback response: ${response}`);
             return response;
         } else {
@@ -893,9 +921,14 @@ async function extractAnswersFromConversation(lead, userMessage, aiResponse) {
         for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
             const questionKey = `question_${i + 1}`;
             if (!lead.answers || !lead.answers[questionKey]) {
+                const q = CUSTOM_QUESTIONS[i];
+                const questionText = typeof q === 'object' ? q.question : q;
+                const possibleAnswers = typeof q === 'object' ? q.possibleAnswers : '';
+                
                 unansweredQuestions.push({
                     number: i + 1,
-                    question: CUSTOM_QUESTIONS[i],
+                    question: questionText,
+                    possibleAnswers: possibleAnswers,
                     key: questionKey
                 });
             }
@@ -910,11 +943,14 @@ async function extractAnswersFromConversation(lead, userMessage, aiResponse) {
         const extractionPrompt = `Analyze this customer message and determine if it contains answers to any of these questions:
 
 QUESTIONS TO FIND ANSWERS FOR:
-${unansweredQuestions.map(q => `${q.number}. ${q.question}`).join('\n')}
+${unansweredQuestions.map(q => `${q.number}. ${q.question}${q.possibleAnswers ? '\n   Possible answers include: ' + q.possibleAnswers : ''}`).join('\n\n')}
 
 CUSTOMER MESSAGE: "${userMessage}"
 
-IMPORTANT: Accept ANY response as an answer. Even "yes", "no", "maybe", or short responses count as valid answers.
+IMPORTANT: 
+- Accept ANY response as an answer. Even "yes", "no", "maybe", or short responses count as valid answers.
+- If the customer's response matches or is similar to ANY of the possible answers, mark it as answered.
+- Be very lenient - any response that could relate to the question counts as an answer.
 
 For each question that has an answer in the customer's message, respond with:
 ANSWER_${q.number}: [the customer's exact response]
