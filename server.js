@@ -715,12 +715,33 @@ Customer's latest message: "${userMessage}"`;
             assistant_id: assistantId
         });
         
-        // Wait for completion
+        // Wait for completion with timeout
+        console.log(`⏳ Waiting for Assistant response...`);
         let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
-        while (runStatus.status !== 'completed') {
+        let attempts = 0;
+        const maxAttempts = 30; // 30 seconds timeout
+        
+        while (runStatus.status !== 'completed' && attempts < maxAttempts) {
             await new Promise(resolve => setTimeout(resolve, 1000));
             runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+            attempts++;
+            
+            console.log(`⏳ Attempt ${attempts}/${maxAttempts} - Status: ${runStatus.status}`);
+            
+            if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+                console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
+                console.log(`❌ Error:`, runStatus.last_error);
+                throw new Error(`Assistant run ${runStatus.status}: ${runStatus.last_error?.message || 'Unknown error'}`);
+            }
         }
+        
+        if (attempts >= maxAttempts) {
+            console.log(`⏰ Assistant response timeout after ${maxAttempts} seconds`);
+            throw new Error('Assistant response timeout');
+        }
+        
+        console.log(`✅ Assistant completed in ${attempts} seconds`);
+
         
         // Get the assistant's response
         const messages = await openaiClient.beta.threads.messages.list(thread.id);
@@ -737,10 +758,13 @@ Customer's latest message: "${userMessage}"`;
             return response;
         }
         
-        return generateFallbackResponse(lead, userMessage);
+        console.log(`❌ No valid assistant message found`);
+        return await generateFallbackResponse(lead, userMessage);
     } catch (error) {
-        console.error('Error generating AI response with Assistant:', error);
-        return generateFallbackResponse(lead, userMessage);
+        console.error('❌ Error generating AI response with Assistant:', error);
+        console.error('❌ Error details:', error.message);
+        console.error('❌ Falling back to basic response system');
+        return await generateFallbackResponse(lead, userMessage);
     }
 }
 
