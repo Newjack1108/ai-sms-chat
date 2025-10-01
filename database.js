@@ -56,7 +56,10 @@ function initializeDatabase() {
     console.log('✅ Database initialized successfully');
 }
 
-// Prepared statements for better performance
+// Initialize database first
+initializeDatabase();
+
+// Prepared statements for better performance (created AFTER tables exist)
 const statements = {
     // Lead operations
     createLead: db.prepare(`
@@ -314,9 +317,6 @@ class LeadDatabase {
         }
     }
 }
-
-// Initialize database on module load
-initializeDatabase();
 
 module.exports = {
     db,
