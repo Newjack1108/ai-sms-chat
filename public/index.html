@@ -1220,8 +1220,23 @@
         }
 
         // Load settings
-        function loadSettings() {
-            // Load from localStorage or API
+        async function loadSettings() {
+            // First try to load from server API
+            try {
+                const response = await fetch('/api/settings');
+                if (response.ok) {
+                    const serverSettings = await response.json();
+                    console.log('✅ Loaded settings from server:', serverSettings);
+                    
+                    if (serverSettings.customQuestions) {
+                        customQuestions = serverSettings.customQuestions;
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ Could not load settings from server, using localStorage');
+            }
+            
+            // Then load from localStorage to populate form fields
             const savedSettings = localStorage.getItem('ai-lead-settings');
             if (savedSettings) {
                 settings = JSON.parse(savedSettings);
@@ -1236,10 +1251,10 @@
                 document.getElementById('crm-webhook').value = settings.crmWebhook || '';
                 document.getElementById('crm-key').value = settings.crmKey || '';
                 
-                // Load custom questions
-                customQuestions = settings.customQuestions || [];
+                // Load custom questions (prefer server version if available)
+                const questionsToLoad = customQuestions.length > 0 ? customQuestions : (settings.customQuestions || []);
                 for (let i = 1; i <= 4; i++) {
-                    const question = customQuestions[i - 1];
+                    const question = questionsToLoad[i - 1];
                     if (typeof question === 'object') {
                         // New format with possible answers
                         document.getElementById(`question-${i}`).value = question.question || '';
