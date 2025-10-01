@@ -971,18 +971,36 @@ Accept the first answer given - don't wait for more details.`;
         const extractionResult = completion.choices[0].message.content;
         console.log(`📝 Extraction result: ${extractionResult}`);
         
+        // Also do a simple keyword match as a fallback
+        let answersExtracted = false;
+        
         // Parse the extraction result
         unansweredQuestions.forEach(q => {
             const answerMatch = extractionResult.match(new RegExp(`ANSWER_${q.number}:\\s*(.+?)(?:\\n|$)`, 'i'));
             if (answerMatch && answerMatch[1]) {
                 const answer = answerMatch[1].trim();
-                if (answer && answer !== 'N/A' && answer !== 'Not mentioned') {
+                if (answer && answer !== 'N/A' && answer !== 'Not mentioned' && answer !== 'None') {
                     lead.answers = lead.answers || {};
                     lead.answers[q.key] = answer;
                     console.log(`✅ Extracted answer for question ${q.number}: ${answer}`);
+                    answersExtracted = true;
                 }
             }
         });
+        
+        // If AI extraction failed, do simple matching for first unanswered question
+        if (!answersExtracted && unansweredQuestions.length > 0) {
+            console.log(`🔍 AI extraction didn't find answers - trying simple matching...`);
+            const firstUnanswered = unansweredQuestions[0];
+            
+            // If user message is meaningful (more than just whitespace), accept it as answer
+            if (userMessage && userMessage.trim().length > 0) {
+                lead.answers = lead.answers || {};
+                lead.answers[firstUnanswered.key] = userMessage;
+                console.log(`✅ Simple match: Stored "${userMessage}" as answer for question ${firstUnanswered.number}`);
+                answersExtracted = true;
+            }
+        }
         
         // Update progress
         const answeredCount = Object.keys(lead.answers || {}).length;
