@@ -704,7 +704,16 @@ async function processAIResponse(lead, userMessage) {
             // Move qualified customer back to active status so they appear in chat interface
             if (lead.status === 'qualified') {
                 console.log(`🔄 Moving qualified customer back to active status`);
-                LeadDatabase.updateLead(lead.id, { status: 'active' });
+                // Update status while preserving all other data
+                LeadDatabase.updateLead(lead.id, {
+                    name: lead.name,
+                    email: lead.email,
+                    status: 'active',
+                    progress: lead.progress,
+                    qualified: lead.qualified,
+                    answers: lead.answers,
+                    qualifiedDate: lead.qualifiedDate
+                });
                 lead.status = 'active'; // Update local object
             }
             
