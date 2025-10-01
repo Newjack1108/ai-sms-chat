@@ -1,8 +1,11 @@
 {
   "name": "crm-integrated-sms-system",
-  "version": "5.4.0",
-  "description": "Professional AI Lead Qualification System - Tabbed CRM Interface with OpenAI Assistant ID integration",
+  "version": "5.6.0",
+  "description": "Professional AI Lead Qualification System with Database Persistence",
   "main": "server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
