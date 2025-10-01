@@ -663,14 +663,52 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
             return await generateFallbackResponse(lead, userMessage);
         }
         
+        // Build context about what information we need
+        const answeredCount = Object.keys(lead.answers || {}).length;
+        const unansweredQuestions = [];
+        const gatheredInfo = [];
+        
+        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+            const questionKey = `question_${i + 1}`;
+            if (lead.answers && lead.answers[questionKey]) {
+                gatheredInfo.push(`${CUSTOM_QUESTIONS[i]}: ${lead.answers[questionKey]}`);
+            } else {
+                unansweredQuestions.push(CUSTOM_QUESTIONS[i]);
+            }
+        }
+        
+        // Build instructions for the Assistant
+        let contextInstructions = `You are helping to qualify a lead named ${lead.name} for an equine stable project.
+
+IMPORTANT INFORMATION TO GATHER (these are the key questions you need answers to):
+${CUSTOM_QUESTIONS.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+
+INFORMATION ALREADY GATHERED:
+${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet'}
+
+STILL NEED TO FIND OUT:
+${unansweredQuestions.length > 0 ? unansweredQuestions.join('\n') : 'All information gathered!'}
+
+Your task:
+1. Have a natural, helpful conversation about their equine stable needs
+2. During the conversation, naturally gather the information listed above
+3. Don't ask questions word-for-word - weave them into natural conversation
+4. Answer any questions they have about stables, horses, or the project
+5. Be friendly, professional, and knowledgeable about equine facilities
+6. When you've gathered all the information, let them know someone will contact them soon
+
+Customer's latest message: "${userMessage}"`;
+
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
         
-        // Add user message to thread
+        // Add the context and user message to thread
         await openaiClient.beta.threads.messages.create(thread.id, {
             role: 'user',
-            content: userMessage
+            content: contextInstructions
         });
+        
+        console.log(`📋 Context sent to Assistant with ${unansweredQuestions.length} questions remaining`);
         
         // Run the assistant
         const run = await openaiClient.beta.threads.runs.create(thread.id, {
@@ -691,8 +729,10 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
         if (assistantMessage && assistantMessage.content[0].type === 'text') {
             const response = assistantMessage.content[0].text.value;
             
-            // Try to extract answer and update lead progress
-            await updateLeadProgress(lead, userMessage);
+            console.log(`✅ Assistant response received: "${response}"`);
+            
+            // Try to extract answers from the user's message using AI
+            await extractAnswersFromConversation(lead, userMessage, response);
             
             return response;
         }
@@ -751,7 +791,86 @@ async function generateFallbackResponse(lead, userMessage) {
     return response;
 }
 
-// Update lead progress based on user response
+// Extract answers from conversation using AI
+async function extractAnswersFromConversation(lead, userMessage, aiResponse) {
+    try {
+        if (!openaiClient) {
+            console.log('⚠️ Cannot extract answers - OpenAI client not available');
+            return;
+        }
+        
+        console.log(`🔍 Extracting answers from conversation...`);
+        
+        // Build context about what we're looking for
+        const unansweredQuestions = [];
+        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+            const questionKey = `question_${i + 1}`;
+            if (!lead.answers || !lead.answers[questionKey]) {
+                unansweredQuestions.push({
+                    number: i + 1,
+                    question: CUSTOM_QUESTIONS[i],
+                    key: questionKey
+                });
+            }
+        }
+        
+        if (unansweredQuestions.length === 0) {
+            console.log('✅ All questions already answered');
+            return;
+        }
+        
+        // Use AI to extract answers from the user's message
+        const extractionPrompt = `Analyze this customer message and determine if it contains answers to any of these questions:
+
+QUESTIONS TO FIND ANSWERS FOR:
+${unansweredQuestions.map(q => `${q.number}. ${q.question}`).join('\n')}
+
+CUSTOMER MESSAGE: "${userMessage}"
+
+For each question that has an answer in the customer's message, respond with:
+ANSWER_${q.number}: [the specific answer]
+
+If the customer's message doesn't answer a question, don't include it.
+Be specific and extract the actual information provided.`;
+
+        const completion = await openaiClient.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            messages: [
+                { role: 'system', content: 'You are an expert at extracting structured information from customer conversations.' },
+                { role: 'user', content: extractionPrompt }
+            ],
+            max_tokens: 200,
+            temperature: 0.3
+        });
+        
+        const extractionResult = completion.choices[0].message.content;
+        console.log(`📝 Extraction result: ${extractionResult}`);
+        
+        // Parse the extraction result
+        unansweredQuestions.forEach(q => {
+            const answerMatch = extractionResult.match(new RegExp(`ANSWER_${q.number}:\\s*(.+?)(?:\\n|$)`, 'i'));
+            if (answerMatch && answerMatch[1]) {
+                const answer = answerMatch[1].trim();
+                if (answer && answer !== 'N/A' && answer !== 'Not mentioned') {
+                    lead.answers = lead.answers || {};
+                    lead.answers[q.key] = answer;
+                    console.log(`✅ Extracted answer for question ${q.number}: ${answer}`);
+                }
+            }
+        });
+        
+        // Update progress
+        const answeredCount = Object.keys(lead.answers || {}).length;
+        lead.progress = Math.round((answeredCount / 4) * 100);
+        lead.status = lead.progress === 100 ? 'qualified' : 'active';
+        console.log(`📈 Lead progress updated: ${answeredCount}/4 questions answered (${lead.progress}%)`);
+        
+    } catch (error) {
+        console.error('Error extracting answers:', error);
+    }
+}
+
+// Update lead progress based on user response (legacy fallback)
 async function updateLeadProgress(lead, userMessage) {
     try {
         const answeredCount = Object.keys(lead.answers || {}).length;
