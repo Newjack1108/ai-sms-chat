@@ -537,6 +537,45 @@
             color: white;
         }
 
+        .customer-delete-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            opacity: 0;
+            z-index: 10;
+        }
+
+        .customer-item:hover .customer-delete-btn {
+            opacity: 1;
+        }
+
+        .customer-delete-btn:hover {
+            background: #c82333;
+            transform: scale(1.05);
+        }
+
+        .customer-item.selected .customer-delete-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+
+        .customer-item.selected .customer-delete-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .customer-item {
+            position: relative;
+        }
+
         .customer-status {
             display: inline-block;
             padding: 6px 12px;
@@ -1052,17 +1091,20 @@
             }
         }
 
-        // Render leads list
+        // Render leads list (filter out qualified leads)
         function renderLeadsList() {
             const leadsList = document.getElementById('leads-list');
             leadsList.innerHTML = '';
 
-            if (leads.length === 0) {
-                leadsList.innerHTML = '<p style="text-align: center; color: #6c757d; padding: 20px;">No leads found</p>';
+            // Filter out qualified leads - they only appear in Customer Information tab
+            const activeLeads = leads.filter(lead => lead.status !== 'qualified');
+
+            if (activeLeads.length === 0) {
+                leadsList.innerHTML = '<p style="text-align: center; color: #6c757d; padding: 20px;">No active leads found.<br><small>Qualified leads have been moved to Customer Information tab.</small></p>';
                 return;
             }
 
-            leads.forEach(lead => {
+            activeLeads.forEach(lead => {
                 const leadItem = document.createElement('div');
                 leadItem.className = 'lead-item';
                 leadItem.dataset.leadId = lead.id;
@@ -1434,6 +1476,7 @@
                 }
                 
                 customerDiv.innerHTML = `
+                    <button class="customer-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️ Delete</button>
                     <div class="customer-name">${customer.name || 'Unknown'}</div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
@@ -1568,6 +1611,7 @@
                 }
                 
                 customerDiv.innerHTML = `
+                    <button class="customer-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️ Delete</button>
                     <div class="customer-name">${customer.name || 'Unknown'}</div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
@@ -1588,6 +1632,48 @@
                 
                 customersList.appendChild(customerDiv);
             });
+        }
+
+        // Delete customer from database
+        async function deleteCustomer(event, customerId) {
+            event.stopPropagation(); // Prevent card selection when clicking delete
+            
+            const customer = customers.find(c => c.id === customerId);
+            if (!customer) return;
+            
+            if (!confirm(`Are you sure you want to permanently delete ${customer.name}?\n\nThis action cannot be undone.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/leads/${customerId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showNotification(`${customer.name} has been deleted successfully`, 'success');
+                    
+                    // Remove from local arrays
+                    customers = customers.filter(c => c.id !== customerId);
+                    leads = leads.filter(l => l.id !== customerId);
+                    
+                    // Refresh both views
+                    renderCustomersList();
+                    renderLeadsList();
+                    
+                    // Clear current lead if it was deleted
+                    if (currentLead && currentLead.id === customerId) {
+                        currentLead = null;
+                        document.getElementById('chat-title').textContent = 'Select a lead to start chatting';
+                        document.getElementById('chat-status').textContent = '';
+                    }
+                } else {
+                    showNotification('Failed to delete customer', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting customer:', error);
+                showNotification('Error deleting customer', 'error');
+            }
         }
 
         // Show notification
