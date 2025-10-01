@@ -584,6 +584,148 @@
             font-weight: 600;
         }
 
+        /* View Toggle */
+        .view-toggle {
+            display: flex;
+            gap: 5px;
+            background: #e9ecef;
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .view-toggle-btn {
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #6c757d;
+            transition: all 0.3s ease;
+        }
+
+        .view-toggle-btn:hover {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+        }
+
+        .view-toggle-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        /* List View Styles */
+        .customer-list-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 10px;
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1fr 0.8fr 0.5fr;
+            gap: 15px;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 4px solid #e9ecef;
+            position: relative;
+        }
+
+        .customer-list-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .customer-list-item.selected {
+            border-left-color: #667eea;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .customer-list-item.selected * {
+            color: white !important;
+        }
+
+        .list-customer-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #212529;
+        }
+
+        .list-customer-contact {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+
+        .list-customer-progress {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .list-progress-bar {
+            flex: 1;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .list-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+
+        .customer-list-item.selected .list-progress-bar {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .customer-list-item.selected .list-progress-fill {
+            background: white;
+        }
+
+        .list-progress-text {
+            font-size: 0.85em;
+            font-weight: 600;
+            color: #495057;
+            min-width: 35px;
+        }
+
+        .list-customer-source {
+            font-size: 0.85em;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .list-customer-actions {
+            text-align: right;
+        }
+
+        .list-delete-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+        }
+
+        .list-delete-btn:hover {
+            background: #c82333;
+            transform: scale(1.05);
+        }
+
+        .customer-list-item.selected .list-delete-btn {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .customer-list-item.selected .list-delete-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .chat-container,
@@ -966,7 +1108,17 @@
                 
                 <div class="customers-list">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h3>👥 All Customers</h3>
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <h3>👥 All Customers</h3>
+                            <div class="view-toggle">
+                                <button class="view-toggle-btn active" id="card-view-btn" onclick="switchCustomerView('card')">
+                                    📋 Card
+                                </button>
+                                <button class="view-toggle-btn" id="list-view-btn" onclick="switchCustomerView('list')">
+                                    📊 List
+                                </button>
+                            </div>
+                        </div>
                         <button class="btn btn-primary" id="add-lead-btn-2" style="padding: 8px 12px; font-size: 0.9em;">
                             ➕ Add Lead
                         </button>
@@ -1034,6 +1186,7 @@
         let settings = {};
         let customQuestions = [];
         let messageCheckInterval = null;
+        let customerView = 'card'; // 'card' or 'list'
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -1424,7 +1577,14 @@
                 const response = await fetch('/api/leads');
                 if (response.ok) {
                     customers = await response.json();
-                    renderCustomersList();
+                    window.allCustomersBackup = [...customers]; // Reset backup with fresh data
+                    
+                    // Render using current view
+                    if (customerView === 'card') {
+                        renderCustomersList();
+                    } else {
+                        renderCustomersListView();
+                    }
                 } else {
                     showNotification('Failed to load customers', 'error');
                 }
@@ -1499,6 +1659,73 @@
             });
         }
 
+        // Switch customer view (card or list)
+        function switchCustomerView(view) {
+            customerView = view;
+            
+            // Update button states
+            document.getElementById('card-view-btn').classList.toggle('active', view === 'card');
+            document.getElementById('list-view-btn').classList.toggle('active', view === 'list');
+            
+            // Re-render customers in new view
+            if (view === 'card') {
+                renderCustomersList();
+            } else {
+                renderCustomersListView();
+            }
+        }
+
+        // Render customers in compact list view
+        function renderCustomersListView() {
+            const customersList = document.getElementById('customers-list');
+            customersList.innerHTML = '';
+
+            if (customers.length === 0) {
+                customersList.innerHTML = '<p style="text-align: center; color: #6c757d; padding: 20px;">No customers found</p>';
+                return;
+            }
+
+            customers.forEach(customer => {
+                const listItem = document.createElement('div');
+                listItem.className = 'customer-list-item';
+                
+                listItem.innerHTML = `
+                    <div>
+                        <div class="list-customer-name">${customer.name || 'Unknown'}</div>
+                        <div class="list-customer-contact">📱 ${customer.phone}</div>
+                    </div>
+                    <div class="list-customer-contact">
+                        📧 ${customer.email || 'No email'}
+                    </div>
+                    <div class="list-customer-progress">
+                        <div class="list-progress-bar">
+                            <div class="list-progress-fill" style="width: ${customer.progress || 0}%"></div>
+                        </div>
+                        <div class="list-progress-text">${customer.progress || 0}%</div>
+                    </div>
+                    <div class="list-customer-source">
+                        <div class="customer-status status-${customer.status}">${customer.status}</div>
+                        <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source || 'Unknown'}</div>
+                    </div>
+                    <div class="list-customer-actions">
+                        <button class="list-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️</button>
+                    </div>
+                `;
+                
+                listItem.addEventListener('click', (e) => {
+                    // Don't select if clicking delete button
+                    if (e.target.classList.contains('list-delete-btn')) return;
+                    
+                    document.querySelectorAll('.customer-list-item').forEach(item => {
+                        item.classList.remove('selected');
+                    });
+                    listItem.classList.add('selected');
+                });
+                
+                customersList.appendChild(listItem);
+            });
+        }
+
         // Setup event listeners
         function setupEventListeners() {
             // Send message
@@ -1563,7 +1790,13 @@
             const statusFilter = document.getElementById('filter-status').value;
             const sourceFilter = document.getElementById('filter-source').value;
 
-            const filteredCustomers = customers.filter(customer => {
+            // Store original customers if not already stored
+            if (!window.allCustomersBackup) {
+                window.allCustomersBackup = [...customers];
+            }
+
+            // Filter from the backup
+            customers = window.allCustomersBackup.filter(customer => {
                 const matchesSearch = !searchTerm || 
                     customer.name.toLowerCase().includes(searchTerm) ||
                     customer.phone.includes(searchTerm) ||
@@ -1575,63 +1808,12 @@
                 return matchesSearch && matchesStatus && matchesSource;
             });
 
-            // Re-render with filtered results
-            const customersList = document.getElementById('customers-list');
-            customersList.innerHTML = '';
-
-            filteredCustomers.forEach(customer => {
-                const customerDiv = document.createElement('div');
-                customerDiv.className = 'customer-item';
-                
-                // Build answers HTML
-                let answersHTML = '';
-                if (customer.answers && Object.keys(customer.answers).length > 0) {
-                    answersHTML = '<div class="customer-answers">';
-                    answersHTML += '<div style="font-weight: 600; margin-bottom: 10px;">📝 Qualification Answers:</div>';
-                    
-                    for (let i = 1; i <= 4; i++) {
-                        const questionKey = `question_${i}`;
-                        const answer = customer.answers[questionKey];
-                        
-                        if (answer) {
-                            const questionData = customQuestions[i - 1];
-                            const questionText = questionData 
-                                ? (typeof questionData === 'object' ? questionData.question : questionData)
-                                : `Question ${i}`;
-                            
-                            answersHTML += `
-                                <div class="answer-item">
-                                    <div class="answer-label">Q${i}: ${questionText}</div>
-                                    <div class="answer-value">→ ${answer}</div>
-                                </div>
-                            `;
-                        }
-                    }
-                    answersHTML += '</div>';
-                }
-                
-                customerDiv.innerHTML = `
-                    <button class="customer-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️ Delete</button>
-                    <div class="customer-name">${customer.name || 'Unknown'}</div>
-                    <div class="customer-details">
-                        📱 ${customer.phone}<br>
-                        📧 ${customer.email || 'No email'}<br>
-                        📍 ${customer.source || 'Unknown source'}<br>
-                        📊 Progress: ${customer.progress || 0}%
-                    </div>
-                    <div class="customer-status status-${customer.status}">${customer.status}</div>
-                    ${answersHTML}
-                `;
-                
-                customerDiv.addEventListener('click', () => {
-                    document.querySelectorAll('.customer-item').forEach(item => {
-                        item.classList.remove('selected');
-                    });
-                    customerDiv.classList.add('selected');
-                });
-                
-                customersList.appendChild(customerDiv);
-            });
+            // Re-render with filtered results using current view
+            if (customerView === 'card') {
+                renderCustomersList();
+            } else {
+                renderCustomersListView();
+            }
         }
 
         // Delete customer from database

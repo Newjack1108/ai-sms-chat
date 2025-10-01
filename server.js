@@ -612,7 +612,7 @@ async function sendAIIntroduction(lead) {
         
         const introductionMessage = `Hi ${lead.name}! 👋 
 
-I'm ${ASSISTANT_NAME}, your AI assistant from Cheshire Sheds. I'm here to help you find the perfect equine stable solution.
+I'm ${ASSISTANT_NAME}, your AI assistant from CSGB Cheshire Stables. I'm here to help you find the perfect equine stable solution.
 
 ${firstQuestion}`;
 
