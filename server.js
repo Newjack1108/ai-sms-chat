@@ -651,6 +651,32 @@ async function processAIResponse(lead, userMessage) {
         };
         messages.push(incomingMessage);
         
+        // Check if lead is already qualified - if so, enter free chat mode
+        if (lead.qualified === true || lead.status === 'qualified') {
+            console.log(`💬 Lead already qualified - entering free chat mode`);
+            
+            // Generate friendly conversational response
+            const aiResponse = await generateQualifiedChatResponse(lead, userMessage);
+            
+            if (aiResponse) {
+                console.log(`📤 Sending chat response: "${aiResponse}"`);
+                await sendSMS(lead.phone, aiResponse);
+                
+                // Store AI response
+                const aiMessage = {
+                    id: messageIdCounter++,
+                    leadId: lead.id,
+                    sender: 'assistant',
+                    content: aiResponse,
+                    timestamp: new Date().toISOString()
+                };
+                messages.push(aiMessage);
+                
+                console.log(`✅ Chat response sent to ${lead.name} (${lead.phone})`);
+            }
+            return;
+        }
+        
         // FIRST: Extract answer from user message BEFORE generating AI response
         console.log(`🔍 Extracting answer BEFORE generating response...`);
         const answeredCountBefore = Object.keys(lead.answers || {}).length;
@@ -675,14 +701,14 @@ async function processAIResponse(lead, userMessage) {
         console.log(`📊 Current progress: ${answeredCount}/4 questions answered`);
         console.log(`📋 Current answers:`, lead.answers);
         
-        if (answeredCount >= 4) {
-            console.log(`🎉 All questions answered - qualifying lead`);
-            // All questions answered - qualify lead
+        if (answeredCount >= 4 && !lead.qualified) {
+            console.log(`🎉 All questions answered - qualifying lead for FIRST TIME`);
+            // All questions answered - qualify lead (only send this message once)
             const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
 
 Based on your answers, I'll have our team prepare a customized proposal for your equine stable project. Someone will contact you within 24 hours to discuss next steps.
 
-Thank you for your time! 🐴✨`;
+If you have any questions in the meantime, feel free to ask! 🐴✨`;
 
             await sendSMS(lead.phone, qualificationMessage);
             
@@ -907,6 +933,96 @@ async function generateFallbackResponse(lead, userMessage) {
     const response = "Thank you for your response! I'll have our team contact you soon.";
     console.log(`📤 Default response: ${response}`);
     return response;
+}
+
+// Generate conversational response for qualified leads
+async function generateQualifiedChatResponse(lead, userMessage) {
+    try {
+        console.log(`💬 Generating qualified chat response...`);
+        
+        if (!openaiClient || !assistantId) {
+            console.log('⚠️ OpenAI Assistant not configured - using simple response');
+            return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
+        }
+        
+        // Build context for post-qualification chat
+        const chatInstructions = `You are ${ASSISTANT_NAME}, an AI assistant from CSGB Cheshire Stables specializing in equine stable solutions.
+
+SITUATION: This customer (${lead.name}) has already completed the qualification process. All 4 qualification questions have been answered and they've been informed that our team will contact them within 24 hours.
+
+YOUR ROLE NOW:
+- Answer any questions they have about equine stables, buildings, or our services
+- Be friendly, helpful, and conversational
+- Keep responses brief and natural (under 150 characters when possible)
+- Reassure them that our team will be in touch soon
+- Handle thank you messages gracefully without repeating the qualification message
+
+THEIR QUALIFICATION INFO (for context):
+${Object.entries(lead.answers || {}).map(([key, value], i) => {
+    const q = CUSTOM_QUESTIONS[i];
+    const questionText = typeof q === 'object' ? q.question : q;
+    return `- ${questionText}: ${value}`;
+}).join('\n')}
+
+Customer's message: "${userMessage}"
+
+Respond naturally and helpfully. If they say "thank you", "thanks", or similar, acknowledge it warmly without repeating qualification details.`;
+
+        // Create a thread for this conversation
+        const thread = await openaiClient.beta.threads.create();
+        
+        // Add the message to thread
+        await openaiClient.beta.threads.messages.create(thread.id, {
+            role: 'user',
+            content: chatInstructions
+        });
+        
+        console.log(`📋 Chat context sent to Assistant for qualified lead`);
+        
+        // Run the assistant
+        const run = await openaiClient.beta.threads.runs.create(thread.id, {
+            assistant_id: assistantId
+        });
+        
+        // Wait for completion with timeout
+        console.log(`⏳ Waiting for Assistant chat response...`);
+        let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+        let attempts = 0;
+        const maxAttempts = 30;
+        
+        while (runStatus.status !== 'completed' && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
+            attempts++;
+            
+            if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+                console.log(`❌ Assistant run failed with status: ${runStatus.status}`);
+                throw new Error(`Assistant run ${runStatus.status}`);
+            }
+        }
+        
+        if (attempts >= maxAttempts) {
+            throw new Error('Assistant response timeout');
+        }
+        
+        console.log(`✅ Assistant chat completed in ${attempts} seconds`);
+        
+        // Get the assistant's response
+        const messages = await openaiClient.beta.threads.messages.list(thread.id);
+        const assistantMessage = messages.data[0];
+        
+        if (assistantMessage && assistantMessage.content[0].type === 'text') {
+            const response = assistantMessage.content[0].text.value;
+            console.log(`✅ Chat response received: "${response}"`);
+            return response;
+        }
+        
+        console.log(`❌ No valid assistant message found`);
+        return "You're welcome! Our team will be in touch with you soon. Feel free to ask if you have any other questions!";
+    } catch (error) {
+        console.error('❌ Error generating qualified chat response:', error);
+        return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
+    }
 }
 
 // Extract answers from conversation using AI
