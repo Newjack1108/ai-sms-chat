@@ -956,9 +956,12 @@ async function generateFallbackResponse(lead, userMessage) {
 async function generateQualifiedChatResponse(lead, userMessage) {
     try {
         console.log(`💬 Generating qualified chat response...`);
+        console.log(`   OpenAI Client: ${openaiClient ? 'Available' : 'NOT AVAILABLE'}`);
+        console.log(`   Assistant ID: ${assistantId ? assistantId : 'NOT SET'}`);
         
         if (!openaiClient || !assistantId) {
             console.log('⚠️ OpenAI Assistant not configured - using simple response');
+            console.log('   This means the assistant cannot answer questions - check your OPENAI_API_KEY and OPENAI_ASSISTANT_ID env vars');
             return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
         }
         
@@ -1038,6 +1041,9 @@ Respond naturally and helpfully. If they say "thank you", "thanks", or similar, 
         return "You're welcome! Our team will be in touch with you soon. Feel free to ask if you have any other questions!";
     } catch (error) {
         console.error('❌ Error generating qualified chat response:', error);
+        console.error('❌ Error details:', error.message);
+        console.error('❌ Error stack:', error.stack);
+        console.log('⚠️ Falling back to simple response due to error above');
         return "You're welcome! If you have any other questions, our team will be happy to help when they contact you.";
     }
 }
