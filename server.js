@@ -701,6 +701,13 @@ async function processAIResponse(lead, userMessage) {
         if (lead.qualified === true || lead.status === 'qualified') {
             console.log(`💬 Lead already qualified - entering free chat mode`);
             
+            // Move qualified customer back to active status so they appear in chat interface
+            if (lead.status === 'qualified') {
+                console.log(`🔄 Moving qualified customer back to active status`);
+                LeadDatabase.updateLead(lead.id, { status: 'active' });
+                lead.status = 'active'; // Update local object
+            }
+            
             // Generate friendly conversational response
             const aiResponse = await generateQualifiedChatResponse(lead, userMessage);
             
