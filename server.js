@@ -64,8 +64,33 @@ function initializeOpenAI() {
     }
 }
 
+// Load settings from database on startup
+function loadSettingsFromDatabase() {
+    // Load custom questions from database
+    const dbQuestions = LeadDatabase.getCustomQuestions();
+    if (dbQuestions && Array.isArray(dbQuestions) && dbQuestions.length === 4) {
+        CUSTOM_QUESTIONS = dbQuestions;
+        console.log('✅ Loaded custom questions from database');
+    } else {
+        // Save default questions to database
+        LeadDatabase.saveCustomQuestions(CUSTOM_QUESTIONS);
+        console.log('✅ Saved default questions to database');
+    }
+    
+    // Load assistant name from database
+    const dbAssistantName = LeadDatabase.getAssistantName();
+    if (dbAssistantName) {
+        ASSISTANT_NAME = dbAssistantName;
+    } else {
+        // Save default assistant name to database
+        LeadDatabase.saveAssistantName(ASSISTANT_NAME);
+        console.log('✅ Saved default assistant name to database');
+    }
+}
+
 // Initialize on startup
 initializeOpenAI();
+loadSettingsFromDatabase();
 
 // ========================================
 // API ENDPOINTS
@@ -240,18 +265,22 @@ app.post('/api/settings', (req, res) => {
             }
             
             CUSTOM_QUESTIONS = customQuestions;
+            // Save to database
+            LeadDatabase.saveCustomQuestions(customQuestions);
             console.log('✅ Custom questions updated with possible answers');
         }
         
         // Update assistant name if provided
         if (assistantName && assistantName.trim().length > 0) {
             ASSISTANT_NAME = assistantName.trim();
+            // Save to database
+            LeadDatabase.saveAssistantName(ASSISTANT_NAME);
             console.log('✅ Assistant name updated to:', ASSISTANT_NAME);
         }
         
         res.json({
             success: true,
-            message: 'Settings updated successfully',
+            message: 'Settings updated successfully (saved to database)',
             customQuestions: CUSTOM_QUESTIONS,
             assistantName: ASSISTANT_NAME
         });
@@ -651,8 +680,9 @@ ${firstQuestion}`;
         // Store introduction message in database
         LeadDatabase.createMessage(lead.id, 'assistant', introductionMessage);
         
+        const firstQuestionText = typeof CUSTOM_QUESTIONS[0] === 'object' ? CUSTOM_QUESTIONS[0].question : CUSTOM_QUESTIONS[0];
         console.log(`🤖 ${ASSISTANT_NAME} introduction sent to ${lead.name} (${lead.phone})`);
-        console.log(`📝 First question from custom questions: ${CUSTOM_QUESTIONS[0]}`);
+        console.log(`📝 First question: ${firstQuestionText}`);
     } catch (error) {
         console.error('Error sending AI introduction:', error);
     }
@@ -1246,6 +1276,10 @@ app.listen(PORT, () => {
     console.log(`   Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? '✅ Set' : '❌ Not set'}`);
     console.log(`   Twilio From Number: ${process.env.TWILIO_FROM_NUMBER || '❌ Not set'}`);
     console.log(`\n🎯 Custom Questions:`);
-    CUSTOM_QUESTIONS.forEach((q, i) => console.log(`   ${i + 1}. ${q}`));
+    CUSTOM_QUESTIONS.forEach((q, i) => {
+        const questionText = typeof q === 'object' ? q.question : q;
+        const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? ` (Options: ${q.possibleAnswers})` : '';
+        console.log(`   ${i + 1}. ${questionText}${possibleAnswers}`);
+    });
     console.log('\n');
 });

@@ -46,6 +46,15 @@ function initializeDatabase() {
         )
     `);
     
+    // Create settings table for custom questions
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
     // Create index for faster queries
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
@@ -110,6 +119,16 @@ const statements = {
     
     deleteMessagesByLeadId: db.prepare(`
         DELETE FROM messages WHERE leadId = ?
+    `),
+    
+    // Settings operations
+    saveSetting: db.prepare(`
+        INSERT OR REPLACE INTO settings (key, value, updatedAt)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+    `),
+    
+    getSetting: db.prepare(`
+        SELECT value FROM settings WHERE key = ?
     `)
 };
 
@@ -314,6 +333,63 @@ class LeadDatabase {
         } catch (error) {
             console.error('❌ Error getting conversation history:', error);
             throw error;
+        }
+    }
+    
+    // Save custom questions to database
+    static saveCustomQuestions(questions) {
+        try {
+            const questionsJSON = JSON.stringify(questions);
+            statements.saveSetting.run('customQuestions', questionsJSON);
+            console.log('✅ Custom questions saved to database');
+            return true;
+        } catch (error) {
+            console.error('❌ Error saving custom questions:', error);
+            throw error;
+        }
+    }
+    
+    // Get custom questions from database
+    static getCustomQuestions() {
+        try {
+            const result = statements.getSetting.get('customQuestions');
+            if (result && result.value) {
+                const questions = JSON.parse(result.value);
+                console.log('✅ Loaded custom questions from database');
+                return questions;
+            }
+            console.log('⚠️ No custom questions in database, using defaults');
+            return null;
+        } catch (error) {
+            console.error('❌ Error getting custom questions:', error);
+            return null;
+        }
+    }
+    
+    // Save assistant name to database
+    static saveAssistantName(name) {
+        try {
+            statements.saveSetting.run('assistantName', name);
+            console.log(`✅ Assistant name saved to database: ${name}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error saving assistant name:', error);
+            throw error;
+        }
+    }
+    
+    // Get assistant name from database
+    static getAssistantName() {
+        try {
+            const result = statements.getSetting.get('assistantName');
+            if (result && result.value) {
+                console.log(`✅ Loaded assistant name from database: ${result.value}`);
+                return result.value;
+            }
+            return null;
+        } catch (error) {
+            console.error('❌ Error getting assistant name:', error);
+            return null;
         }
     }
 }
