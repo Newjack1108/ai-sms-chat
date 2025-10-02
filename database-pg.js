@@ -368,6 +368,122 @@ class LeadDatabase {
             throw error;
         }
     }
+    
+    // Check if customer exists (returns lead if exists, null if new)
+    static async checkExistingCustomer(phone) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const lead = await this.getLeadByPhone(phone);
+            if (lead) {
+                console.log(`👤 Found existing customer: ${lead.name} (${lead.phone})`);
+                console.log(`   Status: ${lead.status}, Progress: ${lead.progress}%`);
+                return lead;
+            }
+            console.log(`🆕 New customer detected: ${phone}`);
+            return null;
+        } catch (error) {
+            console.error('Error checking existing customer:', error);
+            return null;
+        }
+    }
+    
+    // Update last contact time
+    static async updateLastContact(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET last_contact = CURRENT_TIMESTAMP 
+                WHERE id = $1
+            `, [id]);
+            return true;
+        } catch (error) {
+            console.error('Error updating last contact:', error);
+            return false;
+        }
+    }
+    
+    // Get conversation history
+    static async getConversationHistory(leadId) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query(`
+                SELECT * FROM messages 
+                WHERE lead_id = $1 
+                ORDER BY created_at ASC
+            `, [leadId]);
+            return result.rows;
+        } catch (error) {
+            console.error('Error getting conversation history:', error);
+            return [];
+        }
+    }
+    
+    // Delete lead
+    static async deleteLead(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET archived = TRUE 
+                WHERE id = $1
+            `, [id]);
+            return true;
+        } catch (error) {
+            console.error('Error deleting lead:', error);
+            return false;
+        }
+    }
+    
+    // Pause AI
+    static async pauseAI(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET ai_paused = TRUE 
+                WHERE id = $1
+            `, [id]);
+            return true;
+        } catch (error) {
+            console.error('Error pausing AI:', error);
+            return false;
+        }
+    }
+    
+    // Unpause AI
+    static async unpauseAI(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET ai_paused = FALSE 
+                WHERE id = $1
+            `, [id]);
+            return true;
+        } catch (error) {
+            console.error('Error unpausing AI:', error);
+            return false;
+        }
+    }
 }
 
 module.exports = {

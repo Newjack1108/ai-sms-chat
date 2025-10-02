@@ -71,26 +71,31 @@ function initializeOpenAI() {
 }
 
 // Load settings from database on startup
-function loadSettingsFromDatabase() {
-    // Load custom questions from database
-    const dbQuestions = LeadDatabase.getCustomQuestions();
-    if (dbQuestions && Array.isArray(dbQuestions) && dbQuestions.length === 4) {
-        CUSTOM_QUESTIONS = dbQuestions;
-        console.log('✅ Loaded custom questions from database');
-    } else {
-        // Save default questions to database
-        LeadDatabase.saveCustomQuestions(CUSTOM_QUESTIONS);
-        console.log('✅ Saved default questions to database');
-    }
-    
-    // Load assistant name from database
-    const dbAssistantName = LeadDatabase.getAssistantName();
-    if (dbAssistantName) {
-        ASSISTANT_NAME = dbAssistantName;
-    } else {
-        // Save default assistant name to database
-        LeadDatabase.saveAssistantName(ASSISTANT_NAME);
-        console.log('✅ Saved default assistant name to database');
+async function loadSettingsFromDatabase() {
+    try {
+        // Load custom questions from database
+        const dbQuestions = await LeadDatabase.getCustomQuestions();
+        if (dbQuestions && Array.isArray(dbQuestions) && dbQuestions.length === 4) {
+            CUSTOM_QUESTIONS = dbQuestions;
+            console.log('✅ Loaded custom questions from database');
+        } else {
+            // Save default questions to database
+            await LeadDatabase.saveCustomQuestions(CUSTOM_QUESTIONS);
+            console.log('✅ Saved default questions to database');
+        }
+        
+        // Load assistant name from database
+        const dbAssistantName = await LeadDatabase.getAssistantName();
+        if (dbAssistantName) {
+            ASSISTANT_NAME = dbAssistantName;
+        } else {
+            // Save default assistant name to database
+            await LeadDatabase.saveAssistantName(ASSISTANT_NAME);
+            console.log('✅ Saved default assistant name to database');
+        }
+    } catch (error) {
+        console.error('❌ Error loading settings from database:', error);
+        // Continue with defaults if database fails
     }
 }
 
@@ -102,9 +107,9 @@ initializeOpenAI();
 // ========================================
 
 // Get all leads
-app.get('/api/leads', (req, res) => {
+app.get('/api/leads', async (req, res) => {
     try {
-        const leads = LeadDatabase.getAllLeads();
+        const leads = await LeadDatabase.getAllLeads();
         res.json(leads);
     } catch (error) {
         console.error('Error fetching leads:', error);
@@ -116,10 +121,10 @@ app.get('/api/leads', (req, res) => {
 });
 
 // Get messages for a specific lead
-app.get('/api/leads/:leadId/messages', (req, res) => {
+app.get('/api/leads/:leadId/messages', async (req, res) => {
     try {
         const { leadId } = req.params;
-        const leadMessages = LeadDatabase.getMessagesByLeadId(parseInt(leadId));
+        const leadMessages = await LeadDatabase.getMessagesByLeadId(parseInt(leadId));
         res.json(leadMessages);
     } catch (error) {
         console.error('Error fetching messages:', error);
@@ -1624,7 +1629,7 @@ async function startServer() {
         }
         
         // Load settings from database after database is initialized
-        loadSettingsFromDatabase();
+        await loadSettingsFromDatabase();
         
         // Start the server
         app.listen(PORT, () => {
