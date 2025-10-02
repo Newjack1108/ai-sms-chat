@@ -853,32 +853,42 @@ async function processAIResponse(lead, userMessage) {
         
         // FIRST: Extract answer from user message BEFORE generating AI response
         console.log(`🔍 Extracting answer BEFORE generating response...`);
-        const answeredCountBefore = Object.keys(lead.answers || {}).length;
+        lead.answers = lead.answers || {};
+        const answeredCountBefore = Object.keys(lead.answers).length;
+        
+        console.log(`📊 Current state: ${answeredCountBefore} questions already answered`);
+        console.log(`📋 Existing answers:`, JSON.stringify(lead.answers, null, 2));
         
         // Simple answer storage for current unanswered question
+        // Only store if we haven't reached the limit
         if (answeredCountBefore < CUSTOM_QUESTIONS.length && userMessage.trim().length > 0) {
             const questionKey = `question_${answeredCountBefore + 1}`;
-            lead.answers = lead.answers || {};
-            lead.answers[questionKey] = userMessage;
             
-            // Update progress
-            const newAnsweredCount = Object.keys(lead.answers).length;
-            lead.progress = Math.round((newAnsweredCount / 4) * 100);
-            lead.status = lead.progress === 100 ? 'qualified' : 'active';
-            
-            // Save to database
-            LeadDatabase.updateLead(lead.id, {
-                name: lead.name,
-                email: lead.email,
-                status: lead.status,
-                progress: lead.progress,
-                qualified: lead.qualified,
-                answers: lead.answers,
-                qualifiedDate: lead.qualifiedDate
-            });
-            
-            console.log(`✅ Stored answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
-            console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
+            // Check if this answer slot is already filled (prevent duplicate storage)
+            if (!lead.answers[questionKey]) {
+                lead.answers[questionKey] = userMessage;
+                
+                // Update progress
+                const newAnsweredCount = Object.keys(lead.answers).length;
+                lead.progress = Math.round((newAnsweredCount / 4) * 100);
+                lead.status = lead.progress === 100 ? 'qualified' : 'active';
+                
+                // Save to database
+                LeadDatabase.updateLead(lead.id, {
+                    name: lead.name,
+                    email: lead.email,
+                    status: lead.status,
+                    progress: lead.progress,
+                    qualified: lead.qualified,
+                    answers: lead.answers,
+                    qualifiedDate: lead.qualifiedDate
+                });
+                
+                console.log(`✅ Stored NEW answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
+                console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
+            } else {
+                console.log(`⚠️ Answer for question ${answeredCountBefore + 1} already exists, skipping duplicate storage`);
+            }
         }
         
         // Check if all questions are answered NOW (after storing answer)
