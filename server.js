@@ -721,6 +721,40 @@ app.get('/api/config/status', (req, res) => {
     });
 });
 
+// Database status endpoint (for debugging persistence issues)
+app.get('/api/database/status', (req, res) => {
+    try {
+        const leads = LeadDatabase.getAllLeads();
+        const totalLeads = leads.length;
+        const totalMessages = leads.reduce((total, lead) => {
+            const messages = LeadDatabase.getMessagesByLeadId(lead.id);
+            return total + messages.length;
+        }, 0);
+        
+        const status = {
+            databasePath: process.env.DATABASE_PATH || '/tmp/leads.db',
+            railwayVolume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set',
+            totalLeads: totalLeads,
+            totalMessages: totalMessages,
+            leads: leads.map(lead => ({
+                id: lead.id,
+                name: lead.name,
+                phone: lead.phone,
+                status: lead.status,
+                messageCount: LeadDatabase.getMessagesByLeadId(lead.id).length
+            }))
+        };
+        
+        res.json(status);
+    } catch (error) {
+        res.status(500).json({ 
+            error: error.message,
+            databasePath: process.env.DATABASE_PATH || '/tmp/leads.db',
+            railwayVolume: process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'
+        });
+    }
+});
+
 // Database status endpoint (for debugging)
 app.get('/api/database/status', (req, res) => {
     try {

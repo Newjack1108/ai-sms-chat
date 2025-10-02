@@ -2,11 +2,43 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// Initialize database
-const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'leads.db');
-const db = new Database(dbPath);
+// Initialize database with Railway persistent storage
+let dbPath;
+if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    // Use Railway persistent volume
+    dbPath = path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'leads.db');
+} else if (process.env.DATABASE_PATH) {
+    // Use custom database path
+    dbPath = process.env.DATABASE_PATH;
+} else {
+    // Fallback to /tmp (Railway persistent)
+    dbPath = '/tmp/leads.db';
+}
 
-console.log(`🗄️ Database location: ${dbPath}`);
+let db;
+try {
+    db = new Database(dbPath);
+    console.log(`🗄️ Database location: ${dbPath}`);
+    console.log(`✅ Database connection successful`);
+} catch (error) {
+    console.error(`❌ Database connection failed: ${error.message}`);
+    console.error(`📁 Attempted path: ${dbPath}`);
+    
+    // Try fallback to /tmp if other paths fail
+    if (dbPath !== '/tmp/leads.db') {
+        console.log(`🔄 Trying fallback to /tmp/leads.db...`);
+        try {
+            dbPath = '/tmp/leads.db';
+            db = new Database(dbPath);
+            console.log(`✅ Fallback database connection successful: ${dbPath}`);
+        } catch (fallbackError) {
+            console.error(`❌ Fallback database connection also failed: ${fallbackError.message}`);
+            throw fallbackError;
+        }
+    } else {
+        throw error;
+    }
+}
 
 // Enable foreign keys
 db.pragma('foreign_keys = ON');
