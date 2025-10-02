@@ -5,12 +5,12 @@ const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
 const OpenAI = require('openai');
-// Import database (PostgreSQL with SQLite fallback)
+// Import database modules
 const { LeadDatabase: SQLiteLeadDatabase } = require('./database');
 const { LeadDatabase: PGLeadDatabase, isPostgreSQL } = require('./database-pg');
 
-// Use PostgreSQL if available, otherwise SQLite
-const LeadDatabase = isPostgreSQL ? PGLeadDatabase : SQLiteLeadDatabase;
+// Database will be selected at runtime
+let LeadDatabase;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1609,12 +1609,17 @@ function normalizePhoneNumber(phone) {
 // Initialize database
 async function startServer() {
     try {
-        // Initialize PostgreSQL if available
+        // Select database at runtime
         if (isPostgreSQL) {
+            LeadDatabase = PGLeadDatabase;
             const { initializeDatabase } = require('./database-pg');
             await initializeDatabase();
             console.log('✅ PostgreSQL database initialized');
         } else {
+            LeadDatabase = SQLiteLeadDatabase;
+            // Initialize SQLite database
+            const { initializeDatabase } = require('./database');
+            initializeDatabase();
             console.log('✅ SQLite database initialized');
         }
         

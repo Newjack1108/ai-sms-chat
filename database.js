@@ -4,12 +4,22 @@ const path = require('path');
 
 // Initialize database with Railway persistent storage
 let dbPath;
-if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
-    // Use Railway persistent volume
-    dbPath = path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'leads.db');
+if (process.env.DATABASE_URL) {
+    // PostgreSQL is available, don't use SQLite
+    console.log('🗄️ PostgreSQL detected, skipping SQLite initialization');
+    dbPath = null;
 } else if (process.env.DATABASE_PATH) {
     // Use custom database path
     dbPath = process.env.DATABASE_PATH;
+} else if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+    // Use Railway persistent volume (create directory if needed)
+    const fs = require('fs');
+    const volumePath = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    if (!fs.existsSync(volumePath)) {
+        console.log(`📁 Creating directory: ${volumePath}`);
+        fs.mkdirSync(volumePath, { recursive: true });
+    }
+    dbPath = path.join(volumePath, 'leads.db');
 } else if (process.env.RAILWAY_ENVIRONMENT) {
     // Railway environment - use /app directory (persistent)
     dbPath = '/app/leads.db';
@@ -19,39 +29,52 @@ if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
 }
 
 let db;
-try {
-    db = new Database(dbPath);
-    console.log(`🗄️ Database location: ${dbPath}`);
-    console.log(`✅ Database connection successful`);
-    console.log(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
-    console.log(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
-} catch (error) {
-    console.error(`❌ Database connection failed: ${error.message}`);
-    console.error(`📁 Attempted path: ${dbPath}`);
-    console.error(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
-    console.error(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
-    
-    // Try fallback to /app if other paths fail
-    if (dbPath !== '/app/leads.db') {
-        console.log(`🔄 Trying fallback to /app/leads.db...`);
-        try {
-            dbPath = '/app/leads.db';
-            db = new Database(dbPath);
-            console.log(`✅ Fallback database connection successful: ${dbPath}`);
-        } catch (fallbackError) {
-            console.error(`❌ Fallback database connection also failed: ${fallbackError.message}`);
-            throw fallbackError;
+if (dbPath === null) {
+    // PostgreSQL is available, SQLite not needed
+    console.log('🗄️ PostgreSQL available, SQLite database not initialized');
+    db = null;
+} else {
+    try {
+        db = new Database(dbPath);
+        console.log(`🗄️ Database location: ${dbPath}`);
+        console.log(`✅ Database connection successful`);
+        console.log(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
+        console.log(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
+    } catch (error) {
+        console.error(`❌ Database connection failed: ${error.message}`);
+        console.error(`📁 Attempted path: ${dbPath}`);
+        console.error(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
+        console.error(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
+        
+        // Try fallback to /app if other paths fail
+        if (dbPath !== '/app/leads.db') {
+            console.log(`🔄 Trying fallback to /app/leads.db...`);
+            try {
+                dbPath = '/app/leads.db';
+                db = new Database(dbPath);
+                console.log(`✅ Fallback database connection successful: ${dbPath}`);
+            } catch (fallbackError) {
+                console.error(`❌ Fallback database connection also failed: ${fallbackError.message}`);
+                throw fallbackError;
+            }
+        } else {
+            throw error;
         }
-    } else {
-        throw error;
     }
 }
 
-// Enable foreign keys
-db.pragma('foreign_keys = ON');
+// Enable foreign keys (only if SQLite is being used)
+if (db) {
+    db.pragma('foreign_keys = ON');
+}
 
 // Initialize database schema
 function initializeDatabase() {
+    if (!db) {
+        console.log('⚠️ SQLite database not available (PostgreSQL in use)');
+        return;
+    }
+    
     console.log('🗄️ Initializing SQLite database...');
     
     // Create leads table
@@ -105,8 +128,7 @@ function initializeDatabase() {
     console.log('✅ Database initialized successfully');
 }
 
-// Initialize database first
-initializeDatabase();
+// Database will be initialized when needed
 
 // Prepared statements for better performance (created AFTER tables exist)
 const statements = {
