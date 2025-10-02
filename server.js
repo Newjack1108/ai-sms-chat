@@ -838,8 +838,8 @@ async function processAIResponse(lead, userMessage) {
                 lead.status = 'active'; // Update local object
             }
             
-            // Generate friendly conversational response using Assistant API
-            const aiResponse = await generateQualifiedChatResponseWithAssistant(lead, userMessage);
+            // Generate friendly conversational response using Chat Completions API (more reliable)
+            const aiResponse = await generateQualifiedChatResponse(lead, userMessage);
             
             if (aiResponse) {
                 console.log(`📤 Sending chat response: "${aiResponse}"`);
@@ -1170,7 +1170,7 @@ ${Object.entries(lead.answers || {}).map(([key, value], i) => {
         // Use Chat Completions API (more reliable than Assistant API for simple responses)
         console.log(`📋 Sending chat request to OpenAI...`);
         const completion = await openaiClient.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userMessage }
@@ -1336,7 +1336,7 @@ If the customer's message doesn't answer a question, don't include it.
 Accept the first answer given - don't wait for more details.`;
 
         const completion = await openaiClient.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+            model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: 'You are an expert at extracting structured information from customer conversations.' },
                 { role: 'user', content: extractionPrompt }
