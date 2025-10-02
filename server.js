@@ -1038,6 +1038,9 @@ Example: "Got it! Does your building need to be mobile?"`;
         
         // Wait for completion with timeout
         console.log(`⏳ Waiting for Assistant response...`);
+        console.log(`⏳ Initial 3-second delay to allow assistant to start...`);
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second initial delay
+        
         let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
         let attempts = 0;
         const maxAttempts = 30; // 30 seconds timeout
@@ -1234,6 +1237,9 @@ Respond naturally and helpfully. Answer their specific questions about our busin
         
         // Wait for completion with timeout
         console.log(`⏳ Waiting for Assistant chat response...`);
+        console.log(`⏳ Initial 3-second delay to allow assistant to start...`);
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second initial delay
+        
         let runStatus = await openaiClient.beta.threads.runs.retrieve(thread.id, run.id);
         let attempts = 0;
         const maxAttempts = 30;
