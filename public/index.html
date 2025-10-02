@@ -1062,9 +1062,14 @@
                         <!-- Questions will be populated here -->
                     </div>
                     
-                    <button class="btn btn-success" id="qualify-btn" style="margin-top: 20px; width: 100%;" disabled>
-                        ✅ Qualify Lead
-                    </button>
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button class="btn btn-success" id="qualify-btn" style="flex: 1;" disabled>
+                            ✅ Qualify Lead
+                        </button>
+                        <button class="btn btn-warning" id="silent-qualify-btn" style="flex: 1;" disabled>
+                            🔇 Silent Qualify
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1502,9 +1507,11 @@
             // Update questions list
             renderQuestionsList();
 
-            // Enable/disable qualify button
+            // Enable/disable qualify buttons
             const qualifyBtn = document.getElementById('qualify-btn');
+            const silentQualifyBtn = document.getElementById('silent-qualify-btn');
             qualifyBtn.disabled = answeredQuestions < totalQuestions;
+            silentQualifyBtn.disabled = false; // Silent qualify is always available
         }
 
         // Render questions list
@@ -1823,6 +1830,9 @@
 
             // Qualify lead
             document.getElementById('qualify-btn').addEventListener('click', qualifyLead);
+            
+            // Silent qualify lead
+            document.getElementById('silent-qualify-btn').addEventListener('click', silentQualifyLead);
 
             // Search and filter
             document.getElementById('search-customers').addEventListener('input', filterCustomers);
@@ -1863,6 +1873,29 @@
             } catch (error) {
                 console.error('Error qualifying lead:', error);
                 showNotification('Error qualifying lead', 'error');
+            }
+        }
+
+        // Silent qualify lead (no message sent)
+        async function silentQualifyLead() {
+            if (!currentLead) return;
+
+            try {
+                const response = await fetch(`/api/leads/${currentLead.id}/silent-qualify`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showNotification('Lead silently qualified!', 'success');
+                    currentLead.status = 'qualified';
+                    loadLeads();
+                    loadLeadDetails();
+                } else {
+                    showNotification('Failed to silently qualify lead', 'error');
+                }
+            } catch (error) {
+                console.error('Error silently qualifying lead:', error);
+                showNotification('Error silently qualifying lead', 'error');
             }
         }
 

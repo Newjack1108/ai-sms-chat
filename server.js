@@ -229,6 +229,43 @@ Thank you for your time! 🐴✨`;
     }
 });
 
+// Silent qualify lead (no message sent)
+app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
+    try {
+        const { leadId} = req.params;
+        
+        const lead = LeadDatabase.getLeadById(parseInt(leadId));
+        if (!lead) {
+            return res.status(404).json({
+                success: false,
+                error: 'Lead not found'
+            });
+        }
+        
+        // Mark as qualified in database (no message sent)
+        LeadDatabase.updateLead(parseInt(leadId), {
+            ...lead,
+            qualified: true,
+            status: 'qualified',
+            progress: 100,
+            qualifiedDate: new Date().toISOString()
+        });
+        
+        console.log(`🔇 Silent qualification: ${lead.name} (${lead.phone}) - no message sent`);
+
+        res.json({
+            success: true,
+            message: 'Lead silently qualified successfully'
+        });
+    } catch (error) {
+        console.error('Error silently qualifying lead:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Update all settings (custom questions, assistant name, etc.)
 app.post('/api/settings', (req, res) => {
     try {
