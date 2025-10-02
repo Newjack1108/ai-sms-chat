@@ -96,7 +96,6 @@ function loadSettingsFromDatabase() {
 
 // Initialize on startup
 initializeOpenAI();
-loadSettingsFromDatabase();
 
 // ========================================
 // API ENDPOINTS
@@ -1623,6 +1622,9 @@ async function startServer() {
             initializeDatabase();
             console.log('✅ SQLite database initialized');
         }
+        
+        // Load settings from database after database is initialized
+        loadSettingsFromDatabase();
         
         // Start the server
         app.listen(PORT, () => {
