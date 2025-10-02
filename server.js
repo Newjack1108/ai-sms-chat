@@ -147,7 +147,7 @@ app.post('/api/leads/send-message', async (req, res) => {
             });
         }
         
-        const lead = LeadDatabase.getLeadById(parseInt(leadId));
+        const lead = await LeadDatabase.getLeadById(parseInt(leadId));
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -156,7 +156,7 @@ app.post('/api/leads/send-message', async (req, res) => {
         }
         
         // Store user message in database
-        LeadDatabase.createMessage(parseInt(leadId), 'user', message);
+        await LeadDatabase.createMessage(parseInt(leadId), 'user', message);
         
         // Send SMS to customer
         await sendSMS(lead.phone, message);
@@ -166,7 +166,7 @@ app.post('/api/leads/send-message', async (req, res) => {
         
         if (aiResponse) {
             // Store AI response in database
-            LeadDatabase.createMessage(parseInt(leadId), 'assistant', aiResponse);
+            await LeadDatabase.createMessage(parseInt(leadId), 'assistant', aiResponse);
             
             // Send AI response as SMS
             await sendSMS(lead.phone, aiResponse);
@@ -190,7 +190,7 @@ app.post('/api/leads/:leadId/qualify', async (req, res) => {
     try {
         const { leadId} = req.params;
         
-        const lead = LeadDatabase.getLeadById(parseInt(leadId));
+        const lead = await LeadDatabase.getLeadById(parseInt(leadId));
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -199,7 +199,7 @@ app.post('/api/leads/:leadId/qualify', async (req, res) => {
         }
         
         // Mark as qualified in database
-        LeadDatabase.updateLead(parseInt(leadId), {
+        await LeadDatabase.updateLead(parseInt(leadId), {
             ...lead,
             qualified: true,
             status: 'qualified',
@@ -244,7 +244,7 @@ app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
     try {
         const { leadId} = req.params;
         
-        const lead = LeadDatabase.getLeadById(parseInt(leadId));
+        const lead = await LeadDatabase.getLeadById(parseInt(leadId));
         if (!lead) {
             return res.status(404).json({
                 success: false,
@@ -253,7 +253,7 @@ app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
         }
         
         // Mark as qualified in database (no message sent)
-        LeadDatabase.updateLead(parseInt(leadId), {
+        await LeadDatabase.updateLead(parseInt(leadId), {
             ...lead,
             qualified: true,
             status: 'qualified',
@@ -663,12 +663,12 @@ app.post('/webhook/sms', async (req, res) => {
         console.log(`📞 Normalized phone: ${normalizedPhone}`);
         
         // Check if customer already exists in database
-        let lead = LeadDatabase.checkExistingCustomer(normalizedPhone);
+        let lead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
         
         if (!lead) {
             // New customer - create in database
             console.log(`🆕 Creating new lead for ${normalizedPhone}`);
-            lead = LeadDatabase.createLead({
+            lead = await LeadDatabase.createLead({
                 phone: normalizedPhone,
                 name: 'Unknown',
                 email: '',
@@ -684,11 +684,11 @@ app.post('/webhook/sms', async (req, res) => {
             console.log(`🔄 Existing customer found: ${lead.name} (ID: ${lead.id})`);
             console.log(`   Status: ${lead.status}, Progress: ${lead.progress}%`);
             
-            const messageHistory = LeadDatabase.getConversationHistory(lead.id);
+            const messageHistory = await LeadDatabase.getConversationHistory(lead.id);
             console.log(`   📜 Loaded ${messageHistory.length} previous messages`);
             
             // Update last contact time
-            LeadDatabase.updateLastContact(lead.id);
+            await LeadDatabase.updateLastContact(lead.id);
         }
         
         // Process AI response
