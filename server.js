@@ -802,6 +802,59 @@ ${firstQuestion}`;
     }
 }
 
+// Validate if user answer matches expected patterns (flexible matching)
+function validateAnswer(userMessage, expectedAnswers) {
+    if (!userMessage || !expectedAnswers) return false;
+    
+    const userAnswer = userMessage.toLowerCase().trim();
+    const expectedList = expectedAnswers.toLowerCase().split(',').map(a => a.trim());
+    
+    // Check for exact matches
+    if (expectedList.includes(userAnswer)) {
+        return true;
+    }
+    
+    // Check for partial matches (user answer contains expected answer)
+    for (const expected of expectedList) {
+        if (userAnswer.includes(expected) || expected.includes(userAnswer)) {
+            return true;
+        }
+    }
+    
+    // Check for common variations
+    const variations = {
+        'yes': ['y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'definitely', 'absolutely'],
+        'no': ['n', 'nope', 'nah', 'not', 'none', 'never'],
+        'mobile': ['movable', 'moveable', 'portable', 'transportable'],
+        'static': ['fixed', 'permanent', 'stationary'],
+        'asap': ['as soon as possible', 'urgent', 'quickly', 'fast', 'immediately'],
+        'week': ['weeks', 'weekly'],
+        'month': ['months', 'monthly'],
+        'year': ['years', 'yearly']
+    };
+    
+    for (const [key, variants] of Object.entries(variations)) {
+        if (expectedList.includes(key) && variants.some(v => userAnswer.includes(v))) {
+            return true;
+        }
+    }
+    
+    // For postcode question, accept any format that looks like a postcode
+    if (expectedList.includes('any postcode format')) {
+        const postcodePattern = /^[a-z]{1,2}\d{1,2}[a-z]?\s?\d[a-z]{2}$/i;
+        if (postcodePattern.test(userAnswer) || userAnswer.length >= 3) {
+            return true;
+        }
+    }
+    
+    // If answer is substantial (more than 2 characters), accept it
+    if (userAnswer.length > 2) {
+        return true;
+    }
+    
+    return false;
+}
+
 // Process AI response using OpenAI Assistant
 async function processAIResponse(lead, userMessage) {
     try {
@@ -859,33 +912,41 @@ async function processAIResponse(lead, userMessage) {
         console.log(`📊 Current state: ${answeredCountBefore} questions already answered`);
         console.log(`📋 Existing answers:`, JSON.stringify(lead.answers, null, 2));
         
-        // Simple answer storage for current unanswered question
-        // Only store if we haven't reached the limit
+        // Validate and store answer for current unanswered question
         if (answeredCountBefore < CUSTOM_QUESTIONS.length && userMessage.trim().length > 0) {
+            const currentQuestion = CUSTOM_QUESTIONS[answeredCountBefore];
             const questionKey = `question_${answeredCountBefore + 1}`;
             
             // Check if this answer slot is already filled (prevent duplicate storage)
             if (!lead.answers[questionKey]) {
-                lead.answers[questionKey] = userMessage;
+                // Validate the answer against expected patterns
+                const answerValid = validateAnswer(userMessage, currentQuestion.possibleAnswers);
+                console.log(`🔍 Answer validation: "${userMessage}" -> ${answerValid ? 'VALID' : 'INVALID'}`);
                 
-                // Update progress
-                const newAnsweredCount = Object.keys(lead.answers).length;
-                lead.progress = Math.round((newAnsweredCount / 4) * 100);
-                lead.status = lead.progress === 100 ? 'qualified' : 'active';
-                
-                // Save to database
-                LeadDatabase.updateLead(lead.id, {
-                    name: lead.name,
-                    email: lead.email,
-                    status: lead.status,
-                    progress: lead.progress,
-                    qualified: lead.qualified,
-                    answers: lead.answers,
-                    qualifiedDate: lead.qualifiedDate
-                });
-                
-                console.log(`✅ Stored NEW answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
-                console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
+                if (answerValid) {
+                    lead.answers[questionKey] = userMessage;
+                    
+                    // Update progress
+                    const newAnsweredCount = Object.keys(lead.answers).length;
+                    lead.progress = Math.round((newAnsweredCount / 4) * 100);
+                    lead.status = lead.progress === 100 ? 'qualified' : 'active';
+                    
+                    // Save to database
+                    LeadDatabase.updateLead(lead.id, {
+                        name: lead.name,
+                        email: lead.email,
+                        status: lead.status,
+                        progress: lead.progress,
+                        qualified: lead.qualified,
+                        answers: lead.answers,
+                        qualifiedDate: lead.qualifiedDate
+                    });
+                    
+                    console.log(`✅ Stored VALID answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
+                    console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
+                } else {
+                    console.log(`❌ Answer "${userMessage}" doesn't match expected patterns for question ${answeredCountBefore + 1}`);
+                }
             } else {
                 console.log(`⚠️ Answer for question ${answeredCountBefore + 1} already exists, skipping duplicate storage`);
             }
@@ -933,7 +994,9 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
         
         console.log(`🤖 Generating AI response...`);
         // Generate AI response using Assistant
-        const aiResponse = await generateAIResponseWithAssistant(lead, userMessage);
+        const currentQuestion = CUSTOM_QUESTIONS[answeredCountBefore];
+        const answerValid = validateAnswer(userMessage, currentQuestion?.possibleAnswers);
+        const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answerValid);
         
         if (aiResponse) {
             console.log(`📤 Sending AI response: "${aiResponse}"`);
@@ -952,7 +1015,7 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
 }
 
 // Generate AI response using OpenAI Assistant
-async function generateAIResponseWithAssistant(lead, userMessage) {
+async function generateAIResponseWithAssistant(lead, userMessage, answerValid = true) {
     try {
         console.log(`🔍 Checking AI configuration...`);
         console.log(`🤖 OpenAI Client:`, openaiClient ? 'Available' : 'Not available');
@@ -991,34 +1054,23 @@ async function generateAIResponseWithAssistant(lead, userMessage) {
             return `${i + 1}. ${questionText}\n   Possible answers: ${possibleAnswers}`;
         }).join('\n\n');
         
-        let contextInstructions = `You are ${ASSISTANT_NAME}, helping to qualify a lead named ${lead.name} for an equine stable project.
+        // Build structured context for the Assistant
+        const questionIndex = answeredCount + 1;
+        const nextQuestionAvailable = answeredCount < CUSTOM_QUESTIONS.length - 1;
+        const currentQuestion = CUSTOM_QUESTIONS[answeredCount];
+        const questionText = typeof currentQuestion === 'object' ? currentQuestion.question : currentQuestion;
+        
+        let contextInstructions = `MODE: QUALIFICATION
+CUSTOMER_NAME: ${lead.name}
+QUESTION_INDEX: ${questionIndex}
+QUESTION_TEXT: ${questionText}
+ANSWER_VALID: ${answerValid}
+NEXT_QUESTION_AVAILABLE: ${nextQuestionAvailable}
+CUSTOMER_STATUS: unqualified
 
-CRITICAL: You must ONLY gather answers to these EXACT 4 questions - DO NOT ask about anything else:
+CUSTOMER_MESSAGE: "${userMessage}"
 
-${questionsText}
-
-✅ INFORMATION ALREADY GATHERED (DO NOT ASK THESE AGAIN):
-${gatheredInfo.length > 0 ? gatheredInfo.join('\n') : 'None yet'}
-
-❓ STILL NEED ANSWERS FOR (ASK ONLY THESE):
-${unansweredQuestions.length > 0 ? unansweredQuestions.map((q, i) => {
-    const questionText = typeof q === 'object' ? q.question : q;
-    const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? q.possibleAnswers : '';
-    return `${i + 1}. ${questionText}${possibleAnswers ? '\n   Look for: ' + possibleAnswers : ''}`;
-}).join('\n') : 'All information gathered!'}
-
-STRICT RULES (FOLLOW EXACTLY):
-1. CHECK "INFORMATION ALREADY GATHERED" - if a question is listed there, it's ALREADY ANSWERED. DO NOT ASK IT AGAIN.
-2. ONLY ask questions from "STILL NEED ANSWERS FOR" section
-3. Accept any response as a valid answer - don't ask follow-up questions
-4. Brief acknowledgment (2-3 words) + next question
-5. Keep total response under 100 characters
-6. Move to the NEXT unanswered question immediately
-
-Customer's message: "${userMessage}"
-
-Brief response format: "[2-3 word acknowledgment] [Next unanswered question]"
-Example: "Got it! Does your building need to be mobile?"`;
+INSTRUCTIONS: Follow the MODE and QUESTION_TEXT exactly. If ANSWER_VALID is false, re-ask the same question. If ANSWER_VALID is true and NEXT_QUESTION_AVAILABLE is true, ask the next question.`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
