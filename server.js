@@ -391,7 +391,7 @@ app.post('/api/leads', async (req, res) => {
         const normalizedPhone = normalizePhoneNumber(phone);
         
         // Check if lead already exists in database
-        const existingLead = LeadDatabase.checkExistingCustomer(normalizedPhone);
+        const existingLead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
         if (existingLead) {
             return res.status(400).json({
                 success: false,
@@ -400,7 +400,7 @@ app.post('/api/leads', async (req, res) => {
         }
         
         // Create new lead in database
-        const newLead = LeadDatabase.createLead({
+        const newLead = await LeadDatabase.createLead({
             phone: normalizedPhone,
             name: name,
             email: email,
