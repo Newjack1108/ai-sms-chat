@@ -1007,6 +1007,9 @@
                             <button class="btn btn-secondary" id="check-config-btn" style="padding: 6px 12px; font-size: 0.8em; margin-left: 5px;">
                                 ⚙️ Check Config
                             </button>
+                            <button class="btn btn-warning" id="clear-chat-btn" style="padding: 6px 12px; font-size: 0.8em; margin-left: 5px;" disabled>
+                                🗑️ Clear Chat
+                            </button>
                         </div>
                     </div>
                     
@@ -1379,9 +1382,10 @@
             document.getElementById('chat-title').textContent = `Chatting with ${lead.name}`;
             document.getElementById('chat-status').textContent = `Status: ${lead.status} | Phone: ${lead.phone}`;
 
-            // Enable chat input
+            // Enable chat input and clear chat button
             document.getElementById('message-input').disabled = false;
             document.getElementById('send-btn').disabled = false;
+            document.getElementById('clear-chat-btn').disabled = false;
 
             // Load messages for this lead
             loadMessages(lead.id);
@@ -1851,6 +1855,9 @@
 
             // Check config
             document.getElementById('check-config-btn').addEventListener('click', checkConfig);
+            
+            // Clear chat
+            document.getElementById('clear-chat-btn').addEventListener('click', clearChat);
         }
 
         // Qualify lead
@@ -2176,6 +2183,24 @@
                 console.error('❌ Error checking configuration:', error);
                 showNotification('Error checking configuration', 'error');
             }
+        }
+
+        // Clear chat function (clears display only, not database)
+        function clearChat() {
+            if (!currentLead) {
+                showNotification('Please select a lead first', 'warning');
+                return;
+            }
+
+            // Clear the chat messages display
+            const chatMessages = document.getElementById('chat-messages');
+            chatMessages.innerHTML = `
+                <div class="message system">
+                    Chat cleared. Select a different lead or refresh to reload messages.
+                </div>
+            `;
+            
+            showNotification('Chat display cleared!', 'success');
         }
 
         // Start polling for new messages
