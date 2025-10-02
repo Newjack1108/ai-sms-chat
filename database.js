@@ -10,9 +10,12 @@ if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
 } else if (process.env.DATABASE_PATH) {
     // Use custom database path
     dbPath = process.env.DATABASE_PATH;
+} else if (process.env.RAILWAY_ENVIRONMENT) {
+    // Railway environment - use /app directory (persistent)
+    dbPath = '/app/leads.db';
 } else {
-    // Fallback to /tmp (Railway persistent)
-    dbPath = '/tmp/leads.db';
+    // Local development fallback
+    dbPath = path.join(__dirname, 'leads.db');
 }
 
 let db;
@@ -20,15 +23,19 @@ try {
     db = new Database(dbPath);
     console.log(`🗄️ Database location: ${dbPath}`);
     console.log(`✅ Database connection successful`);
+    console.log(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
+    console.log(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
 } catch (error) {
     console.error(`❌ Database connection failed: ${error.message}`);
     console.error(`📁 Attempted path: ${dbPath}`);
+    console.error(`🌍 Environment: ${process.env.RAILWAY_ENVIRONMENT || 'local'}`);
+    console.error(`📁 Railway Volume: ${process.env.RAILWAY_VOLUME_MOUNT_PATH || 'Not set'}`);
     
-    // Try fallback to /tmp if other paths fail
-    if (dbPath !== '/tmp/leads.db') {
-        console.log(`🔄 Trying fallback to /tmp/leads.db...`);
+    // Try fallback to /app if other paths fail
+    if (dbPath !== '/app/leads.db') {
+        console.log(`🔄 Trying fallback to /app/leads.db...`);
         try {
-            dbPath = '/tmp/leads.db';
+            dbPath = '/app/leads.db';
             db = new Database(dbPath);
             console.log(`✅ Fallback database connection successful: ${dbPath}`);
         } catch (fallbackError) {

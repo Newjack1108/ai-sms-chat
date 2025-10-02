@@ -5,7 +5,12 @@ const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
 const OpenAI = require('openai');
-const { LeadDatabase } = require('./database');
+// Import database (PostgreSQL with SQLite fallback)
+const { LeadDatabase: SQLiteLeadDatabase } = require('./database');
+const { LeadDatabase: PGLeadDatabase, isPostgreSQL } = require('./database-pg');
+
+// Use PostgreSQL if available, otherwise SQLite
+const LeadDatabase = isPostgreSQL ? PGLeadDatabase : SQLiteLeadDatabase;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1601,22 +1606,42 @@ function normalizePhoneNumber(phone) {
     return phone;
 }
 
+// Initialize database
+async function startServer() {
+    try {
+        // Initialize PostgreSQL if available
+        if (isPostgreSQL) {
+            const { initializeDatabase } = require('./database-pg');
+            await initializeDatabase();
+            console.log('✅ PostgreSQL database initialized');
+        } else {
+            console.log('✅ SQLite database initialized');
+        }
+        
+        // Start the server
+        app.listen(PORT, () => {
+            console.log(`🚀 Lead Qualification System v5.1.0 running on port ${PORT}`);
+            console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
+            console.log(`🌐 Web Interface: http://localhost:${PORT}`);
+            console.log(`🎯 Natural AI conversation system ready!`);
+            console.log(`\n📊 Configuration Summary:`);
+            console.log(`   OpenAI API Key: ${process.env.OPENAI_API_KEY ? '✅ Set' : '❌ Not set'}`);
+            console.log(`   Assistant ID: ${process.env.OPENAI_ASSISTANT_ID ? `✅ ${process.env.OPENAI_ASSISTANT_ID}` : '❌ Not set'}`);
+            console.log(`   Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? '✅ Set' : '❌ Not set'}`);
+            console.log(`   Twilio From Number: ${process.env.TWILIO_FROM_NUMBER || '❌ Not set'}`);
+            console.log(`\n🎯 Custom Questions:`);
+            CUSTOM_QUESTIONS.forEach((q, i) => {
+                const questionText = typeof q === 'object' ? q.question : q;
+                const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? ` (Options: ${q.possibleAnswers})` : '';
+                console.log(`   ${i + 1}. ${questionText}${possibleAnswers}`);
+            });
+            console.log('\n');
+        });
+    } catch (error) {
+        console.error('❌ Failed to start server:', error);
+        process.exit(1);
+    }
+}
+
 // Start the server
-app.listen(PORT, () => {
-    console.log(`🚀 Lead Qualification System v5.1.0 running on port ${PORT}`);
-    console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
-    console.log(`🌐 Web Interface: http://localhost:${PORT}`);
-    console.log(`🎯 Natural AI conversation system ready!`);
-    console.log(`\n📊 Configuration Summary:`);
-    console.log(`   OpenAI API Key: ${process.env.OPENAI_API_KEY ? '✅ Set' : '❌ Not set'}`);
-    console.log(`   Assistant ID: ${process.env.OPENAI_ASSISTANT_ID ? `✅ ${process.env.OPENAI_ASSISTANT_ID}` : '❌ Not set'}`);
-    console.log(`   Twilio Account SID: ${process.env.TWILIO_ACCOUNT_SID ? '✅ Set' : '❌ Not set'}`);
-    console.log(`   Twilio From Number: ${process.env.TWILIO_FROM_NUMBER || '❌ Not set'}`);
-    console.log(`\n🎯 Custom Questions:`);
-    CUSTOM_QUESTIONS.forEach((q, i) => {
-        const questionText = typeof q === 'object' ? q.question : q;
-        const possibleAnswers = typeof q === 'object' && q.possibleAnswers ? ` (Options: ${q.possibleAnswers})` : '';
-        console.log(`   ${i + 1}. ${questionText}${possibleAnswers}`);
-    });
-    console.log('\n');
-});
+startServer();
