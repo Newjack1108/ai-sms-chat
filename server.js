@@ -390,13 +390,12 @@ app.post('/api/leads', async (req, res) => {
 
         const normalizedPhone = normalizePhoneNumber(phone);
         
-        // Check if lead already exists in database
+        // Check if lead already exists in database (includes restoring archived leads)
         const existingLead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
         if (existingLead) {
-            return res.status(400).json({
-                success: false,
-                error: 'Lead with this phone number already exists'
-            });
+            // Lead exists (either active or was restored from archive)
+            console.log(`✅ Using existing/restored lead: ${existingLead.name} (ID: ${existingLead.id})`);
+            return res.json(existingLead);
         }
         
         // Create new lead in database
