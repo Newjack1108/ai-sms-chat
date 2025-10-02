@@ -1360,6 +1360,9 @@
         function selectLead(lead, event = null) {
             currentLead = lead;
             
+            // Reset chat cleared flag when selecting a new lead
+            window.chatCleared = false;
+            
             // Update active lead in sidebar
             document.querySelectorAll('.lead-item').forEach(item => {
                 item.classList.remove('active');
@@ -1394,6 +1397,9 @@
         // Load messages for a lead
         async function loadMessages(leadId) {
             try {
+                // Reset chat cleared flag when manually loading messages
+                window.chatCleared = false;
+                
                 const response = await fetch(`/api/leads/${leadId}/messages`);
                 if (response.ok) {
                     const messages = await response.json();
@@ -2192,6 +2198,9 @@
                 return;
             }
 
+            // Set flag to prevent auto-reloading
+            window.chatCleared = true;
+
             // Clear the chat messages display
             const chatMessages = document.getElementById('chat-messages');
             chatMessages.innerHTML = `
@@ -2226,6 +2235,11 @@
         // Check for new messages for current lead
         async function checkForNewMessages() {
             if (!currentLead) return;
+            
+            // Don't reload messages if chat was manually cleared
+            if (window.chatCleared) {
+                return;
+            }
             
             try {
                 const response = await fetch(`/api/leads/${currentLead.id}/messages`);
