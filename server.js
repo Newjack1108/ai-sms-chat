@@ -818,9 +818,9 @@ async function processAIResponse(lead, userMessage) {
         // Store incoming message in database
         LeadDatabase.createMessage(lead.id, 'customer', userMessage);
         
-        // Check if lead is already qualified - if so, enter free chat mode
+        // Check if lead is already qualified - send simple auto-response
         if (lead.qualified === true || lead.status === 'qualified') {
-            console.log(`💬 Lead already qualified - entering free chat mode`);
+            console.log(`💬 Lead already qualified - sending simple auto-response`);
             
             // Move qualified customer back to active status so they appear in chat interface
             if (lead.status === 'qualified') {
@@ -838,18 +838,16 @@ async function processAIResponse(lead, userMessage) {
                 lead.status = 'active'; // Update local object
             }
             
-            // Generate friendly conversational response using Chat Completions API (more reliable)
-            const aiResponse = await generateQualifiedChatResponse(lead, userMessage);
+            // Send simple pre-defined response (no AI, can't give wrong info)
+            const autoResponse = "Thanks for your message! Our team has all your details and will be in touch within 24 hours as discussed. If you have any urgent questions, feel free to give us a call during business hours (Mon-Fri 8am-5pm, Sat 10am-3pm).";
             
-            if (aiResponse) {
-                console.log(`📤 Sending chat response: "${aiResponse}"`);
-                await sendSMS(lead.phone, aiResponse);
-                
-                // Store AI response in database
-                LeadDatabase.createMessage(lead.id, 'assistant', aiResponse);
-                
-                console.log(`✅ Chat response sent to ${lead.name} (${lead.phone})`);
-            }
+            console.log(`📤 Sending auto-response: "${autoResponse}"`);
+            await sendSMS(lead.phone, autoResponse);
+            
+            // Store auto-response in database
+            LeadDatabase.createMessage(lead.id, 'assistant', autoResponse);
+            
+            console.log(`✅ Auto-response sent to ${lead.name} (${lead.phone})`);
             return;
         }
         
