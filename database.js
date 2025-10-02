@@ -131,7 +131,7 @@ function initializeDatabase() {
 // Database will be initialized when needed
 
 // Prepared statements for better performance (created AFTER tables exist)
-const statements = {
+const statements = db ? {
     // Lead operations
     createLead: db.prepare(`
         INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, answers)
@@ -192,12 +192,20 @@ const statements = {
     getSetting: db.prepare(`
         SELECT value FROM settings WHERE key = ?
     `)
-};
+} : {};
 
 // Database functions
 class LeadDatabase {
+    // Check if SQLite is available
+    static isAvailable() {
+        return db !== null;
+    }
+
     // Create a new lead
     static createLead(data) {
+        if (!this.isAvailable()) {
+            throw new Error('SQLite database not available - using PostgreSQL instead');
+        }
         try {
             const answers = data.answers ? JSON.stringify(data.answers) : '{}';
             

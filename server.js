@@ -5,12 +5,13 @@ const path = require('path');
 const cors = require('cors');
 const twilio = require('twilio');
 const OpenAI = require('openai');
-// Import database modules
-const { LeadDatabase: SQLiteLeadDatabase } = require('./database');
-const { LeadDatabase: PGLeadDatabase, isPostgreSQL } = require('./database-pg');
+// Import database modules conditionally
+const { isPostgreSQL } = require('./database-pg');
 
 // Database will be selected at runtime
 let LeadDatabase;
+let SQLiteLeadDatabase;
+let PGLeadDatabase;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1611,14 +1612,14 @@ async function startServer() {
     try {
         // Select database at runtime
         if (isPostgreSQL) {
+            const { LeadDatabase: PGLeadDatabase, initializeDatabase } = require('./database-pg');
             LeadDatabase = PGLeadDatabase;
-            const { initializeDatabase } = require('./database-pg');
             await initializeDatabase();
             console.log('✅ PostgreSQL database initialized');
         } else {
+            const { LeadDatabase: SQLiteLeadDatabase, initializeDatabase } = require('./database');
             LeadDatabase = SQLiteLeadDatabase;
             // Initialize SQLite database
-            const { initializeDatabase } = require('./database');
             initializeDatabase();
             console.log('✅ SQLite database initialized');
         }
