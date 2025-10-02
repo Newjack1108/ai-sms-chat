@@ -370,18 +370,45 @@ class LeadDatabase {
     }
     
     // Check if customer exists (returns lead if exists, null if new)
+    // Also checks for archived customers and restores them
     static async checkExistingCustomer(phone) {
         if (!isPostgreSQL) {
             throw new Error('PostgreSQL not available');
         }
         
         try {
+            // First check for active leads
             const lead = await this.getLeadByPhone(phone);
             if (lead) {
                 console.log(`👤 Found existing customer: ${lead.name} (${lead.phone})`);
                 console.log(`   Status: ${lead.status}, Progress: ${lead.progress}%`);
                 return lead;
             }
+            
+            // Check for archived leads and restore them
+            const archivedResult = await pool.query(`
+                SELECT * FROM leads WHERE phone = $1 AND archived = TRUE
+            `, [phone]);
+            
+            if (archivedResult.rows.length > 0) {
+                const archivedLead = archivedResult.rows[0];
+                archivedLead.answers = archivedLead.answers || {};
+                archivedLead.qualified = Boolean(archivedLead.qualified);
+                archivedLead.archived = Boolean(archivedLead.archived);
+                archivedLead.ai_paused = Boolean(archivedLead.ai_paused);
+                
+                // Restore the archived lead
+                await pool.query(`
+                    UPDATE leads 
+                    SET archived = FALSE, last_contact = CURRENT_TIMESTAMP
+                    WHERE id = $1
+                `, [archivedLead.id]);
+                
+                console.log(`🔄 Restored archived customer: ${archivedLead.name} (${archivedLead.phone})`);
+                console.log(`   Status: ${archivedLead.status}, Progress: ${archivedLead.progress}%`);
+                return archivedLead;
+            }
+            
             console.log(`🆕 New customer detected: ${phone}`);
             return null;
         } catch (error) {

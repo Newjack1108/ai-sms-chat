@@ -537,7 +537,7 @@
             color: white;
         }
 
-        .customer-delete-btn {
+        .customer-archive-btn {
             position: absolute;
             top: 15px;
             right: 15px;
@@ -554,21 +554,21 @@
             z-index: 10;
         }
 
-        .customer-item:hover .customer-delete-btn {
+        .customer-item:hover .customer-archive-btn {
             opacity: 1;
         }
 
-        .customer-delete-btn:hover {
+        .customer-archive-btn:hover {
             background: #c82333;
             transform: scale(1.05);
         }
 
-        .customer-item.selected .customer-delete-btn {
+        .customer-item.selected .customer-archive-btn {
             background: rgba(255, 255, 255, 0.2);
             color: white;
         }
 
-        .customer-item.selected .customer-delete-btn:hover {
+        .customer-item.selected .customer-archive-btn:hover {
             background: rgba(255, 255, 255, 0.3);
         }
 
@@ -745,7 +745,7 @@
             text-align: right;
         }
 
-        .list-delete-btn {
+        .list-archive-btn {
             background: #dc3545;
             color: white;
             border: none;
@@ -756,16 +756,16 @@
             transition: all 0.3s ease;
         }
 
-        .list-delete-btn:hover {
+        .list-archive-btn:hover {
             background: #c82333;
             transform: scale(1.05);
         }
 
-        .customer-list-item.selected .list-delete-btn {
+        .customer-list-item.selected .list-archive-btn {
             background: rgba(255, 255, 255, 0.2);
         }
 
-        .customer-list-item.selected .list-delete-btn:hover {
+        .customer-list-item.selected .list-archive-btn:hover {
             background: rgba(255, 255, 255, 0.3);
         }
 
@@ -1729,7 +1729,7 @@
                 }
                 
                 customerDiv.innerHTML = `
-                    <button class="customer-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️ Delete</button>
+                    <button class="customer-archive-btn" onclick="archiveCustomer(event, ${customer.id})">📦 Archive</button>
                     <button class="customer-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})">
                         ${customer.ai_paused ? '⏸️ Resume' : '🤖 Pause'}
                     </button>
@@ -1807,13 +1807,13 @@
                         <button class="list-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})" title="${customer.ai_paused ? 'Resume AI' : 'Pause AI'}">
                             ${customer.ai_paused ? '⏸️' : '🤖'}
                         </button>
-                        <button class="list-delete-btn" onclick="deleteCustomer(event, ${customer.id})">🗑️</button>
+                        <button class="list-archive-btn" onclick="archiveCustomer(event, ${customer.id})">📦</button>
                     </div>
                 `;
                 
                 listItem.addEventListener('click', (e) => {
-                    // Don't select if clicking delete button
-                    if (e.target.classList.contains('list-delete-btn')) return;
+                    // Don't select if clicking archive button
+                    if (e.target.classList.contains('list-archive-btn')) return;
                     
                     document.querySelectorAll('.customer-list-item').forEach(item => {
                         item.classList.remove('selected');
@@ -1944,14 +1944,14 @@
             }
         }
 
-        // Delete customer from database
-        async function deleteCustomer(event, customerId) {
-            event.stopPropagation(); // Prevent card selection when clicking delete
+        // Archive customer (soft delete)
+        async function archiveCustomer(event, customerId) {
+            event.stopPropagation(); // Prevent card selection when clicking archive
             
             const customer = customers.find(c => c.id === customerId);
             if (!customer) return;
             
-            if (!confirm(`Are you sure you want to permanently delete ${customer.name}?\n\nThis action cannot be undone.`)) {
+            if (!confirm(`Are you sure you want to archive ${customer.name}?\n\nThey can be restored if they contact you again.`)) {
                 return;
             }
             
@@ -1961,7 +1961,7 @@
                 });
                 
                 if (response.ok) {
-                    showNotification(`${customer.name} has been deleted successfully`, 'success');
+                    showNotification(`${customer.name} has been archived successfully`, 'success');
                     
                     // Remove from local arrays
                     customers = customers.filter(c => c.id !== customerId);
@@ -1971,18 +1971,18 @@
                     renderCustomersList();
                     renderLeadsList();
                     
-                    // Clear current lead if it was deleted
+                    // Clear current lead if it was archived
                     if (currentLead && currentLead.id === customerId) {
                         currentLead = null;
                         document.getElementById('chat-title').textContent = 'Select a lead to start chatting';
                         document.getElementById('chat-status').textContent = '';
                     }
                 } else {
-                    showNotification('Failed to delete customer', 'error');
+                    showNotification('Failed to archive customer', 'error');
                 }
             } catch (error) {
-                console.error('Error deleting customer:', error);
-                showNotification('Error deleting customer', 'error');
+                console.error('Error archiving customer:', error);
+                showNotification('Error archiving customer', 'error');
             }
         }
 
