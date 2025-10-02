@@ -1,6 +1,6 @@
 {
   "name": "crm-integrated-sms-system",
-  "version": "5.6.10",
+  "version": "5.6.11",
   "description": "Professional AI Lead Qualification System with Database Persistence",
   "main": "server.js",
   "engines": {
