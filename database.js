@@ -162,6 +162,27 @@ function initializeDatabase() {
             db.exec('ALTER TABLE leads ADD COLUMN last_qualified_date TEXT');
             console.log('✅ Added last_qualified_date column');
         }
+        
+        // Reminder system columns
+        if (!columns.some(col => col.name === 'last_customer_message_time')) {
+            db.exec('ALTER TABLE leads ADD COLUMN last_customer_message_time TEXT');
+            console.log('✅ Added last_customer_message_time column');
+        }
+        
+        if (!columns.some(col => col.name === 'reminder_1hr_sent')) {
+            db.exec('ALTER TABLE leads ADD COLUMN reminder_1hr_sent INTEGER DEFAULT 0');
+            console.log('✅ Added reminder_1hr_sent column');
+        }
+        
+        if (!columns.some(col => col.name === 'reminder_24hr_sent')) {
+            db.exec('ALTER TABLE leads ADD COLUMN reminder_24hr_sent INTEGER DEFAULT 0');
+            console.log('✅ Added reminder_24hr_sent column');
+        }
+        
+        if (!columns.some(col => col.name === 'reminder_48hr_sent')) {
+            db.exec('ALTER TABLE leads ADD COLUMN reminder_48hr_sent INTEGER DEFAULT 0');
+            console.log('✅ Added reminder_48hr_sent column');
+        }
     } catch (error) {
         console.log('⚠️ Migration check skipped:', error.message);
     }

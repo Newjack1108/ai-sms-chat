@@ -52,6 +52,10 @@ async function initializeDatabase() {
                 times_qualified INTEGER DEFAULT 0,
                 first_qualified_date TIMESTAMP,
                 last_qualified_date TIMESTAMP,
+                last_customer_message_time TIMESTAMP,
+                reminder_1hr_sent BOOLEAN DEFAULT FALSE,
+                reminder_24hr_sent BOOLEAN DEFAULT FALSE,
+                reminder_48hr_sent BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_contact TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -121,6 +125,35 @@ async function initializeDatabase() {
                     WHERE table_name='leads' AND column_name='last_qualified_date'
                 ) THEN
                     ALTER TABLE leads ADD COLUMN last_qualified_date TIMESTAMP;
+                END IF;
+                
+                -- Reminder system columns
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='last_customer_message_time'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN last_customer_message_time TIMESTAMP;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='reminder_1hr_sent'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN reminder_1hr_sent BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='reminder_24hr_sent'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN reminder_24hr_sent BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='reminder_48hr_sent'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN reminder_48hr_sent BOOLEAN DEFAULT FALSE;
                 END IF;
             END $$;
         `);
