@@ -529,11 +529,11 @@ app.delete('/api/leads/:leadId', (req, res) => {
 });
 
 // Pause AI for a lead
-app.post('/api/leads/:leadId/pause-ai', (req, res) => {
+app.post('/api/leads/:leadId/pause-ai', async (req, res) => {
     try {
         const { leadId } = req.params;
         
-        const success = LeadDatabase.pauseAI(parseInt(leadId));
+        const success = await LeadDatabase.pauseAI(parseInt(leadId));
         if (success) {
             res.json({ success: true, message: 'AI paused successfully' });
         } else {
@@ -546,11 +546,11 @@ app.post('/api/leads/:leadId/pause-ai', (req, res) => {
 });
 
 // Unpause AI for a lead
-app.post('/api/leads/:leadId/unpause-ai', (req, res) => {
+app.post('/api/leads/:leadId/unpause-ai', async (req, res) => {
     try {
         const { leadId } = req.params;
         
-        const success = LeadDatabase.unpauseAI(parseInt(leadId));
+        const success = await LeadDatabase.unpauseAI(parseInt(leadId));
         if (success) {
             res.json({ success: true, message: 'AI unpaused successfully' });
         } else {
