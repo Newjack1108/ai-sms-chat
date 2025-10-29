@@ -1630,8 +1630,8 @@ async function startServer() {
         // Load settings from database after database is initialized
         await loadSettingsFromDatabase();
         
-        // Start the server
-        app.listen(PORT, () => {
+        // Start the server on 0.0.0.0 to accept external connections (required for Railway)
+        app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Lead Qualification System v5.1.0 running on port ${PORT}`);
             console.log(`📱 Webhook URL: http://localhost:${PORT}/webhook/sms`);
             console.log(`🌐 Web Interface: http://localhost:${PORT}`);
