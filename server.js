@@ -1067,8 +1067,14 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
             if (match && match[0].length > longestMatch) {
                 bestMatch = match[0];
                 longestMatch = match[0].length;
+                console.log(`      🔍 Found exact match: "${match[0]}" for expected: "${expected}"`);
             }
         }
+    }
+    
+    // Log the best exact match found (if any)
+    if (bestMatch && longestMatch > 0) {
+        console.log(`      ✅ Best exact match: "${bestMatch}" (${longestMatch} chars)`);
     }
     
     // Check for common variations and timeframe patterns
@@ -1091,10 +1097,13 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
             for (const variant of variants) {
                 // Use word boundary matching to prevent substring matches (e.g., "y" in "urgently")
                 const regex = new RegExp(`\\b${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-                if (regex.test(messageLower)) {
-                    if (variant.length > longestMatch) {
-                        bestMatch = variant;
-                        longestMatch = variant.length;
+                const match = userMessage.match(regex);
+                if (match) {
+                    const matchedText = match[0];
+                    console.log(`      🔍 Found variation match: "${matchedText}" for key: "${key}" (variant: "${variant}")`);
+                    if (matchedText.length > longestMatch) {
+                        bestMatch = matchedText;  // Use actual matched text from message
+                        longestMatch = matchedText.length;
                     }
                 }
             }
@@ -1102,7 +1111,7 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     }
     
     if (bestMatch) {
-        console.log(`      ✅ Matched: "${bestMatch}"`);
+        console.log(`      ✅ Final match selected: "${bestMatch}"`);
         return bestMatch;
     }
     
@@ -1496,11 +1505,23 @@ async function generateAIResponseWithAssistant(lead, userMessage, answersExtract
             return `${i + 1}. ${questionText}\n   Possible answers: ${possibleAnswers}`;
         }).join('\n\n');
         
-        // Build structured context for the Assistant
-        const questionIndex = answeredCount + 1;
-        const nextQuestionAvailable = answeredCount < CUSTOM_QUESTIONS.length - 1;
-        const currentQuestion = CUSTOM_QUESTIONS[answeredCount];
-        const questionText = typeof currentQuestion === 'object' ? currentQuestion.question : currentQuestion;
+        // Find the FIRST unanswered question (not just based on count)
+        let nextQuestionIndex = -1;
+        let nextQuestion = null;
+        
+        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+            const questionKey = `question_${i + 1}`;
+            if (!lead.answers || !lead.answers[questionKey]) {
+                nextQuestionIndex = i + 1;
+                nextQuestion = CUSTOM_QUESTIONS[i];
+                break;
+            }
+        }
+        
+        const questionText = nextQuestion ? (typeof nextQuestion === 'object' ? nextQuestion.question : nextQuestion) : '';
+        const nextQuestionAvailable = nextQuestionIndex > 0;
+        
+        console.log(`📋 Next unanswered question: Q${nextQuestionIndex} - "${questionText}"`);
         
         // Format conversation history for AI context
         const historyText = recentMessages.length > 0 
@@ -1517,7 +1538,7 @@ CUSTOMER_NAME: ${lead.name}
 ANSWERS_JUST_EXTRACTED: ${answersExtracted}
 TOTAL_QUESTIONS_ANSWERED: ${answeredCount}
 QUESTIONS_REMAINING: ${unansweredQuestions.length}
-NEXT_QUESTION_INDEX: ${questionIndex}
+NEXT_QUESTION_INDEX: ${nextQuestionIndex}
 NEXT_QUESTION_TEXT: ${questionText}
 ${alreadyAnsweredText}
 
