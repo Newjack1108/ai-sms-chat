@@ -1009,6 +1009,78 @@ ${questionText}`;
     }
 }
 
+// Extract answer for a specific question from the user's message
+function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) {
+    if (!userMessage || !possibleAnswers) return null;
+    
+    const messageLower = userMessage.toLowerCase().trim();
+    const expectedList = possibleAnswers.toLowerCase().split(',').map(a => a.trim());
+    
+    console.log(`      🔍 Checking Q${questionNumber} against: "${userMessage}"`);
+    console.log(`      📋 Looking for: ${expectedList.join(', ')}`);
+    
+    // Special handling for postcode question (usually question 4)
+    if (possibleAnswers.toLowerCase().includes('postcode') || 
+        possibleAnswers.toLowerCase().includes('any postcode format')) {
+        const postcodePattern = /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi;
+        const postcodeMatch = userMessage.match(postcodePattern);
+        if (postcodeMatch) {
+            console.log(`      ✅ Found postcode: ${postcodeMatch[0]}`);
+            return postcodeMatch[0].trim();
+        }
+    }
+    
+    // Check for exact word/phrase matches from expected answers
+    let bestMatch = null;
+    let longestMatch = 0;
+    
+    for (const expected of expectedList) {
+        if (expected.length < 2) continue; // Skip very short matches
+        
+        // Look for the expected answer as a word or phrase in the message
+        if (messageLower.includes(expected)) {
+            // Find the actual text (could be capitalized differently)
+            const regex = new RegExp(`\\b${expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+            const match = userMessage.match(regex);
+            
+            if (match && match[0].length > longestMatch) {
+                bestMatch = match[0];
+                longestMatch = match[0].length;
+            }
+        }
+    }
+    
+    // Check for common variations
+    const variations = {
+        'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable'],
+        'static': ['fixed', 'permanent', 'stationary', 'not mobile', 'non-mobile'],
+        'asap': ['as soon as possible', 'urgent', 'urgently', 'quickly', 'fast', 'immediately', 'right away'],
+        'yes': ['y', 'yeah', 'yep', 'sure', 'definitely', 'absolutely'],
+        'no': ['nope', 'nah', 'not really', 'negative']
+    };
+    
+    for (const [key, variants] of Object.entries(variations)) {
+        if (expectedList.includes(key)) {
+            for (const variant of variants) {
+                if (messageLower.includes(variant)) {
+                    if (variant.length > longestMatch) {
+                        bestMatch = variant;
+                        longestMatch = variant.length;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (bestMatch) {
+        console.log(`      ✅ Matched: "${bestMatch}"`);
+        return bestMatch;
+    }
+    
+    console.log(`      ❌ No match found`);
+    return null;
+}
+
 // Validate if user answer matches expected patterns (flexible matching)
 function validateAnswer(userMessage, expectedAnswers) {
     if (!userMessage || !expectedAnswers) return false;
@@ -1161,57 +1233,71 @@ async function processAIResponse(lead, userMessage) {
             return;
         }
         
-        // FIRST: Extract answer from user message BEFORE generating AI response
-        console.log(`🔍 Extracting answer BEFORE generating response...`);
+        // FIRST: Extract answers from user message BEFORE generating AI response
+        console.log(`🔍 Extracting answers from message (multi-answer extraction enabled)...`);
         lead.answers = lead.answers || {};
         const answeredCountBefore = Object.keys(lead.answers).length;
         
         console.log(`📊 Current state: ${answeredCountBefore} questions already answered`);
         console.log(`📋 Existing answers:`, JSON.stringify(lead.answers, null, 2));
         
-        // Validate and store answer for current unanswered question
+        // NEW: Try to extract answers for ALL unanswered questions from the message
         if (answeredCountBefore < CUSTOM_QUESTIONS.length && userMessage.trim().length > 0) {
-            const currentQuestion = CUSTOM_QUESTIONS[answeredCountBefore];
-            const questionKey = `question_${answeredCountBefore + 1}`;
+            console.log(`🔍 Scanning message for multiple answers...`);
+            let newAnswersFound = 0;
             
-            // Check if this answer slot is already filled (prevent duplicate storage)
-            if (!lead.answers[questionKey]) {
-                // Validate the answer against expected patterns
-                const answerValid = validateAnswer(userMessage, currentQuestion.possibleAnswers);
-                console.log(`🔍 Answer validation: "${userMessage}" -> ${answerValid ? 'VALID' : 'INVALID'}`);
+            // Check each unanswered question
+            for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                const questionKey = `question_${i + 1}`;
                 
-                if (answerValid) {
-                    lead.answers[questionKey] = userMessage;
-                    
-                    // Update progress
-                    const newAnsweredCount = Object.keys(lead.answers).length;
-                    lead.progress = Math.round((newAnsweredCount / 4) * 100);
-                    lead.status = lead.progress === 100 ? 'qualified' : 'active';
-                    
-                    // Save to database
-                    await LeadDatabase.updateLead(lead.id, {
-                        name: lead.name,
-                        email: lead.email,
-                        status: lead.status,
-                        progress: lead.progress,
-                        qualified: lead.qualified,
-                        ai_paused: lead.ai_paused,
-                        post_qualification_response_sent: lead.post_qualification_response_sent || false,
-                        answers: lead.answers,
-                        qualifiedDate: lead.qualifiedDate,
-                        returning_customer: lead.returning_customer || false,
-                        times_qualified: lead.times_qualified || 0,
-                        first_qualified_date: lead.first_qualified_date,
-                        last_qualified_date: lead.last_qualified_date
-                    });
-                    
-                    console.log(`✅ Stored VALID answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
-                    console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
-                } else {
-                    console.log(`❌ Answer "${userMessage}" doesn't match expected patterns for question ${answeredCountBefore + 1}`);
+                // Skip if already answered
+                if (lead.answers[questionKey]) {
+                    console.log(`   ⏭️ Question ${i + 1} already answered, skipping`);
+                    continue;
                 }
+                
+                const question = CUSTOM_QUESTIONS[i];
+                const possibleAnswers = question.possibleAnswers || '';
+                
+                // Try to extract answer for this question from the message
+                const extractedAnswer = extractAnswerForQuestion(userMessage, possibleAnswers, i + 1);
+                
+                if (extractedAnswer) {
+                    lead.answers[questionKey] = extractedAnswer;
+                    newAnswersFound++;
+                    console.log(`   ✅ Found answer for Q${i + 1}: "${extractedAnswer}"`);
+                } else {
+                    console.log(`   ❓ No match found for Q${i + 1} in this message`);
+                }
+            }
+            
+            // Update progress if any new answers were found
+            if (newAnswersFound > 0) {
+                const newAnsweredCount = Object.keys(lead.answers).length;
+                lead.progress = Math.round((newAnsweredCount / 4) * 100);
+                lead.status = lead.progress === 100 ? 'qualified' : 'active';
+                
+                // Save to database
+                await LeadDatabase.updateLead(lead.id, {
+                    name: lead.name,
+                    email: lead.email,
+                    status: lead.status,
+                    progress: lead.progress,
+                    qualified: lead.qualified,
+                    ai_paused: lead.ai_paused,
+                    post_qualification_response_sent: lead.post_qualification_response_sent || false,
+                    answers: lead.answers,
+                    qualifiedDate: lead.qualifiedDate,
+                    returning_customer: lead.returning_customer || false,
+                    times_qualified: lead.times_qualified || 0,
+                    first_qualified_date: lead.first_qualified_date,
+                    last_qualified_date: lead.last_qualified_date
+                });
+                
+                console.log(`✅ Extracted ${newAnswersFound} answer(s) from single message!`);
+                console.log(`📈 Progress updated: ${newAnsweredCount}/4 questions (${lead.progress}%)`);
             } else {
-                console.log(`⚠️ Answer for question ${answeredCountBefore + 1} already exists, skipping duplicate storage`);
+                console.log(`❌ No valid answers extracted from message`);
             }
         }
         
@@ -1273,9 +1359,9 @@ Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`
         
         console.log(`🤖 Generating AI response...`);
         // Generate AI response using Assistant
-        const currentQuestion = CUSTOM_QUESTIONS[answeredCountBefore];
-        const answerValid = validateAnswer(userMessage, currentQuestion?.possibleAnswers);
-        const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answerValid);
+        const answersJustExtracted = Object.keys(lead.answers).length - answeredCountBefore;
+        console.log(`📊 Answers extracted this round: ${answersJustExtracted}`);
+        const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answersJustExtracted);
         
         if (aiResponse) {
             console.log(`📤 Sending AI response: "${aiResponse}"`);
@@ -1294,7 +1380,7 @@ Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`
 }
 
 // Generate AI response using OpenAI Assistant
-async function generateAIResponseWithAssistant(lead, userMessage, answerValid = true) {
+async function generateAIResponseWithAssistant(lead, userMessage, answersExtracted = 0) {
     try {
         console.log(`🔍 Checking AI configuration...`);
         console.log(`🤖 OpenAI Client:`, openaiClient ? 'Available' : 'Not available');
@@ -1352,9 +1438,10 @@ async function generateAIResponseWithAssistant(lead, userMessage, answerValid = 
         
         let contextInstructions = `MODE: QUALIFICATION
 CUSTOMER_NAME: ${lead.name}
-QUESTION_INDEX: ${questionIndex}
-QUESTION_TEXT: ${questionText}
-ANSWER_VALID: ${answerValid}
+ANSWERS_EXTRACTED: ${answersExtracted}
+QUESTIONS_REMAINING: ${unansweredQuestions.length}
+NEXT_QUESTION_INDEX: ${questionIndex}
+NEXT_QUESTION_TEXT: ${questionText}
 NEXT_QUESTION_AVAILABLE: ${nextQuestionAvailable}
 CUSTOMER_STATUS: unqualified
 
@@ -1364,12 +1451,13 @@ CONVERSATION HISTORY (DO NOT REPEAT these exact phrases):
 ${historyText}
 
 INSTRUCTIONS: 
-1. Follow the MODE and QUESTION_TEXT exactly
-2. If ANSWER_VALID is false, re-ask the same question using DIFFERENT wording than before
-3. If ANSWER_VALID is true and NEXT_QUESTION_AVAILABLE is true, ask the next question
-4. NEVER use the same acknowledgment twice in a row - vary your responses naturally
+1. If ANSWERS_EXTRACTED > 0, acknowledge what was captured (e.g., "Great! I've got your requirements noted.")
+2. If QUESTIONS_REMAINING > 0, ask the NEXT_QUESTION_TEXT naturally
+3. If ANSWERS_EXTRACTED > 1, acknowledge multiple answers were captured (e.g., "Perfect! I've captured several details from your message.")
+4. NEVER repeat the same acknowledgment - vary your responses naturally
 5. Check the CONVERSATION HISTORY and avoid repeating phrases you've already used
-6. Be conversational and natural - you're having a dialogue, not reading a script`;
+6. Be conversational and natural - you're having a dialogue, not reading a script
+7. Flow smoothly from acknowledgment to next question`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
@@ -1469,12 +1557,19 @@ async function generateFallbackResponse(lead, userMessage) {
         const nextQuestion = typeof q === 'object' ? q.question : q;
         console.log(`❓ Asking question ${answeredCount + 1}: ${nextQuestion}`);
         
-        // Ask the next question
-        if (answeredCount < CUSTOM_QUESTIONS.length) {
-            const response = `Thanks! ${nextQuestion}`;
-            console.log(`📤 Fallback response: ${response}`);
-            return response;
-        }
+        // Ask the next question with acknowledgment
+        const acknowledgments = [
+            "Got it! ",
+            "Perfect! ",
+            "Thanks! ",
+            "Excellent! ",
+            "Great! "
+        ];
+        const randomAck = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
+        
+        const response = `${randomAck}${nextQuestion}`;
+        console.log(`📤 Fallback response: ${response}`);
+        return response;
     }
     
     const response = "Thank you for your response! I'll have our team contact you soon.";
