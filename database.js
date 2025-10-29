@@ -437,14 +437,38 @@ class LeadDatabase {
     }
     
     // Check if customer exists (returns lead if exists, null if new)
+    // Also restores archived customers when they message
     static checkExistingCustomer(phone) {
         try {
-            const lead = this.getLeadByPhone(phone);
-            if (lead) {
-                console.log(`👤 Found existing customer: ${lead.name} (${lead.phone})`);
-                console.log(`   Status: ${lead.status}, Progress: ${lead.progress}%`);
-                return lead;
+            // First try to get active (non-archived) lead
+            const activeLead = this.getLeadByPhone(phone);
+            if (activeLead) {
+                console.log(`👤 Found existing customer: ${activeLead.name} (${activeLead.phone})`);
+                console.log(`   Status: ${activeLead.status}, Progress: ${activeLead.progress}%`);
+                return activeLead;
             }
+            
+            // Check if customer exists but is archived
+            const archivedCheck = db.prepare(`
+                SELECT * FROM leads WHERE phone = ? AND archived = 1
+            `).get(phone);
+            
+            if (archivedCheck) {
+                // Customer was archived - restore them
+                console.log(`📥 Restoring archived customer: ${archivedCheck.name} (${phone})`);
+                
+                db.prepare(`
+                    UPDATE leads 
+                    SET archived = 0, lastContact = CURRENT_TIMESTAMP 
+                    WHERE phone = ?
+                `).run(phone);
+                
+                // Return restored lead
+                const restoredLead = this.getLeadByPhone(phone);
+                console.log(`✅ Customer restored from archive: ${restoredLead.name}`);
+                return restoredLead;
+            }
+            
             console.log(`🆕 New customer detected: ${phone}`);
             return null;
         } catch (error) {
@@ -541,6 +565,10 @@ class LeadDatabase {
                 lead.post_qualification_response_sent ? 1 : 0,
                 lead.answers ? JSON.stringify(lead.answers) : '{}',
                 lead.qualifiedDate,
+                lead.returning_customer ? 1 : 0,
+                lead.times_qualified || 0,
+                lead.first_qualified_date || null,
+                lead.last_qualified_date || null,
                 leadId
             );
             console.log(`⏸️ AI paused for lead ID: ${leadId}`);
@@ -570,6 +598,10 @@ class LeadDatabase {
                 lead.post_qualification_response_sent ? 1 : 0,
                 lead.answers ? JSON.stringify(lead.answers) : '{}',
                 lead.qualifiedDate,
+                lead.returning_customer ? 1 : 0,
+                lead.times_qualified || 0,
+                lead.first_qualified_date || null,
+                lead.last_qualified_date || null,
                 leadId
             );
             console.log(`▶️ AI unpaused for lead ID: ${leadId}`);
