@@ -1022,6 +1022,25 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     // Special handling for postcode question (usually question 4)
     if (possibleAnswers.toLowerCase().includes('postcode') || 
         possibleAnswers.toLowerCase().includes('any postcode format')) {
+        
+        // Check for collection/pickup keywords first
+        const collectionKeywords = [
+            'collection', 'collect', 'pickup', 'pick up', 'pick-up', 
+            'ill get it', "i'll get it", 'i will get it', 'getting it',
+            'ill collect', "i'll collect", 'i will collect'
+        ];
+        
+        for (const keyword of collectionKeywords) {
+            const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+            if (regex.test(messageLower)) {
+                const match = userMessage.match(regex);
+                if (match) {
+                    console.log(`      ✅ Found collection keyword: ${match[0]}`);
+                    return match[0]; // Return the matched text (e.g., "Collection", "Pick up")
+                }
+            }
+        }
+        
         // UK postcode patterns (comprehensive list - full and partial)
         const postcodePatterns = [
             /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format (e.g., CH1 4DF, M1 1AE)
@@ -1048,7 +1067,7 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
             return extracted;
         }
         
-        console.log(`      ❓ No postcode pattern found in message`);
+        console.log(`      ❓ No postcode or collection keyword found in message`);
     }
     
     // Check for exact word/phrase matches from expected answers
@@ -1172,8 +1191,22 @@ function validateAnswer(userMessage, expectedAnswers) {
         }
     }
     
-    // For postcode question, accept any format that looks like a postcode
+    // For postcode question, accept any format that looks like a postcode OR collection keywords
     if (expectedList.includes('any postcode format') || expectedAnswers.toLowerCase().includes('postcode')) {
+        // Check for collection/pickup keywords
+        const collectionKeywords = [
+            'collection', 'collect', 'pickup', 'pick up', 'pick-up', 
+            'ill get it', "i'll get it", 'i will get it', 'getting it',
+            'ill collect', "i'll collect", 'i will collect'
+        ];
+        
+        for (const keyword of collectionKeywords) {
+            if (userAnswer.includes(keyword.toLowerCase())) {
+                console.log(`      ✅ Collection keyword match found`);
+                return true;
+            }
+        }
+        
         // More lenient postcode patterns
         const postcodePatterns = [
             /^[a-z]{1,2}\d{1,2}[a-z]?\s?\d[a-z]{2}$/i,  // Standard UK format
