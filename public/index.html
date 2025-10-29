@@ -13,7 +13,7 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             min-height: 100vh;
             color: #333;
         }
@@ -25,20 +25,35 @@
         }
 
         .header {
-            background: rgba(255, 255, 255, 0.95);
+            background: white;
             backdrop-filter: blur(10px);
             border-radius: 15px;
-            padding: 20px;
+            padding: 25px;
             margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
             text-align: center;
         }
 
         .header h1 {
-            color: #2c3e50;
+            color: #1a202c;
             font-size: 2.5em;
             margin-bottom: 10px;
             font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+        
+        .header h1 .sms-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
         }
 
         .header p {
@@ -48,12 +63,12 @@
 
         .tabs {
             display: flex;
-            background: rgba(255, 255, 255, 0.95);
+            background: white;
             backdrop-filter: blur(10px);
             border-radius: 15px;
             padding: 10px;
             margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
             overflow-x: auto;
         }
 
@@ -66,28 +81,28 @@
             transition: all 0.3s ease;
             font-weight: 600;
             font-size: 1.1em;
-            color: #7f8c8d;
+            color: #718096;
             border: 2px solid transparent;
         }
 
         .tab:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: #667eea;
+            background: rgba(66, 153, 225, 0.1);
+            color: #4299e1;
         }
 
         .tab.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 4px 15px rgba(66, 153, 225, 0.3);
         }
 
         .tab-content {
             display: none;
-            background: rgba(255, 255, 255, 0.95);
+            background: white;
             backdrop-filter: blur(10px);
             border-radius: 15px;
             padding: 30px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
             min-height: 600px;
         }
 
@@ -257,28 +272,28 @@
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
         }
 
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 4px 15px rgba(66, 153, 225, 0.4);
         }
 
         .btn-secondary {
-            background: #6c757d;
+            background: #718096;
             color: white;
         }
 
         .btn-success {
-            background: #28a745;
+            background: #48bb78;
             color: white;
         }
 
         .btn-warning {
-            background: #ffc107;
-            color: #212529;
+            background: #ed8936;
+            color: white;
         }
 
         .btn-danger {
@@ -478,8 +493,8 @@
         }
 
         .customer-item.selected {
-            border-left-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-left-color: #4299e1;
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
         }
 
@@ -649,12 +664,12 @@
         }
 
         .view-toggle-btn:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: #667eea;
+            background: rgba(66, 153, 225, 0.1);
+            color: #4299e1;
         }
 
         .view-toggle-btn.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
         }
 
@@ -680,8 +695,8 @@
         }
 
         .customer-list-item.selected {
-            border-left-color: #667eea;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-left-color: #4299e1;
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
         }
 
@@ -716,7 +731,7 @@
 
         .list-progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(90deg, #4299e1 0%, #3182ce 100%);
             transition: width 0.3s ease;
         }
 
@@ -826,7 +841,7 @@
             width: 20px;
             height: 20px;
             border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
+            border-top: 3px solid #4299e1;
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
@@ -912,7 +927,7 @@
             align-items: center;
             padding: 20px 25px;
             border-bottom: 1px solid #e9ecef;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
             color: white;
             border-radius: 15px 15px 0 0;
         }
@@ -961,7 +976,10 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1>🤖 AI Lead Qualification System</h1>
+            <h1>
+                <span class="sms-icon">💬</span>
+                AI Lead Qualification System
+            </h1>
             <p>Professional Lead Management with AI-Powered SMS Conversations</p>
         </div>
 
@@ -1001,13 +1019,7 @@
                         <h3 id="chat-title">Select a lead to start chatting</h3>
                         <div id="chat-status"></div>
                         <div style="margin-top: 10px;">
-                            <button class="btn btn-secondary" id="test-webhook-btn" style="padding: 6px 12px; font-size: 0.8em;">
-                                🧪 Test Webhook
-                            </button>
-                            <button class="btn btn-secondary" id="check-config-btn" style="padding: 6px 12px; font-size: 0.8em; margin-left: 5px;">
-                                ⚙️ Check Config
-                            </button>
-                            <button class="btn btn-warning" id="clear-chat-btn" style="padding: 6px 12px; font-size: 0.8em; margin-left: 5px;" disabled>
+                            <button class="btn btn-warning" id="clear-chat-btn" style="padding: 8px 16px; font-size: 0.9em;" disabled>
                                 🗑️ Clear Chat
                             </button>
                         </div>
@@ -1855,12 +1867,6 @@
             document.getElementById('close-add-lead-modal').addEventListener('click', closeAddLeadModal);
             document.getElementById('cancel-add-lead').addEventListener('click', closeAddLeadModal);
             document.getElementById('save-add-lead').addEventListener('click', addLead);
-
-            // Test webhook
-            document.getElementById('test-webhook-btn').addEventListener('click', testWebhook);
-
-            // Check config
-            document.getElementById('check-config-btn').addEventListener('click', checkConfig);
             
             // Clear chat
             document.getElementById('clear-chat-btn').addEventListener('click', clearChat);
