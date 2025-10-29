@@ -575,45 +575,98 @@ app.post('/api/leads/reactivate', async (req, res) => {
         }
         
         const normalizedPhone = normalizePhoneNumber(phone);
-        console.log(`🔄 Reactivating lead from external source: ${normalizedPhone}`);
-        console.log(`📦 Source: ${source || 'external'}`);
+        console.log(`🔄 New lead submission from ${source || 'external'}: ${normalizedPhone}`);
         
         // Check if lead exists
-        let lead = LeadDatabase.checkExistingCustomer(normalizedPhone);
+        let lead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
         
         if (lead) {
-            // Update existing lead
             console.log(`👤 Found existing lead: ${lead.name} (ID: ${lead.id})`);
+            console.log(`   Current status: ${lead.status}, Qualified: ${lead.qualified}`);
             
-            // Update lead data and unpause AI
-            LeadDatabase.updateLead(lead.id, {
-                name: name || lead.name,
-                email: email || lead.email,
-                status: 'active',
-                progress: lead.progress,
-                qualified: lead.qualified,
-                ai_paused: 0, // Unpause AI
-                post_qualification_response_sent: lead.post_qualification_response_sent || false,
-                answers: lead.answers,
-                qualifiedDate: lead.qualifiedDate
-            });
-            
-            // Update last contact time
-            LeadDatabase.updateLastContact(lead.id);
-            
-            console.log(`✅ Lead reactivated: ${lead.name} - AI unpaused`);
-            
-            res.json({
-                success: true,
-                message: 'Lead reactivated successfully',
-                leadId: lead.id,
-                action: 'reactivated'
-            });
+            // If they're already qualified, this is a NEW inquiry - reset them
+            if (lead.qualified || lead.status === 'qualified') {
+                console.log(`🔄 EXISTING QUALIFIED CUSTOMER - Starting NEW inquiry (auto-reset)`);
+                console.log(`   📊 Previous qualification: ${lead.qualifiedDate}`);
+                console.log(`   📈 Times previously qualified: ${lead.times_qualified || 0}`);
+                
+                // Save previous qualification data
+                const previousQualifiedDate = lead.qualifiedDate;
+                
+                // Reset for new qualification
+                await LeadDatabase.updateLead(lead.id, {
+                    name: name || lead.name,
+                    email: email || lead.email,
+                    source: source || lead.source,
+                    status: 'new',              // Reset to new
+                    progress: 0,                 // Reset progress
+                    qualified: false,            // Unqualify
+                    ai_paused: 0,                // Unpause AI
+                    post_qualification_response_sent: false,  // Reset flag
+                    answers: {},                 // Clear answers for fresh start
+                    qualifiedDate: null,         // Clear current qualification
+                    returning_customer: true,    // Flag as returning
+                    times_qualified: (lead.times_qualified || 0) + 1,  // Increment
+                    first_qualified_date: lead.first_qualified_date || previousQualifiedDate,
+                    last_qualified_date: previousQualifiedDate
+                });
+                
+                console.log(`✅ Returning customer reset for NEW inquiry:`);
+                console.log(`   🔄 Returning customer: YES`);
+                console.log(`   🔢 Times qualified: ${(lead.times_qualified || 0) + 1}`);
+                console.log(`   📅 Last qualified: ${previousQualifiedDate}`);
+                
+                // Get fresh lead data
+                lead = await LeadDatabase.getLeadById(lead.id);
+                
+                // Send AI introduction for the NEW inquiry
+                await sendAIIntroduction(lead, true); // Pass true for "returning customer"
+                
+                res.json({
+                    success: true,
+                    message: 'Returning customer - started fresh qualification',
+                    leadId: lead.id,
+                    action: 'restarted',
+                    returning_customer: true,
+                    times_qualified: lead.times_qualified
+                });
+            } else {
+                // Lead exists but not qualified yet - just update details and unpause
+                console.log(`📝 Updating existing unqualified lead - continuing qualification`);
+                
+                await LeadDatabase.updateLead(lead.id, {
+                    name: name || lead.name,
+                    email: email || lead.email,
+                    source: source || lead.source,
+                    status: lead.status,
+                    progress: lead.progress,
+                    qualified: lead.qualified,
+                    ai_paused: 0,  // Unpause in case it was paused
+                    post_qualification_response_sent: lead.post_qualification_response_sent || false,
+                    answers: lead.answers,
+                    qualifiedDate: lead.qualifiedDate,
+                    returning_customer: lead.returning_customer || false,
+                    times_qualified: lead.times_qualified || 0,
+                    first_qualified_date: lead.first_qualified_date,
+                    last_qualified_date: lead.last_qualified_date
+                });
+                
+                await LeadDatabase.updateLastContact(lead.id);
+                
+                console.log(`✅ Lead updated and AI unpaused - continuing qualification`);
+                
+                res.json({
+                    success: true,
+                    message: 'Existing lead updated - continuing qualification',
+                    leadId: lead.id,
+                    action: 'updated'
+                });
+            }
         } else {
             // Create new lead
-            console.log(`🆕 Creating new lead from external source: ${normalizedPhone}`);
+            console.log(`🆕 Creating NEW lead from external source: ${normalizedPhone}`);
             
-            lead = LeadDatabase.createLead({
+            lead = await LeadDatabase.createLead({
                 phone: normalizedPhone,
                 name: name || 'Unknown',
                 email: email || '',
@@ -621,10 +674,15 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 status: 'new',
                 progress: 0,
                 qualified: false,
-                ai_paused: 0
+                ai_paused: 0,
+                returning_customer: false,
+                times_qualified: 0
             });
             
-            console.log(`✅ New lead created from external source: ${lead.name} (ID: ${lead.id})`);
+            console.log(`✅ New lead created: ${lead.name} (ID: ${lead.id})`);
+            
+            // Send AI introduction
+            await sendAIIntroduction(lead, false);
             
             res.json({
                 success: true,
@@ -634,10 +692,9 @@ app.post('/api/leads/reactivate', async (req, res) => {
             });
         }
     } catch (error) {
-        console.error('Error reactivating lead:', error);
+        console.error('❌ Error processing external lead:', error);
         res.status(500).json({
             success: false,
-            message: 'Error reactivating lead',
             error: error.message
         });
     }
@@ -861,26 +918,41 @@ app.post('/webhook/test', async (req, res) => {
 // ========================================
 
 // Send AI introduction message
-async function sendAIIntroduction(lead) {
+async function sendAIIntroduction(lead, isReturning = false) {
     try {
-        const firstQuestion = typeof CUSTOM_QUESTIONS[0] === 'object' ? CUSTOM_QUESTIONS[0].question : CUSTOM_QUESTIONS[0];
+        console.log(`👋 Sending AI introduction to ${lead.name}...`);
         
-        const introductionMessage = `Hi ${lead.name}! 👋 
+        const firstQuestion = CUSTOM_QUESTIONS[0];
+        const questionText = typeof firstQuestion === 'object' ? firstQuestion.question : firstQuestion;
+        
+        let introMessage;
+        
+        if (isReturning) {
+            // Personalized message for returning customers
+            introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
+
+I see you have a new inquiry. Let me ask you a few quick questions about your current needs so we can help you properly.
+
+${questionText}`;
+        } else {
+            // Standard welcome for new customers
+            introMessage = `Hi ${lead.name}! 👋 
 
 I'm ${ASSISTANT_NAME}, your AI assistant from CSGB Cheshire Stables. I'm here to help you find the perfect equine stable solution.
 
-${firstQuestion}`;
-
-        await sendSMS(lead.phone, introductionMessage);
+${questionText}`;
+        }
+        
+        await sendSMS(lead.phone, introMessage);
         
         // Store introduction message in database
-        LeadDatabase.createMessage(lead.id, 'assistant', introductionMessage);
+        await LeadDatabase.createMessage(lead.id, 'assistant', introMessage);
         
-        const firstQuestionText = typeof CUSTOM_QUESTIONS[0] === 'object' ? CUSTOM_QUESTIONS[0].question : CUSTOM_QUESTIONS[0];
-        console.log(`🤖 ${ASSISTANT_NAME} introduction sent to ${lead.name} (${lead.phone})`);
-        console.log(`📝 First question: ${firstQuestionText}`);
+        console.log(`✅ AI introduction sent${isReturning ? ' (returning customer)' : ''}`);
+        console.log(`📝 First question: ${questionText}`);
     } catch (error) {
-        console.error('Error sending AI introduction:', error);
+        console.error('❌ Error sending AI introduction:', error);
+        throw error;
     }
 }
 
@@ -984,7 +1056,11 @@ async function processAIResponse(lead, userMessage) {
                 ai_paused: lead.ai_paused,
                 post_qualification_response_sent: true, // Mark as sent
                 answers: lead.answers,
-                qualifiedDate: lead.qualifiedDate
+                qualifiedDate: lead.qualifiedDate,
+                returning_customer: lead.returning_customer || false,
+                times_qualified: lead.times_qualified || 0,
+                first_qualified_date: lead.first_qualified_date,
+                last_qualified_date: lead.last_qualified_date
             });
             
             console.log(`✅ Post-qualification auto-response sent to ${lead.name} (${lead.phone}) - will not send again`);
@@ -1019,7 +1095,7 @@ async function processAIResponse(lead, userMessage) {
                     lead.status = lead.progress === 100 ? 'qualified' : 'active';
                     
                     // Save to database
-                    LeadDatabase.updateLead(lead.id, {
+                    await LeadDatabase.updateLead(lead.id, {
                         name: lead.name,
                         email: lead.email,
                         status: lead.status,
@@ -1028,7 +1104,11 @@ async function processAIResponse(lead, userMessage) {
                         ai_paused: lead.ai_paused,
                         post_qualification_response_sent: lead.post_qualification_response_sent || false,
                         answers: lead.answers,
-                        qualifiedDate: lead.qualifiedDate
+                        qualifiedDate: lead.qualifiedDate,
+                        returning_customer: lead.returning_customer || false,
+                        times_qualified: lead.times_qualified || 0,
+                        first_qualified_date: lead.first_qualified_date,
+                        last_qualified_date: lead.last_qualified_date
                     });
                     
                     console.log(`✅ Stored VALID answer for question ${answeredCountBefore + 1}: "${userMessage}"`);
@@ -1047,7 +1127,8 @@ async function processAIResponse(lead, userMessage) {
         console.log(`📋 Current answers:`, lead.answers);
         
         if (answeredCount >= 4 && !lead.qualified) {
-            console.log(`🎉 All questions answered - qualifying lead for FIRST TIME`);
+            console.log(`🎉 All questions answered - qualifying lead`);
+            
             // All questions answered - qualify lead (only send this message once)
             const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
 
@@ -1058,16 +1139,25 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
             await sendSMS(lead.phone, qualificationMessage);
             
             // Store qualification message in database
-            LeadDatabase.createMessage(lead.id, 'assistant', qualificationMessage);
+            await LeadDatabase.createMessage(lead.id, 'assistant', qualificationMessage);
             
             // Mark as qualified
+            const qualifiedDate = new Date().toISOString();
             lead.qualified = true;
-            lead.qualifiedDate = new Date().toISOString();
+            lead.qualifiedDate = qualifiedDate;
             lead.status = 'qualified';
             lead.progress = 100;
             
+            // Set first_qualified_date if this is their first time
+            if (!lead.first_qualified_date) {
+                lead.first_qualified_date = qualifiedDate;
+            }
+            
+            // Always update last_qualified_date
+            lead.last_qualified_date = qualifiedDate;
+            
             // Update in database
-            LeadDatabase.updateLead(lead.id, {
+            await LeadDatabase.updateLead(lead.id, {
                 name: lead.name,
                 email: lead.email,
                 status: lead.status,
@@ -1076,10 +1166,17 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
                 ai_paused: lead.ai_paused,
                 post_qualification_response_sent: false, // First time qualifying, haven't sent post-qual response yet
                 answers: lead.answers,
-                qualifiedDate: lead.qualifiedDate
+                qualifiedDate: lead.qualifiedDate,
+                returning_customer: lead.returning_customer || false,
+                times_qualified: lead.times_qualified || 0,
+                first_qualified_date: lead.first_qualified_date,
+                last_qualified_date: lead.last_qualified_date
             });
             
             console.log(`🎉 Lead qualified: ${lead.name} (${lead.phone})`);
+            if (lead.returning_customer) {
+                console.log(`   🔄 Returning customer - qualified ${lead.times_qualified} time(s) total`);
+            }
             return;
         }
         

@@ -93,6 +93,10 @@ function initializeDatabase() {
             post_qualification_response_sent INTEGER DEFAULT 0,
             answers TEXT,
             qualifiedDate TEXT,
+            returning_customer INTEGER DEFAULT 0,
+            times_qualified INTEGER DEFAULT 0,
+            first_qualified_date TEXT,
+            last_qualified_date TEXT,
             createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
             lastContact TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -126,13 +130,33 @@ function initializeDatabase() {
         CREATE INDEX IF NOT EXISTS idx_messages_leadId ON messages(leadId);
     `);
     
-    // Add new column if it doesn't exist (migration for existing databases)
+    // Add new columns if they don't exist (migration for existing databases)
     try {
         const columns = db.prepare("PRAGMA table_info(leads)").all();
-        const hasColumn = columns.some(col => col.name === 'post_qualification_response_sent');
-        if (!hasColumn) {
+        
+        if (!columns.some(col => col.name === 'post_qualification_response_sent')) {
             db.exec('ALTER TABLE leads ADD COLUMN post_qualification_response_sent INTEGER DEFAULT 0');
-            console.log('✅ Added post_qualification_response_sent column to existing database');
+            console.log('✅ Added post_qualification_response_sent column');
+        }
+        
+        if (!columns.some(col => col.name === 'returning_customer')) {
+            db.exec('ALTER TABLE leads ADD COLUMN returning_customer INTEGER DEFAULT 0');
+            console.log('✅ Added returning_customer column');
+        }
+        
+        if (!columns.some(col => col.name === 'times_qualified')) {
+            db.exec('ALTER TABLE leads ADD COLUMN times_qualified INTEGER DEFAULT 0');
+            console.log('✅ Added times_qualified column');
+        }
+        
+        if (!columns.some(col => col.name === 'first_qualified_date')) {
+            db.exec('ALTER TABLE leads ADD COLUMN first_qualified_date TEXT');
+            console.log('✅ Added first_qualified_date column');
+        }
+        
+        if (!columns.some(col => col.name === 'last_qualified_date')) {
+            db.exec('ALTER TABLE leads ADD COLUMN last_qualified_date TEXT');
+            console.log('✅ Added last_qualified_date column');
         }
     } catch (error) {
         console.log('⚠️ Migration check skipped:', error.message);
@@ -147,8 +171,9 @@ function initializeDatabase() {
 const statements = db ? {
     // Lead operations
     createLead: db.prepare(`
-        INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, answers)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, 
+                           post_qualification_response_sent, answers, returning_customer, times_qualified)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     
     getLeadByPhone: db.prepare(`
@@ -166,7 +191,9 @@ const statements = db ? {
     updateLead: db.prepare(`
         UPDATE leads 
         SET name = ?, email = ?, status = ?, progress = ?, qualified = ?, 
-            ai_paused = ?, post_qualification_response_sent = ?, answers = ?, qualifiedDate = ?, lastContact = CURRENT_TIMESTAMP
+            ai_paused = ?, post_qualification_response_sent = ?, answers = ?, qualifiedDate = ?,
+            returning_customer = ?, times_qualified = ?, first_qualified_date = ?, last_qualified_date = ?,
+            lastContact = CURRENT_TIMESTAMP
         WHERE id = ?
     `),
     
@@ -231,7 +258,10 @@ class LeadDatabase {
                 data.progress || 0,
                 data.qualified || 0,
                 data.ai_paused || 0,
-                answers
+                data.post_qualification_response_sent || 0,
+                answers,
+                data.returning_customer || 0,
+                data.times_qualified || 0
             );
             
             console.log(`✅ Created lead with ID: ${result.lastInsertRowid}`);
@@ -252,6 +282,7 @@ class LeadDatabase {
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
                 lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
+                lead.returning_customer = Boolean(lead.returning_customer);
             }
             return lead;
         } catch (error) {
@@ -270,6 +301,7 @@ class LeadDatabase {
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
                 lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
+                lead.returning_customer = Boolean(lead.returning_customer);
             }
             return lead;
         } catch (error) {
@@ -288,6 +320,7 @@ class LeadDatabase {
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
                 lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
+                lead.returning_customer = Boolean(lead.returning_customer);
                 return lead;
             });
         } catch (error) {
@@ -311,6 +344,10 @@ class LeadDatabase {
                 data.post_qualification_response_sent ? 1 : 0,
                 answers,
                 data.qualifiedDate || null,
+                data.returning_customer ? 1 : 0,
+                data.times_qualified || 0,
+                data.first_qualified_date || null,
+                data.last_qualified_date || null,
                 id
             );
             

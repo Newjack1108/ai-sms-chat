@@ -509,6 +509,35 @@
             font-weight: 600;
             font-size: 1.2em;
             margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .returning-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.65em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .times-badge {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.65em;
+            font-weight: 700;
+        }
+
+        .customer-item.selected .returning-badge,
+        .customer-item.selected .times-badge {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .customer-details {
@@ -1761,7 +1790,11 @@
                         </button>
                         <button class="customer-archive-btn" onclick="archiveCustomer(event, ${customer.id})">📦 Archive</button>
                     </div>
-                    <div class="customer-name">${customer.name || 'Unknown'}</div>
+                    <div class="customer-name">
+                        <span>${customer.name || 'Unknown'}</span>
+                        ${customer.returning_customer ? '<span class="returning-badge">🔄 Returning</span>' : ''}
+                        ${customer.times_qualified && customer.times_qualified > 1 ? `<span class="times-badge">${customer.times_qualified}x</span>` : ''}
+                    </div>
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
                         📧 ${customer.email || 'No email'}<br>
@@ -1815,7 +1848,11 @@
                 
                 listItem.innerHTML = `
                     <div>
-                        <div class="list-customer-name">${customer.name || 'Unknown'}</div>
+                        <div class="list-customer-name">
+                            ${customer.name || 'Unknown'}
+                            ${customer.returning_customer ? '<span class="returning-badge" style="margin-left: 8px;">🔄</span>' : ''}
+                            ${customer.times_qualified && customer.times_qualified > 1 ? `<span class="times-badge" style="margin-left: 4px;">${customer.times_qualified}x</span>` : ''}
+                        </div>
                         <div class="list-customer-contact">📱 ${customer.phone}</div>
                     </div>
                     <div class="list-customer-contact">

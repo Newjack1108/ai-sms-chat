@@ -48,6 +48,10 @@ async function initializeDatabase() {
                 post_qualification_response_sent BOOLEAN DEFAULT FALSE,
                 answers JSONB,
                 qualified_date TIMESTAMP,
+                returning_customer BOOLEAN DEFAULT FALSE,
+                times_qualified INTEGER DEFAULT 0,
+                first_qualified_date TIMESTAMP,
+                last_qualified_date TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_contact TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -80,7 +84,7 @@ async function initializeDatabase() {
             CREATE INDEX IF NOT EXISTS idx_messages_lead_id ON messages(lead_id);
         `);
         
-        // Add new column if it doesn't exist (migration for existing databases)
+        // Add new columns if they don't exist (migration for existing databases)
         await pool.query(`
             DO $$ 
             BEGIN 
@@ -89,6 +93,34 @@ async function initializeDatabase() {
                     WHERE table_name='leads' AND column_name='post_qualification_response_sent'
                 ) THEN
                     ALTER TABLE leads ADD COLUMN post_qualification_response_sent BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='returning_customer'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN returning_customer BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='times_qualified'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN times_qualified INTEGER DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='first_qualified_date'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN first_qualified_date TIMESTAMP;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='last_qualified_date'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN last_qualified_date TIMESTAMP;
                 END IF;
             END $$;
         `);
@@ -110,8 +142,9 @@ class LeadDatabase {
         
         try {
             const result = await pool.query(`
-                INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, answers)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, 
+                                   post_qualification_response_sent, answers, returning_customer, times_qualified)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *
             `, [
                 data.phone,
@@ -122,7 +155,10 @@ class LeadDatabase {
                 data.progress || 0,
                 data.qualified || false,
                 data.ai_paused || false,
-                JSON.stringify(data.answers || {})
+                data.post_qualification_response_sent || false,
+                JSON.stringify(data.answers || {}),
+                data.returning_customer || false,
+                data.times_qualified || 0
             ]);
             
             const lead = result.rows[0];
@@ -156,6 +192,8 @@ class LeadDatabase {
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
+                lead.returning_customer = Boolean(lead.returning_customer);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
                 return lead;
             }
             return null;
@@ -182,6 +220,8 @@ class LeadDatabase {
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
+                lead.returning_customer = Boolean(lead.returning_customer);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
                 return lead;
             }
             return null;
@@ -207,6 +247,8 @@ class LeadDatabase {
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
                 lead.ai_paused = Boolean(lead.ai_paused);
+                lead.returning_customer = Boolean(lead.returning_customer);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
                 return lead;
             });
         } catch (error) {
@@ -225,8 +267,11 @@ class LeadDatabase {
             const result = await pool.query(`
                 UPDATE leads 
                 SET name = $1, email = $2, status = $3, progress = $4, qualified = $5, 
-                    ai_paused = $6, answers = $7, qualified_date = $8, last_contact = CURRENT_TIMESTAMP
-                WHERE id = $9
+                    ai_paused = $6, answers = $7, qualified_date = $8, 
+                    post_qualification_response_sent = $9, returning_customer = $10, 
+                    times_qualified = $11, first_qualified_date = $12, last_qualified_date = $13,
+                    last_contact = CURRENT_TIMESTAMP
+                WHERE id = $14
                 RETURNING *
             `, [
                 data.name,
@@ -237,6 +282,11 @@ class LeadDatabase {
                 data.ai_paused,
                 JSON.stringify(data.answers || {}),
                 data.qualifiedDate,
+                data.post_qualification_response_sent,
+                data.returning_customer,
+                data.times_qualified,
+                data.first_qualified_date,
+                data.last_qualified_date,
                 id
             ]);
             
