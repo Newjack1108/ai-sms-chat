@@ -1022,28 +1022,32 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     // Special handling for postcode question (usually question 4)
     if (possibleAnswers.toLowerCase().includes('postcode') || 
         possibleAnswers.toLowerCase().includes('any postcode format')) {
-        // UK postcode patterns (more comprehensive)
+        // UK postcode patterns (comprehensive list)
         const postcodePatterns = [
-            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format
-            /\b([A-Z]{1,2}\d{1,2}\s?\d[A-Z]{2})\b/gi,        // Without optional letter
-            /\b([A-Z]{2}\d{1,2}\s?\d[A-Z]{2})\b/gi           // Two letter prefix
+            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format (e.g., CH1 4DF, M1 1AE)
+            /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,               // Two letter prefix (e.g., CH1 4DF)
+            /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,             // Single letter prefix (e.g., M1 1AE)
+            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi         // With letter after number (e.g., EC1A 1BB)
         ];
         
         for (const pattern of postcodePatterns) {
             const postcodeMatch = userMessage.match(pattern);
-            if (postcodeMatch) {
-                console.log(`      ✅ Found postcode: ${postcodeMatch[0]}`);
-                return postcodeMatch[0].trim().toUpperCase();
+            if (postcodeMatch && postcodeMatch[0]) {
+                const postcode = postcodeMatch[0].trim().toUpperCase();
+                console.log(`      ✅ Found postcode (pattern match): ${postcode}`);
+                return postcode;
             }
         }
         
-        // Also check for "postcode is X" or "postcode: X" format
-        const postcodeTextMatch = userMessage.match(/postcode[:\s]+([A-Z0-9\s]{5,8})/gi);
-        if (postcodeTextMatch) {
-            const extracted = postcodeTextMatch[0].replace(/postcode[:\s]+/gi, '').trim();
+        // Also check for "postcode is X", "postcode: X", or just any UK postcode-like format
+        const postcodeTextMatch = userMessage.match(/postcode[:\s]+([A-Z0-9\s]{4,9})/gi);
+        if (postcodeTextMatch && postcodeTextMatch[0]) {
+            const extracted = postcodeTextMatch[0].replace(/postcode[:\s]+/gi, '').trim().toUpperCase();
             console.log(`      ✅ Found postcode via text match: ${extracted}`);
-            return extracted.toUpperCase();
+            return extracted;
         }
+        
+        console.log(`      ❓ No postcode pattern found in message`);
     }
     
     // Check for exact word/phrase matches from expected answers
@@ -1133,22 +1137,28 @@ function validateAnswer(userMessage, expectedAnswers) {
         }
     }
     
-    // Check for common variations
+    // Check for common variations (using word boundaries to prevent substring matches)
     const variations = {
-        'yes': ['y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'definitely', 'absolutely'],
-        'no': ['n', 'nope', 'nah', 'not', 'none', 'never'],
+        'yes': ['yeah', 'yep', 'sure', 'ok', 'okay', 'definitely', 'absolutely'],  // Removed 'y' to prevent false matches
+        'no': ['nope', 'nah', 'not', 'none', 'never'],  // Removed 'n' for same reason
         'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable'],
         'static': ['fixed', 'permanent', 'stationary'],
-        'asap': ['as soon as possible', 'urgent', 'quickly', 'fast', 'immediately', 'soon'],
+        'asap': ['as soon as possible', 'urgent', 'urgently', 'quickly', 'fast', 'immediately', 'soon', 'soonest'],
         'week': ['weeks', 'weekly', '1 week', 'a week'],
         'month': ['months', 'monthly', '1 month', 'a month'],
         'year': ['years', 'yearly']
     };
     
     for (const [key, variants] of Object.entries(variations)) {
-        if (expectedList.includes(key) && variants.some(v => userAnswer.includes(v))) {
-            console.log(`      ✅ Variation match found: ${key}`);
-            return true;
+        if (expectedList.includes(key)) {
+            for (const variant of variants) {
+                // Use word boundary to prevent substring matches
+                const regex = new RegExp(`\\b${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+                if (regex.test(userAnswer)) {
+                    console.log(`      ✅ Variation match found: ${key} (matched: ${variant})`);
+                    return true;
+                }
+            }
         }
     }
     
