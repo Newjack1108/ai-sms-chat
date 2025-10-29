@@ -1080,34 +1080,52 @@ async function processAIResponse(lead, userMessage) {
         
         // Check if lead is already qualified
         if (lead.qualified === true || lead.status === 'qualified') {
-            console.log(`💬 Lead is qualified - checking if auto-response already sent`);
+            console.log(`💬 Lead is qualified - checking message type`);
+            
+            // FIRST: Check if this is a simple thank you response (handle these immediately)
+            const lowerMessage = userMessage.toLowerCase().trim();
+            const isThankYou = lowerMessage === 'thanks' || 
+                               lowerMessage === 'thank you' || 
+                               lowerMessage === 'thankyou' ||
+                               lowerMessage === 'ty' ||
+                               lowerMessage === 'thx' ||
+                               lowerMessage === '👍' ||
+                               lowerMessage === 'thanks!' ||
+                               lowerMessage === 'thank you!' ||
+                               lowerMessage === 'thank you.' ||
+                               lowerMessage === 'thanks.';
+            
+            if (isThankYou) {
+                console.log(`👋 Simple thank you detected - sending "Your welcome" response`);
+                const simpleResponse = "Your welcome";
+                await sendSMS(lead.phone, simpleResponse);
+                await LeadDatabase.createMessage(lead.id, 'assistant', simpleResponse);
+                console.log(`✅ Simple "Your welcome" sent`);
+                
+                // Mark post_qualification_response_sent as true so we don't send the long message later
+                if (!lead.post_qualification_response_sent) {
+                    await LeadDatabase.updateLead(lead.id, {
+                        name: lead.name,
+                        email: lead.email,
+                        status: lead.status,
+                        progress: lead.progress,
+                        qualified: lead.qualified,
+                        ai_paused: lead.ai_paused,
+                        post_qualification_response_sent: true, // Mark as sent
+                        answers: lead.answers,
+                        qualifiedDate: lead.qualifiedDate,
+                        returning_customer: lead.returning_customer || false,
+                        times_qualified: lead.times_qualified || 0,
+                        first_qualified_date: lead.first_qualified_date,
+                        last_qualified_date: lead.last_qualified_date
+                    });
+                }
+                return;
+            }
             
             // Check if we already sent the post-qualification response
             if (lead.post_qualification_response_sent) {
-                console.log(`🔇 Post-qualification response already sent - checking for simple thank you`);
-                
-                // Detect simple thank you responses
-                const lowerMessage = userMessage.toLowerCase().trim();
-                const isThankYou = lowerMessage === 'thanks' || 
-                                   lowerMessage === 'thank you' || 
-                                   lowerMessage === 'thankyou' ||
-                                   lowerMessage === 'ty' ||
-                                   lowerMessage === 'thx' ||
-                                   lowerMessage === '👍' ||
-                                   lowerMessage === 'thanks!' ||
-                                   lowerMessage === 'thank you!' ||
-                                   lowerMessage === 'thank you.' ||
-                                   lowerMessage === 'thanks.';
-                
-                if (isThankYou) {
-                    console.log(`👋 Simple thank you detected - sending "Your welcome" response`);
-                    const simpleResponse = "Your welcome";
-                    await sendSMS(lead.phone, simpleResponse);
-                    await LeadDatabase.createMessage(lead.id, 'assistant', simpleResponse);
-                    console.log(`✅ Simple "Your welcome" sent`);
-                    return;
-                }
-                
+                console.log(`🔇 Post-qualification response already sent - staying silent for non-thank-you message`);
                 console.log(`📝 Customer message stored but no reply sent to avoid repetition`);
                 return; // Complete silence for other messages
             }
