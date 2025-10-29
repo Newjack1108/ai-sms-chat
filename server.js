@@ -1263,34 +1263,47 @@ async function processAIResponse(lead, userMessage) {
         await LeadDatabase.createMessage(lead.id, 'customer', userMessage);
         
         // Update last customer message time for reminder tracking
-        await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+        try {
+            await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+            console.log(`✅ Updated last message time for reminder tracking`);
+        } catch (error) {
+            console.error(`⚠️ Failed to update last message time (non-critical):`, error.message);
+        }
         
         // Reset reminder flags if customer responds (they're engaged again)
         if (lead.reminder_1hr_sent || lead.reminder_24hr_sent || lead.reminder_48hr_sent) {
             console.log(`🔄 Customer responded - resetting reminder flags`);
-            await LeadDatabase.resetReminderFlags(lead.id);
-            // Update the lead object to reflect the reset
-            lead.reminder_1hr_sent = 0;
-            lead.reminder_24hr_sent = 0;
-            lead.reminder_48hr_sent = 0;
+            try {
+                await LeadDatabase.resetReminderFlags(lead.id);
+                // Update the lead object to reflect the reset
+                lead.reminder_1hr_sent = 0;
+                lead.reminder_24hr_sent = 0;
+                lead.reminder_48hr_sent = 0;
+            } catch (error) {
+                console.error(`⚠️ Failed to reset reminder flags (non-critical):`, error.message);
+            }
         }
         
-        // Handle YES/NO responses to 48hr reminder
-        if (lead.reminder_48hr_sent) {
+        // Handle YES/NO responses to 48hr reminder (only for very short messages)
+        if (lead.reminder_48hr_sent && userMessage.trim().length <= 10) {
             const response = userMessage.toLowerCase().trim();
             if (response === 'yes' || response === 'yeah' || response === 'yep' || response === 'y') {
                 console.log(`✅ Lead confirmed interest after 48hr reminder - continuing qualification`);
                 // Continue with normal processing (flags already reset above)
             } else if (response === 'no' || response === 'nope' || response === 'not interested' || response === 'n') {
                 console.log(`❌ Lead declined after 48hr reminder - closing conversation`);
-                await LeadDatabase.updateLead(lead.id, { 
-                    ...lead, 
-                    status: 'closed', 
-                    ai_paused: 1 
-                });
-                const closingMsg = "Thank you for letting us know. Feel free to reach out anytime in the future!";
-                await sendSMS(lead.phone, closingMsg);
-                await LeadDatabase.createMessage(lead.id, 'assistant', closingMsg);
+                try {
+                    await LeadDatabase.updateLead(lead.id, { 
+                        ...lead, 
+                        status: 'closed', 
+                        ai_paused: 1 
+                    });
+                    const closingMsg = "Thank you for letting us know. Feel free to reach out anytime in the future!";
+                    await sendSMS(lead.phone, closingMsg);
+                    await LeadDatabase.createMessage(lead.id, 'assistant', closingMsg);
+                } catch (error) {
+                    console.error(`⚠️ Error closing lead after NO response:`, error.message);
+                }
                 return; // Stop processing
             }
         }
