@@ -488,21 +488,29 @@ app.post('/api/delete-all-leads', async (req, res) => {
     try {
         const leads = await LeadDatabase.getAllLeads();
         let deletedCount = 0;
+        let messagesDeleted = 0;
         
         for (const lead of leads) {
             try {
+                // Count messages before deleting
+                const messages = await LeadDatabase.getMessagesByLeadId(lead.id);
+                messagesDeleted += messages.length;
+                
                 await LeadDatabase.deleteLead(lead.id);
                 deletedCount++;
-                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id})`);
+                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id}) with ${messages.length} messages`);
             } catch (error) {
                 console.error(`Failed to delete lead ${lead.id}:`, error.message);
             }
         }
         
+        console.log(`✅ Cleanup complete: ${deletedCount} leads and ${messagesDeleted} messages deleted`);
+        
         res.json({
             success: true,
-            message: `Deleted ${deletedCount} leads`,
-            deletedCount: deletedCount
+            message: `Deleted ${deletedCount} leads and ${messagesDeleted} messages`,
+            deletedCount: deletedCount,
+            messagesDeleted: messagesDeleted
         });
     } catch (error) {
         console.error('Error deleting all leads:', error);
