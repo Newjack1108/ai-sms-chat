@@ -1052,6 +1052,7 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     
     for (const expected of expectedList) {
         if (expected.length < 2) continue; // Skip very short matches
+        if (expected === 'blank' || expected === 'unsure' || expected === 'not') continue; // Skip generic words
         
         // Look for the expected answer as a word or phrase in the message
         if (messageLower.includes(expected)) {
@@ -1099,7 +1100,10 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         return bestMatch;
     }
     
-    console.log(`      ❌ No match found`);
+    // IMPORTANT: Only return null if no match found
+    // Do NOT accept arbitrary text as an answer for specific questions
+    // This prevents false positives where Q2 gets extracted when not mentioned
+    console.log(`      ❌ No match found - returning null (no false positive)`);
     return null;
 }
 
@@ -1110,14 +1114,19 @@ function validateAnswer(userMessage, expectedAnswers) {
     const userAnswer = userMessage.toLowerCase().trim();
     const expectedList = expectedAnswers.toLowerCase().split(',').map(a => a.trim());
     
+    console.log(`      🔍 Validating: "${userMessage}" against expected: ${expectedList.join(', ')}`);
+    
     // Check for exact matches
     if (expectedList.includes(userAnswer)) {
+        console.log(`      ✅ Exact match found`);
         return true;
     }
     
     // Check for partial matches (user answer contains expected answer)
     for (const expected of expectedList) {
+        if (expected.length < 2) continue; // Skip single characters
         if (userAnswer.includes(expected) || expected.includes(userAnswer)) {
+            console.log(`      ✅ Partial match found: ${expected}`);
             return true;
         }
     }
@@ -1126,33 +1135,45 @@ function validateAnswer(userMessage, expectedAnswers) {
     const variations = {
         'yes': ['y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'definitely', 'absolutely'],
         'no': ['n', 'nope', 'nah', 'not', 'none', 'never'],
-        'mobile': ['movable', 'moveable', 'portable', 'transportable'],
+        'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable'],
         'static': ['fixed', 'permanent', 'stationary'],
-        'asap': ['as soon as possible', 'urgent', 'quickly', 'fast', 'immediately'],
-        'week': ['weeks', 'weekly'],
-        'month': ['months', 'monthly'],
+        'asap': ['as soon as possible', 'urgent', 'quickly', 'fast', 'immediately', 'soon'],
+        'week': ['weeks', 'weekly', '1 week', 'a week'],
+        'month': ['months', 'monthly', '1 month', 'a month'],
         'year': ['years', 'yearly']
     };
     
     for (const [key, variants] of Object.entries(variations)) {
         if (expectedList.includes(key) && variants.some(v => userAnswer.includes(v))) {
+            console.log(`      ✅ Variation match found: ${key}`);
             return true;
         }
     }
     
     // For postcode question, accept any format that looks like a postcode
-    if (expectedList.includes('any postcode format')) {
-        const postcodePattern = /^[a-z]{1,2}\d{1,2}[a-z]?\s?\d[a-z]{2}$/i;
-        if (postcodePattern.test(userAnswer) || userAnswer.length >= 3) {
-            return true;
+    if (expectedList.includes('any postcode format') || expectedAnswers.toLowerCase().includes('postcode')) {
+        // More lenient postcode patterns
+        const postcodePatterns = [
+            /^[a-z]{1,2}\d{1,2}[a-z]?\s?\d[a-z]{2}$/i,  // Standard UK format
+            /^[a-z]{2}\d\s?\d[a-z]{2}$/i,               // Simplified format
+            /\b[a-z]{1,2}\d{1,2}\s?\d[a-z]{2}\b/gi      // Embedded in text
+        ];
+        
+        for (const pattern of postcodePatterns) {
+            if (pattern.test(userAnswer)) {
+                console.log(`      ✅ Postcode pattern match found`);
+                return true;
+            }
         }
     }
     
-    // If answer is substantial (more than 2 characters), accept it
-    if (userAnswer.length > 2) {
+    // If answer is substantial (more than 2 characters) and not just numbers, accept it
+    if (userAnswer.length > 2 && userAnswer.length < 50) {
+        console.log(`      ✅ Substantial answer accepted (${userAnswer.length} chars)`);
         return true;
     }
     
+    console.log(`      ❌ No match found - answer rejected`);
     return false;
 }
 
