@@ -483,6 +483,36 @@ app.post('/api/trigger-reminders', async (req, res) => {
     }
 });
 
+// Delete all leads (for testing - BE CAREFUL!)
+app.post('/api/delete-all-leads', async (req, res) => {
+    try {
+        const leads = await LeadDatabase.getAllLeads();
+        let deletedCount = 0;
+        
+        for (const lead of leads) {
+            try {
+                await LeadDatabase.deleteLead(lead.id);
+                deletedCount++;
+                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id})`);
+            } catch (error) {
+                console.error(`Failed to delete lead ${lead.id}:`, error.message);
+            }
+        }
+        
+        res.json({
+            success: true,
+            message: `Deleted ${deletedCount} leads`,
+            deletedCount: deletedCount
+        });
+    } catch (error) {
+        console.error('Error deleting all leads:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Create new lead
 app.post('/api/leads', async (req, res) => {
     try {
