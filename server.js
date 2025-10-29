@@ -386,6 +386,103 @@ app.get('/api/settings/questions', (req, res) => {
     });
 });
 
+// Test endpoint to manually check and trigger reminders
+app.get('/api/test-reminders', async (req, res) => {
+    try {
+        const now = new Date();
+        const leads = await LeadDatabase.getAllLeads();
+        
+        const timeUnit = REMINDER_TEST_MODE ? 'seconds' : 'hours';
+        const divisor = REMINDER_TEST_MODE ? 1000 : (1000 * 60 * 60);
+        
+        const results = [];
+        
+        for (const lead of leads) {
+            const leadInfo = {
+                id: lead.id,
+                name: lead.name,
+                phone: lead.phone,
+                qualified: lead.qualified,
+                ai_paused: lead.ai_paused,
+                progress: lead.progress,
+                last_customer_message_time: lead.last_customer_message_time,
+                createdAt: lead.createdAt,
+                reminder_1hr_sent: lead.reminder_1hr_sent,
+                reminder_24hr_sent: lead.reminder_24hr_sent,
+                reminder_48hr_sent: lead.reminder_48hr_sent,
+                status: 'Not eligible'
+            };
+            
+            // Check eligibility
+            if (lead.qualified || lead.ai_paused) {
+                leadInfo.status = 'Skipped (qualified or paused)';
+                results.push(leadInfo);
+                continue;
+            }
+            
+            if (lead.progress === 0 && !lead.last_customer_message_time) {
+                leadInfo.status = 'Skipped (no progress and no messages)';
+                results.push(leadInfo);
+                continue;
+            }
+            
+            // Calculate time since last message
+            const lastMessageTime = new Date(lead.last_customer_message_time || lead.createdAt);
+            const timeSinceLastMessage = (now - lastMessageTime) / divisor;
+            
+            leadInfo.timeSinceLastMessage = `${timeSinceLastMessage.toFixed(1)} ${timeUnit}`;
+            leadInfo.status = 'Eligible for reminders';
+            
+            // Check which reminders should be sent
+            if (timeSinceLastMessage >= REMINDER_INTERVALS.first && !lead.reminder_1hr_sent) {
+                leadInfo.nextAction = `Send first reminder (threshold: ${REMINDER_INTERVALS.first} ${timeUnit})`;
+            } else if (timeSinceLastMessage >= REMINDER_INTERVALS.second && !lead.reminder_24hr_sent) {
+                leadInfo.nextAction = `Send second reminder (threshold: ${REMINDER_INTERVALS.second} ${timeUnit})`;
+            } else if (timeSinceLastMessage >= REMINDER_INTERVALS.final && !lead.reminder_48hr_sent) {
+                leadInfo.nextAction = `Send final reminder (threshold: ${REMINDER_INTERVALS.final} ${timeUnit})`;
+            } else {
+                leadInfo.nextAction = `Waiting (next check at ${REMINDER_INTERVALS.first} ${timeUnit})`;
+            }
+            
+            results.push(leadInfo);
+        }
+        
+        res.json({
+            success: true,
+            testMode: REMINDER_TEST_MODE,
+            intervals: REMINDER_INTERVALS,
+            timeUnit: timeUnit,
+            totalLeads: leads.length,
+            leads: results,
+            message: 'Use /api/trigger-reminders to actually send reminders for testing'
+        });
+    } catch (error) {
+        console.error('Error testing reminders:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Test endpoint to actually trigger reminders manually
+app.post('/api/trigger-reminders', async (req, res) => {
+    try {
+        console.log('🧪 MANUAL REMINDER CHECK TRIGGERED');
+        await checkAndSendReminders();
+        res.json({
+            success: true,
+            message: 'Reminder check completed. Check server logs for details.'
+        });
+    } catch (error) {
+        console.error('Error triggering reminders:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // Create new lead
 app.post('/api/leads', async (req, res) => {
     try {
