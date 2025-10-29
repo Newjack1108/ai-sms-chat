@@ -407,7 +407,11 @@ app.post('/api/leads', async (req, res) => {
             status: 'new',
             progress: 0,
             qualified: false,
-            answers: {}
+            ai_paused: 0,
+            post_qualification_response_sent: false,
+            answers: {},
+            returning_customer: false,
+            times_qualified: 0
         });
         
         console.log(`✅ Lead created with ID: ${newLead.id}`);
@@ -733,7 +737,11 @@ app.post('/webhook/sms', async (req, res) => {
                 status: 'new',
                 progress: 0,
                 qualified: false,
-                answers: {}
+                ai_paused: 0,
+                post_qualification_response_sent: false,
+                answers: {},
+                returning_customer: false,
+                times_qualified: 0
             });
             console.log(`✅ New lead created with ID: ${lead.id}`);
         } else {
