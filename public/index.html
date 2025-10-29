@@ -713,14 +713,30 @@
             border-radius: 8px;
             padding: 15px 20px;
             margin-bottom: 10px;
-            display: grid;
-            grid-template-columns: 2fr 1.5fr 1fr 0.8fr 0.5fr;
-            gap: 15px;
-            align-items: center;
             cursor: pointer;
             transition: all 0.3s ease;
             border-left: 4px solid #e9ecef;
             position: relative;
+        }
+        
+        .list-item-main {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 1fr 0.8fr 0.5fr;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .list-item-answers {
+            display: none;
+            padding: 15px;
+            margin-top: 15px;
+            border-top: 2px solid #e9ecef;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .customer-list-item.expanded .list-item-answers {
+            display: block;
         }
 
         .customer-list-item:hover {
@@ -1258,9 +1274,17 @@
                                 </button>
                             </div>
                         </div>
-                        <button class="btn btn-primary" id="add-lead-btn-2" style="padding: 8px 12px; font-size: 0.9em;">
-                            ➕ Add Lead
-                        </button>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-secondary" onclick="downloadLeadsCSV()" style="padding: 8px 12px; font-size: 0.9em;">
+                                📥 Download CSV
+                            </button>
+                            <button class="btn btn-secondary" onclick="printLeads()" style="padding: 8px 12px; font-size: 0.9em;">
+                                🖨️ Print
+                            </button>
+                            <button class="btn btn-primary" id="add-lead-btn-2" style="padding: 8px 12px; font-size: 0.9em;">
+                                ➕ Add Lead
+                            </button>
+                        </div>
                     </div>
                     <div id="customers-list">
                         <!-- Customers will be populated here -->
@@ -1846,44 +1870,82 @@
                 const listItem = document.createElement('div');
                 listItem.className = 'customer-list-item';
                 
+                // Build answers HTML
+                let answersHTML = '';
+                if (customer.answers && Object.keys(customer.answers).length > 0) {
+                    answersHTML = '<div class="list-item-answers"><div style="font-weight: 600; margin-bottom: 10px; color: #495057;">📝 Qualification Answers:</div>';
+                    
+                    for (let i = 1; i <= 4; i++) {
+                        const questionKey = `question_${i}`;
+                        const answer = customer.answers[questionKey];
+                        
+                        if (answer) {
+                            const questionData = customQuestions[i - 1];
+                            const questionText = questionData 
+                                ? (typeof questionData === 'object' ? questionData.question : questionData)
+                                : `Question ${i}`;
+                            
+                            answersHTML += `
+                                <div style="margin-bottom: 10px; padding: 8px; background: white; border-radius: 6px;">
+                                    <div style="font-weight: 600; color: #495057; font-size: 0.9em;">Q${i}: ${questionText}</div>
+                                    <div style="color: #212529; margin-top: 4px; margin-left: 15px;">→ ${answer}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    answersHTML += '</div>';
+                }
+                
                 listItem.innerHTML = `
-                    <div>
-                        <div class="list-customer-name">
-                            ${customer.name || 'Unknown'}
-                            ${customer.returning_customer ? '<span class="returning-badge" style="margin-left: 8px;">🔄</span>' : ''}
-                            ${customer.times_qualified && customer.times_qualified > 1 ? `<span class="times-badge" style="margin-left: 4px;">${customer.times_qualified}x</span>` : ''}
+                    <div class="list-item-main">
+                        <div>
+                            <div class="list-customer-name">
+                                ${customer.name || 'Unknown'}
+                                ${customer.returning_customer ? '<span class="returning-badge" style="margin-left: 8px;">🔄</span>' : ''}
+                                ${customer.times_qualified && customer.times_qualified > 1 ? `<span class="times-badge" style="margin-left: 4px;">${customer.times_qualified}x</span>` : ''}
+                            </div>
+                            <div class="list-customer-contact">📱 ${customer.phone}</div>
                         </div>
-                        <div class="list-customer-contact">📱 ${customer.phone}</div>
-                    </div>
-                    <div class="list-customer-contact">
-                        📧 ${customer.email || 'No email'}
-                    </div>
-                    <div class="list-customer-progress">
-                        <div class="list-progress-bar">
-                            <div class="list-progress-fill" style="width: ${customer.progress || 0}%"></div>
+                        <div class="list-customer-contact">
+                            📧 ${customer.email || 'No email'}
                         </div>
-                        <div class="list-progress-text">${customer.progress || 0}%</div>
+                        <div class="list-customer-progress">
+                            <div class="list-progress-bar">
+                                <div class="list-progress-fill" style="width: ${customer.progress || 0}%"></div>
+                            </div>
+                            <div class="list-progress-text">${customer.progress || 0}%</div>
+                        </div>
+                        <div class="list-customer-source">
+                            <div class="customer-status status-${customer.status}">${customer.status}</div>
+                            <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source || 'Unknown'}</div>
+                        </div>
+                        <div class="list-customer-actions">
+                            <button class="list-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})" title="${customer.ai_paused ? 'Resume AI' : 'Pause AI'}">
+                                ${customer.ai_paused ? '⏸️' : '🤖'}
+                            </button>
+                            <button class="list-archive-btn" onclick="archiveCustomer(event, ${customer.id})" title="Archive Customer">📦</button>
+                        </div>
                     </div>
-                    <div class="list-customer-source">
-                        <div class="customer-status status-${customer.status}">${customer.status}</div>
-                        <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source || 'Unknown'}</div>
-                    </div>
-                    <div class="list-customer-actions">
-                        <button class="list-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})" title="${customer.ai_paused ? 'Resume AI' : 'Pause AI'}">
-                            ${customer.ai_paused ? '⏸️' : '🤖'}
-                        </button>
-                        <button class="list-archive-btn" onclick="archiveCustomer(event, ${customer.id})">📦</button>
-                    </div>
+                    ${answersHTML}
                 `;
                 
                 listItem.addEventListener('click', (e) => {
-                    // Don't select if clicking archive button
-                    if (e.target.classList.contains('list-archive-btn')) return;
+                    // Don't toggle if clicking action buttons
+                    if (e.target.classList.contains('list-archive-btn') || 
+                        e.target.classList.contains('list-ai-btn')) {
+                        return;
+                    }
                     
+                    // Toggle expansion
+                    listItem.classList.toggle('expanded');
+                    
+                    // Update selected state
                     document.querySelectorAll('.customer-list-item').forEach(item => {
-                        item.classList.remove('selected');
+                        if (item !== listItem) {
+                            item.classList.remove('selected');
+                        }
                     });
-                    listItem.classList.add('selected');
+                    listItem.classList.toggle('selected');
                 });
                 
                 customersList.appendChild(listItem);
@@ -2319,6 +2381,257 @@
             } catch (error) {
                 // Silently fail - don't spam console with errors
             }
+        }
+
+        // Download leads as CSV
+        function downloadLeadsCSV() {
+            if (customers.length === 0) {
+                showNotification('No customers to download', 'warning');
+                return;
+            }
+
+            // CSV header
+            let csv = 'Name,Phone,Email,Source,Status,Progress,Qualified,Created,Q1,A1,Q2,A2,Q3,A3,Q4,A4\n';
+            
+            // Add each customer
+            customers.forEach(customer => {
+                const name = (customer.name || '').replace(/"/g, '""');
+                const phone = customer.phone || '';
+                const email = (customer.email || '').replace(/"/g, '""');
+                const source = (customer.source || '').replace(/"/g, '""');
+                const status = customer.status || '';
+                const progress = customer.progress || 0;
+                const qualified = customer.qualified ? 'Yes' : 'No';
+                const created = customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : '';
+                
+                // Get questions and answers
+                let row = `"${name}","${phone}","${email}","${source}","${status}",${progress}%,"${qualified}","${created}"`;
+                
+                for (let i = 1; i <= 4; i++) {
+                    const questionData = customQuestions[i - 1];
+                    const questionText = questionData 
+                        ? (typeof questionData === 'object' ? questionData.question : questionData)
+                        : `Question ${i}`;
+                    const answer = customer.answers && customer.answers[`question_${i}`] 
+                        ? customer.answers[`question_${i}`].replace(/"/g, '""')
+                        : '';
+                    
+                    row += `,"${questionText}","${answer}"`;
+                }
+                
+                csv += row + '\n';
+            });
+            
+            // Create download link
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            const timestamp = new Date().toISOString().split('T')[0];
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', `leads_export_${timestamp}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            showNotification(`Exported ${customers.length} customers to CSV`, 'success');
+        }
+
+        // Print leads
+        function printLeads() {
+            if (customers.length === 0) {
+                showNotification('No customers to print', 'warning');
+                return;
+            }
+
+            // Create print window content
+            let printContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Customer Leads Report</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            padding: 20px;
+                            color: #333;
+                        }
+                        h1 {
+                            color: #4299e1;
+                            margin-bottom: 10px;
+                        }
+                        .report-date {
+                            color: #6c757d;
+                            margin-bottom: 30px;
+                        }
+                        .customer {
+                            border: 2px solid #e9ecef;
+                            border-radius: 8px;
+                            padding: 20px;
+                            margin-bottom: 20px;
+                            page-break-inside: avoid;
+                        }
+                        .customer-header {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            margin-bottom: 15px;
+                            padding-bottom: 15px;
+                            border-bottom: 2px solid #e9ecef;
+                        }
+                        .customer-name {
+                            font-size: 1.3em;
+                            font-weight: bold;
+                            color: #212529;
+                        }
+                        .customer-status {
+                            padding: 5px 12px;
+                            border-radius: 15px;
+                            font-size: 0.9em;
+                            font-weight: 600;
+                        }
+                        .status-new { background: #d1ecf1; color: #0c5460; }
+                        .status-active { background: #fff3cd; color: #856404; }
+                        .status-qualified { background: #d4edda; color: #155724; }
+                        .customer-details {
+                            display: grid;
+                            grid-template-columns: 1fr 1fr;
+                            gap: 10px;
+                            margin-bottom: 15px;
+                        }
+                        .detail-item {
+                            padding: 8px;
+                            background: #f8f9fa;
+                            border-radius: 5px;
+                        }
+                        .detail-label {
+                            font-weight: 600;
+                            color: #495057;
+                            font-size: 0.85em;
+                        }
+                        .detail-value {
+                            color: #212529;
+                        }
+                        .answers-section {
+                            margin-top: 15px;
+                        }
+                        .answers-title {
+                            font-weight: 600;
+                            color: #495057;
+                            margin-bottom: 10px;
+                            font-size: 1.1em;
+                        }
+                        .answer-item {
+                            padding: 10px;
+                            margin-bottom: 8px;
+                            background: #f8f9fa;
+                            border-left: 4px solid #4299e1;
+                            border-radius: 4px;
+                        }
+                        .question {
+                            font-weight: 600;
+                            color: #495057;
+                            margin-bottom: 5px;
+                        }
+                        .answer {
+                            color: #212529;
+                            margin-left: 15px;
+                        }
+                        @media print {
+                            body { padding: 10px; }
+                            .customer { page-break-inside: avoid; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>🎯 Customer Leads Report</h1>
+                    <div class="report-date">Generated on ${new Date().toLocaleString()}</div>
+                    <div class="summary" style="margin-bottom: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        <strong>Total Customers:</strong> ${customers.length}<br>
+                        <strong>Qualified:</strong> ${customers.filter(c => c.qualified).length}<br>
+                        <strong>Active:</strong> ${customers.filter(c => c.status === 'active').length}<br>
+                        <strong>New:</strong> ${customers.filter(c => c.status === 'new').length}
+                    </div>
+            `;
+            
+            // Add each customer
+            customers.forEach(customer => {
+                printContent += `
+                    <div class="customer">
+                        <div class="customer-header">
+                            <div class="customer-name">${customer.name || 'Unknown'}</div>
+                            <div class="customer-status status-${customer.status}">${customer.status}</div>
+                        </div>
+                        <div class="customer-details">
+                            <div class="detail-item">
+                                <div class="detail-label">Phone:</div>
+                                <div class="detail-value">${customer.phone}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Email:</div>
+                                <div class="detail-value">${customer.email || 'No email'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Source:</div>
+                                <div class="detail-value">${customer.source || 'Unknown'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Progress:</div>
+                                <div class="detail-value">${customer.progress || 0}%</div>
+                            </div>
+                        </div>
+                `;
+                
+                // Add answers if available
+                if (customer.answers && Object.keys(customer.answers).length > 0) {
+                    printContent += `
+                        <div class="answers-section">
+                            <div class="answers-title">📝 Qualification Answers</div>
+                    `;
+                    
+                    for (let i = 1; i <= 4; i++) {
+                        const questionKey = `question_${i}`;
+                        const answer = customer.answers[questionKey];
+                        
+                        if (answer) {
+                            const questionData = customQuestions[i - 1];
+                            const questionText = questionData 
+                                ? (typeof questionData === 'object' ? questionData.question : questionData)
+                                : `Question ${i}`;
+                            
+                            printContent += `
+                                <div class="answer-item">
+                                    <div class="question">Q${i}: ${questionText}</div>
+                                    <div class="answer">→ ${answer}</div>
+                                </div>
+                            `;
+                        }
+                    }
+                    
+                    printContent += `</div>`;
+                }
+                
+                printContent += `</div>`;
+            });
+            
+            printContent += `
+                </body>
+                </html>
+            `;
+            
+            // Open print window
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(printContent);
+            printWindow.document.close();
+            printWindow.focus();
+            
+            // Wait for content to load then print
+            setTimeout(() => {
+                printWindow.print();
+            }, 250);
+            
+            showNotification('Opening print dialog...', 'success');
         }
     </script>
 </body>
