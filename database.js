@@ -90,6 +90,7 @@ function initializeDatabase() {
             qualified INTEGER DEFAULT 0,
             archived INTEGER DEFAULT 0,
             ai_paused INTEGER DEFAULT 0,
+            post_qualification_response_sent INTEGER DEFAULT 0,
             answers TEXT,
             qualifiedDate TEXT,
             createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -125,6 +126,18 @@ function initializeDatabase() {
         CREATE INDEX IF NOT EXISTS idx_messages_leadId ON messages(leadId);
     `);
     
+    // Add new column if it doesn't exist (migration for existing databases)
+    try {
+        const columns = db.prepare("PRAGMA table_info(leads)").all();
+        const hasColumn = columns.some(col => col.name === 'post_qualification_response_sent');
+        if (!hasColumn) {
+            db.exec('ALTER TABLE leads ADD COLUMN post_qualification_response_sent INTEGER DEFAULT 0');
+            console.log('✅ Added post_qualification_response_sent column to existing database');
+        }
+    } catch (error) {
+        console.log('⚠️ Migration check skipped:', error.message);
+    }
+    
     console.log('✅ Database initialized successfully');
 }
 
@@ -153,7 +166,7 @@ const statements = db ? {
     updateLead: db.prepare(`
         UPDATE leads 
         SET name = ?, email = ?, status = ?, progress = ?, qualified = ?, 
-            ai_paused = ?, answers = ?, qualifiedDate = ?, lastContact = CURRENT_TIMESTAMP
+            ai_paused = ?, post_qualification_response_sent = ?, answers = ?, qualifiedDate = ?, lastContact = CURRENT_TIMESTAMP
         WHERE id = ?
     `),
     
@@ -237,6 +250,8 @@ class LeadDatabase {
                 lead.answers = lead.answers ? JSON.parse(lead.answers) : {};
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
+                lead.ai_paused = Boolean(lead.ai_paused);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
             }
             return lead;
         } catch (error) {
@@ -253,6 +268,8 @@ class LeadDatabase {
                 lead.answers = lead.answers ? JSON.parse(lead.answers) : {};
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
+                lead.ai_paused = Boolean(lead.ai_paused);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
             }
             return lead;
         } catch (error) {
@@ -269,6 +286,8 @@ class LeadDatabase {
                 lead.answers = lead.answers ? JSON.parse(lead.answers) : {};
                 lead.qualified = Boolean(lead.qualified);
                 lead.archived = Boolean(lead.archived);
+                lead.ai_paused = Boolean(lead.ai_paused);
+                lead.post_qualification_response_sent = Boolean(lead.post_qualification_response_sent);
                 return lead;
             });
         } catch (error) {
@@ -289,6 +308,7 @@ class LeadDatabase {
                 data.progress,
                 data.qualified ? 1 : 0,
                 data.ai_paused ? 1 : 0,
+                data.post_qualification_response_sent ? 1 : 0,
                 answers,
                 data.qualifiedDate || null,
                 id
@@ -481,6 +501,7 @@ class LeadDatabase {
                 lead.progress,
                 lead.qualified ? 1 : 0,
                 1,    // ai_paused = true
+                lead.post_qualification_response_sent ? 1 : 0,
                 lead.answers ? JSON.stringify(lead.answers) : '{}',
                 lead.qualifiedDate,
                 leadId
@@ -509,6 +530,7 @@ class LeadDatabase {
                 lead.progress,
                 lead.qualified ? 1 : 0,
                 0,    // ai_paused = false
+                lead.post_qualification_response_sent ? 1 : 0,
                 lead.answers ? JSON.stringify(lead.answers) : '{}',
                 lead.qualifiedDate,
                 leadId

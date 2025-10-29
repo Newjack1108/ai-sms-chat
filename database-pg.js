@@ -45,6 +45,7 @@ async function initializeDatabase() {
                 qualified BOOLEAN DEFAULT FALSE,
                 archived BOOLEAN DEFAULT FALSE,
                 ai_paused BOOLEAN DEFAULT FALSE,
+                post_qualification_response_sent BOOLEAN DEFAULT FALSE,
                 answers JSONB,
                 qualified_date TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -77,6 +78,19 @@ async function initializeDatabase() {
             CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
             CREATE INDEX IF NOT EXISTS idx_leads_archived ON leads(archived);
             CREATE INDEX IF NOT EXISTS idx_messages_lead_id ON messages(lead_id);
+        `);
+        
+        // Add new column if it doesn't exist (migration for existing databases)
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='post_qualification_response_sent'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN post_qualification_response_sent BOOLEAN DEFAULT FALSE;
+                END IF;
+            END $$;
         `);
         
         console.log('✅ PostgreSQL database initialized successfully');

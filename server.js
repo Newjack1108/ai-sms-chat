@@ -593,6 +593,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 progress: lead.progress,
                 qualified: lead.qualified,
                 ai_paused: 0, // Unpause AI
+                post_qualification_response_sent: lead.post_qualification_response_sent || false,
                 answers: lead.answers,
                 qualifiedDate: lead.qualifiedDate
             });
@@ -950,38 +951,43 @@ async function processAIResponse(lead, userMessage) {
         }
         
         // Store incoming message in database
-        LeadDatabase.createMessage(lead.id, 'customer', userMessage);
+        await LeadDatabase.createMessage(lead.id, 'customer', userMessage);
         
-        // Check if lead is already qualified - send simple auto-response
+        // Check if lead is already qualified
         if (lead.qualified === true || lead.status === 'qualified') {
-            console.log(`💬 Lead already qualified - sending simple auto-response`);
+            console.log(`💬 Lead is qualified - checking if auto-response already sent`);
             
-            // Move qualified customer back to active status so they appear in chat interface
-            if (lead.status === 'qualified') {
-                console.log(`🔄 Moving qualified customer back to active status`);
-                // Update status while preserving all other data
-                LeadDatabase.updateLead(lead.id, {
-                    name: lead.name,
-                    email: lead.email,
-                    status: 'active',
-                    progress: lead.progress,
-                    qualified: lead.qualified,
-                    answers: lead.answers,
-                    qualifiedDate: lead.qualifiedDate
-                });
-                lead.status = 'active'; // Update local object
+            // Check if we already sent the post-qualification response
+            if (lead.post_qualification_response_sent) {
+                console.log(`🔇 Post-qualification response already sent - staying silent (no response)`);
+                console.log(`📝 Customer message stored but no reply sent to avoid repetition`);
+                return; // Complete silence - don't send anything
             }
             
-            // Send simple pre-defined response (no AI, can't give wrong info)
+            console.log(`📤 Sending post-qualification auto-response (FIRST TIME ONLY)`);
+            
+            // Send auto-response ONCE
             const autoResponse = "Thanks for your message! Our team has all your details and will be in touch within 24 hours as discussed. If you have any urgent questions, feel free to give us a call during business hours (Mon-Fri 8am-5pm, Sat 10am-3pm).";
             
-            console.log(`📤 Sending auto-response: "${autoResponse}"`);
             await sendSMS(lead.phone, autoResponse);
             
             // Store auto-response in database
-            LeadDatabase.createMessage(lead.id, 'assistant', autoResponse);
+            await LeadDatabase.createMessage(lead.id, 'assistant', autoResponse);
             
-            console.log(`✅ Auto-response sent to ${lead.name} (${lead.phone})`);
+            // Mark as sent - will never send this message again
+            await LeadDatabase.updateLead(lead.id, {
+                name: lead.name,
+                email: lead.email,
+                status: lead.status,
+                progress: lead.progress,
+                qualified: lead.qualified,
+                ai_paused: lead.ai_paused,
+                post_qualification_response_sent: true, // Mark as sent
+                answers: lead.answers,
+                qualifiedDate: lead.qualifiedDate
+            });
+            
+            console.log(`✅ Post-qualification auto-response sent to ${lead.name} (${lead.phone}) - will not send again`);
             return;
         }
         
@@ -1019,6 +1025,8 @@ async function processAIResponse(lead, userMessage) {
                         status: lead.status,
                         progress: lead.progress,
                         qualified: lead.qualified,
+                        ai_paused: lead.ai_paused,
+                        post_qualification_response_sent: lead.post_qualification_response_sent || false,
                         answers: lead.answers,
                         qualifiedDate: lead.qualifiedDate
                     });
@@ -1065,6 +1073,8 @@ If you have any questions in the meantime, feel free to ask! 🐴✨`;
                 status: lead.status,
                 progress: lead.progress,
                 qualified: true,
+                ai_paused: lead.ai_paused,
+                post_qualification_response_sent: false, // First time qualifying, haven't sent post-qual response yet
                 answers: lead.answers,
                 qualifiedDate: lead.qualifiedDate
             });
@@ -1107,6 +1117,12 @@ async function generateAIResponseWithAssistant(lead, userMessage, answerValid = 
             return await generateFallbackResponse(lead, userMessage);
         }
         
+        // Get conversation history to avoid repeating responses
+        const messageHistory = await LeadDatabase.getConversationHistory(lead.id);
+        const recentMessages = messageHistory.slice(-10); // Last 10 messages for context
+        
+        console.log(`📜 Loaded ${recentMessages.length} recent messages for AI context`);
+        
         // Build context about what information we need
         const answeredCount = Object.keys(lead.answers || {}).length;
         const unansweredQuestions = [];
@@ -1141,6 +1157,11 @@ async function generateAIResponseWithAssistant(lead, userMessage, answerValid = 
         const currentQuestion = CUSTOM_QUESTIONS[answeredCount];
         const questionText = typeof currentQuestion === 'object' ? currentQuestion.question : currentQuestion;
         
+        // Format conversation history for AI context
+        const historyText = recentMessages.length > 0 
+            ? recentMessages.map(m => `${m.sender}: ${m.content}`).join('\n')
+            : 'No previous messages';
+        
         let contextInstructions = `MODE: QUALIFICATION
 CUSTOMER_NAME: ${lead.name}
 QUESTION_INDEX: ${questionIndex}
@@ -1151,7 +1172,16 @@ CUSTOMER_STATUS: unqualified
 
 CUSTOMER_MESSAGE: "${userMessage}"
 
-INSTRUCTIONS: Follow the MODE and QUESTION_TEXT exactly. If ANSWER_VALID is false, re-ask the same question. If ANSWER_VALID is true and NEXT_QUESTION_AVAILABLE is true, ask the next question.`;
+CONVERSATION HISTORY (DO NOT REPEAT these exact phrases):
+${historyText}
+
+INSTRUCTIONS: 
+1. Follow the MODE and QUESTION_TEXT exactly
+2. If ANSWER_VALID is false, re-ask the same question using DIFFERENT wording than before
+3. If ANSWER_VALID is true and NEXT_QUESTION_AVAILABLE is true, ask the next question
+4. NEVER use the same acknowledgment twice in a row - vary your responses naturally
+5. Check the CONVERSATION HISTORY and avoid repeating phrases you've already used
+6. Be conversational and natural - you're having a dialogue, not reading a script`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
