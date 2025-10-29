@@ -1022,11 +1022,27 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     // Special handling for postcode question (usually question 4)
     if (possibleAnswers.toLowerCase().includes('postcode') || 
         possibleAnswers.toLowerCase().includes('any postcode format')) {
-        const postcodePattern = /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi;
-        const postcodeMatch = userMessage.match(postcodePattern);
-        if (postcodeMatch) {
-            console.log(`      ✅ Found postcode: ${postcodeMatch[0]}`);
-            return postcodeMatch[0].trim();
+        // UK postcode patterns (more comprehensive)
+        const postcodePatterns = [
+            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format
+            /\b([A-Z]{1,2}\d{1,2}\s?\d[A-Z]{2})\b/gi,        // Without optional letter
+            /\b([A-Z]{2}\d{1,2}\s?\d[A-Z]{2})\b/gi           // Two letter prefix
+        ];
+        
+        for (const pattern of postcodePatterns) {
+            const postcodeMatch = userMessage.match(pattern);
+            if (postcodeMatch) {
+                console.log(`      ✅ Found postcode: ${postcodeMatch[0]}`);
+                return postcodeMatch[0].trim().toUpperCase();
+            }
+        }
+        
+        // Also check for "postcode is X" or "postcode: X" format
+        const postcodeTextMatch = userMessage.match(/postcode[:\s]+([A-Z0-9\s]{5,8})/gi);
+        if (postcodeTextMatch) {
+            const extracted = postcodeTextMatch[0].replace(/postcode[:\s]+/gi, '').trim();
+            console.log(`      ✅ Found postcode via text match: ${extracted}`);
+            return extracted.toUpperCase();
         }
     }
     
@@ -1357,10 +1373,18 @@ Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`
             return;
         }
         
+        // Double-check if all questions are now answered (safety check)
+        const currentAnsweredCount = Object.keys(lead.answers || {}).length;
+        if (currentAnsweredCount >= 4) {
+            console.log(`⚠️ All questions now answered - skipping AI response generation`);
+            return; // Exit early - qualification message already sent above
+        }
+        
         console.log(`🤖 Generating AI response...`);
         // Generate AI response using Assistant
         const answersJustExtracted = Object.keys(lead.answers).length - answeredCountBefore;
         console.log(`📊 Answers extracted this round: ${answersJustExtracted}`);
+        console.log(`📊 Questions still remaining: ${4 - currentAnsweredCount}`);
         const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answersJustExtracted);
         
         if (aiResponse) {
