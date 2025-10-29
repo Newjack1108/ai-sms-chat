@@ -1066,11 +1066,17 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         }
     }
     
-    // Check for common variations
+    // Check for common variations and timeframe patterns
     const variations = {
-        'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable'],
+        'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable', 'on skids'],
         'static': ['fixed', 'permanent', 'stationary', 'not mobile', 'non-mobile'],
-        'asap': ['as soon as possible', 'urgent', 'urgently', 'quickly', 'fast', 'immediately', 'right away'],
+        'asap': ['as soon as possible', 'urgent', 'urgently', 'quickly', 'fast', 'immediately', 'right away', 'soon', 'soonest'],
+        'week': ['1 week', 'a week', 'one week', 'this week', 'next week', 'within a week', 'in a week'],
+        'weeks': ['2 weeks', 'two weeks', 'few weeks', 'couple weeks', 'several weeks', 'within weeks'],
+        'month': ['1 month', 'a month', 'one month', 'this month', 'next month', 'within a month', 'in a month'],
+        'months': ['2 months', 'two months', 'few months', 'couple months', 'several months', '3 months', 'three months'],
+        'day': ['today', 'tomorrow', '1 day', 'a day', 'one day', 'within a day'],
+        'days': ['2 days', 'few days', 'couple days', 'several days', 'within days'],
         'yes': ['y', 'yeah', 'yep', 'sure', 'definitely', 'absolutely'],
         'no': ['nope', 'nah', 'not really', 'negative']
     };
@@ -1375,16 +1381,24 @@ Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`
         
         // Double-check if all questions are now answered (safety check)
         const currentAnsweredCount = Object.keys(lead.answers || {}).length;
+        console.log(`🔍 Safety Check - Current answers:`, lead.answers);
+        console.log(`🔍 Safety Check - Total answered: ${currentAnsweredCount}/4`);
+        
         if (currentAnsweredCount >= 4) {
             console.log(`⚠️ All questions now answered - skipping AI response generation`);
             return; // Exit early - qualification message already sent above
         }
         
         console.log(`🤖 Generating AI response...`);
+        console.log(`📊 Current state for AI context:`);
+        console.log(`   - Before extraction: ${answeredCountBefore} answers`);
+        console.log(`   - After extraction: ${currentAnsweredCount} answers`);
+        console.log(`   - Just extracted: ${currentAnsweredCount - answeredCountBefore} answers`);
+        console.log(`   - Questions remaining: ${4 - currentAnsweredCount}`);
+        console.log(`   - Current answers object:`, JSON.stringify(lead.answers, null, 2));
+        
         // Generate AI response using Assistant
         const answersJustExtracted = Object.keys(lead.answers).length - answeredCountBefore;
-        console.log(`📊 Answers extracted this round: ${answersJustExtracted}`);
-        console.log(`📊 Questions still remaining: ${4 - currentAnsweredCount}`);
         const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answersJustExtracted);
         
         if (aiResponse) {
@@ -1460,14 +1474,19 @@ async function generateAIResponseWithAssistant(lead, userMessage, answersExtract
             ? recentMessages.map(m => `${m.sender}: ${m.content}`).join('\n')
             : 'No previous messages';
         
+        // Build list of what we already have
+        const alreadyAnsweredText = gatheredInfo.length > 0 
+            ? `\nALREADY ANSWERED (DO NOT ASK THESE AGAIN):\n${gatheredInfo.map((info, idx) => `${idx + 1}. ${info}`).join('\n')}`
+            : '\nALREADY ANSWERED: None yet';
+        
         let contextInstructions = `MODE: QUALIFICATION
 CUSTOMER_NAME: ${lead.name}
-ANSWERS_EXTRACTED: ${answersExtracted}
+ANSWERS_JUST_EXTRACTED: ${answersExtracted}
+TOTAL_QUESTIONS_ANSWERED: ${answeredCount}
 QUESTIONS_REMAINING: ${unansweredQuestions.length}
 NEXT_QUESTION_INDEX: ${questionIndex}
 NEXT_QUESTION_TEXT: ${questionText}
-NEXT_QUESTION_AVAILABLE: ${nextQuestionAvailable}
-CUSTOMER_STATUS: unqualified
+${alreadyAnsweredText}
 
 CUSTOMER_MESSAGE: "${userMessage}"
 
@@ -1475,13 +1494,14 @@ CONVERSATION HISTORY (DO NOT REPEAT these exact phrases):
 ${historyText}
 
 INSTRUCTIONS: 
-1. If ANSWERS_EXTRACTED > 0, acknowledge what was captured (e.g., "Great! I've got your requirements noted.")
-2. If QUESTIONS_REMAINING > 0, ask the NEXT_QUESTION_TEXT naturally
-3. If ANSWERS_EXTRACTED > 1, acknowledge multiple answers were captured (e.g., "Perfect! I've captured several details from your message.")
-4. NEVER repeat the same acknowledgment - vary your responses naturally
-5. Check the CONVERSATION HISTORY and avoid repeating phrases you've already used
-6. Be conversational and natural - you're having a dialogue, not reading a script
-7. Flow smoothly from acknowledgment to next question`;
+1. Review ALREADY ANSWERED section - NEVER ask about these topics again
+2. If ANSWERS_JUST_EXTRACTED > 0, acknowledge what was captured (e.g., "Great! I've got your details.")
+3. If ANSWERS_JUST_EXTRACTED > 1, acknowledge multiple answers (e.g., "Perfect! I've captured several details from your message.")
+4. ONLY ask the NEXT_QUESTION_TEXT - do NOT ask about already answered questions
+5. NEVER repeat the same acknowledgment - vary your responses naturally
+6. Check the CONVERSATION HISTORY and avoid repeating phrases you've already used
+7. Be conversational and natural - you're having a dialogue, not reading a script
+8. Flow smoothly from acknowledgment to next question`;
 
         // Create a thread for this conversation
         const thread = await openaiClient.beta.threads.create();
