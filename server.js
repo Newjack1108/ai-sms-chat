@@ -1084,9 +1084,32 @@ async function processAIResponse(lead, userMessage) {
             
             // Check if we already sent the post-qualification response
             if (lead.post_qualification_response_sent) {
-                console.log(`🔇 Post-qualification response already sent - staying silent (no response)`);
+                console.log(`🔇 Post-qualification response already sent - checking for simple thank you`);
+                
+                // Detect simple thank you responses
+                const lowerMessage = userMessage.toLowerCase().trim();
+                const isThankYou = lowerMessage === 'thanks' || 
+                                   lowerMessage === 'thank you' || 
+                                   lowerMessage === 'thankyou' ||
+                                   lowerMessage === 'ty' ||
+                                   lowerMessage === 'thx' ||
+                                   lowerMessage === '👍' ||
+                                   lowerMessage === 'thanks!' ||
+                                   lowerMessage === 'thank you!' ||
+                                   lowerMessage === 'thank you.' ||
+                                   lowerMessage === 'thanks.';
+                
+                if (isThankYou) {
+                    console.log(`👋 Simple thank you detected - sending "Your welcome" response`);
+                    const simpleResponse = "Your welcome";
+                    await sendSMS(lead.phone, simpleResponse);
+                    await LeadDatabase.createMessage(lead.id, 'assistant', simpleResponse);
+                    console.log(`✅ Simple "Your welcome" sent`);
+                    return;
+                }
+                
                 console.log(`📝 Customer message stored but no reply sent to avoid repetition`);
-                return; // Complete silence - don't send anything
+                return; // Complete silence for other messages
             }
             
             console.log(`📤 Sending post-qualification auto-response (FIRST TIME ONLY)`);
@@ -1183,11 +1206,8 @@ async function processAIResponse(lead, userMessage) {
             console.log(`🎉 All questions answered - qualifying lead`);
             
             // All questions answered - qualify lead (only send this message once)
-            const qualificationMessage = `🎉 Excellent! I have all the information I need to help you.
-
-Based on your answers, I'll have our team prepare a customized proposal for your equine stable project. Someone will contact you within 24 hours to discuss next steps.
-
-If you have any questions in the meantime, feel free to ask! 🐴✨`;
+            const qualificationMessage = `Thank you! I have all the information I need to help you. Based on your answers, someone will contact you within 24 hours to discuss your requirements. If you have any questions in the meantime, feel free to ask! 🐴✨
+Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`;
 
             await sendSMS(lead.phone, qualificationMessage);
             
