@@ -340,6 +340,27 @@ class LeadDatabase {
         }
     }
     
+    // Delete lead (permanently)
+    static async deleteLead(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            // Delete messages first (should cascade, but being explicit)
+            await pool.query('DELETE FROM messages WHERE lead_id = $1', [id]);
+            
+            // Delete lead
+            await pool.query('DELETE FROM leads WHERE id = $1', [id]);
+            
+            console.log(`🗑️ Permanently deleted lead ID: ${id}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error deleting lead:', error);
+            throw error;
+        }
+    }
+    
     // Create message
     static async createMessage(leadId, sender, content, timestamp = null) {
         if (!isPostgreSQL) {
@@ -605,6 +626,80 @@ class LeadDatabase {
             return true;
         } catch (error) {
             console.error('Error unpausing AI:', error);
+            return false;
+        }
+    }
+    
+    // Update last customer message time for reminder tracking
+    static async updateLastCustomerMessageTime(leadId, timestamp) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET last_customer_message_time = $1 
+                WHERE id = $2
+            `, [timestamp, leadId]);
+            console.log(`🕐 Updated last message time for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating last message time:', error);
+            return false;
+        }
+    }
+    
+    // Update reminder sent flag
+    static async updateReminderSent(leadId, reminderType) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const columnMap = {
+                '1hr': 'reminder_1hr_sent',
+                '24hr': 'reminder_24hr_sent',
+                '48hr': 'reminder_48hr_sent'
+            };
+            
+            const column = columnMap[reminderType];
+            if (!column) {
+                console.error(`❌ Invalid reminder type: ${reminderType}`);
+                return false;
+            }
+            
+            await pool.query(`
+                UPDATE leads 
+                SET ${column} = TRUE 
+                WHERE id = $1
+            `, [leadId]);
+            console.log(`✅ Marked ${reminderType} reminder as sent for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating reminder flag:', error);
+            return false;
+        }
+    }
+    
+    // Reset reminder flags (when customer responds)
+    static async resetReminderFlags(leadId) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                UPDATE leads 
+                SET reminder_1hr_sent = FALSE,
+                    reminder_24hr_sent = FALSE,
+                    reminder_48hr_sent = FALSE
+                WHERE id = $1
+            `, [leadId]);
+            console.log(`🔄 Reset reminder flags for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error resetting reminder flags:', error);
             return false;
         }
     }
