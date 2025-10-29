@@ -391,10 +391,55 @@ app.post('/api/leads', async (req, res) => {
         const normalizedPhone = normalizePhoneNumber(phone);
         
         // Check if lead already exists in database (includes restoring archived leads)
-        const existingLead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
+        let existingLead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
         if (existingLead) {
-            // Lead exists (either active or was restored from archive)
-            console.log(`✅ Using existing/restored lead: ${existingLead.name} (ID: ${existingLead.id})`);
+            console.log(`👤 Found existing lead: ${existingLead.name} (ID: ${existingLead.id})`);
+            console.log(`   Current status: ${existingLead.status}, Qualified: ${existingLead.qualified}`);
+            
+            // If they're already qualified, this is a NEW inquiry - reset them
+            if (existingLead.qualified || existingLead.status === 'qualified') {
+                console.log(`🔄 EXISTING QUALIFIED CUSTOMER - Manual add triggering NEW inquiry (auto-reset)`);
+                console.log(`   📊 Previous qualification: ${existingLead.qualifiedDate}`);
+                console.log(`   📈 Times previously qualified: ${existingLead.times_qualified || 0}`);
+                
+                // Save previous qualification data
+                const previousQualifiedDate = existingLead.qualifiedDate;
+                
+                // Reset for new qualification
+                await LeadDatabase.updateLead(existingLead.id, {
+                    name: name || existingLead.name,
+                    email: email || existingLead.email,
+                    source: source || existingLead.source,
+                    status: 'new',              // Reset to new
+                    progress: 0,                 // Reset progress
+                    qualified: false,            // Unqualify
+                    ai_paused: 0,                // Unpause AI
+                    post_qualification_response_sent: false,  // Reset flag
+                    answers: {},                 // Clear answers for fresh start
+                    qualifiedDate: null,         // Clear current qualification
+                    returning_customer: true,    // Flag as returning
+                    times_qualified: (existingLead.times_qualified || 0) + 1,  // Increment
+                    first_qualified_date: existingLead.first_qualified_date || previousQualifiedDate,
+                    last_qualified_date: previousQualifiedDate
+                });
+                
+                console.log(`✅ Returning customer reset for NEW manual inquiry`);
+                
+                // Get fresh lead data
+                existingLead = await LeadDatabase.getLeadById(existingLead.id);
+                
+                // Send AI introduction for the NEW inquiry
+                try {
+                    await sendAIIntroduction(existingLead, true); // true = returning customer
+                } catch (introError) {
+                    console.error('Error sending AI introduction:', introError);
+                }
+                
+                return res.json(existingLead);
+            }
+            
+            // Lead exists but not qualified yet - just return it
+            console.log(`✅ Using existing/restored unqualified lead: ${existingLead.name} (ID: ${existingLead.id})`);
             return res.json(existingLead);
         }
         
@@ -418,7 +463,7 @@ app.post('/api/leads', async (req, res) => {
         
         // Send AI introduction message (don't fail the request if this fails)
         try {
-            await sendAIIntroduction(newLead);
+            await sendAIIntroduction(newLead, false); // false = new customer
         } catch (introError) {
             console.error('Error sending AI introduction:', introError);
             // Don't fail the lead creation if introduction fails
