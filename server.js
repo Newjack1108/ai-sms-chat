@@ -1078,14 +1078,16 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         'months': ['2 months', 'two months', 'few months', 'couple months', 'several months', '3 months', 'three months'],
         'day': ['today', 'tomorrow', '1 day', 'a day', 'one day', 'within a day'],
         'days': ['2 days', 'few days', 'couple days', 'several days', 'within days'],
-        'yes': ['y', 'yeah', 'yep', 'sure', 'definitely', 'absolutely'],
+        'yes': ['yeah', 'yep', 'sure', 'definitely', 'absolutely'],  // Removed single 'y' to prevent false matches
         'no': ['nope', 'nah', 'not really', 'negative']
     };
     
     for (const [key, variants] of Object.entries(variations)) {
         if (expectedList.includes(key)) {
             for (const variant of variants) {
-                if (messageLower.includes(variant)) {
+                // Use word boundary matching to prevent substring matches (e.g., "y" in "urgently")
+                const regex = new RegExp(`\\b${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+                if (regex.test(messageLower)) {
                     if (variant.length > longestMatch) {
                         bestMatch = variant;
                         longestMatch = variant.length;
