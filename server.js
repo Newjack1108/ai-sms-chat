@@ -1248,6 +1248,39 @@ async function processAIResponse(lead, userMessage) {
         // Store incoming message in database
         await LeadDatabase.createMessage(lead.id, 'customer', userMessage);
         
+        // Update last customer message time for reminder tracking
+        await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+        
+        // Reset reminder flags if customer responds (they're engaged again)
+        if (lead.reminder_1hr_sent || lead.reminder_24hr_sent || lead.reminder_48hr_sent) {
+            console.log(`🔄 Customer responded - resetting reminder flags`);
+            await LeadDatabase.resetReminderFlags(lead.id);
+            // Update the lead object to reflect the reset
+            lead.reminder_1hr_sent = 0;
+            lead.reminder_24hr_sent = 0;
+            lead.reminder_48hr_sent = 0;
+        }
+        
+        // Handle YES/NO responses to 48hr reminder
+        if (lead.reminder_48hr_sent) {
+            const response = userMessage.toLowerCase().trim();
+            if (response === 'yes' || response === 'yeah' || response === 'yep' || response === 'y') {
+                console.log(`✅ Lead confirmed interest after 48hr reminder - continuing qualification`);
+                // Continue with normal processing (flags already reset above)
+            } else if (response === 'no' || response === 'nope' || response === 'not interested' || response === 'n') {
+                console.log(`❌ Lead declined after 48hr reminder - closing conversation`);
+                await LeadDatabase.updateLead(lead.id, { 
+                    ...lead, 
+                    status: 'closed', 
+                    ai_paused: 1 
+                });
+                const closingMsg = "Thank you for letting us know. Feel free to reach out anytime in the future!";
+                await sendSMS(lead.phone, closingMsg);
+                await LeadDatabase.createMessage(lead.id, 'assistant', closingMsg);
+                return; // Stop processing
+            }
+        }
+        
         // Check if lead is already qualified
         if (lead.qualified === true || lead.status === 'qualified') {
             console.log(`💬 Lead is qualified - checking message type`);
@@ -2018,6 +2051,117 @@ async function sendSMS(to, message) {
     }
 }
 
+// ============================================================================
+// REMINDER SYSTEM FUNCTIONS
+// ============================================================================
+
+// Helper: Find first unanswered question for a lead
+function findFirstUnansweredQuestion(lead) {
+    for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+        const questionKey = `question_${i + 1}`;
+        if (!lead.answers || !lead.answers[questionKey]) {
+            const q = CUSTOM_QUESTIONS[i];
+            return typeof q === 'object' ? q.question : q;
+        }
+    }
+    return CUSTOM_QUESTIONS[0].question; // Fallback to first question
+}
+
+// Send 1 hour reminder
+async function send1HourReminder(lead) {
+    try {
+        const nextQuestion = findFirstUnansweredQuestion(lead);
+        const message = `Hi ${lead.name}, just following up - ${nextQuestion}`;
+        
+        await sendSMS(lead.phone, message);
+        await LeadDatabase.createMessage(lead.id, 'assistant', message);
+        await LeadDatabase.updateReminderSent(lead.id, '1hr');
+        
+        console.log(`🔔 1hr reminder sent to ${lead.name} (${lead.phone})`);
+    } catch (error) {
+        console.error(`❌ Error sending 1hr reminder to lead ${lead.id}:`, error);
+    }
+}
+
+// Send 24 hour reminder
+async function send24HourReminder(lead) {
+    try {
+        const nextQuestion = findFirstUnansweredQuestion(lead);
+        const message = `Hi ${lead.name}, I wanted to check back with you - ${nextQuestion}`;
+        
+        await sendSMS(lead.phone, message);
+        await LeadDatabase.createMessage(lead.id, 'assistant', message);
+        await LeadDatabase.updateReminderSent(lead.id, '24hr');
+        
+        console.log(`🔔 24hr reminder sent to ${lead.name} (${lead.phone})`);
+    } catch (error) {
+        console.error(`❌ Error sending 24hr reminder to lead ${lead.id}:`, error);
+    }
+}
+
+// Send 48 hour final reminder
+async function send48HourReminder(lead) {
+    try {
+        const message = `Hi ${lead.name}, this is my final follow-up. Are you still interested in getting a quote for your stable? Reply YES to continue or NO if you're no longer interested.`;
+        
+        await sendSMS(lead.phone, message);
+        await LeadDatabase.createMessage(lead.id, 'assistant', message);
+        await LeadDatabase.updateReminderSent(lead.id, '48hr');
+        
+        console.log(`🔔 48hr final reminder sent to ${lead.name} (${lead.phone})`);
+    } catch (error) {
+        console.error(`❌ Error sending 48hr reminder to lead ${lead.id}:`, error);
+    }
+}
+
+// Check and send reminders to leads
+async function checkAndSendReminders() {
+    try {
+        const now = new Date();
+        const leads = await LeadDatabase.getAllLeads();
+        
+        console.log(`🔔 Checking ${leads.length} leads for reminders...`);
+        
+        for (const lead of leads) {
+            // Skip if qualified or paused
+            if (lead.qualified || lead.ai_paused) continue;
+            
+            // Skip if no progress (0%) AND no initial message sent
+            if (lead.progress === 0 && !lead.last_customer_message_time) continue;
+            
+            // Determine the time since last customer message
+            const lastMessageTime = new Date(lead.last_customer_message_time || lead.createdAt);
+            const hoursSinceLastMessage = (now - lastMessageTime) / (1000 * 60 * 60);
+            
+            // 1 hour reminder
+            if (hoursSinceLastMessage >= 1 && !lead.reminder_1hr_sent) {
+                console.log(`⏰ Sending 1hr reminder to ${lead.name} (last message ${hoursSinceLastMessage.toFixed(1)}hrs ago)`);
+                await send1HourReminder(lead);
+            }
+            
+            // 24 hour reminder
+            if (hoursSinceLastMessage >= 24 && !lead.reminder_24hr_sent) {
+                console.log(`⏰ Sending 24hr reminder to ${lead.name} (last message ${hoursSinceLastMessage.toFixed(1)}hrs ago)`);
+                await send24HourReminder(lead);
+            }
+            
+            // 48 hour final reminder
+            if (hoursSinceLastMessage >= 48 && !lead.reminder_48hr_sent) {
+                console.log(`⏰ Sending 48hr final reminder to ${lead.name} (last message ${hoursSinceLastMessage.toFixed(1)}hrs ago)`);
+                await send48HourReminder(lead);
+            }
+        }
+        
+        console.log(`✅ Reminder check complete`);
+    } catch (error) {
+        console.error('❌ Error checking reminders:', error);
+    }
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
 // Utility functions
 function normalizePhoneNumber(phone) {
     // Remove all non-digit characters
@@ -2074,6 +2218,14 @@ async function startServer() {
         
         // Load settings from database after database is initialized
         await loadSettingsFromDatabase();
+        
+        // Start reminder checker (runs every 30 minutes)
+        setInterval(async () => {
+            console.log('🔔 Checking for leads needing reminders...');
+            await checkAndSendReminders();
+        }, 30 * 60 * 1000); // 30 minutes
+        
+        console.log('🔔 Reminder service started (checks every 30 minutes)');
         
         // Start the server on 0.0.0.0 to accept external connections (required for Railway)
         app.listen(PORT, '0.0.0.0', () => {

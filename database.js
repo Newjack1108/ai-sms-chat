@@ -97,6 +97,10 @@ function initializeDatabase() {
             times_qualified INTEGER DEFAULT 0,
             first_qualified_date TEXT,
             last_qualified_date TEXT,
+            last_customer_message_time TEXT,
+            reminder_1hr_sent INTEGER DEFAULT 0,
+            reminder_24hr_sent INTEGER DEFAULT 0,
+            reminder_48hr_sent INTEGER DEFAULT 0,
             createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
             lastContact TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -172,8 +176,9 @@ const statements = db ? {
     // Lead operations
     createLead: db.prepare(`
         INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, 
-                           post_qualification_response_sent, answers, returning_customer, times_qualified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           post_qualification_response_sent, answers, returning_customer, times_qualified,
+                           last_customer_message_time, reminder_1hr_sent, reminder_24hr_sent, reminder_48hr_sent)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     
     getLeadByPhone: db.prepare(`
@@ -193,6 +198,7 @@ const statements = db ? {
         SET name = ?, email = ?, status = ?, progress = ?, qualified = ?, 
             ai_paused = ?, post_qualification_response_sent = ?, answers = ?, qualifiedDate = ?,
             returning_customer = ?, times_qualified = ?, first_qualified_date = ?, last_qualified_date = ?,
+            last_customer_message_time = ?, reminder_1hr_sent = ?, reminder_24hr_sent = ?, reminder_48hr_sent = ?,
             lastContact = CURRENT_TIMESTAMP
         WHERE id = ?
     `),
@@ -261,7 +267,11 @@ class LeadDatabase {
                 data.post_qualification_response_sent || 0,
                 answers,
                 data.returning_customer || 0,
-                data.times_qualified || 0
+                data.times_qualified || 0,
+                data.last_customer_message_time || null,
+                data.reminder_1hr_sent || 0,
+                data.reminder_24hr_sent || 0,
+                data.reminder_48hr_sent || 0
             );
             
             console.log(`✅ Created lead with ID: ${result.lastInsertRowid}`);
@@ -348,6 +358,10 @@ class LeadDatabase {
                 data.times_qualified || 0,
                 data.first_qualified_date || null,
                 data.last_qualified_date || null,
+                data.last_customer_message_time || null,
+                data.reminder_1hr_sent ? 1 : 0,
+                data.reminder_24hr_sent ? 1 : 0,
+                data.reminder_48hr_sent ? 1 : 0,
                 id
             );
             
@@ -569,6 +583,10 @@ class LeadDatabase {
                 lead.times_qualified || 0,
                 lead.first_qualified_date || null,
                 lead.last_qualified_date || null,
+                lead.last_customer_message_time || null,
+                lead.reminder_1hr_sent ? 1 : 0,
+                lead.reminder_24hr_sent ? 1 : 0,
+                lead.reminder_48hr_sent ? 1 : 0,
                 leadId
             );
             console.log(`⏸️ AI paused for lead ID: ${leadId}`);
@@ -602,12 +620,87 @@ class LeadDatabase {
                 lead.times_qualified || 0,
                 lead.first_qualified_date || null,
                 lead.last_qualified_date || null,
+                lead.last_customer_message_time || null,
+                lead.reminder_1hr_sent ? 1 : 0,
+                lead.reminder_24hr_sent ? 1 : 0,
+                lead.reminder_48hr_sent ? 1 : 0,
                 leadId
             );
             console.log(`▶️ AI unpaused for lead ID: ${leadId}`);
             return true;
         } catch (error) {
             console.error('❌ Error unpausing AI:', error);
+            return false;
+        }
+    }
+    
+    // Update last customer message time for reminder tracking
+    static updateLastCustomerMessageTime(leadId, timestamp) {
+        try {
+            if (!db) return false;
+            
+            const stmt = db.prepare(`
+                UPDATE leads 
+                SET last_customer_message_time = ? 
+                WHERE id = ?
+            `);
+            stmt.run(timestamp, leadId);
+            console.log(`🕐 Updated last message time for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating last message time:', error);
+            return false;
+        }
+    }
+    
+    // Update reminder sent flag
+    static updateReminderSent(leadId, reminderType) {
+        try {
+            if (!db) return false;
+            
+            const columnMap = {
+                '1hr': 'reminder_1hr_sent',
+                '24hr': 'reminder_24hr_sent',
+                '48hr': 'reminder_48hr_sent'
+            };
+            
+            const column = columnMap[reminderType];
+            if (!column) {
+                console.error(`❌ Invalid reminder type: ${reminderType}`);
+                return false;
+            }
+            
+            const stmt = db.prepare(`
+                UPDATE leads 
+                SET ${column} = 1 
+                WHERE id = ?
+            `);
+            stmt.run(leadId);
+            console.log(`✅ Marked ${reminderType} reminder as sent for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating reminder flag:', error);
+            return false;
+        }
+    }
+    
+    // Reset reminder flags (when customer responds)
+    static resetReminderFlags(leadId) {
+        try {
+            if (!db) return false;
+            
+            const stmt = db.prepare(`
+                UPDATE leads 
+                SET reminder_1hr_sent = 0,
+                    reminder_24hr_sent = 0,
+                    reminder_48hr_sent = 0
+                WHERE id = ?
+            `);
+            stmt.run(leadId);
+            console.log(`🔄 Reset reminder flags for lead ID: ${leadId}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error resetting reminder flags:', error);
             return false;
         }
     }
