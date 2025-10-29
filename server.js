@@ -1168,11 +1168,11 @@ async function processAIResponse(lead, userMessage) {
                                lowerMessage === 'thanks.';
             
             if (isThankYou) {
-                console.log(`👋 Simple thank you detected - sending "Your welcome" response`);
-                const simpleResponse = "Your welcome";
+                console.log(`👋 Simple thank you detected - sending "You are very welcome" response`);
+                const simpleResponse = "You are very welcome";
                 await sendSMS(lead.phone, simpleResponse);
                 await LeadDatabase.createMessage(lead.id, 'assistant', simpleResponse);
-                console.log(`✅ Simple "Your welcome" sent`);
+                console.log(`✅ Simple "You are very welcome" sent`);
                 
                 // Mark post_qualification_response_sent as true so we don't send the long message later
                 if (!lead.post_qualification_response_sent) {
