@@ -1022,12 +1022,13 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     // Special handling for postcode question (usually question 4)
     if (possibleAnswers.toLowerCase().includes('postcode') || 
         possibleAnswers.toLowerCase().includes('any postcode format')) {
-        // UK postcode patterns (comprehensive list)
+        // UK postcode patterns (comprehensive list - full and partial)
         const postcodePatterns = [
             /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format (e.g., CH1 4DF, M1 1AE)
             /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,               // Two letter prefix (e.g., CH1 4DF)
             /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,             // Single letter prefix (e.g., M1 1AE)
-            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi         // With letter after number (e.g., EC1A 1BB)
+            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,        // With letter after number (e.g., EC1A 1BB)
+            /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi                // Partial postcode - outward code only (e.g., CW7, CH1, M1)
         ];
         
         for (const pattern of postcodePatterns) {
