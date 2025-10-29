@@ -49,7 +49,7 @@ let CUSTOM_QUESTIONS = [
 ];
 
 // Assistant name (can be updated via API)
-let ASSISTANT_NAME = "Oscar";
+let ASSISTANT_NAME = "William";
 
 // OpenAI Assistant configuration
 let openaiClient = null;
