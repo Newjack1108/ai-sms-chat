@@ -36,15 +36,15 @@ let CUSTOM_QUESTIONS = [
     },
     {
         question: "Does your building need to be mobile?",
-        possibleAnswers: "skids, mobile, towable, yes, moveable, steel skid, wooden skids, no, static"
+        possibleAnswers: "skids, mobile, towable, yes, moveable, movable, portable, transportable, steel skid, wooden skids, on skids, no, static, fixed, permanent, stationary"
     },
     {
         question: "How soon do you need the building?",
-        possibleAnswers: "ASAP, asap, week, weeks, tbc, TBC, month, months, next year, day, days, don't mind, anytime, not fussed"
+        possibleAnswers: "ASAP, asap, urgent, urgently, soon, soonest, week, weeks, 1 week, a week, month, months, 1 month, a month, next year, day, days, today, tomorrow, tbc, TBC, don't mind, anytime, not fussed, quickly, fast, immediately"
     },
     {
         question: "Did you supply the postcode where the building is to be installed?",
-        possibleAnswers: "blank, unsure, not, any postcode format (lowercase and uppercase)"
+        possibleAnswers: "any postcode format (lowercase and uppercase), collection, collect, pickup, pick up, ill get it, i'll get it, i will get it, getting it, ill collect, i'll collect, i will collect"
     }
 ];
 
