@@ -588,6 +588,51 @@ app.get('/api/debug/message-count', async (req, res) => {
     }
 });
 
+// 🧪 NUCLEAR OPTION: Delete everything directly with raw SQL
+app.post('/api/debug/nuclear-delete', async (req, res) => {
+    if (!isPostgreSQL) {
+        return res.json({ error: 'Not using PostgreSQL' });
+    }
+    
+    try {
+        const { pool } = require('./database-pg');
+        
+        console.log('☢️ NUCLEAR DELETE: Starting direct SQL delete...');
+        
+        // Delete with explicit client and transaction
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            console.log('☢️ Transaction started');
+            
+            const messagesResult = await client.query('DELETE FROM messages');
+            console.log(`☢️ Deleted ${messagesResult.rowCount} messages`);
+            
+            const leadsResult = await client.query('DELETE FROM leads');
+            console.log(`☢️ Deleted ${leadsResult.rowCount} leads`);
+            
+            await client.query('COMMIT');
+            console.log('☢️ Transaction committed');
+            
+            res.json({
+                success: true,
+                messagesDeleted: messagesResult.rowCount,
+                leadsDeleted: leadsResult.rowCount,
+                message: 'Nuclear delete complete'
+            });
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('☢️ Transaction rolled back:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    } catch (error) {
+        console.error('Error in nuclear delete:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Create new lead
 app.post('/api/leads', async (req, res) => {
     try {
