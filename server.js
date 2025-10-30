@@ -1951,7 +1951,7 @@ ${historyText}
 INSTRUCTIONS: 
 1. Review ALREADY ANSWERED section - NEVER ask about these topics again
 2. If ANSWERS_JUST_EXTRACTED > 0, acknowledge what was captured (e.g., "Great! I've got your details.")
-3. If ANSWERS_JUST_EXTRACTED > 1, acknowledge multiple answers (e.g., "Perfect! I've captured several details from your message.")
+3. If ANSWERS_JUST_EXTRACTED > 1, acknowledge multiple answers (e.g., "Perfect! I have those details.")
 4. ONLY ask the NEXT_QUESTION_TEXT - do NOT ask about already answered questions
 5. NEVER repeat the same acknowledgment - vary your responses naturally
 6. Check the CONVERSATION HISTORY and avoid repeating phrases you've already used
