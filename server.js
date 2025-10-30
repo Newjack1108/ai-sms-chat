@@ -521,6 +521,31 @@ app.post('/api/delete-all-leads', async (req, res) => {
     }
 });
 
+// 🧪 DEBUG ENDPOINT: Check what's in the database
+app.get('/api/debug/database-info', async (req, res) => {
+    try {
+        const leads = await LeadDatabase.getAllLeads();
+        const databaseType = isPostgreSQL ? 'PostgreSQL' : 'SQLite';
+        
+        res.json({
+            databaseType,
+            totalLeads: leads.length,
+            leads: leads.map(l => ({
+                id: l.id,
+                phone: l.phone,
+                name: l.name,
+                status: l.status,
+                progress: l.progress,
+                qualified: l.qualified,
+                createdAt: l.createdAt
+            }))
+        });
+    } catch (error) {
+        console.error('Error getting database info:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Create new lead
 app.post('/api/leads', async (req, res) => {
     try {
