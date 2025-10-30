@@ -486,7 +486,18 @@ app.post('/api/trigger-reminders', async (req, res) => {
 // Delete all leads (for testing - BE CAREFUL!)
 app.post('/api/delete-all-leads', async (req, res) => {
     try {
-        const leads = await LeadDatabase.getAllLeads();
+        // Get ALL leads (including archived) for complete deletion
+        let leads;
+        if (isPostgreSQL) {
+            const { pool } = require('./database-pg');
+            const result = await pool.query('SELECT * FROM leads');
+            leads = result.rows;
+            console.log(`📊 Found ${leads.length} total leads in PostgreSQL (including archived)`);
+        } else {
+            leads = await LeadDatabase.getAllLeads();
+            console.log(`📊 Found ${leads.length} leads in SQLite`);
+        }
+        
         let deletedCount = 0;
         let messagesDeleted = 0;
         
@@ -496,11 +507,11 @@ app.post('/api/delete-all-leads', async (req, res) => {
                 const messages = await LeadDatabase.getMessagesByLeadId(lead.id);
                 messagesDeleted += messages.length;
                 
-                await LeadDatabase.deleteLead(lead.id);
+                const result = await LeadDatabase.deleteLead(lead.id);
                 deletedCount++;
-                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id}) with ${messages.length} messages`);
+                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id}) - ${result.messagesDeleted || messages.length} messages deleted`);
             } catch (error) {
-                console.error(`Failed to delete lead ${lead.id}:`, error.message);
+                console.error(`❌ Failed to delete lead ${lead.id}:`, error.message);
             }
         }
         

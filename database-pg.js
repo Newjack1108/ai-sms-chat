@@ -346,27 +346,39 @@ class LeadDatabase {
             throw new Error('PostgreSQL not available');
         }
         
+        const client = await pool.connect();
+        
         try {
+            await client.query('BEGIN');
+            console.log(`🗑️ PostgreSQL: Starting transaction to delete lead ID: ${id}`);
+            
             // Delete messages first - CHECK RESULT
-            const messagesResult = await pool.query('DELETE FROM messages WHERE lead_id = $1', [id]);
+            const messagesResult = await client.query('DELETE FROM messages WHERE lead_id = $1', [id]);
             console.log(`🗑️ PostgreSQL: Deleted ${messagesResult.rowCount} messages for lead ID: ${id}`);
             
             // Delete lead - CHECK RESULT
-            const leadResult = await pool.query('DELETE FROM leads WHERE id = $1', [id]);
+            const leadResult = await client.query('DELETE FROM leads WHERE id = $1', [id]);
             console.log(`🗑️ PostgreSQL: Deleted ${leadResult.rowCount} lead(s) with ID: ${id}`);
             
             if (leadResult.rowCount === 0) {
                 console.warn(`⚠️ No lead found with ID: ${id} (may already be deleted)`);
             }
             
+            await client.query('COMMIT');
+            console.log(`✅ PostgreSQL: Transaction committed for lead ID: ${id}`);
+            
             return {
                 messagesDeleted: messagesResult.rowCount || 0,
                 leadDeleted: leadResult.rowCount > 0
             };
         } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('❌ PostgreSQL: Transaction rolled back');
             console.error('❌ Error deleting lead from PostgreSQL:', error);
             console.error('❌ Error details:', error.message, error.code);
             throw error;
+        } finally {
+            client.release();
         }
     }
     
