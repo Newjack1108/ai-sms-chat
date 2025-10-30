@@ -617,6 +617,32 @@ class LeadDatabase {
             return null;
         }
     }
+    
+    // Generic save setting to database
+    static saveSetting(key, value) {
+        try {
+            statements.saveSetting.run(key, value);
+            console.log(`✅ Setting saved to database: ${key}`);
+            return true;
+        } catch (error) {
+            console.error(`❌ Error saving setting ${key}:`, error);
+            throw error;
+        }
+    }
+    
+    // Generic get setting from database
+    static getSetting(key) {
+        try {
+            const result = statements.getSetting.get(key);
+            if (result && result.value) {
+                return result.value;
+            }
+            return null;
+        } catch (error) {
+            console.error(`❌ Error getting setting ${key}:`, error);
+            return null;
+        }
+    }
 
     // Pause AI for a lead
     static pauseAI(leadId) {

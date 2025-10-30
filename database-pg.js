@@ -534,6 +534,50 @@ class LeadDatabase {
         }
     }
     
+    // Generic save setting to database
+    static async saveSetting(key, value) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(`
+                INSERT INTO settings (key, value, updated_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = CURRENT_TIMESTAMP
+            `, [key, value]);
+            
+            console.log(`✅ Setting saved to PostgreSQL: ${key}`);
+            return true;
+        } catch (error) {
+            console.error(`❌ Error saving setting ${key}:`, error);
+            throw error;
+        }
+    }
+    
+    // Generic get setting from database
+    static async getSetting(key) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query(`
+                SELECT value FROM settings WHERE key = $1
+            `, [key]);
+            
+            if (result.rows.length > 0) {
+                return result.rows[0].value;
+            }
+            return null;
+        } catch (error) {
+            console.error(`❌ Error getting setting ${key}:`, error);
+            return null;
+        }
+    }
+    
     // Check if customer exists (returns lead if exists, null if new)
     // Also checks for archived customers and restores them
     static async checkExistingCustomer(phone) {
