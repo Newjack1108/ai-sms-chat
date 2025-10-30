@@ -1179,6 +1179,13 @@
                         <input type="text" class="form-input" id="assistant-id" placeholder="Enter OpenAI Assistant ID">
                     </div>
                     <div class="form-group">
+                        <label class="form-label">Assistant Name</label>
+                        <input type="text" class="form-input" id="assistant-name" placeholder="Enter AI Assistant Name (e.g., William)">
+                        <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                            This is the name the AI will use when introducing itself to customers
+                        </small>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Model</label>
                         <select class="form-input" id="openai-model">
                             <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
@@ -1196,6 +1203,39 @@
                     <div class="form-group">
                         <label class="form-label">API Key</label>
                         <input type="password" class="form-input" id="crm-key" placeholder="Enter CRM API Key">
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3>📌 Lead Sources</h3>
+                    <p style="color: #6c757d; margin-bottom: 15px; font-size: 0.9em;">
+                        Manage how leads from different channels are categorized. Technical IDs are used in API calls, while Display Names are shown in the dashboard.
+                    </p>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <button class="btn btn-primary" onclick="showAddSourceModal()" style="padding: 8px 16px; font-size: 0.9em;">
+                            ➕ Add New Source
+                        </button>
+                    </div>
+                    
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden;">
+                            <thead style="background: #f8f9fa;">
+                                <tr>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6; font-weight: 600;">Technical ID</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6; font-weight: 600;">Display Name</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6; font-weight: 600;">Status</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #dee2e6; font-weight: 600;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leadSourcesList">
+                                <tr>
+                                    <td colspan="4" style="padding: 20px; text-align: center; color: #6c757d;">
+                                        Loading sources...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
                 
@@ -1385,6 +1425,7 @@
                         loadLeadDetails();
                     } else if (tabId === 'system-settings') {
                         loadSettings();
+                        loadLeadSources();
                     } else if (tabId === 'customer-info') {
                         loadCustomers();
                     }
@@ -1576,7 +1617,7 @@
             document.getElementById('lead-name').textContent = currentLead.name || '-';
             document.getElementById('lead-phone').textContent = currentLead.phone || '-';
             document.getElementById('lead-email').textContent = currentLead.email || '-';
-            document.getElementById('lead-source').textContent = currentLead.source || '-';
+            document.getElementById('lead-source').textContent = currentLead.source_display || currentLead.source || '-';
             document.getElementById('lead-status').textContent = currentLead.status || '-';
 
             // Update qualification progress
@@ -1645,6 +1686,11 @@
                     if (serverSettings.customQuestions) {
                         customQuestions = serverSettings.customQuestions;
                     }
+                    
+                    // Load assistant name from server
+                    if (serverSettings.assistantName) {
+                        document.getElementById('assistant-name').value = serverSettings.assistantName;
+                    }
                 }
             } catch (error) {
                 console.log('⚠️ Could not load settings from server, using localStorage');
@@ -1661,6 +1707,7 @@
                 document.getElementById('twilio-phone').value = settings.twilioPhone || '';
                 document.getElementById('openai-key').value = settings.openaiKey || '';
                 document.getElementById('assistant-id').value = settings.assistantId || '';
+                document.getElementById('assistant-name').value = settings.assistantName || document.getElementById('assistant-name').value || 'William';
                 document.getElementById('openai-model').value = settings.openaiModel || 'gpt-3.5-turbo';
                 document.getElementById('crm-webhook').value = settings.crmWebhook || '';
                 document.getElementById('crm-key').value = settings.crmKey || '';
@@ -1727,7 +1774,7 @@
                     },
                     body: JSON.stringify({
                         customQuestions: newSettings.customQuestions,
-                        assistantName: 'Oscar' // Using the assistant name from your OpenAI Assistant
+                        assistantName: document.getElementById('assistant-name').value || 'William'
                     })
                 });
 
@@ -1741,6 +1788,184 @@
             } catch (error) {
                 console.error('Error syncing settings to server:', error);
                 showNotification('Settings saved locally, but failed to sync to server', 'warning');
+            }
+        }
+        
+        // ============================================================================
+        // LEAD SOURCE MANAGEMENT FUNCTIONS
+        // ============================================================================
+        
+        // Load and display lead sources
+        async function loadLeadSources() {
+            try {
+                const response = await fetch('/api/settings/lead-sources');
+                if (response.ok) {
+                    const data = await response.json();
+                    const sources = data.sources;
+                    
+                    const tbody = document.getElementById('leadSourcesList');
+                    if (sources.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" style="padding: 20px; text-align: center; color: #6c757d;">No sources found. Click "Add New Source" to create one.</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = sources.map(source => `
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 12px; font-family: monospace; color: #3182ce;">${source.technical_id}</td>
+                            <td style="padding: 12px; font-weight: 500;">${source.display_name}</td>
+                            <td style="padding: 12px; text-align: center;">
+                                <span style="display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 0.85em; font-weight: 600; ${source.active ? 'background: #d4edda; color: #155724;' : 'background: #f8d7da; color: #721c24;'}">
+                                    ${source.active ? '✓ Active' : '✗ Inactive'}
+                                </span>
+                            </td>
+                            <td style="padding: 12px; text-align: center;">
+                                <button onclick="editLeadSource(${source.id}, '${source.technical_id}', '${source.display_name}', ${source.active})" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.85em; margin-right: 5px;">
+                                    ✏️ Edit
+                                </button>
+                                <button onclick="toggleSourceStatus(${source.id}, ${!source.active})" class="btn ${source.active ? 'btn-warning' : 'btn-success'}" style="padding: 6px 12px; font-size: 0.85em; margin-right: 5px;">
+                                    ${source.active ? '⏸️ Disable' : '▶️ Enable'}
+                                </button>
+                                <button onclick="deleteLeadSource(${source.id}, '${source.display_name}')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85em;">
+                                    🗑️ Delete
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    showNotification('Failed to load lead sources', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading lead sources:', error);
+                showNotification('Error loading lead sources', 'error');
+            }
+        }
+        
+        // Show add source modal
+        function showAddSourceModal() {
+            document.getElementById('modalTitle').textContent = 'Add New Lead Source';
+            document.getElementById('sourceTechnicalId').value = '';
+            document.getElementById('sourceTechnicalId').disabled = false;
+            document.getElementById('sourceDisplayName').value = '';
+            document.getElementById('sourceEditId').value = '';
+            document.getElementById('sourceModal').style.display = 'flex';
+        }
+        
+        // Edit lead source
+        function editLeadSource(id, technicalId, displayName, active) {
+            document.getElementById('modalTitle').textContent = 'Edit Lead Source';
+            document.getElementById('sourceTechnicalId').value = technicalId;
+            document.getElementById('sourceTechnicalId').disabled = true; // Can't change technical ID
+            document.getElementById('sourceDisplayName').value = displayName;
+            document.getElementById('sourceEditId').value = id;
+            document.getElementById('sourceModal').style.display = 'flex';
+        }
+        
+        // Close source modal
+        function closeSourceModal() {
+            document.getElementById('sourceModal').style.display = 'none';
+        }
+        
+        // Save lead source (create or update)
+        async function saveLeadSource() {
+            const technicalId = document.getElementById('sourceTechnicalId').value.trim();
+            const displayName = document.getElementById('sourceDisplayName').value.trim();
+            const editId = document.getElementById('sourceEditId').value;
+            
+            if (!technicalId || !displayName) {
+                showNotification('Both Technical ID and Display Name are required', 'error');
+                return;
+            }
+            
+            // Validate technical ID format
+            if (!/^[a-z0-9_]+$/i.test(technicalId)) {
+                showNotification('Technical ID must contain only letters, numbers, and underscores', 'error');
+                return;
+            }
+            
+            try {
+                let response;
+                if (editId) {
+                    // Update existing source
+                    response = await fetch(`/api/settings/lead-sources/${editId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ displayName, active: true })
+                    });
+                } else {
+                    // Create new source
+                    response = await fetch('/api/settings/lead-sources', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ technicalId, displayName })
+                    });
+                }
+                
+                if (response.ok) {
+                    showNotification(editId ? 'Lead source updated successfully' : 'Lead source created successfully', 'success');
+                    closeSourceModal();
+                    loadLeadSources();
+                } else {
+                    const error = await response.json();
+                    showNotification(error.error || 'Failed to save lead source', 'error');
+                }
+            } catch (error) {
+                console.error('Error saving lead source:', error);
+                showNotification('Error saving lead source', 'error');
+            }
+        }
+        
+        // Toggle source status (active/inactive)
+        async function toggleSourceStatus(id, newActiveState) {
+            try {
+                // First get the current source to get its display name
+                const getResponse = await fetch('/api/settings/lead-sources');
+                const data = await getResponse.json();
+                const source = data.sources.find(s => s.id === id);
+                
+                if (!source) {
+                    showNotification('Source not found', 'error');
+                    return;
+                }
+                
+                const response = await fetch(`/api/settings/lead-sources/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ displayName: source.display_name, active: newActiveState })
+                });
+                
+                if (response.ok) {
+                    showNotification(`Lead source ${newActiveState ? 'enabled' : 'disabled'} successfully`, 'success');
+                    loadLeadSources();
+                } else {
+                    showNotification('Failed to update lead source', 'error');
+                }
+            } catch (error) {
+                console.error('Error toggling source status:', error);
+                showNotification('Error updating lead source', 'error');
+            }
+        }
+        
+        // Delete lead source
+        async function deleteLeadSource(id, displayName) {
+            if (!confirm(`Are you sure you want to delete the lead source "${displayName}"?\n\nThis cannot be undone. Leads using this source will keep their current source value.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/settings/lead-sources/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showNotification('Lead source deleted successfully', 'success');
+                    loadLeadSources();
+                } else {
+                    const error = await response.json();
+                    showNotification(error.error || 'Failed to delete lead source', 'error');
+                }
+            } catch (error) {
+                console.error('Error deleting lead source:', error);
+                showNotification('Error deleting lead source', 'error');
             }
         }
 
@@ -1823,7 +2048,7 @@
                     <div class="customer-details">
                         📱 ${customer.phone}<br>
                         📧 ${customer.email || 'No email'}<br>
-                        📍 ${customer.source || 'Unknown source'}<br>
+                        📍 ${customer.source_display || customer.source || 'Unknown source'}<br>
                         📊 Progress: ${customer.progress || 0}%
                     </div>
                     <div class="customer-status status-${customer.status}">${customer.status}</div>
@@ -1918,7 +2143,7 @@
                         </div>
                         <div class="list-customer-source">
                             <div class="customer-status status-${customer.status}">${customer.status}</div>
-                            <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source || 'Unknown'}</div>
+                            <div style="margin-top: 5px; font-size: 0.8em;">📍 ${customer.source_display || customer.source || 'Unknown'}</div>
                         </div>
                         <div class="list-customer-actions">
                             <button class="list-ai-btn ${customer.ai_paused ? 'paused' : ''}" onclick="toggleAI(event, ${customer.id}, ${customer.ai_paused ? 'true' : 'false'})" title="${customer.ai_paused ? 'Resume AI' : 'Pause AI'}">
@@ -2399,7 +2624,7 @@
                 const name = (customer.name || '').replace(/"/g, '""');
                 const phone = customer.phone || '';
                 const email = (customer.email || '').replace(/"/g, '""');
-                const source = (customer.source || '').replace(/"/g, '""');
+                const source = (customer.source_display || customer.source || '').replace(/"/g, '""');
                 const status = customer.status || '';
                 const progress = customer.progress || 0;
                 const qualified = customer.qualified ? 'Yes' : 'No';
@@ -2575,7 +2800,7 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Source:</div>
-                                <div class="detail-value">${customer.source || 'Unknown'}</div>
+                                <div class="detail-value">${customer.source_display || customer.source || 'Unknown'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Progress:</div>
@@ -2635,5 +2860,41 @@
             showNotification('Opening print dialog...', 'success');
         }
     </script>
+    
+    <!-- Add/Edit Lead Source Modal -->
+    <div id="sourceModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;">
+        <div style="background: white; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2);">
+            <h3 style="margin: 0 0 20px 0; font-size: 1.5em; color: #2c3e50;">
+                <span id="modalTitle">Add New Lead Source</span>
+            </h3>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #2c3e50;">Technical ID</label>
+                <input type="text" id="sourceTechnicalId" class="form-input" placeholder="e.g., facebook_lead" style="width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 6px;">
+                <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                    Letters, numbers, and underscores only
+                </small>
+            </div>
+            
+            <div style="margin-bottom: 25px;">
+                <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #2c3e50;">Display Name</label>
+                <input type="text" id="sourceDisplayName" class="form-input" placeholder="e.g., Facebook Lead" style="width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 6px;">
+                <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                    Friendly name shown in the dashboard
+                </small>
+            </div>
+            
+            <input type="hidden" id="sourceEditId">
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeSourceModal()" class="btn btn-secondary" style="padding: 10px 20px;">
+                    Cancel
+                </button>
+                <button onclick="saveLeadSource()" class="btn btn-primary" style="padding: 10px 20px;">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

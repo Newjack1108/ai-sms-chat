@@ -124,7 +124,20 @@ initializeOpenAI();
 app.get('/api/leads', async (req, res) => {
     try {
         const leads = await LeadDatabase.getAllLeads();
-        res.json(leads);
+        
+        // Enrich leads with source display names
+        const leadSources = await LeadDatabase.getLeadSources();
+        const sourceMap = {};
+        leadSources.forEach(src => {
+            sourceMap[src.technical_id] = src.display_name;
+        });
+        
+        const enrichedLeads = leads.map(lead => ({
+            ...lead,
+            source_display: sourceMap[lead.source] || lead.source || 'Unknown Source'
+        }));
+        
+        res.json(enrichedLeads);
     } catch (error) {
         console.error('Error fetching leads:', error);
         res.status(500).json({
@@ -384,6 +397,120 @@ app.get('/api/settings/questions', (req, res) => {
         success: true,
         questions: CUSTOM_QUESTIONS
     });
+});
+
+// ============================================================================
+// LEAD SOURCE MANAGEMENT API ENDPOINTS
+// ============================================================================
+
+// Get all lead sources
+app.get('/api/settings/lead-sources', async (req, res) => {
+    try {
+        const sources = await LeadDatabase.getLeadSources();
+        res.json({
+            success: true,
+            sources: sources
+        });
+    } catch (error) {
+        console.error('Error fetching lead sources:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Create new lead source
+app.post('/api/settings/lead-sources', async (req, res) => {
+    try {
+        const { technicalId, displayName } = req.body;
+        
+        if (!technicalId || !displayName) {
+            return res.status(400).json({
+                success: false,
+                error: 'Technical ID and Display Name are required'
+            });
+        }
+        
+        // Validate technical ID format (alphanumeric and underscore only)
+        if (!/^[a-z0-9_]+$/i.test(technicalId)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Technical ID must contain only letters, numbers, and underscores'
+            });
+        }
+        
+        const newSource = await LeadDatabase.createLeadSource(technicalId, displayName);
+        res.json({
+            success: true,
+            source: newSource,
+            message: 'Lead source created successfully'
+        });
+    } catch (error) {
+        console.error('Error creating lead source:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Update lead source
+app.put('/api/settings/lead-sources/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { displayName, active } = req.body;
+        
+        if (!displayName) {
+            return res.status(400).json({
+                success: false,
+                error: 'Display Name is required'
+            });
+        }
+        
+        const updated = await LeadDatabase.updateLeadSource(
+            parseInt(id), 
+            displayName, 
+            active !== undefined ? active : true
+        );
+        
+        if (updated) {
+            res.json({
+                success: true,
+                message: 'Lead source updated successfully'
+            });
+        } else {
+            res.status(404).json({
+                success: false,
+                error: 'Lead source not found'
+            });
+        }
+    } catch (error) {
+        console.error('Error updating lead source:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Delete lead source
+app.delete('/api/settings/lead-sources/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        await LeadDatabase.deleteLeadSource(parseInt(id));
+        res.json({
+            success: true,
+            message: 'Lead source deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting lead source:', error);
+        res.status(400).json({
+            success: false,
+            error: error.message
+        });
+    }
 });
 
 // Test endpoint to manually check and trigger reminders

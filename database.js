@@ -127,6 +127,35 @@ function initializeDatabase() {
         )
     `);
     
+    // Create lead_sources table for managing lead source mappings
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS lead_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            technical_id TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Insert default lead sources if table is empty
+    const sourceCount = db.prepare('SELECT COUNT(*) as count FROM lead_sources').get();
+    if (sourceCount.count === 0) {
+        const insertSource = db.prepare(`
+            INSERT INTO lead_sources (technical_id, display_name, active)
+            VALUES (?, ?, 1)
+        `);
+        
+        insertSource.run('inbound_sms', 'SMS Inbound');
+        insertSource.run('manual', 'Manual Entry');
+        insertSource.run('gravity_form_cs', 'CS Website Lead');
+        insertSource.run('gravity_form_csgb', 'CSGB Website Lead');
+        insertSource.run('facebook_lead', 'Facebook Lead');
+        insertSource.run('make_webhook', 'Make.com Integration');
+        
+        console.log('✅ Initialized default lead sources');
+    }
+    
     // Create index for faster queries
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
@@ -731,6 +760,91 @@ class LeadDatabase {
         } catch (error) {
             console.error('❌ Error resetting reminder flags:', error);
             return false;
+        }
+    }
+    
+    // ============================================================================
+    // LEAD SOURCE MANAGEMENT FUNCTIONS
+    // ============================================================================
+    
+    // Get all lead sources
+    static getLeadSources() {
+        try {
+            if (!db) return [];
+            const stmt = db.prepare('SELECT * FROM lead_sources ORDER BY display_name ASC');
+            return stmt.all();
+        } catch (error) {
+            console.error('❌ Error getting lead sources:', error);
+            return [];
+        }
+    }
+    
+    // Get source by technical ID
+    static getSourceByTechnicalId(technicalId) {
+        try {
+            if (!db) return null;
+            const stmt = db.prepare('SELECT * FROM lead_sources WHERE technical_id = ? AND active = 1');
+            return stmt.get(technicalId);
+        } catch (error) {
+            console.error('❌ Error getting source by technical ID:', error);
+            return null;
+        }
+    }
+    
+    // Create new lead source
+    static createLeadSource(technicalId, displayName) {
+        try {
+            if (!db) return null;
+            const stmt = db.prepare(`
+                INSERT INTO lead_sources (technical_id, display_name, active)
+                VALUES (?, ?, 1)
+            `);
+            const result = stmt.run(technicalId, displayName);
+            console.log(`✅ Created lead source: ${technicalId} → ${displayName}`);
+            return { id: result.lastInsertRowid, technical_id: technicalId, display_name: displayName, active: 1 };
+        } catch (error) {
+            console.error('❌ Error creating lead source:', error);
+            throw error;
+        }
+    }
+    
+    // Update lead source
+    static updateLeadSource(id, displayName, active) {
+        try {
+            if (!db) return false;
+            const stmt = db.prepare(`
+                UPDATE lead_sources 
+                SET display_name = ?, active = ?
+                WHERE id = ?
+            `);
+            stmt.run(displayName, active ? 1 : 0, id);
+            console.log(`✅ Updated lead source ID: ${id}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating lead source:', error);
+            return false;
+        }
+    }
+    
+    // Delete lead source
+    static deleteLeadSource(id) {
+        try {
+            if (!db) return false;
+            // Check if any leads use this source
+            const checkStmt = db.prepare('SELECT COUNT(*) as count FROM leads WHERE source = (SELECT technical_id FROM lead_sources WHERE id = ?)');
+            const result = checkStmt.get(id);
+            
+            if (result.count > 0) {
+                throw new Error(`Cannot delete source: ${result.count} leads are using this source`);
+            }
+            
+            const stmt = db.prepare('DELETE FROM lead_sources WHERE id = ?');
+            stmt.run(id);
+            console.log(`🗑️ Deleted lead source ID: ${id}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error deleting lead source:', error);
+            throw error;
         }
     }
     

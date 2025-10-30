@@ -81,6 +81,32 @@ async function initializeDatabase() {
             )
         `);
         
+        // Create lead_sources table for managing lead source mappings
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS lead_sources (
+                id SERIAL PRIMARY KEY,
+                technical_id VARCHAR(50) UNIQUE NOT NULL,
+                display_name VARCHAR(100) NOT NULL,
+                active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Insert default lead sources if table is empty
+        const sourceCountResult = await pool.query('SELECT COUNT(*) as count FROM lead_sources');
+        if (parseInt(sourceCountResult.rows[0].count) === 0) {
+            await pool.query(`
+                INSERT INTO lead_sources (technical_id, display_name, active) VALUES
+                ('inbound_sms', 'SMS Inbound', TRUE),
+                ('manual', 'Manual Entry', TRUE),
+                ('gravity_form_cs', 'CS Website Lead', TRUE),
+                ('gravity_form_csgb', 'CSGB Website Lead', TRUE),
+                ('facebook_lead', 'Facebook Lead', TRUE),
+                ('make_webhook', 'Make.com Integration', TRUE)
+            `);
+            console.log('✅ Initialized default lead sources');
+        }
+        
         // Create indexes
         await pool.query(`
             CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
@@ -722,6 +748,112 @@ class LeadDatabase {
         } catch (error) {
             console.error('❌ Error resetting reminder flags:', error);
             return false;
+        }
+    }
+    
+    // ============================================================================
+    // LEAD SOURCE MANAGEMENT FUNCTIONS
+    // ============================================================================
+    
+    // Get all lead sources
+    static async getLeadSources() {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query('SELECT * FROM lead_sources ORDER BY display_name ASC');
+            return result.rows;
+        } catch (error) {
+            console.error('❌ Error getting lead sources:', error);
+            return [];
+        }
+    }
+    
+    // Get source by technical ID
+    static async getSourceByTechnicalId(technicalId) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query(
+                'SELECT * FROM lead_sources WHERE technical_id = $1 AND active = TRUE',
+                [technicalId]
+            );
+            return result.rows[0] || null;
+        } catch (error) {
+            console.error('❌ Error getting source by technical ID:', error);
+            return null;
+        }
+    }
+    
+    // Create new lead source
+    static async createLeadSource(technicalId, displayName) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query(
+                `INSERT INTO lead_sources (technical_id, display_name, active)
+                 VALUES ($1, $2, TRUE)
+                 RETURNING *`,
+                [technicalId, displayName]
+            );
+            console.log(`✅ Created lead source: ${technicalId} → ${displayName}`);
+            return result.rows[0];
+        } catch (error) {
+            console.error('❌ Error creating lead source:', error);
+            throw error;
+        }
+    }
+    
+    // Update lead source
+    static async updateLeadSource(id, displayName, active) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            await pool.query(
+                `UPDATE lead_sources 
+                 SET display_name = $1, active = $2
+                 WHERE id = $3`,
+                [displayName, active, id]
+            );
+            console.log(`✅ Updated lead source ID: ${id}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error updating lead source:', error);
+            return false;
+        }
+    }
+    
+    // Delete lead source
+    static async deleteLeadSource(id) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            // Check if any leads use this source
+            const checkResult = await pool.query(
+                `SELECT COUNT(*) as count FROM leads 
+                 WHERE source = (SELECT technical_id FROM lead_sources WHERE id = $1)`,
+                [id]
+            );
+            
+            if (parseInt(checkResult.rows[0].count) > 0) {
+                throw new Error(`Cannot delete source: ${checkResult.rows[0].count} leads are using this source`);
+            }
+            
+            await pool.query('DELETE FROM lead_sources WHERE id = $1', [id]);
+            console.log(`🗑️ Deleted lead source ID: ${id}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error deleting lead source:', error);
+            throw error;
         }
     }
 }
