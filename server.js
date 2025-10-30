@@ -1572,7 +1572,7 @@ async function processAIResponse(lead, userMessage) {
                         status: 'closed', 
                         ai_paused: 1 
                     });
-                    const closingMsg = "Thank you for letting us know. Feel free to reach out anytime in the future!";
+                    const closingMsg = "We appreciate you letting us know. Feel free to contact us anytime in the future! \nKeep and eye on our social media for future SPECIAL OFFERS!!";
                     await sendSMS(lead.phone, closingMsg);
                     await LeadDatabase.createMessage(lead.id, 'assistant', closingMsg);
                 } catch (error) {
@@ -1616,7 +1616,7 @@ async function processAIResponse(lead, userMessage) {
             
             if (isThankYou) {
                 console.log(`👋 Simple thank you detected - sending "You are very welcome" response`);
-                const simpleResponse = "You are very welcome";
+                const simpleResponse = "You are very welcome 😊";
                 await sendSMS(lead.phone, simpleResponse);
                 await LeadDatabase.createMessage(lead.id, 'assistant', simpleResponse);
                 console.log(`✅ Simple "You are very welcome" sent`);
@@ -1652,7 +1652,7 @@ async function processAIResponse(lead, userMessage) {
             console.log(`📤 Sending post-qualification auto-response (FIRST TIME ONLY)`);
             
             // Send auto-response ONCE
-            const autoResponse = "Thanks for your message! Our team has all your details and will be in touch within 24 hours as discussed. If you have any urgent questions, feel free to give us a call during business hours (Mon-Fri 8am-5pm, Sat 10am-3pm).";
+            const autoResponse = "Thanks for your message! We will be in touch but if you have any further questions, feel free to give us a call during business hours (Mon-Fri 8am-5pm, Sat 10am-3pm). Tel:01606 272788";
             
             await sendSMS(lead.phone, autoResponse);
             
@@ -1757,8 +1757,8 @@ async function processAIResponse(lead, userMessage) {
             console.log(`🎉 All questions answered - qualifying lead`);
             
             // All questions answered - qualify lead (only send this message once)
-            const qualificationMessage = `Thank you! I have all the information I need to help you. Based on your answers, someone will contact you within 24 hours to discuss your requirements. If you have any questions in the meantime, feel free to ask! 🐴✨
-Our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm.`;
+            const qualificationMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
 
             await sendSMS(lead.phone, qualificationMessage);
             
@@ -2418,7 +2418,7 @@ async function send24HourReminder(lead) {
 // Send 48 hour final reminder
 async function send48HourReminder(lead) {
     try {
-        const message = `Hi ${lead.name}, this is my final follow-up. Are you still interested in getting a quote for your stable? Reply YES to continue or NO if you're no longer interested.`;
+        const message = `Hi ${lead.name}, Sorry to bother you again, are you still interested in getting a quote for your building? Reply YES to continue or NO to end this chat.`;
         
         await sendSMS(lead.phone, message);
         await LeadDatabase.createMessage(lead.id, 'assistant', message);
