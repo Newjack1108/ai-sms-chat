@@ -527,9 +527,17 @@ app.get('/api/debug/database-info', async (req, res) => {
         const leads = await LeadDatabase.getAllLeads();
         const databaseType = isPostgreSQL ? 'PostgreSQL' : 'SQLite';
         
+        // Get total message count
+        let totalMessages = 0;
+        for (const lead of leads) {
+            const messages = await LeadDatabase.getMessagesByLeadId(lead.id);
+            totalMessages += messages.length;
+        }
+        
         res.json({
             databaseType,
             totalLeads: leads.length,
+            totalMessages,
             leads: leads.map(l => ({
                 id: l.id,
                 phone: l.phone,
@@ -542,6 +550,29 @@ app.get('/api/debug/database-info', async (req, res) => {
         });
     } catch (error) {
         console.error('Error getting database info:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 🧪 DEBUG ENDPOINT: Direct PostgreSQL message count
+app.get('/api/debug/message-count', async (req, res) => {
+    if (!isPostgreSQL) {
+        return res.json({ error: 'Not using PostgreSQL' });
+    }
+    
+    try {
+        const { pool } = require('./database-pg');
+        const result = await pool.query('SELECT COUNT(*) as count FROM messages');
+        const leadResult = await pool.query('SELECT COUNT(*) as count FROM leads');
+        
+        res.json({
+            database: 'PostgreSQL',
+            totalMessages: parseInt(result.rows[0].count),
+            totalLeads: parseInt(leadResult.rows[0].count),
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error querying PostgreSQL:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
