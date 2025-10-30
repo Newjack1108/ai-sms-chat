@@ -410,15 +410,23 @@ class LeadDatabase {
     static deleteLead(id) {
         try {
             // Delete messages first (cascade should handle this, but being explicit)
-            statements.deleteMessagesByLeadId.run(id);
+            const messagesResult = statements.deleteMessagesByLeadId.run(id);
+            console.log(`🗑️ SQLite: Deleted ${messagesResult.changes} messages for lead ID: ${id}`);
             
             // Delete lead
-            statements.deleteLead.run(id);
+            const leadResult = statements.deleteLead.run(id);
+            console.log(`🗑️ SQLite: Deleted ${leadResult.changes} lead(s) with ID: ${id}`);
             
-            console.log(`🗑️ Permanently deleted lead ID: ${id}`);
-            return true;
+            if (leadResult.changes === 0) {
+                console.warn(`⚠️ No lead found with ID: ${id} (may already be deleted)`);
+            }
+            
+            return {
+                messagesDeleted: messagesResult.changes || 0,
+                leadDeleted: leadResult.changes > 0
+            };
         } catch (error) {
-            console.error('❌ Error deleting lead:', error);
+            console.error('❌ Error deleting lead from SQLite:', error);
             throw error;
         }
     }

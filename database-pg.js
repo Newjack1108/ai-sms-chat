@@ -347,16 +347,25 @@ class LeadDatabase {
         }
         
         try {
-            // Delete messages first (should cascade, but being explicit)
-            await pool.query('DELETE FROM messages WHERE lead_id = $1', [id]);
+            // Delete messages first - CHECK RESULT
+            const messagesResult = await pool.query('DELETE FROM messages WHERE lead_id = $1', [id]);
+            console.log(`🗑️ PostgreSQL: Deleted ${messagesResult.rowCount} messages for lead ID: ${id}`);
             
-            // Delete lead
-            await pool.query('DELETE FROM leads WHERE id = $1', [id]);
+            // Delete lead - CHECK RESULT
+            const leadResult = await pool.query('DELETE FROM leads WHERE id = $1', [id]);
+            console.log(`🗑️ PostgreSQL: Deleted ${leadResult.rowCount} lead(s) with ID: ${id}`);
             
-            console.log(`🗑️ Permanently deleted lead ID: ${id}`);
-            return true;
+            if (leadResult.rowCount === 0) {
+                console.warn(`⚠️ No lead found with ID: ${id} (may already be deleted)`);
+            }
+            
+            return {
+                messagesDeleted: messagesResult.rowCount || 0,
+                leadDeleted: leadResult.rowCount > 0
+            };
         } catch (error) {
-            console.error('❌ Error deleting lead:', error);
+            console.error('❌ Error deleting lead from PostgreSQL:', error);
+            console.error('❌ Error details:', error.message, error.code);
             throw error;
         }
     }
