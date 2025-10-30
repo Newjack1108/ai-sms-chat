@@ -1430,21 +1430,8 @@ async function processAIResponse(lead, userMessage) {
             console.error(`⚠️ Failed to update last message time (non-critical):`, error.message);
         }
         
-        // Reset reminder flags if customer responds (they're engaged again)
-        if (lead.reminder_1hr_sent || lead.reminder_24hr_sent || lead.reminder_48hr_sent) {
-            console.log(`🔄 Customer responded - resetting reminder flags`);
-            try {
-                await LeadDatabase.resetReminderFlags(lead.id);
-                // Update the lead object to reflect the reset
-                lead.reminder_1hr_sent = 0;
-                lead.reminder_24hr_sent = 0;
-                lead.reminder_48hr_sent = 0;
-            } catch (error) {
-                console.error(`⚠️ Failed to reset reminder flags (non-critical):`, error.message);
-            }
-        }
-        
-        // Handle YES/NO responses to 48hr reminder (only for very short messages)
+        // Handle YES/NO responses to 48hr reminder FIRST (before resetting flags!)
+        // Only check for very short messages to avoid false positives
         if (lead.reminder_48hr_sent && userMessage.trim().length <= 10) {
             const response = userMessage.toLowerCase().trim();
             if (response === 'yes' || response === 'yeah' || response === 'yep' || response === 'y') {
@@ -1479,6 +1466,21 @@ async function processAIResponse(lead, userMessage) {
                     console.error(`⚠️ Error closing lead after NO response:`, error.message);
                 }
                 return; // Stop processing
+            }
+        }
+        
+        // Reset reminder flags if customer responds (they're engaged again)
+        // Only reset AFTER checking YES/NO to 48hr reminder above
+        if (lead.reminder_1hr_sent || lead.reminder_24hr_sent || lead.reminder_48hr_sent) {
+            console.log(`🔄 Customer responded - resetting reminder flags`);
+            try {
+                await LeadDatabase.resetReminderFlags(lead.id);
+                // Update the lead object to reflect the reset
+                lead.reminder_1hr_sent = 0;
+                lead.reminder_24hr_sent = 0;
+                lead.reminder_48hr_sent = 0;
+            } catch (error) {
+                console.error(`⚠️ Failed to reset reminder flags (non-critical):`, error.message);
             }
         }
         
