@@ -2329,8 +2329,8 @@ async function checkAndSendReminders() {
         console.log(`🔔 Checking ${leads.length} leads for reminders... ${REMINDER_TEST_MODE ? '⚡ TEST MODE' : ''}`);
         
         for (const lead of leads) {
-            // Skip if qualified or paused
-            if (lead.qualified || lead.ai_paused) continue;
+            // Skip if qualified, paused, or closed
+            if (lead.qualified || lead.ai_paused || lead.status === 'closed') continue;
             
             // Skip if no progress (0%) AND no initial message sent
             if (lead.progress === 0 && !lead.last_customer_message_time) continue;
