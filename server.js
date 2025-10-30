@@ -1449,7 +1449,21 @@ async function processAIResponse(lead, userMessage) {
             const response = userMessage.toLowerCase().trim();
             if (response === 'yes' || response === 'yeah' || response === 'yep' || response === 'y') {
                 console.log(`✅ Lead confirmed interest after 48hr reminder - continuing qualification`);
-                // Continue with normal processing (flags already reset above)
+                
+                // Send acknowledgment + next question
+                const nextQuestion = findFirstUnansweredQuestion(lead);
+                const nextQuestionText = typeof nextQuestion === 'object' ? nextQuestion.question : nextQuestion;
+                const reengageMsg = `Great! Thanks for confirming. Let me help you get that quote sorted. ${nextQuestionText}`;
+                
+                try {
+                    await sendSMS(lead.phone, reengageMsg);
+                    await LeadDatabase.createMessage(lead.id, 'assistant', reengageMsg);
+                    console.log(`📤 Sent re-engagement message to ${lead.phone}`);
+                } catch (error) {
+                    console.error(`⚠️ Error sending re-engagement message:`, error.message);
+                }
+                return; // Stop further processing (we already sent the response)
+                
             } else if (response === 'no' || response === 'nope' || response === 'not interested' || response === 'n') {
                 console.log(`❌ Lead declined after 48hr reminder - closing conversation`);
                 try {
