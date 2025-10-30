@@ -1691,6 +1691,14 @@
                     if (serverSettings.assistantName) {
                         document.getElementById('assistant-name').value = serverSettings.assistantName;
                     }
+                    
+                    // Load CRM webhook from server
+                    if (serverSettings.crmWebhook !== undefined) {
+                        document.getElementById('crm-webhook').value = serverSettings.crmWebhook;
+                    }
+                    if (serverSettings.crmKey !== undefined) {
+                        document.getElementById('crm-key').value = serverSettings.crmKey;
+                    }
                 }
             } catch (error) {
                 console.log('⚠️ Could not load settings from server, using localStorage');
@@ -1774,7 +1782,9 @@
                     },
                     body: JSON.stringify({
                         customQuestions: newSettings.customQuestions,
-                        assistantName: document.getElementById('assistant-name').value || 'William'
+                        assistantName: document.getElementById('assistant-name').value || 'William',
+                        crmWebhook: newSettings.crmWebhook,
+                        crmKey: newSettings.crmKey
                     })
                 });
 

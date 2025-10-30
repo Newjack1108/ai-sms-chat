@@ -113,6 +113,98 @@ async function loadSettingsFromDatabase() {
     }
 }
 
+// ============================================================================
+// CRM WEBHOOK FUNCTIONS
+// ============================================================================
+
+// Get CRM webhook URL from database
+async function getCRMWebhookURL() {
+    try {
+        const settingValue = await LeadDatabase.getSetting('crmWebhook');
+        if (!settingValue) {
+            return null;
+        }
+        
+        // Parse the JSON value
+        const webhookData = JSON.parse(settingValue);
+        return webhookData.webhookUrl || null;
+    } catch (error) {
+        console.error('❌ Error getting CRM webhook URL:', error);
+        return null;
+    }
+}
+
+// Send qualified lead to CRM webhook
+async function sendToCRMWebhook(lead) {
+    try {
+        // Get webhook URL from database
+        const webhookUrl = await getCRMWebhookURL();
+        
+        if (!webhookUrl || webhookUrl.trim() === '') {
+            console.log('⚠️ No CRM webhook configured - skipping webhook send');
+            return;
+        }
+        
+        console.log('📤 Sending qualified lead to CRM webhook...');
+        
+        // Get source display name
+        let sourceDisplay = lead.source || 'Unknown';
+        try {
+            const sourceMapping = await LeadDatabase.getSourceByTechnicalId(lead.source);
+            if (sourceMapping) {
+                sourceDisplay = sourceMapping.display_name;
+            }
+        } catch (error) {
+            console.log('⚠️ Could not get source mapping:', error.message);
+        }
+        
+        // Prepare webhook data
+        const webhookData = {
+            id: lead.id,
+            name: lead.name,
+            phone: lead.phone,
+            email: lead.email,
+            source: lead.source,
+            source_display: sourceDisplay,
+            status: 'qualified',
+            progress: lead.progress || 0,
+            qualified: true,
+            qualifiedDate: lead.qualifiedDate || new Date().toISOString(),
+            answers: lead.answers || {},
+            customQuestions: CUSTOM_QUESTIONS,
+            // Include returning customer info
+            returning_customer: lead.returning_customer || false,
+            times_qualified: lead.times_qualified || 1
+        };
+        
+        console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
+        
+        // Send webhook
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(webhookData)
+        });
+        
+        if (response.ok) {
+            console.log('✅ Successfully sent qualified lead to CRM webhook');
+            console.log(`   Lead: ${lead.name} (${lead.phone})`);
+            console.log(`   Webhook URL: ${webhookUrl}`);
+        } else {
+            console.error('❌ CRM webhook failed:', response.status, response.statusText);
+            const errorText = await response.text().catch(() => 'No error details');
+            console.error('   Error details:', errorText);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error sending to CRM webhook:', error.message);
+        console.error('   Stack:', error.stack);
+        // Don't throw - webhook failure shouldn't break the app
+    }
+}
+
 // Initialize on startup
 initializeOpenAI();
 
@@ -252,10 +344,20 @@ Thank you for your time! 🐴✨`;
             timestamp: new Date().toISOString()
         };
         messages.push(qualMessage);
+        
+        // Get updated lead for webhook
+        const updatedLead = await LeadDatabase.getLeadById(parseInt(leadId));
+        
+        // 🔥 SEND TO CRM WEBHOOK
+        try {
+            await sendToCRMWebhook(updatedLead);
+        } catch (error) {
+            console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+        }
 
         res.json({
             success: true,
-            message: 'Lead qualified successfully'
+            message: 'Lead qualified successfully and sent to CRM'
         });
     } catch (error) {
         console.error('Error qualifying lead:', error);
@@ -289,10 +391,20 @@ app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
         });
         
         console.log(`🔇 Silent qualification: ${lead.name} (${lead.phone}) - no message sent`);
+        
+        // Get updated lead for webhook
+        const updatedLead = await LeadDatabase.getLeadById(parseInt(leadId));
+        
+        // 🔥 SEND TO CRM WEBHOOK (even if not all questions answered)
+        try {
+            await sendToCRMWebhook(updatedLead);
+        } catch (error) {
+            console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+        }
 
         res.json({
             success: true,
-            message: 'Lead silently qualified successfully'
+            message: 'Lead silently qualified successfully and sent to CRM'
         });
     } catch (error) {
         console.error('Error silently qualifying lead:', error);
@@ -304,14 +416,15 @@ app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
 });
 
 
-// Update all settings (custom questions, assistant name, etc.)
-app.post('/api/settings', (req, res) => {
+// Update all settings (custom questions, assistant name, webhook, etc.)
+app.post('/api/settings', async (req, res) => {
     try {
-        const { customQuestions, assistantName } = req.body;
+        const { customQuestions, assistantName, crmWebhook, crmKey } = req.body;
         
         console.log('📝 Updating settings...');
         console.log('   Custom Questions:', customQuestions);
         console.log('   Assistant Name:', assistantName);
+        console.log('   CRM Webhook:', crmWebhook ? '***configured***' : 'not set');
         
         // Update custom questions if provided
         if (customQuestions && Array.isArray(customQuestions)) {
@@ -353,6 +466,16 @@ app.post('/api/settings', (req, res) => {
             console.log('✅ Assistant name updated to:', ASSISTANT_NAME);
         }
         
+        // Update CRM webhook if provided
+        if (crmWebhook !== undefined) {
+            const webhookData = {
+                webhookUrl: crmWebhook || '',
+                apiKey: crmKey || ''
+            };
+            await LeadDatabase.saveSetting('crmWebhook', JSON.stringify(webhookData));
+            console.log('✅ CRM webhook updated:', crmWebhook ? 'configured' : 'cleared');
+        }
+        
         res.json({
             success: true,
             message: 'Settings updated successfully (saved to database)',
@@ -369,12 +492,28 @@ app.post('/api/settings', (req, res) => {
 });
 
 // Get current settings
-app.get('/api/settings', (req, res) => {
+app.get('/api/settings', async (req, res) => {
     try {
+        // Get CRM webhook settings from database
+        let crmWebhookUrl = '';
+        let crmApiKey = '';
+        try {
+            const webhookSetting = await LeadDatabase.getSetting('crmWebhook');
+            if (webhookSetting) {
+                const webhookData = JSON.parse(webhookSetting);
+                crmWebhookUrl = webhookData.webhookUrl || '';
+                crmApiKey = webhookData.apiKey || '';
+            }
+        } catch (error) {
+            console.log('⚠️ Could not load CRM webhook settings:', error.message);
+        }
+        
         res.json({
             success: true,
             customQuestions: CUSTOM_QUESTIONS,
-            assistantName: ASSISTANT_NAME
+            assistantName: ASSISTANT_NAME,
+            crmWebhook: crmWebhookUrl,
+            crmKey: crmApiKey
         });
     } catch (error) {
         console.error('Error fetching settings:', error);
@@ -1946,6 +2085,14 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             if (lead.returning_customer) {
                 console.log(`   🔄 Returning customer - qualified ${lead.times_qualified} time(s) total`);
             }
+            
+            // 🔥 SEND TO CRM WEBHOOK
+            try {
+                await sendToCRMWebhook(lead);
+            } catch (error) {
+                console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+            }
+            
             return;
         }
         
