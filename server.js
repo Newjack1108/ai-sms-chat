@@ -712,6 +712,15 @@ app.post('/api/leads', async (req, res) => {
                 
                 console.log(`✅ Returning customer reset for NEW manual inquiry`);
                 
+                // Reset reminder tracking for fresh start
+                try {
+                    await LeadDatabase.updateLastCustomerMessageTime(existingLead.id, new Date().toISOString());
+                    await LeadDatabase.resetReminderFlags(existingLead.id);
+                    console.log(`🔄 Reset reminder tracking for returning customer`);
+                } catch (error) {
+                    console.error(`⚠️ Failed to reset reminder tracking (non-critical):`, error.message);
+                }
+                
                 // Get fresh lead data
                 existingLead = await LeadDatabase.getLeadById(existingLead.id);
                 
@@ -951,6 +960,15 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 console.log(`   🔄 Returning customer: YES`);
                 console.log(`   🔢 Times qualified: ${(lead.times_qualified || 0) + 1}`);
                 console.log(`   📅 Last qualified: ${previousQualifiedDate}`);
+                
+                // Reset reminder tracking for fresh start
+                try {
+                    await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+                    await LeadDatabase.resetReminderFlags(lead.id);
+                    console.log(`🔄 Reset reminder tracking for returning customer`);
+                } catch (error) {
+                    console.error(`⚠️ Failed to reset reminder tracking (non-critical):`, error.message);
+                }
                 
                 // Get fresh lead data
                 lead = await LeadDatabase.getLeadById(lead.id);
