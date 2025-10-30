@@ -573,7 +573,7 @@ class LeadDatabase {
             const result = await pool.query(`
                 SELECT * FROM messages 
                 WHERE lead_id = $1 
-                ORDER BY created_at ASC
+                ORDER BY timestamp ASC
             `, [leadId]);
             return result.rows;
         } catch (error) {
