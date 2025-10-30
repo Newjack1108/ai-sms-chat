@@ -486,43 +486,69 @@ app.post('/api/trigger-reminders', async (req, res) => {
 // Delete all leads (for testing - BE CAREFUL!)
 app.post('/api/delete-all-leads', async (req, res) => {
     try {
-        // Get ALL leads (including archived) for complete deletion
-        let leads;
         if (isPostgreSQL) {
+            // Use nuclear delete for PostgreSQL (works reliably)
             const { pool } = require('./database-pg');
-            const result = await pool.query('SELECT * FROM leads');
-            leads = result.rows;
-            console.log(`📊 Found ${leads.length} total leads in PostgreSQL (including archived)`);
-        } else {
-            leads = await LeadDatabase.getAllLeads();
-            console.log(`📊 Found ${leads.length} leads in SQLite`);
-        }
-        
-        let deletedCount = 0;
-        let messagesDeleted = 0;
-        
-        for (const lead of leads) {
+            
+            console.log('🗑️ Using nuclear delete for PostgreSQL...');
+            
+            const client = await pool.connect();
             try {
-                // Count messages before deleting
-                const messages = await LeadDatabase.getMessagesByLeadId(lead.id);
-                messagesDeleted += messages.length;
+                await client.query('BEGIN');
+                console.log('🗑️ Transaction started');
                 
-                const result = await LeadDatabase.deleteLead(lead.id);
-                deletedCount++;
-                console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id}) - ${result.messagesDeleted || messages.length} messages deleted`);
+                const messagesResult = await client.query('DELETE FROM messages');
+                console.log(`🗑️ Deleted ${messagesResult.rowCount} messages`);
+                
+                const leadsResult = await client.query('DELETE FROM leads');
+                console.log(`🗑️ Deleted ${leadsResult.rowCount} leads`);
+                
+                await client.query('COMMIT');
+                console.log('✅ Transaction committed');
+                
+                res.json({
+                    success: true,
+                    message: `Deleted ${leadsResult.rowCount} leads and ${messagesResult.rowCount} messages`,
+                    deletedCount: leadsResult.rowCount,
+                    messagesDeleted: messagesResult.rowCount
+                });
             } catch (error) {
-                console.error(`❌ Failed to delete lead ${lead.id}:`, error.message);
+                await client.query('ROLLBACK');
+                console.error('❌ Transaction rolled back:', error);
+                throw error;
+            } finally {
+                client.release();
             }
+        } else {
+            // SQLite - use regular method
+            const leads = await LeadDatabase.getAllLeads();
+            console.log(`📊 Found ${leads.length} leads in SQLite`);
+            
+            let deletedCount = 0;
+            let messagesDeleted = 0;
+            
+            for (const lead of leads) {
+                try {
+                    const messages = await LeadDatabase.getMessagesByLeadId(lead.id);
+                    messagesDeleted += messages.length;
+                    
+                    const result = await LeadDatabase.deleteLead(lead.id);
+                    deletedCount++;
+                    console.log(`🗑️ Deleted lead: ${lead.name} (ID: ${lead.id})`);
+                } catch (error) {
+                    console.error(`❌ Failed to delete lead ${lead.id}:`, error.message);
+                }
+            }
+            
+            console.log(`✅ Cleanup complete: ${deletedCount} leads and ${messagesDeleted} messages deleted`);
+            
+            res.json({
+                success: true,
+                message: `Deleted ${deletedCount} leads and ${messagesDeleted} messages`,
+                deletedCount: deletedCount,
+                messagesDeleted: messagesDeleted
+            });
         }
-        
-        console.log(`✅ Cleanup complete: ${deletedCount} leads and ${messagesDeleted} messages deleted`);
-        
-        res.json({
-            success: true,
-            message: `Deleted ${deletedCount} leads and ${messagesDeleted} messages`,
-            deletedCount: deletedCount,
-            messagesDeleted: messagesDeleted
-        });
     } catch (error) {
         console.error('Error deleting all leads:', error);
         res.status(500).json({
