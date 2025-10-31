@@ -20,9 +20,17 @@ const PORT = process.env.PORT || 3000;
 // Load environment variables
 require('dotenv').config();
 
+// Trust proxy for Railway deployments (important for sessions)
+app.set('trust proxy', 1);
+
 // Authentication credentials (from environment variables)
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+// Use defaults if not set or if empty string
+const ADMIN_USERNAME = (process.env.ADMIN_USERNAME && process.env.ADMIN_USERNAME.trim()) || 'admin';
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.trim()) || 'admin123';
+
+console.log(`🔐 Authentication configured`);
+console.log(`   Username: "${ADMIN_USERNAME}"`);
+console.log(`   Password: "${ADMIN_PASSWORD ? '***' : 'empty'}"`);
 
 // Middleware
 app.use(cors());
@@ -35,9 +43,10 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+        secure: false, // Set to false for Railway/proxy compatibility (proxy handles HTTPS)
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: 'lax' // Helps with cross-site requests
     }
 }));
 
@@ -298,10 +307,19 @@ initializeOpenAI();
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     
+    console.log(`🔐 Login attempt received`);
+    console.log(`   Username received: "${username}"`);
+    console.log(`   Password received: "${password ? '***' : 'empty'}"`);
+    console.log(`   Expected username: "${ADMIN_USERNAME}"`);
+    console.log(`   Expected password: "${ADMIN_PASSWORD ? '***' : 'empty'}"`);
+    console.log(`   Username match: ${username === ADMIN_USERNAME}`);
+    console.log(`   Password match: ${password === ADMIN_PASSWORD}`);
+    
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
         req.session.authenticated = true;
         req.session.username = username;
         console.log(`✅ User logged in: ${username}`);
+        console.log(`   Session authenticated: ${req.session.authenticated}`);
         res.json({
             success: true,
             message: 'Login successful'
