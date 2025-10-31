@@ -1856,7 +1856,7 @@ async function processAIResponse(lead, userMessage) {
                         status: 'closed', 
                         ai_paused: 1 
                     });
-                    const closingMsg = "We appreciate you letting us know. Feel free to contact us anytime in the future! \nKeep and eye on our social media for future SPECIAL OFFERS!!";
+                    const closingMsg = "We appreciate you letting us know. Feel free to contact us anytime in the future! \nKeep and eye on our social media for future SPECIAL OFFERS!! Or visit our website: https://www.csgbgroup.co.uk/cheshire-stables";
                     await sendSMS(lead.phone, closingMsg);
                     await LeadDatabase.createMessage(lead.id, 'assistant', closingMsg);
                 } catch (error) {
