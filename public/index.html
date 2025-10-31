@@ -1036,11 +1036,18 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1>
-                <span class="sms-icon">💬</span>
-                AI Lead Qualification System
-            </h1>
-            <p>Professional Lead Management with AI-Powered SMS Conversations</p>
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h1>
+                        <span class="sms-icon">💬</span>
+                        AI Lead Qualification System
+                    </h1>
+                    <p>Professional Lead Management with AI-Powered SMS Conversations</p>
+                </div>
+                <button id="logout-btn" style="padding: 10px 20px; background: #e53e3e; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.3s;">
+                    Logout
+                </button>
+            </div>
         </div>
 
         <!-- Tabs -->
@@ -1423,8 +1430,62 @@
         let messageCheckInterval = null;
         let customerView = 'card'; // 'card' or 'list'
 
+        // Authentication functions
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/check');
+                const data = await response.json();
+                
+                if (!data.authenticated) {
+                    window.location.href = '/login';
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                window.location.href = '/login';
+                return false;
+            }
+        }
+        
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('Logout failed:', error);
+                // Redirect anyway
+                window.location.href = '/login';
+            }
+        }
+        
+        // Global error handler for 401 responses
+        const originalFetch = window.fetch;
+        window.fetch = async function(...args) {
+            const response = await originalFetch(...args);
+            
+            if (response.status === 401) {
+                const data = await response.json().catch(() => ({}));
+                if (data.requiresLogin) {
+                    window.location.href = '/login';
+                    return response;
+                }
+            }
+            
+            return response;
+        };
+
         // Initialize the application
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
+            // Check authentication first
+            const isAuthenticated = await checkAuth();
+            if (!isAuthenticated) {
+                return; // Will redirect to login
+            }
+            
+            // Setup logout button
+            document.getElementById('logout-btn').addEventListener('click', logout);
+            
             initializeTabs();
             loadSettings();
             loadLeads();

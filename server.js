@@ -3,6 +3,7 @@
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const session = require('express-session');
 const twilio = require('twilio');
 const OpenAI = require('openai');
 // Import database modules conditionally
@@ -19,10 +20,83 @@ const PORT = process.env.PORT || 3000;
 // Load environment variables
 require('dotenv').config();
 
+// Authentication credentials (from environment variables)
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Session middleware
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+    if (req.session && req.session.authenticated) {
+        return next();
+    }
+    
+    // Allow public access to login page, login endpoints, and webhooks
+    if (req.path === '/login' || 
+        req.path === '/api/login' || 
+        req.path === '/api/auth/check' ||
+        req.path === '/api/logout' ||
+        req.path.startsWith('/webhook/')) {
+        return next();
+    }
+    
+    // For API routes, return 401
+    if (req.path.startsWith('/api/')) {
+        return res.status(401).json({
+            success: false,
+            error: 'Authentication required',
+            requiresLogin: true
+        });
+    }
+    
+    // For HTML pages, redirect to login
+    return res.redirect('/login');
+}
+
+// Route handler for /login to serve login.html (before static files)
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Serve static assets (CSS, JS, images) and public routes without auth
+app.use((req, res, next) => {
+    // Allow login page, webhooks, and static assets
+    if (req.path === '/login' || 
+        req.path.startsWith('/webhook/') ||
+        req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg)$/)) {
+        return next();
+    }
+    
+    // Check authentication for index.html and API routes
+    if (req.path === '/' || req.path === '/index.html') {
+        return requireAuth(req, res, next);
+    }
+    
+    if (req.path.startsWith('/api/')) {
+        return requireAuth(req, res, next);
+    }
+    
+    // Allow other static files through
+    next();
+});
+
+// Serve static files
 app.use(express.static('public'));
 
 // Database is now persistent - no more in-memory storage
@@ -215,6 +289,57 @@ initializeOpenAI();
 // ========================================
 // API ENDPOINTS
 // ========================================
+
+// ============================================================================
+// AUTHENTICATION ENDPOINTS
+// ============================================================================
+
+// Login endpoint
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        req.session.authenticated = true;
+        req.session.username = username;
+        console.log(`✅ User logged in: ${username}`);
+        res.json({
+            success: true,
+            message: 'Login successful'
+        });
+    } else {
+        console.log(`❌ Failed login attempt for username: ${username}`);
+        res.status(401).json({
+            success: false,
+            error: 'Invalid username or password'
+        });
+    }
+});
+
+// Logout endpoint
+app.post('/api/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('Error destroying session:', err);
+            return res.status(500).json({
+                success: false,
+                error: 'Logout failed'
+            });
+        }
+        console.log('✅ User logged out');
+        res.json({
+            success: true,
+            message: 'Logged out successfully'
+        });
+    });
+});
+
+// Check authentication status
+app.get('/api/auth/check', (req, res) => {
+    res.json({
+        authenticated: req.session && req.session.authenticated === true,
+        username: req.session && req.session.username ? req.session.username : null
+    });
+});
 
 // Get all leads
 app.get('/api/leads', async (req, res) => {
