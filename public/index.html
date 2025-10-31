@@ -734,6 +734,11 @@
             border-top: 2px solid #e9ecef;
             background: #f8f9fa;
             border-radius: 8px;
+            color: #000000 !important;
+        }
+        
+        .list-item-answers * {
+            color: #000000 !important;
         }
         
         .customer-list-item.expanded .list-item-answers {
@@ -753,6 +758,12 @@
 
         .customer-list-item.selected * {
             color: white !important;
+        }
+        
+        /* Ensure answers section text is visible - more specific than general selected rule */
+        .customer-list-item.selected .list-item-answers,
+        .customer-list-item.selected .list-item-answers * {
+            color: #ffffff !important;
         }
 
         .list-customer-name {
