@@ -1932,6 +1932,19 @@ async function sendAIIntroduction(lead, isReturning = false) {
     try {
         console.log(`👋 Sending AI introduction to ${lead.name}...`);
         
+        // Get lead source display name
+        let sourceDisplay = '';
+        if (lead.source) {
+            try {
+                const sourceMapping = await LeadDatabase.getSourceByTechnicalId(lead.source);
+                if (sourceMapping && sourceMapping.display_name) {
+                    sourceDisplay = ` via ${sourceMapping.display_name}`;
+                }
+            } catch (error) {
+                console.log(`⚠️ Could not get source mapping for ${lead.source}:`, error.message);
+            }
+        }
+        
         // Check if lead already has some answers (e.g., from initialMessage)
         const answeredCount = Object.keys(lead.answers || {}).length;
         const hasAnswers = answeredCount > 0;
@@ -1952,7 +1965,7 @@ If you have any questions in the meantime our office hours are Monday to Friday,
         } else if (hasAnswers) {
             // Lead already has some answers - welcome and ask next question
             if (isReturning) {
-                introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
+                introMessage = `Hi ${lead.name}! Great to hear from you again!${sourceDisplay} 👋
 
 I see you have a new inquiry. ${questionText}`;
             } else {
@@ -1966,7 +1979,7 @@ ${questionText}`;
             // No answers yet - standard introduction with first question
             if (isReturning) {
                 // Personalized message for returning customers
-                introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
+                introMessage = `Hi ${lead.name}! Great to hear from you again!${sourceDisplay} 👋
 
 I see you have a new inquiry. Let me ask you a few quick questions about your current needs so we can help you properly.
 
