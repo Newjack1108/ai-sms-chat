@@ -1930,25 +1930,53 @@ async function sendAIIntroduction(lead, isReturning = false) {
     try {
         console.log(`👋 Sending AI introduction to ${lead.name}...`);
         
-        const firstQuestion = CUSTOM_QUESTIONS[0];
-        const questionText = typeof firstQuestion === 'object' ? firstQuestion.question : firstQuestion;
+        // Check if lead already has some answers (e.g., from initialMessage)
+        const answeredCount = Object.keys(lead.answers || {}).length;
+        const hasAnswers = answeredCount > 0;
+        
+        // Find the first unanswered question (or Q1 if none answered yet)
+        const nextQuestion = findFirstUnansweredQuestion(lead);
+        const questionText = nextQuestion;
+        
+        console.log(`   📊 Lead has ${answeredCount} answers already`);
+        console.log(`   ❓ Next question to ask: ${questionText}`);
         
         let introMessage;
         
-        if (isReturning) {
-            // Personalized message for returning customers
-            introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
+        if (lead.progress === 100) {
+            // All questions answered - send qualification message instead
+            introMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+        } else if (hasAnswers) {
+            // Lead already has some answers - welcome and ask next question
+            if (isReturning) {
+                introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
 
-I see you have a new inquiry. Let me ask you a few quick questions about your current needs so we can help you properly.
-
-${questionText}`;
-        } else {
-            // Standard welcome for new customers
-            introMessage = `Hi ${lead.name}! 👋 
+I see you have a new inquiry. ${questionText}`;
+            } else {
+                introMessage = `Hi ${lead.name}! 👋 
 
 I'm ${ASSISTANT_NAME}, your AI assistant from CSGB Cheshire Stables. I'm here to help you find the perfect equine stable solution.
 
 ${questionText}`;
+            }
+        } else {
+            // No answers yet - standard introduction with first question
+            if (isReturning) {
+                // Personalized message for returning customers
+                introMessage = `Hi ${lead.name}! Great to hear from you again! 👋
+
+I see you have a new inquiry. Let me ask you a few quick questions about your current needs so we can help you properly.
+
+${questionText}`;
+            } else {
+                // Standard welcome for new customers
+                introMessage = `Hi ${lead.name}! 👋 
+
+I'm ${ASSISTANT_NAME}, your AI assistant from CSGB Cheshire Stables. I'm here to help you find the perfect equine stable solution.
+
+${questionText}`;
+            }
         }
         
         await sendSMS(lead.phone, introMessage);
@@ -1957,7 +1985,7 @@ ${questionText}`;
         await LeadDatabase.createMessage(lead.id, 'assistant', introMessage);
         
         console.log(`✅ AI introduction sent${isReturning ? ' (returning customer)' : ''}`);
-        console.log(`📝 First question: ${questionText}`);
+        console.log(`📝 Question asked: ${questionText}`);
     } catch (error) {
         console.error('❌ Error sending AI introduction:', error);
         throw error;
