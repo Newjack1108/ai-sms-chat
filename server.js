@@ -56,12 +56,13 @@ function requireAuth(req, res, next) {
         return next();
     }
     
-    // Allow public access to login page, login endpoints, and webhooks
+    // Allow public access to login page, login endpoints, webhooks, and lead creation (for external integrations)
     if (req.path === '/login' || 
         req.path === '/api/login' || 
         req.path === '/api/auth/check' ||
         req.path === '/api/logout' ||
-        req.path.startsWith('/webhook/')) {
+        req.path.startsWith('/webhook/') ||
+        (req.method === 'POST' && req.path === '/api/leads')) {
         return next();
     }
     
@@ -89,6 +90,11 @@ app.use((req, res, next) => {
     if (req.path === '/login' || 
         req.path.startsWith('/webhook/') ||
         req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg)$/)) {
+        return next();
+    }
+    
+    // Allow POST /api/leads (used by external webhooks/integrations like Make.com)
+    if (req.method === 'POST' && req.path === '/api/leads') {
         return next();
     }
     
