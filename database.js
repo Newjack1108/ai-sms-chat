@@ -643,6 +643,53 @@ class LeadDatabase {
             return null;
         }
     }
+    
+    // Save reminder intervals
+    static saveReminderIntervals(first, second, final, checkInterval) {
+        try {
+            const intervals = {
+                first: first,
+                second: second,
+                final: final,
+                checkInterval: checkInterval
+            };
+            const intervalsJSON = JSON.stringify(intervals);
+            statements.saveSetting.run('reminderIntervals', intervalsJSON);
+            console.log(`✅ Reminder intervals saved to database`);
+            return true;
+        } catch (error) {
+            console.error(`❌ Error saving reminder intervals:`, error);
+            throw error;
+        }
+    }
+    
+    // Get reminder intervals from database
+    static getReminderIntervals() {
+        try {
+            const result = statements.getSetting.get('reminderIntervals');
+            if (result && result.value) {
+                const intervals = JSON.parse(result.value);
+                console.log(`✅ Loaded reminder intervals from database`);
+                return intervals;
+            }
+            // Return defaults if not set
+            return {
+                first: 5,           // 5 minutes
+                second: 120,        // 120 minutes (2 hours)
+                final: 900,         // 900 minutes (15 hours)
+                checkInterval: 30   // 30 minutes
+            };
+        } catch (error) {
+            console.error(`❌ Error getting reminder intervals:`, error);
+            // Return defaults on error
+            return {
+                first: 5,
+                second: 120,
+                final: 900,
+                checkInterval: 30
+            };
+        }
+    }
 
     // Pause AI for a lead
     static pauseAI(leadId) {

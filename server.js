@@ -51,18 +51,12 @@ let CUSTOM_QUESTIONS = [
 // Assistant name (can be updated via API)
 let ASSISTANT_NAME = "William";
 
-// Reminder test mode (set REMINDER_TEST_MODE=true in .env for faster testing)
-const REMINDER_TEST_MODE = process.env.REMINDER_TEST_MODE === 'true';
-const REMINDER_INTERVALS = REMINDER_TEST_MODE ? {
-    first: 30,      // 30 seconds (instead of 1 hour)
-    second: 60,     // 60 seconds (instead of 24 hours)
-    final: 90,      // 90 seconds (instead of 48 hours)
-    checkInterval: 30 // Check every 30 seconds
-} : {
-    first: 1,       // 1 hour
-    second: 24,     // 24 hours
-    final: 48,      // 48 hours
-    checkInterval: 30 * 60 // Check every 30 minutes
+// Reminder intervals (loaded from database on startup)
+let REMINDER_INTERVALS = {
+    first: 5,           // 5 minutes (default)
+    second: 120,        // 120 minutes = 2 hours (default)
+    final: 900,         // 900 minutes = 15 hours (default)
+    checkInterval: 30   // 30 minutes (default)
 };
 
 // OpenAI Assistant configuration
@@ -106,6 +100,16 @@ async function loadSettingsFromDatabase() {
             // Save default assistant name to database
             await LeadDatabase.saveAssistantName(ASSISTANT_NAME);
             console.log('✅ Saved default assistant name to database');
+        }
+        
+        // Load reminder intervals from database
+        try {
+            const intervals = await LeadDatabase.getReminderIntervals();
+            REMINDER_INTERVALS = intervals;
+            console.log('✅ Loaded reminder intervals from database:', REMINDER_INTERVALS);
+        } catch (error) {
+            console.log('⚠️ Could not load reminder intervals, using defaults:', error.message);
+            // Continue with defaults
         }
     } catch (error) {
         console.error('❌ Error loading settings from database:', error);
@@ -476,11 +480,39 @@ app.post('/api/settings', async (req, res) => {
             console.log('✅ CRM webhook updated:', crmWebhook ? 'configured' : 'cleared');
         }
         
+        // Update reminder intervals if provided
+        const { reminderFirst, reminderSecond, reminderFinal, reminderCheckInterval } = req.body;
+        if (reminderFirst !== undefined || reminderSecond !== undefined || reminderFinal !== undefined || reminderCheckInterval !== undefined) {
+            const currentIntervals = await LeadDatabase.getReminderIntervals();
+            const newIntervals = {
+                first: reminderFirst !== undefined ? parseInt(reminderFirst) : currentIntervals.first,
+                second: reminderSecond !== undefined ? parseInt(reminderSecond) : currentIntervals.second,
+                final: reminderFinal !== undefined ? parseInt(reminderFinal) : currentIntervals.final,
+                checkInterval: reminderCheckInterval !== undefined ? parseInt(reminderCheckInterval) : currentIntervals.checkInterval
+            };
+            
+            await LeadDatabase.saveReminderIntervals(
+                newIntervals.first,
+                newIntervals.second,
+                newIntervals.final,
+                newIntervals.checkInterval
+            );
+            
+            // Update runtime variable
+            REMINDER_INTERVALS.first = newIntervals.first;
+            REMINDER_INTERVALS.second = newIntervals.second;
+            REMINDER_INTERVALS.final = newIntervals.final;
+            REMINDER_INTERVALS.checkInterval = newIntervals.checkInterval;
+            
+            console.log('✅ Reminder intervals updated:', newIntervals);
+        }
+        
         res.json({
             success: true,
             message: 'Settings updated successfully (saved to database)',
             customQuestions: CUSTOM_QUESTIONS,
-            assistantName: ASSISTANT_NAME
+            assistantName: ASSISTANT_NAME,
+            reminderIntervals: REMINDER_INTERVALS
         });
     } catch (error) {
         console.error('Error updating settings:', error);
@@ -508,12 +540,21 @@ app.get('/api/settings', async (req, res) => {
             console.log('⚠️ Could not load CRM webhook settings:', error.message);
         }
         
+        // Get reminder intervals from database
+        let reminderIntervals = REMINDER_INTERVALS;
+        try {
+            reminderIntervals = await LeadDatabase.getReminderIntervals();
+        } catch (error) {
+            console.log('⚠️ Could not load reminder intervals, using runtime values:', error.message);
+        }
+        
         res.json({
             success: true,
             customQuestions: CUSTOM_QUESTIONS,
             assistantName: ASSISTANT_NAME,
             crmWebhook: crmWebhookUrl,
-            crmKey: crmApiKey
+            crmKey: crmApiKey,
+            reminderIntervals: reminderIntervals
         });
     } catch (error) {
         console.error('Error fetching settings:', error);
@@ -658,8 +699,7 @@ app.get('/api/test-reminders', async (req, res) => {
         const now = new Date();
         const leads = await LeadDatabase.getAllLeads();
         
-        const timeUnit = REMINDER_TEST_MODE ? 'seconds' : 'hours';
-        const divisor = REMINDER_TEST_MODE ? 1000 : (1000 * 60 * 60);
+        const divisor = 1000 * 60; // ms to minutes
         
         const results = [];
         
@@ -680,34 +720,41 @@ app.get('/api/test-reminders', async (req, res) => {
             };
             
             // Check eligibility
-            if (lead.qualified || lead.ai_paused) {
-                leadInfo.status = 'Skipped (qualified or paused)';
+            if (lead.qualified || lead.ai_paused || lead.status === 'closed') {
+                leadInfo.status = 'Skipped (qualified, paused, or closed)';
                 results.push(leadInfo);
                 continue;
             }
             
-            if (lead.progress === 0 && !lead.last_customer_message_time) {
-                leadInfo.status = 'Skipped (no progress and no messages)';
+            // Skip if Q1 hasn't been answered yet
+            if (!lead.answers || !lead.answers.question_1) {
+                leadInfo.status = 'Skipped (Q1 not answered yet)';
+                results.push(leadInfo);
+                continue;
+            }
+            
+            if (!lead.last_customer_message_time) {
+                leadInfo.status = 'Skipped (no last message time)';
                 results.push(leadInfo);
                 continue;
             }
             
             // Calculate time since last message
-            const lastMessageTime = new Date(lead.last_customer_message_time || lead.createdAt);
+            const lastMessageTime = new Date(lead.last_customer_message_time);
             const timeSinceLastMessage = (now - lastMessageTime) / divisor;
             
-            leadInfo.timeSinceLastMessage = `${timeSinceLastMessage.toFixed(1)} ${timeUnit}`;
+            leadInfo.timeSinceLastMessage = `${timeSinceLastMessage.toFixed(1)} minutes`;
             leadInfo.status = 'Eligible for reminders';
             
             // Check which reminders should be sent
             if (timeSinceLastMessage >= REMINDER_INTERVALS.first && !lead.reminder_1hr_sent) {
-                leadInfo.nextAction = `Send first reminder (threshold: ${REMINDER_INTERVALS.first} ${timeUnit})`;
+                leadInfo.nextAction = `Send first reminder (threshold: ${REMINDER_INTERVALS.first} minutes)`;
             } else if (timeSinceLastMessage >= REMINDER_INTERVALS.second && !lead.reminder_24hr_sent) {
-                leadInfo.nextAction = `Send second reminder (threshold: ${REMINDER_INTERVALS.second} ${timeUnit})`;
+                leadInfo.nextAction = `Send second reminder (threshold: ${REMINDER_INTERVALS.second} minutes)`;
             } else if (timeSinceLastMessage >= REMINDER_INTERVALS.final && !lead.reminder_48hr_sent) {
-                leadInfo.nextAction = `Send final reminder (threshold: ${REMINDER_INTERVALS.final} ${timeUnit})`;
+                leadInfo.nextAction = `Send final reminder (threshold: ${REMINDER_INTERVALS.final} minutes)`;
             } else {
-                leadInfo.nextAction = `Waiting (next check at ${REMINDER_INTERVALS.first} ${timeUnit})`;
+                leadInfo.nextAction = `Waiting (next check at ${REMINDER_INTERVALS.first} minutes)`;
             }
             
             results.push(leadInfo);
@@ -715,9 +762,8 @@ app.get('/api/test-reminders', async (req, res) => {
         
         res.json({
             success: true,
-            testMode: REMINDER_TEST_MODE,
             intervals: REMINDER_INTERVALS,
-            timeUnit: timeUnit,
+            timeUnit: 'minutes',
             totalLeads: leads.length,
             leads: results,
             message: 'Use /api/trigger-reminders to actually send reminders for testing'
@@ -2728,37 +2774,41 @@ async function checkAndSendReminders() {
         const now = new Date();
         const leads = await LeadDatabase.getAllLeads();
         
-        const timeUnit = REMINDER_TEST_MODE ? 'seconds' : 'hours';
-        const divisor = REMINDER_TEST_MODE ? 1000 : (1000 * 60 * 60); // ms to seconds or hours
+        const divisor = 1000 * 60; // ms to minutes
         
-        console.log(`🔔 Checking ${leads.length} leads for reminders... ${REMINDER_TEST_MODE ? '⚡ TEST MODE' : ''}`);
+        console.log(`🔔 Checking ${leads.length} leads for reminders...`);
         
         for (const lead of leads) {
             // Skip if qualified, paused, or closed
             if (lead.qualified || lead.ai_paused || lead.status === 'closed') continue;
             
-            // Skip if no progress (0%) AND no initial message sent
-            if (lead.progress === 0 && !lead.last_customer_message_time) continue;
+            // Skip if Q1 hasn't been answered yet (reminders only start after first response)
+            if (!lead.answers || !lead.answers.question_1) {
+                continue; // No reminders until Q1 is answered
+            }
             
-            // Determine the time since last customer message
-            const lastMessageTime = new Date(lead.last_customer_message_time || lead.createdAt);
+            // Skip if no last customer message time
+            if (!lead.last_customer_message_time) continue;
+            
+            // Determine the time since last customer message (in minutes)
+            const lastMessageTime = new Date(lead.last_customer_message_time);
             const timeSinceLastMessage = (now - lastMessageTime) / divisor;
             
-            // First reminder (1hr or 30sec in test mode)
+            // First reminder
             if (timeSinceLastMessage >= REMINDER_INTERVALS.first && !lead.reminder_1hr_sent) {
-                console.log(`⏰ Sending first reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} ${timeUnit} ago)`);
+                console.log(`⏰ Sending first reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} minutes ago)`);
                 await send1HourReminder(lead);
             }
             
-            // Second reminder (24hr or 60sec in test mode)
+            // Second reminder
             if (timeSinceLastMessage >= REMINDER_INTERVALS.second && !lead.reminder_24hr_sent) {
-                console.log(`⏰ Sending second reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} ${timeUnit} ago)`);
+                console.log(`⏰ Sending second reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} minutes ago)`);
                 await send24HourReminder(lead);
             }
             
-            // Final reminder (48hr or 90sec in test mode)
+            // Final reminder
             if (timeSinceLastMessage >= REMINDER_INTERVALS.final && !lead.reminder_48hr_sent) {
-                console.log(`⏰ Sending final reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} ${timeUnit} ago)`);
+                console.log(`⏰ Sending final reminder to ${lead.name} (last message ${timeSinceLastMessage.toFixed(1)} minutes ago)`);
                 await send48HourReminder(lead);
             }
         }
@@ -2830,27 +2880,18 @@ async function startServer() {
         // Load settings from database after database is initialized
         await loadSettingsFromDatabase();
         
-        // Start reminder checker with appropriate interval based on test mode
-        const checkIntervalMs = REMINDER_TEST_MODE 
-            ? REMINDER_INTERVALS.checkInterval * 1000           // 30 seconds in test mode
-            : REMINDER_INTERVALS.checkInterval * 60 * 1000;     // 30 minutes in production
+        // Start reminder checker (checkInterval is in minutes)
+        const checkIntervalMs = REMINDER_INTERVALS.checkInterval * 60 * 1000;
         
         setInterval(async () => {
             console.log('🔔 Checking for leads needing reminders...');
             await checkAndSendReminders();
         }, checkIntervalMs);
         
-        const intervalDesc = REMINDER_TEST_MODE 
-            ? `${REMINDER_INTERVALS.checkInterval} seconds ⚡ TEST MODE`
-            : `${REMINDER_INTERVALS.checkInterval} minutes`;
-        console.log(`🔔 Reminder service started (checks every ${intervalDesc})`);
-        
-        if (REMINDER_TEST_MODE) {
-            console.log(`⚡⚡⚡ REMINDER TEST MODE ENABLED ⚡⚡⚡`);
-            console.log(`   First reminder: ${REMINDER_INTERVALS.first} seconds`);
-            console.log(`   Second reminder: ${REMINDER_INTERVALS.second} seconds`);
-            console.log(`   Final reminder: ${REMINDER_INTERVALS.final} seconds`);
-        }
+        console.log(`🔔 Reminder service started (checks every ${REMINDER_INTERVALS.checkInterval} minutes)`);
+        console.log(`   First reminder: ${REMINDER_INTERVALS.first} minutes`);
+        console.log(`   Second reminder: ${REMINDER_INTERVALS.second} minutes`);
+        console.log(`   Final reminder: ${REMINDER_INTERVALS.final} minutes`);
         
         // Start the server on 0.0.0.0 to accept external connections (required for Railway)
         app.listen(PORT, '0.0.0.0', () => {

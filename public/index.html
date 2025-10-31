@@ -1239,6 +1239,37 @@
                     </div>
                 </div>
                 
+                <div class="settings-section">
+                    <h3>⏰ Reminder Intervals</h3>
+                    <p style="color: #6c757d; margin-bottom: 15px; font-size: 0.9em;">
+                        Configure when follow-up reminder messages are sent to leads after they answer Q1. All values are in minutes. Reminders only start after the first question (Q1) has been answered.
+                    </p>
+                    
+                    <div class="form-group">
+                        <label class="form-label">First Reminder (minutes)</label>
+                        <input type="number" class="form-input" id="reminder-first" placeholder="5" min="1">
+                        <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                            Default: 5 minutes
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Second Reminder (minutes)</label>
+                        <input type="number" class="form-input" id="reminder-second" placeholder="120" min="1">
+                        <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                            Default: 120 minutes = 2 hours
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Final Reminder (minutes)</label>
+                        <input type="number" class="form-input" id="reminder-final" placeholder="900" min="1">
+                        <small style="color: #6c757d; font-size: 0.85em; display: block; margin-top: 5px;">
+                            Default: 900 minutes = 15 hours
+                        </small>
+                    </div>
+                </div>
+                
                 <div class="custom-questions">
                     <h3>❓ Custom Qualification Questions</h3>
                     <p style="color: #6c757d; margin-bottom: 20px;">
@@ -1699,6 +1730,13 @@
                     if (serverSettings.crmKey !== undefined) {
                         document.getElementById('crm-key').value = serverSettings.crmKey;
                     }
+                    
+                    // Load reminder intervals from server
+                    if (serverSettings.reminderIntervals) {
+                        document.getElementById('reminder-first').value = serverSettings.reminderIntervals.first || 5;
+                        document.getElementById('reminder-second').value = serverSettings.reminderIntervals.second || 120;
+                        document.getElementById('reminder-final').value = serverSettings.reminderIntervals.final || 900;
+                    }
                 }
             } catch (error) {
                 console.log('⚠️ Could not load settings from server, using localStorage');
@@ -1784,7 +1822,10 @@
                         customQuestions: newSettings.customQuestions,
                         assistantName: document.getElementById('assistant-name').value || 'William',
                         crmWebhook: newSettings.crmWebhook,
-                        crmKey: newSettings.crmKey
+                        crmKey: newSettings.crmKey,
+                        reminderFirst: parseInt(document.getElementById('reminder-first').value) || 5,
+                        reminderSecond: parseInt(document.getElementById('reminder-second').value) || 120,
+                        reminderFinal: parseInt(document.getElementById('reminder-final').value) || 900
                     })
                 });
 

@@ -578,6 +578,72 @@ class LeadDatabase {
         }
     }
     
+    // Save reminder intervals
+    static async saveReminderIntervals(first, second, final, checkInterval) {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const intervals = {
+                first: first,
+                second: second,
+                final: final,
+                checkInterval: checkInterval
+            };
+            const intervalsJSON = JSON.stringify(intervals);
+            
+            await pool.query(`
+                INSERT INTO settings (key, value, updated_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = CURRENT_TIMESTAMP
+            `, ['reminderIntervals', intervalsJSON]);
+            
+            console.log(`✅ Reminder intervals saved to PostgreSQL`);
+            return true;
+        } catch (error) {
+            console.error(`❌ Error saving reminder intervals:`, error);
+            throw error;
+        }
+    }
+    
+    // Get reminder intervals from database
+    static async getReminderIntervals() {
+        if (!isPostgreSQL) {
+            throw new Error('PostgreSQL not available');
+        }
+        
+        try {
+            const result = await pool.query(`
+                SELECT value FROM settings WHERE key = $1
+            `, ['reminderIntervals']);
+            
+            if (result.rows.length > 0) {
+                const intervals = JSON.parse(result.rows[0].value);
+                console.log(`✅ Loaded reminder intervals from PostgreSQL`);
+                return intervals;
+            }
+            // Return defaults if not set
+            return {
+                first: 5,           // 5 minutes
+                second: 120,        // 120 minutes (2 hours)
+                final: 900,         // 900 minutes (15 hours)
+                checkInterval: 30   // 30 minutes
+            };
+        } catch (error) {
+            console.error(`❌ Error getting reminder intervals:`, error);
+            // Return defaults on error
+            return {
+                first: 5,
+                second: 120,
+                final: 900,
+                checkInterval: 30
+            };
+        }
+    }
+    
     // Check if customer exists (returns lead if exists, null if new)
     // Also checks for archived customers and restores them
     static async checkExistingCustomer(phone) {
