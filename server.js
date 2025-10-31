@@ -977,7 +977,7 @@ app.post('/api/leads', async (req, res) => {
         console.log('📝 Creating new lead...');
         console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
 
-        const { name, email, phone, source } = req.body;
+        const { name, email, phone, source, initialMessage } = req.body;
 
         if (!name || !email || !phone) {
             console.log('❌ Missing required fields');
@@ -1036,11 +1036,104 @@ app.post('/api/leads', async (req, res) => {
                 // Get fresh lead data
                 existingLead = await LeadDatabase.getLeadById(existingLead.id);
                 
-                // Send AI introduction for the NEW inquiry
+                // Process initialMessage if provided (e.g., from Facebook Lead Ads)
+                if (initialMessage && initialMessage.trim().length > 0) {
+                    console.log(`📝 Processing initial message for returning customer: "${initialMessage}"`);
+                    
+                    try {
+                        // Initialize answers object
+                        existingLead.answers = existingLead.answers || {};
+                        let newAnswersFound = 0;
+                        
+                        // Try to extract answers for ALL unanswered questions from the message
+                        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                            const questionKey = `question_${i + 1}`;
+                            
+                            // Skip if already answered
+                            if (existingLead.answers[questionKey]) {
+                                continue;
+                            }
+                            
+                            const question = CUSTOM_QUESTIONS[i];
+                            const possibleAnswers = typeof question === 'object' ? question.possibleAnswers : '';
+                            
+                            if (!possibleAnswers) {
+                                continue;
+                            }
+                            
+                            // Extract answer for this question
+                            const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
+                            
+                            if (extractedAnswer) {
+                                existingLead.answers[questionKey] = extractedAnswer;
+                                newAnswersFound++;
+                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                            }
+                        }
+                        
+                        // Update progress if any new answers were found
+                        if (newAnswersFound > 0) {
+                            const newAnsweredCount = Object.keys(existingLead.answers).length;
+                            existingLead.progress = Math.round((newAnsweredCount / 4) * 100);
+                            existingLead.status = existingLead.progress === 100 ? 'qualified' : 'active';
+                            
+                            // Save extracted answers to database
+                            await LeadDatabase.updateLead(existingLead.id, {
+                                name: existingLead.name,
+                                email: existingLead.email,
+                                status: existingLead.status,
+                                progress: existingLead.progress,
+                                qualified: existingLead.progress === 100,
+                                ai_paused: existingLead.ai_paused,
+                                post_qualification_response_sent: false,
+                                answers: existingLead.answers,
+                                qualifiedDate: existingLead.progress === 100 ? new Date().toISOString() : null,
+                                returning_customer: existingLead.returning_customer || false,
+                                times_qualified: existingLead.times_qualified || 0,
+                                first_qualified_date: existingLead.first_qualified_date,
+                                last_qualified_date: existingLead.last_qualified_date
+                            });
+                            
+                            // Update last customer message time for reminder tracking
+                            await LeadDatabase.updateLastCustomerMessageTime(existingLead.id, new Date().toISOString());
+                            
+                            console.log(`✅ Processed initial message: ${newAnswersFound} answers extracted, progress: ${existingLead.progress}%`);
+                            
+                            // If fully qualified, send webhook
+                            if (existingLead.progress === 100) {
+                                console.log(`🎉 Returning customer fully qualified from initial message!`);
+                                const qualifiedLead = await LeadDatabase.getLeadById(existingLead.id);
+                                try {
+                                    await sendToCRMWebhook(qualifiedLead);
+                                } catch (error) {
+                                    console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+                                }
+                            }
+                            
+                            // Reload lead to get latest data
+                            existingLead = await LeadDatabase.getLeadById(existingLead.id);
+                        }
+                    } catch (error) {
+                        console.error('⚠️ Error processing initial message (non-critical):', error.message);
+                    }
+                }
+                
+                // Send AI introduction or qualification message for the NEW inquiry
                 try {
-                    await sendAIIntroduction(existingLead, true); // true = returning customer
+                    // If lead is already fully qualified from initial message, send qualification message instead
+                    if (existingLead.progress === 100 && existingLead.qualified) {
+                        console.log(`🎉 Returning customer already qualified from initial message - sending qualification message instead of intro`);
+                        const qualificationMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+                        
+                        await sendSMS(existingLead.phone, qualificationMessage);
+                        await LeadDatabase.createMessage(existingLead.id, 'assistant', qualificationMessage);
+                    } else {
+                        // Send normal introduction asking first question
+                        await sendAIIntroduction(existingLead, true); // true = returning customer
+                    }
                 } catch (introError) {
-                    console.error('Error sending AI introduction:', introError);
+                    console.error('Error sending AI introduction/qualification:', introError);
                 }
                 
                 return res.json(existingLead);
@@ -1052,7 +1145,7 @@ app.post('/api/leads', async (req, res) => {
         }
         
         // Create new lead in database
-        const newLead = await LeadDatabase.createLead({
+        let newLead = await LeadDatabase.createLead({
             phone: normalizedPhone,
             name: name,
             email: email,
@@ -1069,11 +1162,107 @@ app.post('/api/leads', async (req, res) => {
         
         console.log(`✅ Lead created with ID: ${newLead.id}`);
         
-        // Send AI introduction message (don't fail the request if this fails)
+        // Process initialMessage if provided (e.g., from Facebook Lead Ads)
+        if (initialMessage && initialMessage.trim().length > 0) {
+            console.log(`📝 Processing initial message from lead creation: "${initialMessage}"`);
+            
+            try {
+                // Initialize answers object
+                newLead.answers = newLead.answers || {};
+                const answeredCountBefore = Object.keys(newLead.answers).length;
+                let newAnswersFound = 0;
+                
+                // Try to extract answers for ALL unanswered questions from the message
+                for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                    const questionKey = `question_${i + 1}`;
+                    
+                    // Skip if already answered
+                    if (newLead.answers[questionKey]) {
+                        console.log(`   ⏭️ Question ${i + 1} already answered, skipping`);
+                        continue;
+                    }
+                    
+                    const question = CUSTOM_QUESTIONS[i];
+                    const possibleAnswers = typeof question === 'object' ? question.possibleAnswers : '';
+                    
+                    if (!possibleAnswers) {
+                        continue; // No possible answers defined, skip extraction
+                    }
+                    
+                    // Extract answer for this question
+                    const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
+                    
+                    if (extractedAnswer) {
+                        newLead.answers[questionKey] = extractedAnswer;
+                        newAnswersFound++;
+                        console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                    }
+                }
+                
+                // Update progress if any new answers were found
+                if (newAnswersFound > 0) {
+                    const newAnsweredCount = Object.keys(newLead.answers).length;
+                    newLead.progress = Math.round((newAnsweredCount / 4) * 100);
+                    newLead.status = newLead.progress === 100 ? 'qualified' : 'active';
+                    
+                    // Save extracted answers to database
+                    await LeadDatabase.updateLead(newLead.id, {
+                        name: newLead.name,
+                        email: newLead.email,
+                        status: newLead.status,
+                        progress: newLead.progress,
+                        qualified: newLead.progress === 100,
+                        ai_paused: newLead.ai_paused,
+                        post_qualification_response_sent: false,
+                        answers: newLead.answers,
+                        qualifiedDate: newLead.progress === 100 ? new Date().toISOString() : null,
+                        returning_customer: newLead.returning_customer || false,
+                        times_qualified: newLead.times_qualified || 0,
+                        first_qualified_date: newLead.first_qualified_date,
+                        last_qualified_date: newLead.last_qualified_date
+                    });
+                    
+                    // Update last customer message time for reminder tracking
+                    await LeadDatabase.updateLastCustomerMessageTime(newLead.id, new Date().toISOString());
+                    
+                    console.log(`✅ Processed initial message: ${newAnswersFound} answers extracted, progress: ${newLead.progress}%`);
+                    
+                    // If fully qualified, send webhook
+                    if (newLead.progress === 100) {
+                        console.log(`🎉 Lead fully qualified from initial message!`);
+                        const qualifiedLead = await LeadDatabase.getLeadById(newLead.id);
+                        try {
+                            await sendToCRMWebhook(qualifiedLead);
+                        } catch (error) {
+                            console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+                        }
+                    }
+                    
+                    // Reload lead to get latest data
+                    newLead = await LeadDatabase.getLeadById(newLead.id);
+                }
+            } catch (error) {
+                console.error('⚠️ Error processing initial message (non-critical):', error.message);
+                // Continue with lead creation even if message processing fails
+            }
+        }
+        
+        // Send AI introduction or qualification message (don't fail the request if this fails)
         try {
-            await sendAIIntroduction(newLead, false); // false = new customer
+            // If lead is already fully qualified from initial message, send qualification message instead
+            if (newLead.progress === 100 && newLead.qualified) {
+                console.log(`🎉 Lead already qualified from initial message - sending qualification message instead of intro`);
+                const qualificationMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+                
+                await sendSMS(newLead.phone, qualificationMessage);
+                await LeadDatabase.createMessage(newLead.id, 'assistant', qualificationMessage);
+            } else {
+                // Send normal introduction asking first question
+                await sendAIIntroduction(newLead, false); // false = new customer
+            }
         } catch (introError) {
-            console.error('Error sending AI introduction:', introError);
+            console.error('Error sending AI introduction/qualification:', introError);
             // Don't fail the lead creation if introduction fails
         }
 
