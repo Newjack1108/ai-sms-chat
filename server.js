@@ -1258,10 +1258,11 @@ app.post('/api/leads', async (req, res) => {
                                     console.error('⚠️ Failed to send webhook (non-critical):', error.message);
                                 }
                             }
-                            
-                            // Reload lead to get latest data
-                            existingLead = await LeadDatabase.getLeadById(existingLead.id);
                         }
+                        
+                        // ALWAYS reload lead after processing initialMessage to ensure fresh data for sendAIIntroduction
+                        existingLead = await LeadDatabase.getLeadById(existingLead.id);
+                        console.log(`🔄 Reloaded lead after initialMessage processing. Progress: ${existingLead.progress}%, Answers: ${Object.keys(existingLead.answers || {}).length}`);
                     } catch (error) {
                         console.error('⚠️ Error processing initial message (non-critical):', error.message);
                     }
@@ -1386,10 +1387,11 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                             console.error('⚠️ Failed to send webhook (non-critical):', error.message);
                         }
                     }
-                    
-                    // Reload lead to get latest data
-                    newLead = await LeadDatabase.getLeadById(newLead.id);
                 }
+                
+                // ALWAYS reload lead after processing initialMessage to ensure fresh data for sendAIIntroduction
+                newLead = await LeadDatabase.getLeadById(newLead.id);
+                console.log(`🔄 Reloaded lead after initialMessage processing. Progress: ${newLead.progress}%, Answers: ${Object.keys(newLead.answers || {}).length}`);
             } catch (error) {
                 console.error('⚠️ Error processing initial message (non-critical):', error.message);
                 // Continue with lead creation even if message processing fails
