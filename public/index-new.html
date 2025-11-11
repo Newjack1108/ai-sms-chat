@@ -953,7 +953,7 @@
                     const result = await response.json();
                     
                     // Add message to chat
-                    addMessageToUI('user', message);
+                    addMessageToUI('assistant', message);
                     if (result.aiResponse) {
                         addMessageToUI('assistant', result.aiResponse);
                     }

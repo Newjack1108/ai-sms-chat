@@ -227,8 +227,8 @@ async function getCRMWebhookURL() {
     }
 }
 
-// Send qualified lead to CRM webhook
-async function sendToCRMWebhook(lead) {
+// Send lead event to CRM webhook (Make / external automation)
+async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails = {}) {
     try {
         // Get webhook URL from database
         const webhookUrl = await getCRMWebhookURL();
@@ -238,7 +238,7 @@ async function sendToCRMWebhook(lead) {
             return;
         }
         
-        console.log('📤 Sending qualified lead to CRM webhook...');
+        console.log(`📤 Sending "${eventType}" event to CRM webhook...`);
         
         // Get source display name
         let sourceDisplay = lead.source || 'Unknown';
@@ -251,23 +251,60 @@ async function sendToCRMWebhook(lead) {
             console.log('⚠️ Could not get source mapping:', error.message);
         }
         
-        // Prepare webhook data
-        const webhookData = {
+        const eventTimestamp = new Date().toISOString();
+        
+        const leadPayload = {
             id: lead.id,
             name: lead.name,
             phone: lead.phone,
             email: lead.email,
             source: lead.source,
             source_display: sourceDisplay,
-            status: 'qualified',
+            status: lead.status || 'unknown',
             progress: lead.progress || 0,
-            qualified: true,
-            qualifiedDate: lead.qualifiedDate || new Date().toISOString(),
+            qualified: Boolean(lead.qualified),
+            qualifiedDate: lead.qualifiedDate || null,
             answers: lead.answers || {},
+            returning_customer: Boolean(lead.returning_customer),
+            times_qualified: lead.times_qualified || 0
+        };
+
+        // Normalize qualified flag for automation consumers
+        if (eventDetails.silentQualification === true) {
+            leadPayload.qualified = false;
+        } else if ((leadPayload.progress || 0) >= 100) {
+            leadPayload.qualified = true;
+        }
+        
+        const metadata = {
+            returning_customer: leadPayload.returning_customer,
+            times_qualified: leadPayload.times_qualified,
+            first_qualified_date: lead.first_qualified_date || null,
+            last_qualified_date: lead.last_qualified_date || null
+        };
+        
+        if (eventDetails.triggeredBy) {
+            metadata.triggered_by = eventDetails.triggeredBy;
+        }
+        
+        if (eventDetails.qualificationMethod) {
+            metadata.qualification_method = eventDetails.qualificationMethod;
+        }
+        if (eventDetails.silentQualification !== undefined) {
+            metadata.silent_qualification = Boolean(eventDetails.silentQualification);
+        }
+        if (eventDetails.meta && typeof eventDetails.meta === 'object') {
+            Object.assign(metadata, eventDetails.meta);
+        }
+        
+        // Prepare webhook data
+        const webhookData = {
+            ...leadPayload, // Maintain backward compatibility for legacy consumers
+            event_type: eventType,
+            event_timestamp: eventTimestamp,
+            lead: leadPayload,
             customQuestions: CUSTOM_QUESTIONS,
-            // Include returning customer info
-            returning_customer: lead.returning_customer || false,
-            times_qualified: lead.times_qualified || 1
+            metadata
         };
         
         console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
@@ -427,8 +464,8 @@ app.post('/api/leads/send-message', async (req, res) => {
             });
         }
         
-        // Store user message in database
-        await LeadDatabase.createMessage(parseInt(leadId), 'user', message);
+        // Store admin/assistant message in database
+        await LeadDatabase.createMessage(parseInt(leadId), 'assistant', message);
         
         // Send SMS to customer
         await sendSMS(lead.phone, message);
@@ -503,7 +540,10 @@ Thank you for your time! 🐴✨`;
         
         // 🔥 SEND TO CRM WEBHOOK
         try {
-            await sendToCRMWebhook(updatedLead);
+            await sendToCRMWebhook(updatedLead, 'lead_qualified', {
+                qualificationMethod: 'manual',
+                triggeredBy: 'admin_portal'
+            });
         } catch (error) {
             console.error('⚠️ Failed to send webhook (non-critical):', error.message);
         }
@@ -550,7 +590,11 @@ app.post('/api/leads/:leadId/silent-qualify', async (req, res) => {
         
         // 🔥 SEND TO CRM WEBHOOK (even if not all questions answered)
         try {
-            await sendToCRMWebhook(updatedLead);
+            await sendToCRMWebhook(updatedLead, 'lead_qualified', {
+                qualificationMethod: 'silent',
+                silentQualification: true,
+                triggeredBy: 'admin_portal'
+            });
         } catch (error) {
             console.error('⚠️ Failed to send webhook (non-critical):', error.message);
         }
@@ -1185,6 +1229,18 @@ app.post('/api/leads', async (req, res) => {
                 // Get fresh lead data
                 existingLead = await LeadDatabase.getLeadById(existingLead.id);
                 
+                // Notify automation about returning customer event
+                try {
+                    await sendToCRMWebhook(existingLead, 'lead_returning_customer', {
+                        triggeredBy: 'admin_portal',
+                        meta: {
+                            previous_qualified_date: previousQualifiedDate
+                        }
+                    });
+                } catch (error) {
+                    console.error('⚠️ Failed to send returning customer webhook (non-critical):', error.message);
+                }
+                
                 // Process initialMessage if provided (e.g., from Facebook Lead Ads)
                 if (initialMessage && initialMessage.trim().length > 0) {
                     console.log(`📝 Processing initial message for returning customer: "${initialMessage}"`);
@@ -1253,7 +1309,13 @@ app.post('/api/leads', async (req, res) => {
                                 console.log(`🎉 Returning customer fully qualified from initial message!`);
                                 const qualifiedLead = await LeadDatabase.getLeadById(existingLead.id);
                                 try {
-                                    await sendToCRMWebhook(qualifiedLead);
+                                    await sendToCRMWebhook(qualifiedLead, 'lead_qualified', {
+                                        qualificationMethod: 'auto_initial_message',
+                                        triggeredBy: 'admin_portal',
+                                        meta: {
+                                            initial_message_processed: true
+                                        }
+                                    });
                                 } catch (error) {
                                     console.error('⚠️ Failed to send webhook (non-critical):', error.message);
                                 }
@@ -1382,7 +1444,13 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                         console.log(`🎉 Lead fully qualified from initial message!`);
                         const qualifiedLead = await LeadDatabase.getLeadById(newLead.id);
                         try {
-                            await sendToCRMWebhook(qualifiedLead);
+                            await sendToCRMWebhook(qualifiedLead, 'lead_qualified', {
+                                qualificationMethod: 'auto_initial_message',
+                                triggeredBy: 'admin_portal',
+                                meta: {
+                                    initial_message_processed: true
+                                }
+                            });
                         } catch (error) {
                             console.error('⚠️ Failed to send webhook (non-critical):', error.message);
                         }
@@ -1624,6 +1692,18 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 
                 // Get fresh lead data
                 lead = await LeadDatabase.getLeadById(lead.id);
+                
+                // Notify automation about returning customer event
+                try {
+                    await sendToCRMWebhook(lead, 'lead_returning_customer', {
+                        triggeredBy: 'api_leads_reactivate',
+                        meta: {
+                            previous_qualified_date: previousQualifiedDate
+                        }
+                    });
+                } catch (error) {
+                    console.error('⚠️ Failed to send returning customer webhook (non-critical):', error.message);
+                }
                 
                 // Send AI introduction for the NEW inquiry
                 await sendAIIntroduction(lead, true); // Pass true for "returning customer"
@@ -2515,7 +2595,10 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             
             // 🔥 SEND TO CRM WEBHOOK
             try {
-                await sendToCRMWebhook(lead);
+                await sendToCRMWebhook(lead, 'lead_qualified', {
+                    qualificationMethod: 'auto_conversation',
+                    triggeredBy: 'incoming_sms'
+                });
             } catch (error) {
                 console.error('⚠️ Failed to send webhook (non-critical):', error.message);
             }
