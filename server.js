@@ -156,6 +156,8 @@ const TIMEFRAME_PATTERNS = [
     /\b(?:today|tomorrow|tonight|over the weekend|end of the month)\b/gi
 ];
 
+const DIMENSION_REGEX = /\b(?:\d{1,3}\s?(?:x|×|by)\s?\d{1,3}|\d{1,3}\s?(?:ft|foot|feet|m|metre|meter|meters)(?:\s?(?:x|by)\s?\d{1,3}\s?(?:ft|foot|feet|m|metre|meter|meters))?)\b/gi;
+
 function stripPatterns(text, patterns) {
     if (!text) return '';
     let result = text;
@@ -180,6 +182,27 @@ function stripTrailingConnectors(text) {
         .replace(/^\b(to|for|in|at|on|by|around|about|within|the)\b\s*/i, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
+}
+
+function findNearestDimension(text, targetIndex) {
+    if (!text) return null;
+    const dimensionRegex = new RegExp(DIMENSION_REGEX.source, 'gi');
+    let match;
+    let closest = null;
+    while ((match = dimensionRegex.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const distance = typeof targetIndex === 'number' ? Math.abs(start - targetIndex) : 0;
+        if (!closest || distance < closest.distance) {
+            closest = {
+                text: match[0],
+                start,
+                end,
+                distance
+            };
+        }
+    }
+    return closest;
 }
 
 // Assistant name (can be updated via API)
@@ -2381,6 +2404,7 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         let cleanedResult = cleanAnswerResult(expanded || bestMatch.text);
 
         if (questionNumber === 1) {
+            const dimensionMatch = findNearestDimension(originalMessage, bestMatch.start);
             cleanedResult = stripPatterns(cleanedResult, TIMEFRAME_PATTERNS);
             cleanedResult = stripPostcodes(cleanedResult);
             cleanedResult = stripTrailingConnectors(cleanedResult);
@@ -2389,6 +2413,13 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
             }
             if (!cleanedResult || cleanedResult.length === 0) {
                 cleanedResult = cleanAnswerResult(bestMatch.text);
+            }
+            if (dimensionMatch) {
+                const lowerClean = (cleanedResult || '').toLowerCase();
+                const lowerDim = dimensionMatch.text.toLowerCase();
+                if (!lowerClean.includes(lowerDim)) {
+                    cleanedResult = cleanAnswerResult(`${dimensionMatch.text} ${cleanedResult || ''}`.trim());
+                }
             }
         } else if (questionNumber === 2) {
             cleanedResult = cleanAnswerResult(bestMatch.text);
