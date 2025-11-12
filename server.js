@@ -140,6 +140,48 @@ let CUSTOM_QUESTIONS = [
 const WEBHOOK_DEDUPE_WINDOW_MS = 15000; // 15 seconds dedupe window
 const recentWebhookEvents = new Map();
 
+const POSTCODE_PATTERNS = [
+    /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,
+    /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,
+    /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,
+    /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,
+    /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi
+];
+
+const TIMEFRAME_PATTERNS = [
+    /\b(?:asap|a\.s\.a\.p\.|urgent|urgently|immediately|quickly|soon|soonest|right away|straight away)\b/gi,
+    /\b(?:next|this|within|in)\s+(?:day|week|month|year|couple of weeks|couple of months|couple of days)s?\b/gi,
+    /\b(?:few|couple of|couple|several)\s+(?:days|weeks|months)\b/gi,
+    /\b\d+\s*(?:day|days|week|weeks|month|months|year|years)\b/gi,
+    /\b(?:today|tomorrow|tonight|over the weekend|end of the month)\b/gi
+];
+
+function stripPatterns(text, patterns) {
+    if (!text) return '';
+    let result = text;
+    patterns.forEach(pattern => {
+        result = result.replace(pattern, ' ').trim();
+    });
+    return result.replace(/\s{2,}/g, ' ').trim();
+}
+
+function stripPostcodes(text) {
+    let result = text;
+    POSTCODE_PATTERNS.forEach(pattern => {
+        result = result.replace(pattern, ' ').trim();
+    });
+    return result.replace(/\s{2,}/g, ' ').trim();
+}
+
+function stripTrailingConnectors(text) {
+    if (!text) return '';
+    return text
+        .replace(/\b(to|for|in|at|on|by|around|about|within|the)\s*$/i, '')
+        .replace(/^\b(to|for|in|at|on|by|around|about|within|the)\b\s*/i, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
 // Assistant name (can be updated via API)
 let ASSISTANT_NAME = "William";
 
@@ -2280,15 +2322,7 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
             }
         }
         
-        const postcodePatterns = [
-            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,
-            /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,
-            /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,
-            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,
-            /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi
-        ];
-        
-        for (const pattern of postcodePatterns) {
+        for (const pattern of POSTCODE_PATTERNS) {
             let match;
             while ((match = pattern.exec(originalMessage)) !== null) {
                 recordMatch(match[0].toUpperCase(), match.index, pattern.lastIndex, 'postcode pattern');
@@ -2344,14 +2378,54 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
     
     if (bestMatch) {
         const expanded = extractClauseForMatch(originalMessage, bestMatch.start, bestMatch.end);
-        const cleanedResult = cleanAnswerResult(expanded || bestMatch.text);
+        let cleanedResult = cleanAnswerResult(expanded || bestMatch.text);
+
+        if (questionNumber === 1) {
+            cleanedResult = stripPatterns(cleanedResult, TIMEFRAME_PATTERNS);
+            cleanedResult = stripPostcodes(cleanedResult);
+            cleanedResult = stripTrailingConnectors(cleanedResult);
+            if (!cleanedResult || cleanedResult.length === 0) {
+                cleanedResult = cleanAnswerResult(expanded);
+            }
+            if (!cleanedResult || cleanedResult.length === 0) {
+                cleanedResult = cleanAnswerResult(bestMatch.text);
+            }
+        } else if (questionNumber === 2) {
+            cleanedResult = cleanAnswerResult(bestMatch.text);
+            if (/\b(stable|stables|barn|shelter|building)\b/i.test(expanded)) {
+                const nearby = expanded.match(/\b(?:mobile|static|permanent|fixed|portable|movable|moveable)\b\s*(?:stable|stables|barn|shelter|building|block)?/i);
+                if (nearby) {
+                    cleanedResult = cleanAnswerResult(nearby[0]);
+                }
+            }
+        } else if (questionNumber === 3) {
+            const timeframeMatch = expanded.match(/\b(?:asap|urgent|urgently|immediately|quickly|soon|soonest|right away|straight away|today|tomorrow|tonight|end of the month|over the weekend)\b/i) ||
+                expanded.match(/\b(?:next|this|within|in)\s+(?:day|week|month|year|couple of weeks|couple of months|couple of days)\b/i) ||
+                expanded.match(/\b(?:few|couple of|couple|several)\s+(?:days|weeks|months)\b/i) ||
+                expanded.match(/\b\d+\s*(?:day|days|week|weeks|month|months|year|years)\b/i);
+            if (timeframeMatch) {
+                cleanedResult = cleanAnswerResult(timeframeMatch[0]);
+            } else {
+                cleanedResult = cleanAnswerResult(bestMatch.text);
+            }
+        } else if (questionNumber === 4) {
+            const postcodeMatch = expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b/i) || expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\b/i);
+            if (postcodeMatch) {
+                cleanedResult = postcodeMatch[0].toUpperCase();
+            } else {
+                cleanedResult = cleanAnswerResult(bestMatch.text.toUpperCase());
+            }
+        }
+
+        cleanedResult = stripTrailingConnectors(cleanedResult);
+
         if (cleanedResult) {
             console.log(`      ✅ Final match selected: "${cleanedResult}"${bestMatch.reason ? ` (${bestMatch.reason})` : ''}`);
             return cleanedResult;
         }
 
         console.log(`      ✅ Final match selected: "${bestMatch.text}"${bestMatch.reason ? ` (${bestMatch.reason})` : ''}`);
-        return bestMatch.text;
+        return cleanAnswerResult(bestMatch.text);
     }
     
     console.log('      ❌ No match found - returning null (no false positive)');
