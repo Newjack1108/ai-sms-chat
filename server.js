@@ -227,6 +227,66 @@ async function getCRMWebhookURL() {
     }
 }
 
+function normalizeLeadAnswers(lead) {
+    if (!lead || lead.answers === undefined || lead.answers === null) {
+        return {};
+    }
+
+    if (typeof lead.answers === 'object') {
+        return lead.answers;
+    }
+
+    if (typeof lead.answers === 'string') {
+        try {
+            return JSON.parse(lead.answers || '{}');
+        } catch (error) {
+            console.error('⚠️ Failed to parse lead answers JSON:', error.message);
+            return {};
+        }
+    }
+
+    return {};
+}
+
+function buildLeadAnswerPayload(lead) {
+    const normalizedAnswers = normalizeLeadAnswers(lead);
+    const structuredAnswers = {};
+    const flatAnswers = {};
+    let answersCount = 0;
+
+    for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+        const questionNumber = i + 1;
+        const answerKey = `question_${questionNumber}`;
+        const questionDef = CUSTOM_QUESTIONS[i];
+        const questionText = questionDef
+            ? (typeof questionDef === 'object' ? questionDef.question : questionDef)
+            : `Question ${questionNumber}`;
+        const possibleAnswers = questionDef && typeof questionDef === 'object' ? questionDef.possibleAnswers || '' : '';
+        const answerValue = normalizedAnswers[answerKey] || '';
+
+        if (answerValue && answerValue.length > 0) {
+            answersCount++;
+        }
+
+        structuredAnswers[answerKey] = {
+            questionNumber,
+            question: questionText,
+            answer: answerValue,
+            possibleAnswers
+        };
+
+        flatAnswers[`question_${questionNumber}_text`] = questionText;
+        flatAnswers[`answer_${questionNumber}`] = answerValue;
+    }
+
+    return {
+        normalizedAnswers,
+        structuredAnswers,
+        flatAnswers,
+        answersCount
+    };
+}
+
 // Send lead event to CRM webhook (Make / external automation)
 async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails = {}) {
     try {
@@ -253,6 +313,13 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
         
         const eventTimestamp = new Date().toISOString();
         
+        const {
+            normalizedAnswers,
+            structuredAnswers,
+            flatAnswers,
+            answersCount
+        } = buildLeadAnswerPayload(lead);
+        
         const leadPayload = {
             id: lead.id,
             name: lead.name,
@@ -264,7 +331,9 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             progress: lead.progress || 0,
             qualified: Boolean(lead.qualified),
             qualifiedDate: lead.qualifiedDate || null,
-            answers: lead.answers || {},
+            answers: normalizedAnswers,
+            answers_structured: structuredAnswers,
+            answers_flat: flatAnswers,
             returning_customer: Boolean(lead.returning_customer),
             times_qualified: lead.times_qualified || 0
         };
@@ -280,7 +349,10 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             returning_customer: leadPayload.returning_customer,
             times_qualified: leadPayload.times_qualified,
             first_qualified_date: lead.first_qualified_date || null,
-            last_qualified_date: lead.last_qualified_date || null
+            last_qualified_date: lead.last_qualified_date || null,
+            answers_count: answersCount,
+            answers_complete: answersCount >= CUSTOM_QUESTIONS.length,
+            questions_total: CUSTOM_QUESTIONS.length
         };
         
         if (eventDetails.triggeredBy) {
@@ -304,8 +376,14 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             event_timestamp: eventTimestamp,
             lead: leadPayload,
             customQuestions: CUSTOM_QUESTIONS,
-            metadata
+            metadata,
+            answers_flat: flatAnswers
         };
+
+        // Expose convenience fields (answer_1, answer_2, etc.) for external tools
+        Object.entries(flatAnswers).forEach(([key, value]) => {
+            webhookData[key] = value;
+        });
         
         console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
         
@@ -2088,94 +2166,133 @@ ${questionText}`;
 }
 
 // Extract answer for a specific question from the user's message
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractClauseForMatch(message, start, end) {
+    if (start === undefined || end === undefined || start < 0 || end < 0) {
+        return '';
+    }
+
+    const clauseRegex = /[^.!?\n\r]+[.!?\n\r]?/g;
+    let clauseMatch;
+    while ((clauseMatch = clauseRegex.exec(message)) !== null) {
+        const clauseStart = clauseMatch.index;
+        const clauseEnd = clauseStart + clauseMatch[0].length;
+        if (start >= clauseStart && end <= clauseEnd) {
+            let clause = clauseMatch[0].trim();
+            clause = clause.replace(/^[\s,;:\-]+/, '').replace(/[\s,;:\-]+$/, '');
+            clause = clause.replace(/^(and|but|so|then|also)\s+/i, '').trim();
+            return clause;
+        }
+    }
+
+    const windowPadding = 80;
+    const fallbackStart = Math.max(0, start - windowPadding);
+    const fallbackEnd = Math.min(message.length, end + windowPadding);
+    let fallback = message.slice(fallbackStart, fallbackEnd).trim();
+    fallback = fallback.replace(/^[\s,;:\-]+/, '').replace(/[\s,;:\-]+$/, '');
+    fallback = fallback.replace(/^(and|but|so|then|also)\s+/i, '').trim();
+    return fallback || message.slice(start, end).trim();
+}
+
+function cleanAnswerResult(text) {
+    if (!text) return '';
+    let cleaned = text.trim();
+    cleaned = cleaned.replace(/^[\s,;:\-]+/, '').replace(/[\s,;:\-]+$/, '');
+    cleaned = cleaned.replace(/^(and|but|so|then|also)\s+/i, '').trim();
+    return cleaned;
+}
+
 function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) {
     if (!userMessage || !possibleAnswers) return null;
     
-    const messageLower = userMessage.toLowerCase().trim();
-    const expectedList = possibleAnswers.toLowerCase().split(',').map(a => a.trim());
+    const originalMessage = userMessage.trim();
+    if (originalMessage.length === 0) return null;
+
+    const messageLower = originalMessage.toLowerCase();
+    const expectedList = possibleAnswers
+        .toLowerCase()
+        .split(',')
+        .map(a => a.trim())
+        .filter(Boolean);
     
-    console.log(`      🔍 Checking Q${questionNumber} against: "${userMessage}"`);
+    console.log(`      🔍 Checking Q${questionNumber} against: "${originalMessage}"`);
     console.log(`      📋 Looking for: ${expectedList.join(', ')}`);
-    
+
+    let bestMatch = null;
+
+    const recordMatch = (matchedText, startIndex, endIndex, reason = '') => {
+        if (matchedText === undefined || matchedText === null) return;
+        const trimmedMatch = matchedText.trim();
+        if (trimmedMatch.length === 0) return;
+        const length = trimmedMatch.length;
+
+        if (!bestMatch || length > bestMatch.length) {
+            bestMatch = {
+                text: trimmedMatch,
+                start: startIndex,
+                end: endIndex,
+                length,
+                reason
+            };
+        }
+    };
+
     // Special handling for postcode question (usually question 4)
     if (possibleAnswers.toLowerCase().includes('postcode') || 
         possibleAnswers.toLowerCase().includes('any postcode format')) {
-        
-        // Check for collection/pickup keywords first
         const collectionKeywords = [
             'collection', 'collect', 'pickup', 'pick up', 'pick-up', 
             'ill get it', "i'll get it", 'i will get it', 'getting it',
             'ill collect', "i'll collect", 'i will collect'
         ];
-        
+
         for (const keyword of collectionKeywords) {
-            const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
-            if (regex.test(messageLower)) {
-                const match = userMessage.match(regex);
-                if (match) {
-                    console.log(`      ✅ Found collection keyword: ${match[0]}`);
-                    return match[0]; // Return the matched text (e.g., "Collection", "Pick up")
-                }
+            const keywordRegex = new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'gi');
+            let match;
+            while ((match = keywordRegex.exec(originalMessage)) !== null) {
+                recordMatch(match[0], match.index, keywordRegex.lastIndex, 'collection keyword');
             }
         }
         
-        // UK postcode patterns (comprehensive list - full and partial)
         const postcodePatterns = [
-            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,  // Standard UK format (e.g., CH1 4DF, M1 1AE)
-            /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,               // Two letter prefix (e.g., CH1 4DF)
-            /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,             // Single letter prefix (e.g., M1 1AE)
-            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,        // With letter after number (e.g., EC1A 1BB)
-            /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi                // Partial postcode - outward code only (e.g., CW7, CH1, M1)
+            /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,
+            /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,
+            /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,
+            /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,
+            /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi
         ];
         
         for (const pattern of postcodePatterns) {
-            const postcodeMatch = userMessage.match(pattern);
-            if (postcodeMatch && postcodeMatch[0]) {
-                const postcode = postcodeMatch[0].trim().toUpperCase();
-                console.log(`      ✅ Found postcode (pattern match): ${postcode}`);
-                return postcode;
+            let match;
+            while ((match = pattern.exec(originalMessage)) !== null) {
+                recordMatch(match[0].toUpperCase(), match.index, pattern.lastIndex, 'postcode pattern');
             }
         }
         
-        // Also check for "postcode is X", "postcode: X", or just any UK postcode-like format
-        const postcodeTextMatch = userMessage.match(/postcode[:\s]+([A-Z0-9\s]{4,9})/gi);
-        if (postcodeTextMatch && postcodeTextMatch[0]) {
+        const postcodeTextRegex = /postcode[:\s]+([A-Z0-9\s]{4,9})/gi;
+        let postcodeTextMatch;
+        while ((postcodeTextMatch = postcodeTextRegex.exec(originalMessage)) !== null) {
             const extracted = postcodeTextMatch[0].replace(/postcode[:\s]+/gi, '').trim().toUpperCase();
-            console.log(`      ✅ Found postcode via text match: ${extracted}`);
-            return extracted;
+            recordMatch(extracted, postcodeTextMatch.index, postcodeTextRegex.lastIndex, 'postcode text match');
         }
-        
-        console.log(`      ❓ No postcode or collection keyword found in message`);
     }
     
     // Check for exact word/phrase matches from expected answers
-    let bestMatch = null;
-    let longestMatch = 0;
-    
     for (const expected of expectedList) {
-        if (expected.length < 2) continue; // Skip very short matches
-        if (expected === 'blank' || expected === 'unsure' || expected === 'not') continue; // Skip generic words
-        
-        // Look for the expected answer as a word or phrase in the message
-        if (messageLower.includes(expected)) {
-            // Find the actual text (could be capitalized differently)
-            const regex = new RegExp(`\\b${expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-            const match = userMessage.match(regex);
-            
-            if (match && match[0].length > longestMatch) {
-                bestMatch = match[0];
-                longestMatch = match[0].length;
-                console.log(`      🔍 Found exact match: "${match[0]}" for expected: "${expected}"`);
-            }
+        if (expected.length < 2) continue;
+        if (expected === 'blank' || expected === 'unsure' || expected === 'not') continue;
+
+        const expectedRegex = new RegExp(`\\b${escapeRegex(expected)}\\b`, 'gi');
+        let match;
+        while ((match = expectedRegex.exec(originalMessage)) !== null) {
+            recordMatch(match[0], match.index, expectedRegex.lastIndex, `expected:${expected}`);
+            console.log(`      🔍 Found exact match: "${match[0]}" for expected: "${expected}"`);
         }
     }
     
-    // Log the best exact match found (if any)
-    if (bestMatch && longestMatch > 0) {
-        console.log(`      ✅ Best exact match: "${bestMatch}" (${longestMatch} chars)`);
-    }
-    
-    // Check for common variations and timeframe patterns
     const variations = {
         'mobile': ['movable', 'moveable', 'portable', 'transportable', 'skids', 'towable', 'on skids'],
         'static': ['fixed', 'permanent', 'stationary', 'not mobile', 'non-mobile'],
@@ -2186,37 +2303,35 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         'months': ['2 months', 'two months', 'few months', 'couple months', 'several months', '3 months', 'three months'],
         'day': ['today', 'tomorrow', '1 day', 'a day', 'one day', 'within a day'],
         'days': ['2 days', 'few days', 'couple days', 'several days', 'within days'],
-        'yes': ['yeah', 'yep', 'sure', 'definitely', 'absolutely'],  // Removed single 'y' to prevent false matches
+        'yes': ['yeah', 'yep', 'sure', 'definitely', 'absolutely'],
         'no': ['nope', 'nah', 'not really', 'negative']
     };
     
     for (const [key, variants] of Object.entries(variations)) {
-        if (expectedList.includes(key)) {
-            for (const variant of variants) {
-                // Use word boundary matching to prevent substring matches (e.g., "y" in "urgently")
-                const regex = new RegExp(`\\b${variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-                const match = userMessage.match(regex);
-                if (match) {
-                    const matchedText = match[0];
-                    console.log(`      🔍 Found variation match: "${matchedText}" for key: "${key}" (variant: "${variant}")`);
-                    if (matchedText.length > longestMatch) {
-                        bestMatch = matchedText;  // Use actual matched text from message
-                        longestMatch = matchedText.length;
-                    }
-                }
+        if (!expectedList.includes(key)) continue;
+        for (const variant of variants) {
+            const variantRegex = new RegExp(`\\b${escapeRegex(variant)}\\b`, 'gi');
+            let match;
+            while ((match = variantRegex.exec(originalMessage)) !== null) {
+                recordMatch(match[0], match.index, variantRegex.lastIndex, `variant:${variant}`);
+                console.log(`      🔍 Found variation match: "${match[0]}" for key: "${key}" (variant: "${variant}")`);
             }
         }
     }
     
     if (bestMatch) {
-        console.log(`      ✅ Final match selected: "${bestMatch}"`);
-        return bestMatch;
+        const expanded = extractClauseForMatch(originalMessage, bestMatch.start, bestMatch.end);
+        const cleanedResult = cleanAnswerResult(expanded || bestMatch.text);
+        if (cleanedResult) {
+            console.log(`      ✅ Final match selected: "${cleanedResult}"${bestMatch.reason ? ` (${bestMatch.reason})` : ''}`);
+            return cleanedResult;
+        }
+
+        console.log(`      ✅ Final match selected: "${bestMatch.text}"${bestMatch.reason ? ` (${bestMatch.reason})` : ''}`);
+        return bestMatch.text;
     }
     
-    // IMPORTANT: Only return null if no match found
-    // Do NOT accept arbitrary text as an answer for specific questions
-    // This prevents false positives where Q2 gets extracted when not mentioned
-    console.log(`      ❌ No match found - returning null (no false positive)`);
+    console.log('      ❌ No match found - returning null (no false positive)');
     return null;
 }
 
