@@ -1584,6 +1584,7 @@
                 if (response.ok) {
                     leads = await response.json();
                     renderLeadsList();
+                    syncCurrentLeadWithLatest();
                 } else {
                     showNotification('Failed to load leads', 'error');
                 }
@@ -1615,6 +1616,10 @@
                     <div class="lead-phone">${lead.phone}</div>
                     <div class="lead-status status-${lead.status}">${lead.status}</div>
                 `;
+
+                if (currentLead && currentLead.id === lead.id) {
+                    leadItem.classList.add('active');
+                }
                 
                 leadItem.addEventListener('click', (event) => selectLead(lead, event));
                 leadsList.appendChild(leadItem);
@@ -1646,14 +1651,9 @@
                 });
             }
 
-            // Update chat header
-            document.getElementById('chat-title').textContent = `Chatting with ${lead.name}`;
-            document.getElementById('chat-status').textContent = `Status: ${lead.status} | Phone: ${lead.phone}`;
-
-            // Enable chat input and clear chat button
-            document.getElementById('message-input').disabled = false;
-            document.getElementById('send-btn').disabled = false;
-            document.getElementById('clear-chat-btn').disabled = false;
+            updateChatHeader();
+            setChatControlsEnabled(true);
+            loadLeadDetails();
 
             // Load messages for this lead
             loadMessages(lead.id);
@@ -1755,6 +1755,9 @@
                 document.getElementById('lead-email').textContent = '-';
                 document.getElementById('lead-source').textContent = '-';
                 document.getElementById('lead-status').textContent = '-';
+                document.getElementById('progress-fill').style.width = '0%';
+                document.getElementById('progress-text').textContent = '0 of 4 questions answered';
+                document.getElementById('questions-list').innerHTML = '';
                 return;
             }
 
@@ -3060,6 +3063,77 @@
             }, 250);
             
             showNotification('Opening print dialog...', 'success');
+        }
+
+        function setChatControlsEnabled(enabled) {
+            document.getElementById('message-input').disabled = !enabled;
+            document.getElementById('send-btn').disabled = !enabled;
+            document.getElementById('clear-chat-btn').disabled = !enabled;
+        }
+
+        function updateChatHeader() {
+            const titleEl = document.getElementById('chat-title');
+            const statusEl = document.getElementById('chat-status');
+
+            if (currentLead) {
+                const leadName = currentLead.name || 'Unknown';
+                const leadStatus = currentLead.status || '-';
+                const leadPhone = currentLead.phone || '-';
+                titleEl.textContent = `Chatting with ${leadName}`;
+                statusEl.textContent = `Status: ${leadStatus} | Phone: ${leadPhone}`;
+            } else {
+                titleEl.textContent = 'Select a lead to start chatting';
+                statusEl.textContent = 'Status: - | Phone: -';
+            }
+        }
+
+        function hasLeadDetailsChanged(previousLead, updatedLead) {
+            if (!previousLead || !updatedLead) return false;
+
+            const previousAnswers = JSON.stringify(previousLead.answers || {});
+            const updatedAnswers = JSON.stringify(updatedLead.answers || {});
+
+            return (
+                (previousLead.name || '') !== (updatedLead.name || '') ||
+                (previousLead.email || '') !== (updatedLead.email || '') ||
+                (previousLead.phone || '') !== (updatedLead.phone || '') ||
+                (previousLead.status || '') !== (updatedLead.status || '') ||
+                (previousLead.source || '') !== (updatedLead.source || '') ||
+                (previousLead.source_display || '') !== (updatedLead.source_display || '') ||
+                (previousLead.progress || 0) !== (updatedLead.progress || 0) ||
+                previousAnswers !== updatedAnswers
+            );
+        }
+
+        function handleCurrentLeadNoLongerActive() {
+            if (!currentLead) return;
+
+            showNotification('Lead moved to Customer Information tab.', 'info');
+            currentLead = null;
+            setChatControlsEnabled(false);
+            updateChatHeader();
+            loadLeadDetails();
+        }
+
+        function syncCurrentLeadWithLatest() {
+            if (!currentLead) return;
+
+            const updatedLead = leads.find(lead => lead.id === currentLead.id);
+            if (!updatedLead) {
+                handleCurrentLeadNoLongerActive();
+                return;
+            }
+
+            const detailsChanged = hasLeadDetailsChanged(currentLead, updatedLead);
+            currentLead = updatedLead;
+            updateChatHeader();
+
+            const leadDetailsSection = document.getElementById('lead-details');
+            const leadDetailsActive = leadDetailsSection && leadDetailsSection.classList.contains('active');
+
+            if (detailsChanged || leadDetailsActive) {
+                loadLeadDetails();
+            }
         }
     </script>
     
