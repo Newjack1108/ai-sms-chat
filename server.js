@@ -120,22 +120,25 @@ console.log('💾 Using SQLite database for persistent storage');
 // Default custom questions for lead qualification (can be updated via API)
 let CUSTOM_QUESTIONS = [
     {
-        question: "What type of building do you require?",
-        possibleAnswers: "Double, Single, Stables, Stable, Field shelter, Barn, 24ft, 12ft, 36ft, tack room"
+        question: 'What type and size of building do you require?',
+        possibleAnswers: 'mobile, skids, static, stables, stable, barn, field shelter, 12x12, 12x24, 24x12, 36x12, 12ft, 24ft, 36ft'
     },
     {
-        question: "Does your building need to be mobile?",
-        possibleAnswers: "skids, mobile, towable, yes, moveable, movable, portable, transportable, steel skid, wooden skids, on skids, no, static, fixed, permanent, stationary"
+        question: 'Do you need a mobile or static building?',
+        possibleAnswers: 'mobile, skids, static, permanent'
     },
     {
-        question: "How soon do you need the building?",
-        possibleAnswers: "ASAP, asap, urgent, urgently, soon, soonest, week, weeks, 1 week, a week, month, months, 1 month, a month, next year, day, days, today, tomorrow, tbc, TBC, don't mind, anytime, not fussed, quickly, fast, immediately"
+        question: 'When are you looking to have it ready for?',
+        possibleAnswers: 'asap, urgent, week, weeks, month, months, next year, soon, whenever'
     },
     {
-        question: "Did you supply the postcode where the building is to be installed?",
-        possibleAnswers: "any postcode format (lowercase and uppercase), collection, collect, pickup, pick up, ill get it, i'll get it, i will get it, getting it, ill collect, i'll collect, i will collect"
+        question: 'Finally, what postcode will the building be going to?',
+        possibleAnswers: 'any postcode format, collection, pick up, pickup, ill collect, i will collect'
     }
 ];
+
+const WEBHOOK_DEDUPE_WINDOW_MS = 15000; // 15 seconds dedupe window
+const recentWebhookEvents = new Map();
 
 // Assistant name (can be updated via API)
 let ASSISTANT_NAME = "William";
@@ -298,6 +301,24 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             return;
         }
         
+        // Dedupe repeated events for the same lead + event signature
+        const qualificationMethod = eventDetails && eventDetails.qualificationMethod ? eventDetails.qualificationMethod : 'none';
+        const eventHash = eventDetails && eventDetails.meta && eventDetails.meta.eventId
+            ? `${lead.id}:${eventType}:${eventDetails.meta.eventId}`
+            : `${lead.id}:${eventType}:${qualificationMethod}`;
+        const now = Date.now();
+        const lastSent = recentWebhookEvents.get(eventHash);
+        if (lastSent && (now - lastSent) < WEBHOOK_DEDUPE_WINDOW_MS) {
+            console.log(`⏩ Skipping duplicate webhook event (${eventHash}) sent ${now - lastSent}ms ago`);
+            return;
+        }
+        recentWebhookEvents.set(eventHash, now);
+        for (const [key, timestamp] of recentWebhookEvents.entries()) {
+            if (now - timestamp > WEBHOOK_DEDUPE_WINDOW_MS) {
+                recentWebhookEvents.delete(key);
+            }
+        }
+        
         console.log(`📤 Sending "${eventType}" event to CRM webhook...`);
         
         // Get source display name
@@ -404,11 +425,13 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             console.error('❌ CRM webhook failed:', response.status, response.statusText);
             const errorText = await response.text().catch(() => 'No error details');
             console.error('   Error details:', errorText);
+            recentWebhookEvents.delete(eventHash);
         }
         
     } catch (error) {
         console.error('❌ Error sending to CRM webhook:', error.message);
         console.error('   Stack:', error.stack);
+        recentWebhookEvents.delete(eventHash);
         // Don't throw - webhook failure shouldn't break the app
     }
 }
