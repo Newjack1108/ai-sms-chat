@@ -325,10 +325,37 @@ function normalizeLeadAnswers(lead) {
     return {};
 }
 
+// Helper function to create a shortened version of a question
+function shortenQuestion(questionText) {
+    if (!questionText) return '';
+    
+    // Remove common question starters
+    let shortened = questionText
+        .replace(/^(what|when|where|who|why|how|do|does|did|are|is|will|can|could|would)\s+/i, '')
+        .replace(/\?$/, '')
+        .trim();
+    
+    // Take first 40 characters or up to first comma/question mark
+    const maxLength = 40;
+    if (shortened.length > maxLength) {
+        const truncated = shortened.substring(0, maxLength);
+        // Try to break at a word boundary
+        const lastSpace = truncated.lastIndexOf(' ');
+        if (lastSpace > maxLength * 0.6) {
+            shortened = truncated.substring(0, lastSpace);
+        } else {
+            shortened = truncated;
+        }
+    }
+    
+    return shortened || questionText.substring(0, maxLength);
+}
+
 function buildLeadAnswerPayload(lead) {
     const normalizedAnswers = normalizeLeadAnswers(lead);
     const structuredAnswers = {};
     const flatAnswers = {};
+    const labeledAnswers = {};
     let answersCount = 0;
 
     for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
@@ -354,12 +381,24 @@ function buildLeadAnswerPayload(lead) {
 
         flatAnswers[`question_${questionNumber}_text`] = questionText;
         flatAnswers[`answer_${questionNumber}`] = answerValue;
+        
+        // Create labeled format: "Shortened Question: Answer"
+        if (answerValue && answerValue.length > 0) {
+            const shortQuestion = shortenQuestion(questionText);
+            labeledAnswers[answerKey] = `${shortQuestion}: ${answerValue}`;
+            // Also add as a numbered key for convenience
+            labeledAnswers[`q${questionNumber}_labeled`] = `${shortQuestion}: ${answerValue}`;
+        } else {
+            labeledAnswers[answerKey] = '';
+            labeledAnswers[`q${questionNumber}_labeled`] = '';
+        }
     }
 
     return {
         normalizedAnswers,
         structuredAnswers,
         flatAnswers,
+        labeledAnswers,
         answersCount
     };
 }
@@ -441,6 +480,7 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             normalizedAnswers,
             structuredAnswers,
             flatAnswers,
+            labeledAnswers,
             answersCount
         } = buildLeadAnswerPayload(lead);
         
@@ -501,12 +541,20 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             lead: leadPayload,
             customQuestions: CUSTOM_QUESTIONS,
             metadata,
-            answers_flat: flatAnswers
+            answers_flat: flatAnswers,
+            answers_labeled: labeledAnswers
         };
 
         // Expose convenience fields (answer_1, answer_2, etc.) for external tools
         Object.entries(flatAnswers).forEach(([key, value]) => {
             webhookData[key] = value;
+        });
+        
+        // Expose labeled answers (question: answer format) for convenience
+        Object.entries(labeledAnswers).forEach(([key, value]) => {
+            if (value) { // Only add non-empty labeled answers
+                webhookData[key] = value;
+            }
         });
         
         console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
