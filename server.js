@@ -550,7 +550,9 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             lead: leadPayload,
             customQuestions: CUSTOM_QUESTIONS,
             metadata,
-            answers_flat: flatAnswers
+            answers_flat: flatAnswers,
+            answers_structured: structuredAnswers,
+            answers_labeled: leadPayload.answers_labeled
         };
 
         // Expose convenience fields (answer_1, answer_2, etc.) for external tools
