@@ -2837,8 +2837,10 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             }
             
             // 🔥 SEND TO CRM WEBHOOK
+            // Reload lead from database to ensure all data is current and properly structured
             try {
-                await sendToCRMWebhook(lead, 'lead_qualified', {
+                const qualifiedLead = await LeadDatabase.getLeadById(lead.id);
+                await sendToCRMWebhook(qualifiedLead, 'lead_qualified', {
                     qualificationMethod: 'auto_conversation',
                     triggeredBy: 'incoming_sms'
                 });
