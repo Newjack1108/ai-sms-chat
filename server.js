@@ -484,6 +484,14 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             answersCount
         } = buildLeadAnswerPayload(lead);
         
+        // Build filtered labeled answers for leadPayload
+        const filteredLabeledAnswersForPayload = {};
+        Object.entries(labeledAnswers).forEach(([key, value]) => {
+            if (value && typeof value === 'string' && value.trim().length > 0) {
+                filteredLabeledAnswersForPayload[key] = value;
+            }
+        });
+        
         const leadPayload = {
             id: lead.id,
             name: lead.name,
@@ -498,6 +506,7 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             answers: normalizedAnswers,
             answers_structured: structuredAnswers,
             answers_flat: flatAnswers,
+            answers_labeled: filteredLabeledAnswersForPayload,
             returning_customer: Boolean(lead.returning_customer),
             times_qualified: lead.times_qualified || 0
         };
@@ -550,18 +559,18 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
         });
         
         // Expose labeled answers (question: answer format) for convenience
-        // Filter out empty values but keep the structure
-        const filteredLabeledAnswers = {};
-        Object.entries(labeledAnswers).forEach(([key, value]) => {
-            if (value && value.trim().length > 0) {
-                filteredLabeledAnswers[key] = value;
-                webhookData[key] = value; // Also expose as individual fields
-            }
+        // Use the same filtered labeled answers from leadPayload
+        Object.entries(leadPayload.answers_labeled).forEach(([key, value]) => {
+            webhookData[key] = value; // Also expose as individual fields
         });
         
-        // Add answers_labeled object to webhook data
-        webhookData.answers_labeled = filteredLabeledAnswers;
+        // Ensure answers_labeled is in webhookData (it should already be from leadPayload spread, but be explicit)
+        webhookData.answers_labeled = leadPayload.answers_labeled;
         
+        // Debug: Log labeled answers to verify they're being created
+        console.log('📋 Labeled answers (raw):', JSON.stringify(labeledAnswers, null, 2));
+        console.log('📋 Filtered labeled answers:', JSON.stringify(leadPayload.answers_labeled, null, 2));
+        console.log('📦 Webhook payload (answers_labeled check):', webhookData.answers_labeled ? 'EXISTS' : 'MISSING');
         console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
         
         // Send webhook
