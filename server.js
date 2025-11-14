@@ -541,8 +541,7 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             lead: leadPayload,
             customQuestions: CUSTOM_QUESTIONS,
             metadata,
-            answers_flat: flatAnswers,
-            answers_labeled: labeledAnswers
+            answers_flat: flatAnswers
         };
 
         // Expose convenience fields (answer_1, answer_2, etc.) for external tools
@@ -551,11 +550,17 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
         });
         
         // Expose labeled answers (question: answer format) for convenience
+        // Filter out empty values but keep the structure
+        const filteredLabeledAnswers = {};
         Object.entries(labeledAnswers).forEach(([key, value]) => {
-            if (value) { // Only add non-empty labeled answers
-                webhookData[key] = value;
+            if (value && value.trim().length > 0) {
+                filteredLabeledAnswers[key] = value;
+                webhookData[key] = value; // Also expose as individual fields
             }
         });
+        
+        // Add answers_labeled object to webhook data
+        webhookData.answers_labeled = filteredLabeledAnswers;
         
         console.log('📦 Webhook payload:', JSON.stringify(webhookData, null, 2));
         
