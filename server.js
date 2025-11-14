@@ -366,21 +366,33 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             return;
         }
         
-        // For 'lead_qualified' events, only send if lead is actually qualified
-        // This prevents sending blank/incomplete leads to CRM
-        // Exception: Silent qualifications (manual admin action) always send webhook
-        if (eventType === 'lead_qualified') {
-            const isSilentQualification = eventDetails.silentQualification === true;
-            const isQualified = Boolean(lead.qualified) || (lead.progress || 0) >= 100;
-            
-            if (!isQualified && !isSilentQualification) {
-                console.log(`⏩ Skipping webhook - lead ${lead.id} is not qualified yet (progress: ${lead.progress || 0}%, qualified: ${lead.qualified})`);
-                return;
-            }
-            
-            if (isSilentQualification) {
-                console.log(`🔇 Silent qualification - sending webhook even if lead data is incomplete`);
-            }
+        // Only send webhooks for qualified leads to prevent blank leads in CRM
+        // Exception: Silent qualifications (manual admin action) - always send
+        const isQualified = Boolean(lead.qualified) || (lead.progress || 0) >= 100;
+        const isSilentQualification = eventDetails.silentQualification === true;
+        
+        // For lead_qualified events, only send if actually qualified (unless silent qualification)
+        if (eventType === 'lead_qualified' && !isQualified && !isSilentQualification) {
+            console.log(`⏩ Skipping webhook - lead ${lead.id} is not qualified yet (progress: ${lead.progress || 0}%, qualified: ${lead.qualified})`);
+            return;
+        }
+        
+        // For lead_returning_customer events, only send if lead is qualified
+        // This prevents blank leads from being created in CRM
+        if (eventType === 'lead_returning_customer' && !isQualified) {
+            console.log(`⏩ Skipping lead_returning_customer webhook - lead ${lead.id} is not qualified yet (progress: ${lead.progress || 0}%, qualified: ${lead.qualified})`);
+            return;
+        }
+        
+        // For any other event type, if lead is not qualified and it's not a silent qualification, skip
+        // This prevents blank leads from being created in CRM during lead creation
+        if (!isQualified && !isSilentQualification) {
+            console.log(`⏩ Skipping webhook - lead ${lead.id} is not qualified and event type '${eventType}' requires qualification`);
+            return;
+        }
+        
+        if (isSilentQualification) {
+            console.log(`🔇 Silent qualification - sending webhook even if lead data is incomplete`);
         }
         
         // Dedupe repeated events for the same lead + event signature
