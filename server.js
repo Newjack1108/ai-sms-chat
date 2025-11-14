@@ -140,12 +140,21 @@ let CUSTOM_QUESTIONS = [
 const WEBHOOK_DEDUPE_WINDOW_MS = 15000; // 15 seconds dedupe window
 const recentWebhookEvents = new Map();
 
+// Helper function to validate postcode has minimum 1 letter and 1 number
+// This prevents "No" (2 letters, 0 numbers) from being accepted while allowing "M1" (1 letter, 1 number)
+function isValidPostcodeFormat(text) {
+    if (!text) return false;
+    const letters = (text.match(/[A-Z]/gi) || []).length;
+    const numbers = (text.match(/\d/g) || []).length;
+    return letters >= 1 && numbers >= 1;
+}
+
 const POSTCODE_PATTERNS = [
     /\b([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})\b/gi,
     /\b([A-Z]{2}\d\s?\d[A-Z]{2})\b/gi,
     /\b([A-Z]\d{1,2}\s?\d[A-Z]{2})\b/gi,
     /\b([A-Z]{1,2}\d[A-Z]\s?\d[A-Z]{2})\b/gi,
-    /\b([A-Z]{1,2}\d{1,2}[A-Z]?)\b/gi
+    /\b([A-Z]{1,}\d{1,}[A-Z]?)\b/gi  // Updated: requires at least 1 letter and 1+ numbers
 ];
 
 const TIMEFRAME_PATTERNS = [
@@ -2377,7 +2386,11 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         for (const pattern of POSTCODE_PATTERNS) {
             let match;
             while ((match = pattern.exec(originalMessage)) !== null) {
-                recordMatch(match[0].toUpperCase(), match.index, pattern.lastIndex, 'postcode pattern');
+                const matchedText = match[0].toUpperCase();
+                // Validate: must have at least 1 letter and 1 number
+                if (isValidPostcodeFormat(matchedText)) {
+                    recordMatch(matchedText, match.index, pattern.lastIndex, 'postcode pattern');
+                }
             }
         }
         
@@ -2385,7 +2398,10 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
         let postcodeTextMatch;
         while ((postcodeTextMatch = postcodeTextRegex.exec(originalMessage)) !== null) {
             const extracted = postcodeTextMatch[0].replace(/postcode[:\s]+/gi, '').trim().toUpperCase();
-            recordMatch(extracted, postcodeTextMatch.index, postcodeTextRegex.lastIndex, 'postcode text match');
+            // Validate: must have at least 2 letters and 1 number
+            if (isValidPostcodeFormat(extracted)) {
+                recordMatch(extracted, postcodeTextMatch.index, postcodeTextRegex.lastIndex, 'postcode text match');
+            }
         }
     }
     
@@ -2469,8 +2485,8 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
                 cleanedResult = cleanAnswerResult(bestMatch.text);
             }
         } else if (questionNumber === 4) {
-            const postcodeMatch = expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b/i) || expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\b/i);
-            if (postcodeMatch) {
+            const postcodeMatch = expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b/i) || expanded.match(/\b[A-Z]{1,}\d{1,}[A-Z]?\b/i);
+            if (postcodeMatch && isValidPostcodeFormat(postcodeMatch[0])) {
                 cleanedResult = postcodeMatch[0].toUpperCase();
             } else {
                 cleanedResult = cleanAnswerResult(bestMatch.text.toUpperCase());
@@ -2557,17 +2573,22 @@ function validateAnswer(userMessage, expectedAnswers) {
             }
         }
         
-        // More lenient postcode patterns
+        // More lenient postcode patterns - but must have at least 1 letter and 1 number
         const postcodePatterns = [
             /^[a-z]{1,2}\d{1,2}[a-z]?\s?\d[a-z]{2}$/i,  // Standard UK format
             /^[a-z]{2}\d\s?\d[a-z]{2}$/i,               // Simplified format
-            /\b[a-z]{1,2}\d{1,2}\s?\d[a-z]{2}\b/gi      // Embedded in text
+            /\b[a-z]{1,}\d{1,}\s?\d[a-z]{2}\b/gi,       // Embedded in text - requires 1+ letters
+            /\b[a-z]{1,}\d{1,}[a-z]?\b/gi               // Short format - requires 1+ letters and 1+ numbers
         ];
         
         for (const pattern of postcodePatterns) {
-            if (pattern.test(userAnswer)) {
-                console.log(`      ✅ Postcode pattern match found`);
-                return true;
+            const match = userAnswer.match(pattern);
+            if (match) {
+                // Validate: must have at least 1 letter and 1 number
+                if (isValidPostcodeFormat(match[0])) {
+                    console.log(`      ✅ Postcode pattern match found: ${match[0]}`);
+                    return true;
+                }
             }
         }
     }
