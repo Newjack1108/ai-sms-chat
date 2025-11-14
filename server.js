@@ -2485,11 +2485,46 @@ function extractAnswerForQuestion(userMessage, possibleAnswers, questionNumber) 
                 cleanedResult = cleanAnswerResult(bestMatch.text);
             }
         } else if (questionNumber === 4) {
-            const postcodeMatch = expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b/i) || expanded.match(/\b[A-Z]{1,}\d{1,}[A-Z]?\b/i);
-            if (postcodeMatch && isValidPostcodeFormat(postcodeMatch[0])) {
-                cleanedResult = postcodeMatch[0].toUpperCase();
+            // Check for collection keywords first
+            const collectionKeywords = ['collection', 'collect', 'pickup', 'pick up', 'pick-up', 
+                'ill get it', "i'll get it", 'i will get it', 'getting it',
+                'ill collect', "i'll collect", 'i will collect'];
+            const isCollectionKeyword = collectionKeywords.some(keyword => 
+                new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'gi').test(expanded || bestMatch.text)
+            );
+            
+            if (isCollectionKeyword) {
+                // Extract the collection keyword
+                for (const keyword of collectionKeywords) {
+                    const keywordRegex = new RegExp(`\\b${escapeRegex(keyword)}\\b`, 'gi');
+                    const match = (expanded || bestMatch.text).match(keywordRegex);
+                    if (match) {
+                        cleanedResult = match[0];
+                        break;
+                    }
+                }
             } else {
-                cleanedResult = cleanAnswerResult(bestMatch.text.toUpperCase());
+                // Only accept valid postcodes - reject "No" and other non-postcode answers
+                const postcodeMatch = expanded.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b/i) || expanded.match(/\b[A-Z]{1,}\d{1,}[A-Z]?\b/i);
+                if (postcodeMatch && isValidPostcodeFormat(postcodeMatch[0])) {
+                    cleanedResult = postcodeMatch[0].toUpperCase();
+                } else {
+                    // Reject common non-postcode answers like "No", "Yes", etc.
+                    const rejectedAnswers = ['no', 'yes', 'nope', 'nah', 'yeah', 'yep', 'sure', 'ok', 'okay'];
+                    const bestMatchLower = (bestMatch.text || '').toLowerCase().trim();
+                    if (rejectedAnswers.includes(bestMatchLower)) {
+                        console.log(`      ⏩ Rejecting non-postcode answer "${bestMatch.text}" for question 4`);
+                        return null; // Don't accept this as a postcode answer
+                    }
+                    // Only use bestMatch if it looks like it could be a postcode
+                    const potentialPostcode = cleanAnswerResult(bestMatch.text.toUpperCase());
+                    if (isValidPostcodeFormat(potentialPostcode)) {
+                        cleanedResult = potentialPostcode;
+                    } else {
+                        console.log(`      ⏩ Rejecting "${bestMatch.text}" - not a valid postcode format`);
+                        return null; // Don't accept non-postcode answers
+                    }
+                }
             }
         }
 
