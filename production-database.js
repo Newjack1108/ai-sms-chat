@@ -664,6 +664,51 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
         
+        // Migrate production_users role constraint to include 'staff'
+        try {
+            // Check if constraint needs updating by trying to find existing constraint
+            const constraintCheck = await pool.query(`
+                SELECT constraint_name 
+                FROM information_schema.table_constraints 
+                WHERE table_name = 'production_users' 
+                AND constraint_type = 'CHECK'
+            `);
+            
+            if (constraintCheck.rows.length > 0) {
+                // Try to drop and recreate constraint
+                for (const constraint of constraintCheck.rows) {
+                    try {
+                        await pool.query(`ALTER TABLE production_users DROP CONSTRAINT IF EXISTS ${constraint.constraint_name}`);
+                    } catch (e) {
+                        // Constraint might be named differently or already dropped
+                        console.log('⚠️ Could not drop constraint:', constraint.constraint_name, e.message);
+                    }
+                }
+            }
+            
+            // Add new constraint with staff role (will fail silently if already exists with correct values)
+            try {
+                await pool.query(`
+                    ALTER TABLE production_users 
+                    DROP CONSTRAINT IF EXISTS production_users_role_check
+                `);
+                await pool.query(`
+                    ALTER TABLE production_users 
+                    ADD CONSTRAINT production_users_role_check 
+                    CHECK (role IN ('admin', 'manager', 'staff'))
+                `);
+                console.log('✅ Updated production_users role constraint to include staff');
+            } catch (e) {
+                // Constraint might already be correct or table doesn't exist yet
+                if (!e.message.includes('does not exist')) {
+                    console.log('⚠️ Role constraint update:', e.message);
+                }
+            }
+        } catch (error) {
+            // If constraint doesn't exist or update fails, table creation will handle it
+            console.log('⚠️ Role constraint migration check:', error.message);
+        }
+        
         // Migrate existing panels table to add new columns
         await pool.query(`
             DO $$ 
