@@ -51,7 +51,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cost (GBP)</label>
-                    <input type="number" step="0.01" id="panelCost" class="form-input" value="0">
+                    <input type="number" step="0.01" id="panelCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
+                    <small style="color: #6c757d;">Calculated automatically from BOM + Labour</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Built Quantity</label>
@@ -176,7 +177,9 @@
                 document.getElementById('panelName').value = panel.name;
                 document.getElementById('panelDescription').value = panel.description || '';
                 document.getElementById('panelType').value = panel.panel_type || '';
-                document.getElementById('panelCost').value = panel.cost_gbp;
+                // Load calculated cost
+                const trueCostData = await apiCall(`/panels/${panel.id}/true-cost`);
+                document.getElementById('panelCost').value = trueCostData.true_cost.toFixed(2);
                 document.getElementById('panelBuiltQty').value = panel.built_quantity || 0;
                 document.getElementById('panelMinStock').value = panel.min_stock || 0;
                 document.getElementById('panelLabourHours').value = panel.labour_hours || 0;
@@ -417,7 +420,6 @@
                 name: document.getElementById('panelName').value,
                 description: document.getElementById('panelDescription').value,
                 panel_type: document.getElementById('panelType').value,
-                cost_gbp: document.getElementById('panelCost').value,
                 built_quantity: document.getElementById('panelBuiltQty').value,
                 min_stock: document.getElementById('panelMinStock').value,
                 labour_hours: document.getElementById('panelLabourHours').value,

@@ -51,7 +51,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cost (GBP)</label>
-                    <input type="number" step="0.01" id="productCost" class="form-input" value="0">
+                    <input type="number" step="0.01" id="productCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
+                    <small style="color: #6c757d;">Calculated automatically from Panels + Materials</small>
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary">Cancel</button>
@@ -124,7 +125,7 @@
                                 <th>Name</th>
                                 <th>Type</th>
                                 <th>Status</th>
-                                <th>Cost</th>
+                                <th>Cost (Auto)</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -167,7 +168,9 @@
                 document.getElementById('productName').value = product.name;
                 document.getElementById('productDescription').value = product.description || '';
                 document.getElementById('productType').value = product.product_type || '';
-                document.getElementById('productCost').value = product.cost_gbp;
+                // Load calculated cost
+                const costData = await apiCall(`/products/${product.id}/cost`);
+                document.getElementById('productCost').value = costData.cost.toFixed(2);
                 showModal('productModal');
             } catch (error) {
                 showAlert('Error loading product', 'error');
@@ -307,7 +310,6 @@
                 name: document.getElementById('productName').value,
                 description: document.getElementById('productDescription').value,
                 product_type: document.getElementById('productType').value,
-                cost_gbp: document.getElementById('productCost').value,
                 status: 'active'
             };
             

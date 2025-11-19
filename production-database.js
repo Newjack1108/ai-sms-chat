@@ -694,22 +694,31 @@ class ProductionDatabase {
     // ============ PANELS OPERATIONS ============
     
     static async createPanel(data) {
+        // Cost will be calculated automatically, but allow override for initial creation
+        const initialCost = data.cost_gbp || 0;
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-                [data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0, 
+                [data.name, data.description, data.panel_type, data.status || 'active', initialCost, 
                  data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
             );
-            return result.rows[0];
+            const panel = result.rows[0];
+            // Recalculate cost after creation (will update if BOM exists)
+            await this.updatePanelCost(panel.id);
+            return await this.getPanelById(panel.id);
         } else {
             const stmt = db.prepare(
                 `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0,
+            const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', initialCost,
                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
-            return this.getPanelById(info.lastInsertRowid);
+            const panel = await this.getPanelById(info.lastInsertRowid);
+            // Recalculate cost after creation
+            await this.updatePanelCost(panel.id);
+            return await this.getPanelById(panel.id);
         }
     }
     
@@ -734,20 +743,24 @@ class ProductionDatabase {
     static async updatePanel(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE panels SET name = $1, description = $2, panel_type = $3, status = $4, cost_gbp = $5, 
-                 built_quantity = $6, min_stock = $7, labour_hours = $8
-                 WHERE id = $9 RETURNING *`,
-                [data.name, data.description, data.panel_type, data.status, data.cost_gbp, 
+                `UPDATE panels SET name = $1, description = $2, panel_type = $3, status = $4, 
+                 built_quantity = $5, min_stock = $6, labour_hours = $7
+                 WHERE id = $8 RETURNING *`,
+                [data.name, data.description, data.panel_type, data.status, 
                  data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id]
             );
-            return result.rows[0];
+            // Recalculate cost automatically (BOM + labour)
+            await this.updatePanelCost(id);
+            return await this.getPanelById(id);
         } else {
             db.prepare(
-                `UPDATE panels SET name = ?, description = ?, panel_type = ?, status = ?, cost_gbp = ?,
+                `UPDATE panels SET name = ?, description = ?, panel_type = ?, status = ?,
                  built_quantity = ?, min_stock = ?, labour_hours = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.panel_type, data.status, data.cost_gbp,
+            ).run(data.name, data.description, data.panel_type, data.status,
                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id);
+            // Recalculate cost automatically
+            await this.updatePanelCost(id);
             return this.getPanelById(id);
         }
     }
@@ -761,6 +774,8 @@ class ProductionDatabase {
                  VALUES ($1, $2, $3, $4) RETURNING *`,
                 [panelId, stockItemId, quantityRequired, unit]
             );
+            // Recalculate panel cost after BOM change
+            await this.updatePanelCost(panelId);
             return result.rows[0];
         } else {
             const stmt = db.prepare(
@@ -768,6 +783,8 @@ class ProductionDatabase {
                  VALUES (?, ?, ?, ?)`
             );
             const info = stmt.run(panelId, stockItemId, quantityRequired, unit);
+            // Recalculate panel cost after BOM change
+            await this.updatePanelCost(panelId);
             return this.getBOMItemById(info.lastInsertRowid);
         }
     }
@@ -802,10 +819,19 @@ class ProductionDatabase {
     }
     
     static async deleteBOMItem(bomId) {
+        // Get panel ID before deleting
+        const bomItem = await this.getBOMItemById(bomId);
+        const panelId = bomItem ? bomItem.panel_id : null;
+        
         if (isPostgreSQL) {
             await pool.query(`DELETE FROM bom_items WHERE id = $1`, [bomId]);
         } else {
             db.prepare(`DELETE FROM bom_items WHERE id = ?`).run(bomId);
+        }
+        
+        // Recalculate panel cost after BOM change
+        if (panelId) {
+            await this.updatePanelCost(panelId);
         }
     }
     
@@ -836,6 +862,77 @@ class ProductionDatabase {
         const labourCost = labourHours * parseFloat(labourRate || 25);
         
         return bomValue + labourCost;
+    }
+    
+    // Calculate product cost from components (panels + raw materials)
+    static async calculateProductCost(productId) {
+        const components = await this.getProductComponents(productId);
+        let totalCost = 0;
+        
+        for (const comp of components) {
+            const compQty = parseFloat(comp.quantity_required || 0);
+            
+            if (comp.component_type === 'panel') {
+                // Get panel's true cost (BOM + labour)
+                const panelCost = await this.calculatePanelTrueCost(comp.component_id);
+                totalCost += panelCost * compQty;
+            } else if (comp.component_type === 'raw_material') {
+                // Get raw material cost
+                const stockItem = await this.getStockItemById(comp.component_id);
+                if (stockItem) {
+                    const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
+                    totalCost += materialCost;
+                }
+            }
+        }
+        
+        return totalCost;
+    }
+    
+    // Update panel cost automatically (called after BOM or labour changes)
+    static async updatePanelCost(panelId) {
+        const trueCost = await this.calculatePanelTrueCost(panelId);
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE panels SET cost_gbp = $1 WHERE id = $2`, [trueCost, panelId]);
+        } else {
+            db.prepare(`UPDATE panels SET cost_gbp = ? WHERE id = ?`).run(trueCost, panelId);
+        }
+        // Recalculate all products that use this panel
+        await this.recalculateProductsUsingPanel(panelId);
+        return trueCost;
+    }
+    
+    // Update product cost automatically (called after components change)
+    static async updateProductCost(productId) {
+        const productCost = await this.calculateProductCost(productId);
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE finished_products SET cost_gbp = $1 WHERE id = $2`, [productCost, productId]);
+        } else {
+            db.prepare(`UPDATE finished_products SET cost_gbp = ? WHERE id = ?`).run(productCost, productId);
+        }
+        return productCost;
+    }
+    
+    // Recalculate all products that use a specific panel (called when panel cost changes)
+    static async recalculateProductsUsingPanel(panelId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT product_id FROM product_components 
+                 WHERE component_type = 'panel' AND component_id = $1`,
+                [panelId]
+            );
+            for (const row of result.rows) {
+                await this.updateProductCost(row.product_id);
+            }
+        } else {
+            const products = db.prepare(
+                `SELECT DISTINCT product_id FROM product_components 
+                 WHERE component_type = 'panel' AND component_id = ?`
+            ).all(panelId);
+            for (const product of products) {
+                await this.updateProductCost(product.product_id);
+            }
+        }
     }
     
     // Update panel built quantity
@@ -979,20 +1076,29 @@ class ProductionDatabase {
     // ============ FINISHED PRODUCTS OPERATIONS ============
     
     static async createProduct(data) {
+        // Cost will be calculated automatically from components
+        const initialCost = data.cost_gbp || 0;
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO finished_products (name, description, product_type, status, cost_gbp)
                  VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [data.name, data.description, data.product_type, data.status || 'active', data.cost_gbp || 0]
+                [data.name, data.description, data.product_type, data.status || 'active', initialCost]
             );
-            return result.rows[0];
+            const product = result.rows[0];
+            // Recalculate cost after creation (will update if components exist)
+            await this.updateProductCost(product.id);
+            return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
                 `INSERT INTO finished_products (name, description, product_type, status, cost_gbp)
                  VALUES (?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, data.status || 'active', data.cost_gbp || 0);
-            return this.getProductById(info.lastInsertRowid);
+            const info = stmt.run(data.name, data.description, data.product_type, data.status || 'active', initialCost);
+            const product = await this.getProductById(info.lastInsertRowid);
+            // Recalculate cost after creation
+            await this.updateProductCost(product.id);
+            return await this.getProductById(product.id);
         }
     }
     
@@ -1017,16 +1123,20 @@ class ProductionDatabase {
     static async updateProduct(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE finished_products SET name = $1, description = $2, product_type = $3, status = $4, cost_gbp = $5
-                 WHERE id = $6 RETURNING *`,
-                [data.name, data.description, data.product_type, data.status, data.cost_gbp, id]
+                `UPDATE finished_products SET name = $1, description = $2, product_type = $3, status = $4
+                 WHERE id = $5 RETURNING *`,
+                [data.name, data.description, data.product_type, data.status, id]
             );
-            return result.rows[0];
+            // Recalculate cost automatically from components
+            await this.updateProductCost(id);
+            return await this.getProductById(id);
         } else {
             db.prepare(
-                `UPDATE finished_products SET name = ?, description = ?, product_type = ?, status = ?, cost_gbp = ?
+                `UPDATE finished_products SET name = ?, description = ?, product_type = ?, status = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.product_type, data.status, data.cost_gbp, id);
+            ).run(data.name, data.description, data.product_type, data.status, id);
+            // Recalculate cost automatically
+            await this.updateProductCost(id);
             return this.getProductById(id);
         }
     }
@@ -1040,6 +1150,8 @@ class ProductionDatabase {
                  VALUES ($1, $2, $3, $4, $5) RETURNING *`,
                 [productId, componentType, componentId, quantityRequired, unit]
             );
+            // Recalculate product cost after component change
+            await this.updateProductCost(productId);
             return result.rows[0];
         } else {
             const stmt = db.prepare(
@@ -1047,6 +1159,8 @@ class ProductionDatabase {
                  VALUES (?, ?, ?, ?, ?)`
             );
             const info = stmt.run(productId, componentType, componentId, quantityRequired, unit);
+            // Recalculate product cost after component change
+            await this.updateProductCost(productId);
             return this.getProductComponentById(info.lastInsertRowid);
         }
     }
@@ -1091,10 +1205,19 @@ class ProductionDatabase {
     }
     
     static async deleteProductComponent(compId) {
+        // Get product ID before deleting
+        const comp = await this.getProductComponentById(compId);
+        const productId = comp ? comp.product_id : null;
+        
         if (isPostgreSQL) {
             await pool.query(`DELETE FROM product_components WHERE id = $1`, [compId]);
         } else {
             db.prepare(`DELETE FROM product_components WHERE id = ?`).run(compId);
+        }
+        
+        // Recalculate product cost after component change
+        if (productId) {
+            await this.updateProductCost(productId);
         }
     }
     

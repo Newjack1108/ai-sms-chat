@@ -256,17 +256,17 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
 
 router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
         
+        // Cost is calculated automatically from BOM + labour
         const panel = await ProductionDatabase.createPanel({
             name,
             description,
             panel_type,
             status,
-            cost_gbp: parseFloat(cost_gbp) || 0,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
@@ -281,14 +281,14 @@ router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => 
 router.put('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const { name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
         
+        // Cost is calculated automatically from BOM + labour
         const panel = await ProductionDatabase.updatePanel(panelId, {
             name,
             description,
             panel_type,
             status,
-            cost_gbp: parseFloat(cost_gbp) || 0,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
@@ -461,17 +461,17 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, description, product_type, status, cost_gbp } = req.body;
+        const { name, description, product_type, status } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
         
+        // Cost is calculated automatically from components (panels + materials)
         const product = await ProductionDatabase.createProduct({
             name,
             description,
             product_type,
-            status,
-            cost_gbp: parseFloat(cost_gbp) || 0
+            status
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -483,14 +483,14 @@ router.post('/products', requireProductionAuth, requireAdmin, async (req, res) =
 router.put('/products/:id', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, status, cost_gbp } = req.body;
+        const { name, description, product_type, status } = req.body;
         
+        // Cost is calculated automatically from components
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
             product_type,
-            status,
-            cost_gbp: parseFloat(cost_gbp) || 0
+            status
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -507,6 +507,17 @@ router.get('/products/:id/components', requireProductionAuth, async (req, res) =
     } catch (error) {
         console.error('Get product components error:', error);
         res.status(500).json({ success: false, error: 'Failed to get product components' });
+    }
+});
+
+router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        const productCost = await ProductionDatabase.calculateProductCost(productId);
+        res.json({ success: true, cost: productCost });
+    } catch (error) {
+        console.error('Calculate product cost error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate product cost' });
     }
 });
 
