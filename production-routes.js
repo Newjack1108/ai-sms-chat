@@ -95,10 +95,21 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
         res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
     } catch (error) {
         console.error('Create user error:', error);
-        if (error.message && error.message.includes('UNIQUE')) {
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+        if (error.message && (error.message.includes('UNIQUE') || error.message.includes('duplicate'))) {
             res.status(400).json({ success: false, error: 'Username already exists' });
+        } else if (error.message && error.message.includes('CHECK constraint')) {
+            res.status(400).json({ 
+                success: false, 
+                error: 'Invalid role. The database may need to be migrated. Please contact support or restart the server.' 
+            });
         } else {
-            res.status(500).json({ success: false, error: 'Failed to create user' });
+            res.status(500).json({ 
+                success: false, 
+                error: 'Failed to create user',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
         }
     }
 });

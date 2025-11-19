@@ -369,6 +369,40 @@ function initializeSQLite() {
         db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run('labour_rate_per_hour', '25.00');
     }
     
+    // Migrate production_users role constraint to include 'staff'
+    // SQLite doesn't support ALTER TABLE for CHECK constraints, so we need to recreate the table
+    try {
+        // Check if table exists and has old constraint
+        const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
+        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'staff'")) {
+            console.log('🔄 Migrating production_users table to support staff role...');
+            
+            // Create new table with updated constraint
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS production_users_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            `);
+            
+            // Copy data
+            db.exec('INSERT INTO production_users_new SELECT * FROM production_users');
+            
+            // Drop old table
+            db.exec('DROP TABLE production_users');
+            
+            // Rename new table
+            db.exec('ALTER TABLE production_users_new RENAME TO production_users');
+            
+            console.log('✅ Migrated production_users table to support staff role');
+        }
+    } catch (error) {
+        console.log('⚠️ Role constraint migration check skipped:', error.message);
+    }
+    
     console.log('✅ Production SQLite database initialized');
 }
 
