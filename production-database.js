@@ -261,6 +261,51 @@ function initializeSQLite() {
         )
     `);
     
+    // Jobs/Sites table for timesheet
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Timesheet entries table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS timesheet_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL,
+            clock_in_time TEXT NOT NULL,
+            clock_out_time TEXT,
+            clock_in_latitude REAL,
+            clock_in_longitude REAL,
+            clock_out_latitude REAL,
+            clock_out_longitude REAL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            FOREIGN KEY (job_id) REFERENCES jobs(id)
+        )
+    `);
+    
+    // Timesheet notices table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS timesheet_notices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            priority TEXT DEFAULT 'normal' CHECK(priority IN ('low', 'normal', 'high', 'urgent')),
+            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+            created_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT,
+            FOREIGN KEY (created_by) REFERENCES production_users(id)
+        )
+    `);
+    
     // Create indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
@@ -274,6 +319,10 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id);
         CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id);
         CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date);
+        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id);
+        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id);
+        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time);
+        CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status);
     `);
     
     // Migrate existing panels table to add new columns
@@ -522,6 +571,48 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Jobs/Sites table for timesheet
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS jobs (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                status VARCHAR(20) DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Timesheet entries table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS timesheet_entries (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                job_id INTEGER NOT NULL REFERENCES jobs(id),
+                clock_in_time TIMESTAMP NOT NULL,
+                clock_out_time TIMESTAMP,
+                clock_in_latitude DECIMAL(10,8),
+                clock_in_longitude DECIMAL(11,8),
+                clock_out_latitude DECIMAL(10,8),
+                clock_out_longitude DECIMAL(11,8),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Timesheet notices table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS timesheet_notices (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                message TEXT NOT NULL,
+                priority VARCHAR(20) DEFAULT 'normal' CHECK(priority IN ('low', 'normal', 'high', 'urgent')),
+                status VARCHAR(20) DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+                created_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+        `);
+        
         // Create indexes
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_stock ON bom_items(stock_item_id)`);
@@ -534,6 +625,10 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
         
         // Migrate existing panels table to add new columns
         await pool.query(`
@@ -1793,6 +1888,368 @@ class ProductionDatabase {
             const order = this.getProductOrderById(id);
             db.prepare(`DELETE FROM product_orders WHERE id = ?`).run(id);
             return order;
+        }
+    }
+    
+    // ============ TIMESHEET OPERATIONS ============
+    
+    // Job/Site operations
+    static async createJob(name, description) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO jobs (name, description) VALUES ($1, $2) RETURNING *`,
+                [name, description]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(`INSERT INTO jobs (name, description) VALUES (?, ?)`);
+            const info = stmt.run(name, description);
+            return this.getJobById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getAllJobs() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM jobs WHERE status = 'active' ORDER BY name`);
+            return result.rows;
+        } else {
+            return db.prepare(`SELECT * FROM jobs WHERE status = 'active' ORDER BY name`).all();
+        }
+    }
+    
+    static async getAllJobsIncludingInactive() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM jobs ORDER BY status DESC, name`);
+            return result.rows;
+        } else {
+            return db.prepare(`SELECT * FROM jobs ORDER BY status DESC, name`).all();
+        }
+    }
+    
+    static async getJobById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM jobs WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async updateJob(id, name, description, status) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE jobs SET name = $1, description = $2, status = $3 WHERE id = $4 RETURNING *`,
+                [name, description, status, id]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(`UPDATE jobs SET name = ?, description = ?, status = ? WHERE id = ?`).run(name, description, status, id);
+            return this.getJobById(id);
+        }
+    }
+    
+    static async deleteJob(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`DELETE FROM jobs WHERE id = $1 RETURNING *`, [id]);
+            return result.rows[0] || null;
+        } else {
+            const job = this.getJobById(id);
+            db.prepare(`DELETE FROM jobs WHERE id = ?`).run(id);
+            return job;
+        }
+    }
+    
+    // Timesheet entry operations
+    static async getCurrentClockStatus(userId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.user_id = $1 AND te.clock_out_time IS NULL
+                 ORDER BY te.clock_in_time DESC
+                 LIMIT 1`,
+                [userId]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.user_id = ? AND te.clock_out_time IS NULL
+                 ORDER BY te.clock_in_time DESC
+                 LIMIT 1`
+            ).get(userId) || null;
+        }
+    }
+    
+    static async clockIn(userId, jobId, latitude, longitude) {
+        const clockInTime = new Date().toISOString();
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO timesheet_entries (user_id, job_id, clock_in_time, clock_in_latitude, clock_in_longitude)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [userId, jobId, clockInTime, latitude, longitude]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO timesheet_entries (user_id, job_id, clock_in_time, clock_in_latitude, clock_in_longitude)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(userId, jobId, clockInTime, latitude, longitude);
+            return this.getTimesheetEntryById(info.lastInsertRowid);
+        }
+    }
+    
+    static async clockOut(userId, latitude, longitude) {
+        const clockOutTime = new Date().toISOString();
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE timesheet_entries 
+                 SET clock_out_time = $1, clock_out_latitude = $2, clock_out_longitude = $3, updated_at = $1
+                 WHERE user_id = $4 AND clock_out_time IS NULL
+                 RETURNING *`,
+                [clockOutTime, latitude, longitude, userId]
+            );
+            return result.rows[0] || null;
+        } else {
+            // Get the entry before updating
+            const currentEntry = this.getCurrentClockStatus(userId);
+            if (!currentEntry) {
+                return null;
+            }
+            db.prepare(
+                `UPDATE timesheet_entries 
+                 SET clock_out_time = ?, clock_out_latitude = ?, clock_out_longitude = ?, updated_at = ?
+                 WHERE user_id = ? AND clock_out_time IS NULL`
+            ).run(clockOutTime, latitude, longitude, clockOutTime, userId);
+            // Return the updated entry
+            return this.getTimesheetEntryById(currentEntry.id);
+        }
+    }
+    
+    static async getTimesheetEntryById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.id = $1`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.id = ?`
+            ).get(id) || null;
+        }
+    }
+    
+    static async getActiveClockIns() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.clock_out_time IS NULL
+                 ORDER BY te.clock_in_time DESC`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT te.*, j.name as job_name, u.username 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.clock_out_time IS NULL
+                 ORDER BY te.clock_in_time DESC`
+            ).all();
+        }
+    }
+    
+    static async getTimesheetHistory(userId, startDate, endDate) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT te.*, j.name as job_name 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 WHERE te.user_id = $1 
+                 AND DATE(te.clock_in_time) >= $2 
+                 AND DATE(te.clock_in_time) <= $3
+                 ORDER BY te.clock_in_time DESC`,
+                [userId, startDate, endDate]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT te.*, j.name as job_name 
+                 FROM timesheet_entries te
+                 LEFT JOIN jobs j ON te.job_id = j.id
+                 WHERE te.user_id = ? 
+                 AND DATE(te.clock_in_time) >= ? 
+                 AND DATE(te.clock_in_time) <= ?
+                 ORDER BY te.clock_in_time DESC`
+            ).all(userId, startDate, endDate);
+        }
+    }
+    
+    // Timesheet notices operations
+    static async createTimesheetNotice(title, message, priority, expiresAt, createdBy) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO timesheet_notices (title, message, priority, expires_at, created_by)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [title, message, priority, expiresAt, createdBy]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO timesheet_notices (title, message, priority, expires_at, created_by)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(title, message, priority, expiresAt, createdBy);
+            return this.getTimesheetNoticeById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getActiveTimesheetNotices() {
+        const now = new Date().toISOString();
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT tn.*, u.username as created_by_name
+                 FROM timesheet_notices tn
+                 LEFT JOIN production_users u ON tn.created_by = u.id
+                 WHERE tn.status = 'active' 
+                 AND (tn.expires_at IS NULL OR tn.expires_at > $1)
+                 ORDER BY 
+                 CASE tn.priority 
+                     WHEN 'urgent' THEN 1
+                     WHEN 'high' THEN 2
+                     WHEN 'normal' THEN 3
+                     WHEN 'low' THEN 4
+                 END,
+                 tn.created_at DESC`,
+                [now]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT tn.*, u.username as created_by_name
+                 FROM timesheet_notices tn
+                 LEFT JOIN production_users u ON tn.created_by = u.id
+                 WHERE tn.status = 'active' 
+                 AND (tn.expires_at IS NULL OR tn.expires_at > ?)
+                 ORDER BY 
+                 CASE tn.priority 
+                     WHEN 'urgent' THEN 1
+                     WHEN 'high' THEN 2
+                     WHEN 'normal' THEN 3
+                     WHEN 'low' THEN 4
+                 END,
+                 tn.created_at DESC`
+            ).all(now);
+        }
+    }
+    
+    static async getAllTimesheetNotices() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT tn.*, u.username as created_by_name
+                 FROM timesheet_notices tn
+                 LEFT JOIN production_users u ON tn.created_by = u.id
+                 ORDER BY tn.created_at DESC`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT tn.*, u.username as created_by_name
+                 FROM timesheet_notices tn
+                 LEFT JOIN production_users u ON tn.created_by = u.id
+                 ORDER BY tn.created_at DESC`
+            ).all();
+        }
+    }
+    
+    static async getTimesheetNoticeById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM timesheet_notices WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM timesheet_notices WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async updateTimesheetNotice(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.title !== undefined) {
+            updates.push(`title = $${paramIndex}`);
+            values.push(data.title);
+            paramIndex++;
+        }
+        if (data.message !== undefined) {
+            updates.push(`message = $${paramIndex}`);
+            values.push(data.message);
+            paramIndex++;
+        }
+        if (data.priority !== undefined) {
+            updates.push(`priority = $${paramIndex}`);
+            values.push(data.priority);
+            paramIndex++;
+        }
+        if (data.status !== undefined) {
+            updates.push(`status = $${paramIndex}`);
+            values.push(data.status);
+            paramIndex++;
+        }
+        if (data.expires_at !== undefined) {
+            updates.push(`expires_at = $${paramIndex}`);
+            values.push(data.expires_at);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getTimesheetNoticeById(id);
+        }
+        
+        values.push(id);
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE timesheet_notices SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+                values
+            );
+            return result.rows[0];
+        } else {
+            const setClause = updates.map((update, idx) => {
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE timesheet_notices SET ${setClause} WHERE id = ?`).run(...values);
+            return this.getTimesheetNoticeById(id);
+        }
+    }
+    
+    static async deleteTimesheetNotice(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`DELETE FROM timesheet_notices WHERE id = $1 RETURNING *`, [id]);
+            return result.rows[0] || null;
+        } else {
+            const notice = this.getTimesheetNoticeById(id);
+            db.prepare(`DELETE FROM timesheet_notices WHERE id = ?`).run(id);
+            return notice;
         }
     }
     

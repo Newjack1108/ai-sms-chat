@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timesheet - Clock In/Out</title>
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .timesheet-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .notice-board {
+            margin-bottom: 30px;
+        }
+        
+        .notice-item {
+            background: white;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .notice-item.urgent {
+            border-left-color: #e74c3c;
+            background: #fee;
+        }
+        
+        .notice-item.high {
+            border-left-color: #f39c12;
+            background: #fff8e1;
+        }
+        
+        .notice-item.normal {
+            border-left-color: #3498db;
+        }
+        
+        .notice-item.low {
+            border-left-color: #95a5a6;
+        }
+        
+        .notice-title {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        
+        .notice-message {
+            color: #555;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .notice-meta {
+            font-size: 12px;
+            color: #999;
+            margin-top: 8px;
+        }
+        
+        .clock-status {
+            text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .clock-status.clocked-in {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .clock-status-text {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        
+        .clock-details {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .clock-controls {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .job-select-group {
+            margin-bottom: 25px;
+        }
+        
+        .clock-button {
+            width: 100%;
+            padding: 20px;
+            font-size: 20px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 15px;
+        }
+        
+        .clock-button.clock-in {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .clock-button.clock-in:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .clock-button.clock-out {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+        
+        .clock-button.clock-out:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+        }
+        
+        .clock-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .location-status {
+            text-align: center;
+            padding: 10px;
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .location-status.error {
+            color: #e74c3c;
+        }
+        
+        .location-status.success {
+            color: #27ae60;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'">
+            <h1>Timesheet</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="timesheet-container">
+            <!-- Notice Board -->
+            <div class="card notice-board">
+                <div class="card-header">
+                    <h2>Notices & Reminders</h2>
+                </div>
+                <div id="noticesList">
+                    <div class="loading">Loading notices...</div>
+                </div>
+            </div>
+            
+            <!-- Clock Status -->
+            <div class="clock-status" id="clockStatus">
+                <div class="clock-status-text">Loading...</div>
+                <div class="clock-details" id="clockDetails"></div>
+            </div>
+            
+            <!-- Clock Controls -->
+            <div class="clock-controls">
+                <div class="job-select-group" id="jobSelectGroup" style="display: none;">
+                    <label class="form-label">Select Job/Site *</label>
+                    <select id="jobSelect" class="form-select" required>
+                        <option value="">Loading jobs...</option>
+                    </select>
+                </div>
+                
+                <button id="clockInBtn" class="clock-button clock-in" onclick="handleClockIn()" style="display: none;">
+                    Clock In
+                </button>
+                
+                <button id="clockOutBtn" class="clock-button clock-out" onclick="handleClockOut()" style="display: none;">
+                    Clock Out
+                </button>
+                
+                <div class="location-status" id="locationStatus"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let currentStatus = null;
+        let jobs = [];
+        let currentLocation = null;
+        let locationError = false;
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            
+            // Request location permission
+            requestLocation();
+            
+            // Load initial data
+            await Promise.all([
+                loadNotices(),
+                loadJobs(),
+                loadClockStatus()
+            ]);
+        }
+        
+        function requestLocation() {
+            if (!navigator.geolocation) {
+                locationError = true;
+                updateLocationStatus('Geolocation not supported by your browser', 'error');
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    currentLocation = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude
+                    };
+                    updateLocationStatus('Location ready', 'success');
+                },
+                (error) => {
+                    locationError = true;
+                    let message = 'Location access denied';
+                    if (error.code === error.PERMISSION_DENIED) {
+                        message = 'Please enable location access to clock in/out';
+                    } else if (error.code === error.POSITION_UNAVAILABLE) {
+                        message = 'Location unavailable';
+                    } else if (error.code === error.TIMEOUT) {
+                        message = 'Location request timeout';
+                    }
+                    updateLocationStatus(message, 'error');
+                },
+                { timeout: 10000, enableHighAccuracy: true }
+            );
+        }
+        
+        function updateLocationStatus(message, type) {
+            const statusEl = document.getElementById('locationStatus');
+            statusEl.textContent = message;
+            statusEl.className = `location-status ${type}`;
+        }
+        
+        async function loadNotices() {
+            try {
+                const data = await apiCall('/timesheet/notices');
+                const notices = data.notices || [];
+                const noticesList = document.getElementById('noticesList');
+                
+                if (notices.length === 0) {
+                    noticesList.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No notices at this time</p>';
+                    return;
+                }
+                
+                noticesList.innerHTML = notices.map(notice => {
+                    const priorityClass = notice.priority || 'normal';
+                    const expiresText = notice.expires_at ? `Expires: ${formatDate(notice.expires_at)}` : '';
+                    return `
+                        <div class="notice-item ${priorityClass}">
+                            <div class="notice-title">${escapeHtml(notice.title)}</div>
+                            <div class="notice-message">${escapeHtml(notice.message)}</div>
+                            <div class="notice-meta">${expiresText}</div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                document.getElementById('noticesList').innerHTML = '<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading notices</p>';
+            }
+        }
+        
+        async function loadJobs() {
+            try {
+                const data = await apiCall('/timesheet/jobs');
+                jobs = data.jobs || [];
+                const jobSelect = document.getElementById('jobSelect');
+                
+                jobSelect.innerHTML = '<option value="">Select job/site</option>';
+                jobs.forEach(job => {
+                    jobSelect.innerHTML += `<option value="${job.id}">${job.name}${job.description ? ' - ' + job.description : ''}</option>`;
+                });
+            } catch (error) {
+                showAlert('Error loading jobs', 'error');
+            }
+        }
+        
+        async function loadClockStatus() {
+            try {
+                const data = await apiCall('/timesheet/status');
+                currentStatus = data.status;
+                updateUI();
+            } catch (error) {
+                showAlert('Error loading clock status', 'error');
+            }
+        }
+        
+        function updateUI() {
+            const clockStatus = document.getElementById('clockStatus');
+            const clockDetails = document.getElementById('clockDetails');
+            const jobSelectGroup = document.getElementById('jobSelectGroup');
+            const clockInBtn = document.getElementById('clockInBtn');
+            const clockOutBtn = document.getElementById('clockOutBtn');
+            
+            if (currentStatus) {
+                // Clocked in
+                clockStatus.className = 'clock-status clocked-in';
+                clockStatus.querySelector('.clock-status-text').textContent = 'You are clocked in';
+                const clockInTime = new Date(currentStatus.clock_in_time);
+                clockDetails.innerHTML = `
+                    <div>Job: ${escapeHtml(currentStatus.job_name || 'Unknown')}</div>
+                    <div>Clocked in: ${formatDate(clockInTime)}</div>
+                `;
+                
+                jobSelectGroup.style.display = 'none';
+                clockInBtn.style.display = 'none';
+                clockOutBtn.style.display = 'block';
+            } else {
+                // Not clocked in
+                clockStatus.className = 'clock-status';
+                clockStatus.querySelector('.clock-status-text').textContent = 'You are not clocked in';
+                clockDetails.textContent = 'Select a job/site and clock in to start';
+                
+                jobSelectGroup.style.display = 'block';
+                clockInBtn.style.display = 'block';
+                clockOutBtn.style.display = 'none';
+            }
+        }
+        
+        async function handleClockIn() {
+            const jobId = document.getElementById('jobSelect').value;
+            if (!jobId) {
+                showAlert('Please select a job/site', 'error');
+                return;
+            }
+            
+            if (!currentLocation && !locationError) {
+                showAlert('Getting your location...', 'error');
+                requestLocation();
+                return;
+            }
+            
+            if (locationError) {
+                if (!confirm('Location unavailable. Continue without GPS coordinates?')) {
+                    return;
+                }
+            }
+            
+            const clockInBtn = document.getElementById('clockInBtn');
+            clockInBtn.disabled = true;
+            clockInBtn.textContent = 'Clocking in...';
+            
+            try {
+                await apiCall('/timesheet/clock-in', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        job_id: jobId,
+                        latitude: currentLocation ? currentLocation.latitude : null,
+                        longitude: currentLocation ? currentLocation.longitude : null
+                    })
+                });
+                showAlert('Clocked in successfully');
+                await loadClockStatus();
+            } catch (error) {
+                showAlert(error.message || 'Failed to clock in', 'error');
+            } finally {
+                clockInBtn.disabled = false;
+                clockInBtn.textContent = 'Clock In';
+            }
+        }
+        
+        async function handleClockOut() {
+            if (!currentLocation && !locationError) {
+                showAlert('Getting your location...', 'error');
+                requestLocation();
+                return;
+            }
+            
+            if (locationError) {
+                if (!confirm('Location unavailable. Continue without GPS coordinates?')) {
+                    return;
+                }
+            }
+            
+            const clockOutBtn = document.getElementById('clockOutBtn');
+            clockOutBtn.disabled = true;
+            clockOutBtn.textContent = 'Clocking out...';
+            
+            try {
+                await apiCall('/timesheet/clock-out', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        latitude: currentLocation ? currentLocation.latitude : null,
+                        longitude: currentLocation ? currentLocation.longitude : null
+                    })
+                });
+                showAlert('Clocked out successfully');
+                await loadClockStatus();
+            } catch (error) {
+                showAlert(error.message || 'Failed to clock out', 'error');
+            } finally {
+                clockOutBtn.disabled = false;
+                clockOutBtn.textContent = 'Clock Out';
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        init();
+    </script>
+</body>
+</html>
+

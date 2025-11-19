@@ -719,6 +719,199 @@ router.delete('/orders/:id', requireProductionAuth, requireManager, async (req, 
     }
 });
 
+// ============ TIMESHEET ROUTES ============
+
+// Job Management
+router.get('/timesheet/jobs', requireProductionAuth, async (req, res) => {
+    try {
+        const includeInactive = req.query.all === 'true';
+        const jobs = includeInactive 
+            ? await ProductionDatabase.getAllJobsIncludingInactive()
+            : await ProductionDatabase.getAllJobs();
+        res.json({ success: true, jobs });
+    } catch (error) {
+        console.error('Get jobs error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get jobs' });
+    }
+});
+
+router.post('/timesheet/jobs', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const { name, description } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, error: 'Job name is required' });
+        }
+        const job = await ProductionDatabase.createJob(name, description);
+        res.json({ success: true, job });
+    } catch (error) {
+        console.error('Create job error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create job' });
+    }
+});
+
+router.put('/timesheet/jobs/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const jobId = parseInt(req.params.id);
+        const { name, description, status } = req.body;
+        const job = await ProductionDatabase.updateJob(jobId, name, description, status);
+        res.json({ success: true, job });
+    } catch (error) {
+        console.error('Update job error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update job' });
+    }
+});
+
+router.delete('/timesheet/jobs/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const jobId = parseInt(req.params.id);
+        const job = await ProductionDatabase.deleteJob(jobId);
+        if (!job) {
+            return res.status(404).json({ success: false, error: 'Job not found' });
+        }
+        res.json({ success: true, message: 'Job deleted successfully' });
+    } catch (error) {
+        console.error('Delete job error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete job' });
+    }
+});
+
+// Staff Clocking
+router.get('/timesheet/status', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const status = await ProductionDatabase.getCurrentClockStatus(userId);
+        res.json({ success: true, status });
+    } catch (error) {
+        console.error('Get clock status error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get clock status' });
+    }
+});
+
+router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { job_id, latitude, longitude } = req.body;
+        
+        if (!job_id) {
+            return res.status(400).json({ success: false, error: 'Job ID is required' });
+        }
+        
+        // Check if already clocked in
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        if (currentStatus) {
+            return res.status(400).json({ success: false, error: 'You are already clocked in' });
+        }
+        
+        const entry = await ProductionDatabase.clockIn(userId, parseInt(job_id), latitude, longitude);
+        res.json({ success: true, entry });
+    } catch (error) {
+        console.error('Clock in error:', error);
+        res.status(500).json({ success: false, error: 'Failed to clock in' });
+    }
+});
+
+router.post('/timesheet/clock-out', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { latitude, longitude } = req.body;
+        
+        // Check if clocked in
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        if (!currentStatus) {
+            return res.status(400).json({ success: false, error: 'You are not clocked in' });
+        }
+        
+        const entry = await ProductionDatabase.clockOut(userId, latitude, longitude);
+        if (!entry) {
+            return res.status(400).json({ success: false, error: 'Failed to clock out' });
+        }
+        res.json({ success: true, entry });
+    } catch (error) {
+        console.error('Clock out error:', error);
+        res.status(500).json({ success: false, error: 'Failed to clock out' });
+    }
+});
+
+// Admin Views
+router.get('/timesheet/active', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const activeClockIns = await ProductionDatabase.getActiveClockIns();
+        res.json({ success: true, clockIns: activeClockIns });
+    } catch (error) {
+        console.error('Get active clock ins error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get active clock ins' });
+    }
+});
+
+// Notices/Reminders
+router.get('/timesheet/notices', requireProductionAuth, async (req, res) => {
+    try {
+        const notices = await ProductionDatabase.getActiveTimesheetNotices();
+        res.json({ success: true, notices });
+    } catch (error) {
+        console.error('Get notices error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get notices' });
+    }
+});
+
+router.get('/timesheet/notices/all', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const notices = await ProductionDatabase.getAllTimesheetNotices();
+        res.json({ success: true, notices });
+    } catch (error) {
+        console.error('Get all notices error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get notices' });
+    }
+});
+
+router.post('/timesheet/notices', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const { title, message, priority, expires_at } = req.body;
+        if (!title || !message) {
+            return res.status(400).json({ success: false, error: 'Title and message are required' });
+        }
+        const createdBy = req.session.production_user.id;
+        const notice = await ProductionDatabase.createTimesheetNotice(title, message, priority || 'normal', expires_at || null, createdBy);
+        res.json({ success: true, notice });
+    } catch (error) {
+        console.error('Create notice error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create notice' });
+    }
+});
+
+router.put('/timesheet/notices/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const noticeId = parseInt(req.params.id);
+        const { title, message, priority, status, expires_at } = req.body;
+        const updateData = {};
+        if (title !== undefined) updateData.title = title;
+        if (message !== undefined) updateData.message = message;
+        if (priority !== undefined) updateData.priority = priority;
+        if (status !== undefined) updateData.status = status;
+        if (expires_at !== undefined) updateData.expires_at = expires_at;
+        
+        const notice = await ProductionDatabase.updateTimesheetNotice(noticeId, updateData);
+        res.json({ success: true, notice });
+    } catch (error) {
+        console.error('Update notice error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update notice' });
+    }
+});
+
+router.delete('/timesheet/notices/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const noticeId = parseInt(req.params.id);
+        const notice = await ProductionDatabase.deleteTimesheetNotice(noticeId);
+        if (!notice) {
+            return res.status(404).json({ success: false, error: 'Notice not found' });
+        }
+        res.json({ success: true, message: 'Notice deleted successfully' });
+    } catch (error) {
+        console.error('Delete notice error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete notice' });
+    }
+});
+
 // ============ STOCK CHECK REMINDERS ROUTES ============
 
 router.get('/reminders', requireProductionAuth, async (req, res) => {
