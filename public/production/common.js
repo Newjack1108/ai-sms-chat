@@ -13,6 +13,13 @@ async function apiCall(endpoint, options = {}) {
             }
         });
         
+        // Handle authentication errors first
+        if (response.status === 401 || response.status === 403) {
+            // Don't try to parse, just redirect
+            window.location.href = '/production/login.html';
+            return null;
+        }
+        
         // Check if response is JSON
         const contentType = response.headers.get('content-type');
         let data;
@@ -20,12 +27,6 @@ async function apiCall(endpoint, options = {}) {
         if (!contentType || !contentType.includes('application/json')) {
             const text = await response.text();
             console.error('Non-JSON response from', endpoint, ':', text.substring(0, 200));
-            
-            // Handle authentication errors
-            if (response.status === 401 || response.status === 403) {
-                window.location.href = '/production/login.html';
-                return;
-            }
             
             // Try to parse as JSON anyway (some servers don't set content-type correctly)
             try {
@@ -38,6 +39,11 @@ async function apiCall(endpoint, options = {}) {
         }
         
         if (!response.ok) {
+            // Check if it's an auth error in the JSON response
+            if (data.requiresLogin || response.status === 401 || response.status === 403) {
+                window.location.href = '/production/login.html';
+                return null;
+            }
             throw new Error(data.error || 'Request failed');
         }
         
@@ -53,12 +59,31 @@ async function checkAuth() {
     try {
         const response = await fetch(`${API_BASE}/me`);
         if (!response.ok) {
-            window.location.href = '/production/login.html';
-            return null;
+            if (response.status === 401 || response.status === 403) {
+                window.location.href = '/production/login.html';
+                return null;
+            }
+            // For other errors, try to parse JSON
+            try {
+                const data = await response.json();
+                if (data.requiresLogin) {
+                    window.location.href = '/production/login.html';
+                    return null;
+                }
+            } catch (e) {
+                // If not JSON, just redirect
+                window.location.href = '/production/login.html';
+                return null;
+            }
         }
         const data = await response.json();
         return data.user;
     } catch (error) {
+        // Only redirect on network/auth errors, not on JSON parse errors
+        if (error.message && error.message.includes('JSON')) {
+            console.error('Auth check failed:', error);
+            return null;
+        }
         window.location.href = '/production/login.html';
         return null;
     }
