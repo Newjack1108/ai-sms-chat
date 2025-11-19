@@ -1430,6 +1430,64 @@ class ProductionDatabase {
         return lowStockPanels;
     }
     
+    static async getTotalStockValue() {
+        const stockItems = await this.getAllStockItems();
+        let totalValue = 0;
+        
+        for (const item of stockItems) {
+            const quantity = parseFloat(item.current_quantity || 0);
+            const cost = parseFloat(item.cost_per_unit_gbp || 0);
+            totalValue += quantity * cost;
+        }
+        
+        return totalValue;
+    }
+    
+    static async getTotalPanelValue() {
+        const panels = await this.getAllPanels();
+        let totalValue = 0;
+        
+        for (const panel of panels) {
+            const builtQty = parseFloat(panel.built_quantity || 0);
+            const trueCost = await this.calculatePanelTrueCost(panel.id);
+            totalValue += builtQty * trueCost;
+        }
+        
+        return totalValue;
+    }
+    
+    static async getLastWeekPlannerSummary() {
+        // Get last week's Monday (7 days ago)
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        const lastMonday = new Date(today);
+        lastMonday.setDate(today.getDate() - daysToMonday - 7);
+        lastMonday.setHours(0, 0, 0, 0);
+        
+        const weekStartStr = lastMonday.toISOString().split('T')[0];
+        const planner = await this.getWeeklyPlannerByDate(weekStartStr);
+        
+        if (!planner) {
+            return null;
+        }
+        
+        const efficiency = await this.calculatePlannerEfficiency(planner.id);
+        if (!efficiency) {
+            return null;
+        }
+        
+        return {
+            week_start: planner.week_start_date,
+            efficiency: efficiency.overall_efficiency,
+            indicator: efficiency.indicator,
+            hours_used: efficiency.hours_used,
+            hours_available: efficiency.hours_available,
+            panels_built: efficiency.panels_built,
+            panels_planned: efficiency.panels_planned
+        };
+    }
+    
     // ============ SETTINGS OPERATIONS ============
     
     static async getSetting(key) {

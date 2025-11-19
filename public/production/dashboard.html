@@ -25,6 +25,44 @@
     </nav>
     
     <div class="container">
+        <div class="grid grid-4" style="margin-bottom: 20px;">
+            <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                    <h2 style="color: white; margin: 0;">Total WIP Value</h2>
+                </div>
+                <div style="padding: 20px; text-align: center;">
+                    <div id="totalWIPValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
+                </div>
+            </div>
+            
+            <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
+                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                    <h2 style="color: white; margin: 0;">Total Stock Value</h2>
+                </div>
+                <div style="padding: 20px; text-align: center;">
+                    <div id="totalStockValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
+                </div>
+            </div>
+            
+            <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
+                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                    <h2 style="color: white; margin: 0;">Total Panel Value</h2>
+                </div>
+                <div style="padding: 20px; text-align: center;">
+                    <div id="totalPanelValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
+                </div>
+            </div>
+            
+            <div class="card" id="lastWeekCard">
+                <div class="card-header">
+                    <h2>Last Week's Performance</h2>
+                </div>
+                <div id="lastWeekSummary" style="padding: 20px; text-align: center;">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
         <div class="grid grid-3">
             <div class="card">
                 <div class="card-header">
@@ -68,6 +106,58 @@
     <script>
         async function loadDashboard() {
             await initNavbar();
+            
+            // Load dashboard summary
+            try {
+                const summaryData = await apiCall('/dashboard/summary');
+                const summary = summaryData.summary;
+                
+                document.getElementById('totalWIPValue').textContent = formatCurrency(summary.total_wip_value);
+                document.getElementById('totalStockValue').textContent = formatCurrency(summary.total_stock_value);
+                document.getElementById('totalPanelValue').textContent = formatCurrency(summary.total_panel_value);
+                
+                const lastWeekDiv = document.getElementById('lastWeekSummary');
+                if (summary.last_week) {
+                    const weekStart = new Date(summary.last_week.week_start);
+                    const weekEnd = new Date(weekStart);
+                    weekEnd.setDate(weekEnd.getDate() + 6);
+                    
+                    const indicatorClass = summary.last_week.indicator === 'green' ? 'badge-success' : 
+                                          summary.last_week.indicator === 'yellow' ? 'badge-warning' : 'badge-danger';
+                    
+                    lastWeekDiv.innerHTML = `
+                        <div style="margin-bottom: 15px;">
+                            <strong>Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</strong>
+                        </div>
+                        <div style="font-size: 28px; font-weight: bold; margin-bottom: 15px;">
+                            <span class="badge ${indicatorClass}" style="font-size: 24px; padding: 10px 20px;">
+                                ${summary.last_week.efficiency.toFixed(1)}% Efficiency
+                            </span>
+                        </div>
+                        <div style="font-size: 14px; color: #6c757d;">
+                            <div>Hours: ${summary.last_week.hours_used.toFixed(1)} / ${summary.last_week.hours_available.toFixed(1)}</div>
+                            <div>Panels: ${summary.last_week.panels_built.toFixed(1)} / ${summary.last_week.panels_planned.toFixed(1)}</div>
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <a href="planner.html" class="btn btn-primary btn-sm">View Planner</a>
+                        </div>
+                    `;
+                    
+                    // Set card background based on indicator
+                    const card = document.getElementById('lastWeekCard');
+                    if (summary.last_week.indicator === 'green') {
+                        card.style.background = 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)';
+                    } else if (summary.last_week.indicator === 'yellow') {
+                        card.style.background = 'linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%)';
+                    } else {
+                        card.style.background = 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)';
+                    }
+                } else {
+                    lastWeekDiv.innerHTML = '<p>No planner data for last week</p>';
+                }
+            } catch (error) {
+                console.error('Error loading dashboard summary:', error);
+            }
             
             // Load stock alerts
             try {

@@ -414,6 +414,30 @@ router.get('/wip', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
+    try {
+        const wipData = await ProductionDatabase.getWIPData();
+        const totalWIPValue = wipData.reduce((sum, panel) => sum + parseFloat(panel.wip_value || 0), 0);
+        
+        const totalStockValue = await ProductionDatabase.getTotalStockValue();
+        const totalPanelValue = await ProductionDatabase.getTotalPanelValue();
+        const lastWeekSummary = await ProductionDatabase.getLastWeekPlannerSummary();
+        
+        res.json({
+            success: true,
+            summary: {
+                total_wip_value: totalWIPValue,
+                total_stock_value: totalStockValue,
+                total_panel_value: totalPanelValue,
+                last_week: lastWeekSummary
+            }
+        });
+    } catch (error) {
+        console.error('Get dashboard summary error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get dashboard summary' });
+    }
+});
+
 // ============ SETTINGS ROUTES ============
 
 router.get('/settings', requireProductionAuth, requireAdmin, async (req, res) => {
