@@ -256,7 +256,7 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
 
 router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, description, panel_type, status, cost_gbp } = req.body;
+        const { name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -266,7 +266,10 @@ router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => 
             description,
             panel_type,
             status,
-            cost_gbp: parseFloat(cost_gbp) || 0
+            cost_gbp: parseFloat(cost_gbp) || 0,
+            built_quantity: parseFloat(built_quantity) || 0,
+            min_stock: parseFloat(min_stock) || 0,
+            labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, panel });
     } catch (error) {
@@ -278,14 +281,17 @@ router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => 
 router.put('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const { name, description, panel_type, status, cost_gbp } = req.body;
+        const { name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours } = req.body;
         
         const panel = await ProductionDatabase.updatePanel(panelId, {
             name,
             description,
             panel_type,
             status,
-            cost_gbp: parseFloat(cost_gbp) || 0
+            cost_gbp: parseFloat(cost_gbp) || 0,
+            built_quantity: parseFloat(built_quantity) || 0,
+            min_stock: parseFloat(min_stock) || 0,
+            labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, panel });
     } catch (error) {
