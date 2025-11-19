@@ -6,9 +6,18 @@
     <title>Dashboard - Production System</title>
     <link rel="stylesheet" href="common.css">
 </head>
-<body>
+<body class="dashboard-page">
+    <!-- Faded background logo -->
+    <div class="dashboard-background-logo"></div>
+    
     <nav class="navbar">
-        <h1>Production Dashboard</h1>
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <div style="display: none; padding: 10px 20px; background: #e9ecef; border-radius: 6px; color: #6c757d; font-size: 12px;">
+                Place logo.png here<br>(200x40px recommended)
+            </div>
+            <h1>Production Dashboard</h1>
+        </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
             <a href="stock.html" class="btn btn-secondary btn-sm">Stock</a>
@@ -24,7 +33,7 @@
         </div>
     </nav>
     
-    <div class="container">
+    <div class="container" style="position: relative; z-index: 1;">
         <div class="grid grid-4" style="margin-bottom: 20px;">
             <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                 <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">

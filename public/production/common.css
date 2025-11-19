@@ -9,7 +9,29 @@ body {
     background: #f5f7fa;
     color: #333;
     min-height: 100vh;
+    position: relative;
 }
+
+body.dashboard-page {
+    position: relative;
+}
+
+.dashboard-background-logo {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 800px;
+    height: 800px;
+    opacity: 0.03;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url('logo.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
 
 .navbar {
     background: white;
@@ -19,11 +41,27 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+    position: relative;
+    z-index: 100;
+}
+
+.navbar-logo {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.navbar-logo img {
+    height: 40px;
+    width: auto;
+    max-width: 200px;
+    object-fit: contain;
 }
 
 .navbar h1 {
     color: #2c3e50;
     font-size: 24px;
+    margin: 0;
 }
 
 .navbar-right {
