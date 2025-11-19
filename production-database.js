@@ -86,6 +86,9 @@ function initializeSQLite() {
             panel_type TEXT,
             status TEXT DEFAULT 'active',
             cost_gbp REAL DEFAULT 0,
+            built_quantity REAL DEFAULT 0,
+            min_stock REAL DEFAULT 0,
+            labour_hours REAL DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
@@ -205,6 +208,30 @@ function initializeSQLite() {
         )
     `);
     
+    // Panel movements table (track when panels are built/used)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS panel_movements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            panel_id INTEGER NOT NULL,
+            movement_type TEXT NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
+            quantity REAL NOT NULL,
+            reference TEXT,
+            user_id INTEGER,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (panel_id) REFERENCES panels(id),
+            FOREIGN KEY (user_id) REFERENCES production_users(id)
+        )
+    `);
+    
+    // Production settings table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS production_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
     // Create indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
@@ -214,7 +241,35 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
     `);
+    
+    // Migrate existing panels table to add new columns
+    try {
+        const columns = db.prepare("PRAGMA table_info(panels)").all();
+        const columnNames = columns.map(col => col.name);
+        
+        if (!columnNames.includes('built_quantity')) {
+            db.exec('ALTER TABLE panels ADD COLUMN built_quantity REAL DEFAULT 0');
+            console.log('✅ Added built_quantity column to panels');
+        }
+        if (!columnNames.includes('min_stock')) {
+            db.exec('ALTER TABLE panels ADD COLUMN min_stock REAL DEFAULT 0');
+            console.log('✅ Added min_stock column to panels');
+        }
+        if (!columnNames.includes('labour_hours')) {
+            db.exec('ALTER TABLE panels ADD COLUMN labour_hours REAL DEFAULT 0');
+            console.log('✅ Added labour_hours column to panels');
+        }
+    } catch (error) {
+        console.log('⚠️ Migration check skipped:', error.message);
+    }
+    
+    // Insert default labour rate if not exists
+    const settingCheck = db.prepare('SELECT COUNT(*) as count FROM production_settings WHERE key = ?').get('labour_rate_per_hour');
+    if (settingCheck.count === 0) {
+        db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run('labour_rate_per_hour', '25.00');
+    }
     
     console.log('✅ Production SQLite database initialized');
 }
@@ -260,6 +315,9 @@ async function initializePostgreSQL() {
                 panel_type VARCHAR(100),
                 status VARCHAR(50) DEFAULT 'active',
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
+                built_quantity DECIMAL(10,2) DEFAULT 0,
+                min_stock DECIMAL(10,2) DEFAULT 0,
+                labour_hours DECIMAL(10,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -366,6 +424,28 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Panel movements table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS panel_movements (
+                id SERIAL PRIMARY KEY,
+                panel_id INTEGER NOT NULL REFERENCES panels(id),
+                movement_type VARCHAR(20) NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
+                quantity DECIMAL(10,2) NOT NULL,
+                reference TEXT,
+                user_id INTEGER REFERENCES production_users(id),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Production settings table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS production_settings (
+                key VARCHAR(255) PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
         // Create indexes
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_stock ON bom_items(stock_item_id)`);
@@ -374,6 +454,40 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id)`);
+        
+        // Migrate existing panels table to add new columns
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='panels' AND column_name='built_quantity'
+                ) THEN
+                    ALTER TABLE panels ADD COLUMN built_quantity DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='panels' AND column_name='min_stock'
+                ) THEN
+                    ALTER TABLE panels ADD COLUMN min_stock DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='panels' AND column_name='labour_hours'
+                ) THEN
+                    ALTER TABLE panels ADD COLUMN labour_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+            END $$;
+        `);
+        
+        // Insert default labour rate if not exists
+        const settingCheck = await pool.query(`SELECT COUNT(*) as count FROM production_settings WHERE key = 'labour_rate_per_hour'`);
+        if (parseInt(settingCheck.rows[0].count) === 0) {
+            await pool.query(`INSERT INTO production_settings (key, value) VALUES ('labour_rate_per_hour', '25.00')`);
+        }
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -582,17 +696,19 @@ class ProductionDatabase {
     static async createPanel(data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO panels (name, description, panel_type, status, cost_gbp)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0]
+                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0, 
+                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO panels (name, description, panel_type, status, cost_gbp)
-                 VALUES (?, ?, ?, ?, ?)`
+                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0);
+            const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', data.cost_gbp || 0,
+                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
             return this.getPanelById(info.lastInsertRowid);
         }
     }
@@ -618,16 +734,20 @@ class ProductionDatabase {
     static async updatePanel(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE panels SET name = $1, description = $2, panel_type = $3, status = $4, cost_gbp = $5
-                 WHERE id = $6 RETURNING *`,
-                [data.name, data.description, data.panel_type, data.status, data.cost_gbp, id]
+                `UPDATE panels SET name = $1, description = $2, panel_type = $3, status = $4, cost_gbp = $5, 
+                 built_quantity = $6, min_stock = $7, labour_hours = $8
+                 WHERE id = $9 RETURNING *`,
+                [data.name, data.description, data.panel_type, data.status, data.cost_gbp, 
+                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id]
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE panels SET name = ?, description = ?, panel_type = ?, status = ?, cost_gbp = ?
+                `UPDATE panels SET name = ?, description = ?, panel_type = ?, status = ?, cost_gbp = ?,
+                 built_quantity = ?, min_stock = ?, labour_hours = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.panel_type, data.status, data.cost_gbp, id);
+            ).run(data.name, data.description, data.panel_type, data.status, data.cost_gbp,
+                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id);
             return this.getPanelById(id);
         }
     }
@@ -686,6 +806,173 @@ class ProductionDatabase {
             await pool.query(`DELETE FROM bom_items WHERE id = $1`, [bomId]);
         } else {
             db.prepare(`DELETE FROM bom_items WHERE id = ?`).run(bomId);
+        }
+    }
+    
+    // Calculate BOM value for a panel
+    static async calculateBOMValue(panelId) {
+        const bomItems = await this.getPanelBOM(panelId);
+        let totalValue = 0;
+        
+        for (const bomItem of bomItems) {
+            const stockItem = await this.getStockItemById(bomItem.stock_item_id);
+            if (stockItem) {
+                const itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * parseFloat(bomItem.quantity_required || 0);
+                totalValue += itemCost;
+            }
+        }
+        
+        return totalValue;
+    }
+    
+    // Calculate true cost (BOM + labour)
+    static async calculatePanelTrueCost(panelId) {
+        const panel = await this.getPanelById(panelId);
+        if (!panel) return 0;
+        
+        const bomValue = await this.calculateBOMValue(panelId);
+        const labourHours = parseFloat(panel.labour_hours || 0);
+        const labourRate = await this.getSetting('labour_rate_per_hour');
+        const labourCost = labourHours * parseFloat(labourRate || 25);
+        
+        return bomValue + labourCost;
+    }
+    
+    // Update panel built quantity
+    static async updatePanelQuantity(id, quantity) {
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE panels SET built_quantity = $1 WHERE id = $2`, [quantity, id]);
+        } else {
+            db.prepare(`UPDATE panels SET built_quantity = ? WHERE id = ?`).run(quantity, id);
+        }
+    }
+    
+    // Record panel movement
+    static async recordPanelMovement(data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO panel_movements (panel_id, movement_type, quantity, reference, user_id)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [data.panel_id, data.movement_type, data.quantity, data.reference, data.user_id]
+            );
+            // Update panel quantity
+            const panel = await this.getPanelById(data.panel_id);
+            let newQuantity = parseFloat(panel.built_quantity) || 0;
+            if (data.movement_type === 'build') {
+                newQuantity += parseFloat(data.quantity);
+            } else if (data.movement_type === 'use') {
+                newQuantity -= parseFloat(data.quantity);
+            } else if (data.movement_type === 'adjustment') {
+                newQuantity = parseFloat(data.quantity);
+            }
+            await this.updatePanelQuantity(data.panel_id, newQuantity);
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO panel_movements (panel_id, movement_type, quantity, reference, user_id)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            stmt.run(data.panel_id, data.movement_type, data.quantity, data.reference, data.user_id);
+            // Update panel quantity
+            const panel = this.getPanelById(data.panel_id);
+            let newQuantity = parseFloat(panel.built_quantity) || 0;
+            if (data.movement_type === 'build') {
+                newQuantity += parseFloat(data.quantity);
+            } else if (data.movement_type === 'use') {
+                newQuantity -= parseFloat(data.quantity);
+            } else if (data.movement_type === 'adjustment') {
+                newQuantity = parseFloat(data.quantity);
+            }
+            this.updatePanelQuantity(data.panel_id, newQuantity);
+            return db.prepare(`SELECT * FROM panel_movements WHERE id = (SELECT MAX(id) FROM panel_movements)`).get();
+        }
+    }
+    
+    // Get panel movements
+    static async getPanelMovements(panelId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT pm.*, u.username as user_name FROM panel_movements pm
+                 LEFT JOIN production_users u ON pm.user_id = u.id
+                 WHERE pm.panel_id = $1 ORDER BY pm.timestamp DESC`,
+                [panelId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT pm.*, u.username as user_name FROM panel_movements pm
+                 LEFT JOIN production_users u ON pm.user_id = u.id
+                 WHERE pm.panel_id = ? ORDER BY pm.timestamp DESC`
+            ).all(panelId);
+        }
+    }
+    
+    // Get WIP data (panels with costs)
+    static async getWIPData() {
+        const panels = await this.getAllPanels();
+        const labourRate = parseFloat(await this.getSetting('labour_rate_per_hour') || 25);
+        const wipData = [];
+        
+        for (const panel of panels) {
+            const bomValue = await this.calculateBOMValue(panel.id);
+            const labourHours = parseFloat(panel.labour_hours || 0);
+            const labourCost = labourHours * labourRate;
+            const trueCost = bomValue + labourCost;
+            const builtQty = parseFloat(panel.built_quantity || 0);
+            const minStock = parseFloat(panel.min_stock || 0);
+            const wipValue = trueCost * builtQty;
+            const isLowStock = builtQty <= minStock;
+            
+            wipData.push({
+                panel_id: panel.id,
+                panel_name: panel.name,
+                panel_type: panel.panel_type,
+                built_quantity: builtQty,
+                min_stock: minStock,
+                bom_value: bomValue,
+                labour_hours: labourHours,
+                labour_cost: labourCost,
+                true_cost: trueCost,
+                wip_value: wipValue,
+                is_low_stock: isLowStock
+            });
+        }
+        
+        return wipData;
+    }
+    
+    // ============ SETTINGS OPERATIONS ============
+    
+    static async getSetting(key) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT value FROM production_settings WHERE key = $1`, [key]);
+            return result.rows[0] ? result.rows[0].value : null;
+        } else {
+            const result = db.prepare(`SELECT value FROM production_settings WHERE key = ?`).get(key);
+            return result ? result.value : null;
+        }
+    }
+    
+    static async setSetting(key, value) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO production_settings (key, value, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP)
+                 ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = CURRENT_TIMESTAMP`,
+                [key, value]
+            );
+        } else {
+            db.prepare(
+                `INSERT OR REPLACE INTO production_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)`
+            ).run(key, value);
+        }
+    }
+    
+    static async getAllSettings() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM production_settings ORDER BY key`);
+            return result.rows;
+        } else {
+            return db.prepare(`SELECT * FROM production_settings ORDER BY key`).all();
         }
     }
     

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WIP Dashboard - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Work In Progress (WIP) Dashboard</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <a href="panels.html" class="btn btn-secondary btn-sm">Panels</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Panel WIP Summary</h2>
+                <button onclick="loadWIP()" class="btn btn-primary">Refresh</button>
+            </div>
+            <div id="wipSummary" style="margin-bottom: 20px;">
+                <div class="loading">Loading...</div>
+            </div>
+            <div id="wipList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let labourRate = 25;
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            await loadLabourRate();
+            loadWIP();
+        }
+        
+        async function loadLabourRate() {
+            try {
+                const data = await apiCall('/settings/labour_rate_per_hour');
+                labourRate = parseFloat(data.value || 25);
+            } catch (error) {
+                console.error('Error loading labour rate:', error);
+            }
+        }
+        
+        async function loadWIP() {
+            try {
+                const data = await apiCall('/wip');
+                const wip = data.wip;
+                
+                // Calculate totals
+                let totalWIPValue = 0;
+                let totalBuiltQty = 0;
+                let lowStockCount = 0;
+                
+                wip.forEach(panel => {
+                    totalWIPValue += parseFloat(panel.wip_value || 0);
+                    totalBuiltQty += parseFloat(panel.built_quantity || 0);
+                    if (panel.is_low_stock) lowStockCount++;
+                });
+                
+                // Summary
+                document.getElementById('wipSummary').innerHTML = `
+                    <div class="grid grid-3">
+                        <div class="card" style="background: #f8f9fa;">
+                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Total WIP Value</h3>
+                            <p style="font-size: 24px; font-weight: bold; color: #667eea; margin: 0;">${formatCurrency(totalWIPValue)}</p>
+                        </div>
+                        <div class="card" style="background: #f8f9fa;">
+                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Total Built Panels</h3>
+                            <p style="font-size: 24px; font-weight: bold; color: #28a745; margin: 0;">${totalBuiltQty.toFixed(2)}</p>
+                        </div>
+                        <div class="card" style="background: #f8f9fa;">
+                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Low Stock Alerts</h3>
+                            <p style="font-size: 24px; font-weight: bold; color: ${lowStockCount > 0 ? '#dc3545' : '#28a745'}; margin: 0;">${lowStockCount}</p>
+                        </div>
+                    </div>
+                `;
+                
+                // WIP List
+                if (wip.length === 0) {
+                    document.getElementById('wipList').innerHTML = '<p>No panels found</p>';
+                    return;
+                }
+                
+                document.getElementById('wipList').innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Panel Name</th>
+                                <th>Type</th>
+                                <th>Built Qty</th>
+                                <th>Min Stock</th>
+                                <th>BOM Value</th>
+                                <th>Labour Hours</th>
+                                <th>Labour Cost</th>
+                                <th>True Cost</th>
+                                <th>WIP Value</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${wip.map(panel => {
+                                const isLow = panel.is_low_stock;
+                                return `
+                                    <tr style="${isLow ? 'background: #fff3cd;' : ''}">
+                                        <td><strong>${panel.panel_name}</strong></td>
+                                        <td>${panel.panel_type || '-'}</td>
+                                        <td>${panel.built_quantity.toFixed(2)}</td>
+                                        <td>${panel.min_stock.toFixed(2)}</td>
+                                        <td>${formatCurrency(panel.bom_value)}</td>
+                                        <td>${panel.labour_hours.toFixed(2)}</td>
+                                        <td>${formatCurrency(panel.labour_cost)}</td>
+                                        <td><strong>${formatCurrency(panel.true_cost)}</strong></td>
+                                        <td><strong style="color: #667eea;">${formatCurrency(panel.wip_value)}</strong></td>
+                                        <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('wipList').innerHTML = '<p>Error loading WIP data</p>';
+                console.error('Error loading WIP:', error);
+            }
+        }
+        
+        init();
+    </script>
+</body>
+</html>
+

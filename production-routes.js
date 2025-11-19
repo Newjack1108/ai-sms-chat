@@ -338,6 +338,109 @@ router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdmin, asy
     }
 });
 
+router.get('/panels/:id/bom-value', requireProductionAuth, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        const bomValue = await ProductionDatabase.calculateBOMValue(panelId);
+        res.json({ success: true, bom_value: bomValue });
+    } catch (error) {
+        console.error('Calculate BOM value error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate BOM value' });
+    }
+});
+
+router.get('/panels/:id/true-cost', requireProductionAuth, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        const trueCost = await ProductionDatabase.calculatePanelTrueCost(panelId);
+        res.json({ success: true, true_cost: trueCost });
+    } catch (error) {
+        console.error('Calculate true cost error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate true cost' });
+    }
+});
+
+router.get('/panels/:id/movements', requireProductionAuth, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        const movements = await ProductionDatabase.getPanelMovements(panelId);
+        res.json({ success: true, movements });
+    } catch (error) {
+        console.error('Get panel movements error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get panel movements' });
+    }
+});
+
+router.post('/panels/:id/movement', requireProductionAuth, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        const { movement_type, quantity, reference } = req.body;
+        
+        if (!movement_type || !quantity) {
+            return res.status(400).json({ success: false, error: 'Movement type and quantity are required' });
+        }
+        
+        if (!['build', 'use', 'adjustment'].includes(movement_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid movement type' });
+        }
+        
+        const movement = await ProductionDatabase.recordPanelMovement({
+            panel_id: panelId,
+            movement_type,
+            quantity: parseFloat(quantity),
+            reference,
+            user_id: req.session.production_user.id
+        });
+        res.json({ success: true, movement });
+    } catch (error) {
+        console.error('Record panel movement error:', error);
+        res.status(500).json({ success: false, error: 'Failed to record panel movement' });
+    }
+});
+
+router.get('/wip', requireProductionAuth, async (req, res) => {
+    try {
+        const wipData = await ProductionDatabase.getWIPData();
+        res.json({ success: true, wip: wipData });
+    } catch (error) {
+        console.error('Get WIP data error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get WIP data' });
+    }
+});
+
+// ============ SETTINGS ROUTES ============
+
+router.get('/settings', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const settings = await ProductionDatabase.getAllSettings();
+        res.json({ success: true, settings });
+    } catch (error) {
+        console.error('Get settings error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get settings' });
+    }
+});
+
+router.get('/settings/:key', requireProductionAuth, async (req, res) => {
+    try {
+        const value = await ProductionDatabase.getSetting(req.params.key);
+        res.json({ success: true, value });
+    } catch (error) {
+        console.error('Get setting error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get setting' });
+    }
+});
+
+router.put('/settings/:key', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const { value } = req.body;
+        await ProductionDatabase.setSetting(req.params.key, value);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Set setting error:', error);
+        res.status(500).json({ success: false, error: 'Failed to set setting' });
+    }
+});
+
 // ============ FINISHED PRODUCTS ROUTES ============
 
 router.get('/products', requireProductionAuth, async (req, res) => {
