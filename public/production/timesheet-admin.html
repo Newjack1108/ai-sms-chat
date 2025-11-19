@@ -20,6 +20,16 @@
     </nav>
     
     <div class="container">
+        <!-- Admin Clock In/Out -->
+        <div class="card">
+            <div class="card-header">
+                <h2>My Clock Status</h2>
+            </div>
+            <div id="adminClockStatus" style="padding: 20px;">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
         <!-- Active Staff Clock Ins -->
         <div class="card">
             <div class="card-header">
@@ -136,6 +146,9 @@
         let currentUser = null;
         let refreshInterval = null;
         
+        let currentLocation = null;
+        let locationError = false;
+        
         async function init() {
             currentUser = await checkAuth();
             if (!currentUser) return;
@@ -148,7 +161,11 @@
                 return;
             }
             
+            // Request location permission for clock in/out
+            requestLocation();
+            
             await Promise.all([
+                loadAdminClockStatus(),
                 loadActiveClockIns(),
                 loadJobs(),
                 loadNotices()
@@ -156,6 +173,139 @@
             
             // Auto-refresh active clock ins every 30 seconds
             refreshInterval = setInterval(loadActiveClockIns, 30000);
+        }
+        
+        function requestLocation() {
+            if (!navigator.geolocation) {
+                locationError = true;
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    currentLocation = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude
+                    };
+                },
+                (error) => {
+                    locationError = true;
+                },
+                { timeout: 10000, enableHighAccuracy: true }
+            );
+        }
+        
+        async function loadAdminClockStatus() {
+            try {
+                const data = await apiCall('/timesheet/status');
+                const status = data.status;
+                const jobsData = await apiCall('/timesheet/jobs');
+                const jobs = jobsData.jobs || [];
+                const adminClockStatus = document.getElementById('adminClockStatus');
+                
+                if (status) {
+                    // Clocked in
+                    const clockInTime = new Date(status.clock_in_time);
+                    adminClockStatus.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px; color: #667eea;">
+                                You are clocked in
+                            </div>
+                            <div style="color: #666; margin-bottom: 20px;">
+                                <div>Job: <strong>${status.job_name || 'Unknown'}</strong></div>
+                                <div>Clocked in: ${formatDate(clockInTime)}</div>
+                            </div>
+                            <button onclick="handleAdminClockOut()" class="btn btn-danger" style="width: 100%; padding: 15px; font-size: 16px;">
+                                Clock Out
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    // Not clocked in
+                    adminClockStatus.innerHTML = `
+                        <div style="text-align: center; padding: 20px;">
+                            <div style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #666;">
+                                You are not clocked in
+                            </div>
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label class="form-label">Select Job/Site *</label>
+                                <select id="adminJobSelect" class="form-select" required>
+                                    <option value="">Select job/site</option>
+                                    ${jobs.map(job => `<option value="${job.id}">${job.name}${job.description ? ' - ' + job.description : ''}</option>`).join('')}
+                                </select>
+                            </div>
+                            <button onclick="handleAdminClockIn()" class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 16px;">
+                                Clock In
+                            </button>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('adminClockStatus').innerHTML = '<p style="color: #e74c3c;">Error loading clock status</p>';
+            }
+        }
+        
+        async function handleAdminClockIn() {
+            const jobId = document.getElementById('adminJobSelect').value;
+            if (!jobId) {
+                showAlert('Please select a job/site', 'error');
+                return;
+            }
+            
+            if (!currentLocation && !locationError) {
+                showAlert('Getting your location...', 'error');
+                requestLocation();
+                return;
+            }
+            
+            if (locationError) {
+                if (!confirm('Location unavailable. Continue without GPS coordinates?')) {
+                    return;
+                }
+            }
+            
+            try {
+                await apiCall('/timesheet/clock-in', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        job_id: jobId,
+                        latitude: currentLocation ? currentLocation.latitude : null,
+                        longitude: currentLocation ? currentLocation.longitude : null
+                    })
+                });
+                showAlert('Clocked in successfully');
+                await Promise.all([loadAdminClockStatus(), loadActiveClockIns()]);
+            } catch (error) {
+                showAlert(error.message || 'Failed to clock in', 'error');
+            }
+        }
+        
+        async function handleAdminClockOut() {
+            if (!currentLocation && !locationError) {
+                showAlert('Getting your location...', 'error');
+                requestLocation();
+                return;
+            }
+            
+            if (locationError) {
+                if (!confirm('Location unavailable. Continue without GPS coordinates?')) {
+                    return;
+                }
+            }
+            
+            try {
+                await apiCall('/timesheet/clock-out', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        latitude: currentLocation ? currentLocation.latitude : null,
+                        longitude: currentLocation ? currentLocation.longitude : null
+                    })
+                });
+                showAlert('Clocked out successfully');
+                await Promise.all([loadAdminClockStatus(), loadActiveClockIns()]);
+            } catch (error) {
+                showAlert(error.message || 'Failed to clock out', 'error');
+            }
         }
         
         async function loadActiveClockIns() {
