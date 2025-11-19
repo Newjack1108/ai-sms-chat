@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Orders - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Production Orders</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Orders</h2>
+                <button onclick="showAddOrderModal()" class="btn btn-primary">Add Order</button>
+            </div>
+            <div id="ordersList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h2>Material Requirements Calculator</h2>
+            </div>
+            <div id="calculatorContent">
+                <div class="form-group">
+                    <label class="form-label">Select Orders to Calculate</label>
+                    <div id="ordersCheckboxes"></div>
+                </div>
+                <button onclick="calculateRequirements()" class="btn btn-primary">Calculate Requirements</button>
+                <div id="requirementsResult" class="mt-20"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Order Modal -->
+    <div id="orderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Order</h3>
+                <button class="modal-close" onclick="hideModal('orderModal')">&times;</button>
+            </div>
+            <form id="orderForm">
+                <div class="form-group">
+                    <label class="form-label">Product *</label>
+                    <select id="orderProduct" class="form-select" required>
+                        <option value="">Select product</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quantity *</label>
+                    <input type="number" id="orderQty" class="form-input" required min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Order Date</label>
+                    <input type="date" id="orderDate" class="form-input">
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('orderModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Order</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let products = [];
+        let orders = [];
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            await loadProducts();
+            loadOrders();
+        }
+        
+        async function loadProducts() {
+            try {
+                const data = await apiCall('/products');
+                products = data.products.filter(p => p.status === 'active');
+                
+                const select = document.getElementById('orderProduct');
+                select.innerHTML = '<option value="">Select product</option>';
+                products.forEach(product => {
+                    select.innerHTML += `<option value="${product.id}">${product.name}</option>`;
+                });
+            } catch (error) {
+                console.error('Error loading products:', error);
+            }
+        }
+        
+        async function loadOrders() {
+            try {
+                const data = await apiCall('/orders');
+                orders = data.orders;
+                const ordersList = document.getElementById('ordersList');
+                
+                if (orders.length === 0) {
+                    ordersList.innerHTML = '<p>No orders found</p>';
+                    updateOrdersCheckboxes();
+                    return;
+                }
+                
+                ordersList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>Quantity</th>
+                                <th>Status</th>
+                                <th>Order Date</th>
+                                <th>Created By</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orders.map(order => `
+                                <tr>
+                                    <td><strong>${order.product_name || 'Unknown'}</strong></td>
+                                    <td>${order.quantity}</td>
+                                    <td><span class="badge badge-info">${order.status}</span></td>
+                                    <td>${formatDate(order.order_date)}</td>
+                                    <td>${order.created_by_name || '-'}</td>
+                                    <td>
+                                        <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View Requirements</button>
+                                        <button onclick="updateOrderStatus(${order.id})" class="btn btn-secondary btn-sm">Update Status</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                updateOrdersCheckboxes();
+            } catch (error) {
+                document.getElementById('ordersList').innerHTML = '<p>Error loading orders</p>';
+            }
+        }
+        
+        function updateOrdersCheckboxes() {
+            const checkboxesDiv = document.getElementById('ordersCheckboxes');
+            if (orders.length === 0) {
+                checkboxesDiv.innerHTML = '<p>No orders available</p>';
+                return;
+            }
+            
+            checkboxesDiv.innerHTML = orders.map(order => `
+                <label style="display: block; margin-bottom: 10px;">
+                    <input type="checkbox" value="${order.id}" style="margin-right: 8px;">
+                    ${order.product_name} - Qty: ${order.quantity} (${order.status})
+                </label>
+            `).join('');
+        }
+        
+        function showAddOrderModal() {
+            document.getElementById('orderForm').reset();
+            document.getElementById('orderDate').value = new Date().toISOString().split('T')[0];
+            showModal('orderModal');
+        }
+        
+        async function calculateRequirements() {
+            const selected = Array.from(document.querySelectorAll('#ordersCheckboxes input:checked')).map(cb => parseInt(cb.value));
+            if (selected.length === 0) {
+                showAlert('Please select at least one order', 'error');
+                return;
+            }
+            
+            try {
+                const selectedOrders = orders.filter(o => selected.includes(o.id));
+                const ordersData = selectedOrders.map(o => ({
+                    product_id: o.product_id,
+                    quantity: o.quantity
+                }));
+                
+                const result = await apiCall('/requirements/calculate', {
+                    method: 'POST',
+                    body: JSON.stringify({ orders: ordersData })
+                });
+                
+                const requirements = result.requirements;
+                const resultDiv = document.getElementById('requirementsResult');
+                
+                let totalCost = 0;
+                requirements.raw_materials_required.forEach(m => totalCost += parseFloat(m.cost_gbp || 0));
+                
+                resultDiv.innerHTML = `
+                    <h3>Material Requirements Summary</h3>
+                    <div class="alert alert-info">
+                        <strong>Total Estimated Cost:</strong> ${formatCurrency(requirements.total_cost_gbp || totalCost)}
+                    </div>
+                    
+                    <h4>Panels Required</h4>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Panel</th>
+                                <th>Total Quantity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="2">No panels required</td></tr>' : requirements.panels_required.map(p => `
+                                <tr>
+                                    <td>${p.panel_name}</td>
+                                    <td>${p.total_quantity.toFixed(2)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    
+                    <h4>Raw Materials Required</h4>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Material</th>
+                                <th>Total Quantity</th>
+                                <th>Unit</th>
+                                <th>Available</th>
+                                <th>Shortfall</th>
+                                <th>Cost (GBP)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${requirements.raw_materials_required.map(m => {
+                                const available = parseFloat(m.available || 0);
+                                const required = parseFloat(m.total_quantity || 0);
+                                const shortfall = Math.max(0, required - available);
+                                const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                return `
+                                    <tr>
+                                        <td><strong>${m.name}</strong></td>
+                                        <td>${required.toFixed(2)}</td>
+                                        <td>${m.unit}</td>
+                                        <td>${available.toFixed(2)}</td>
+                                        <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                        <td>${formatCurrency(m.cost_gbp || 0)}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                showAlert('Error calculating requirements: ' + error.message, 'error');
+            }
+        }
+        
+        async function viewOrderRequirements(orderId) {
+            try {
+                const result = await apiCall(`/orders/${orderId}/requirements`, {
+                    method: 'POST'
+                });
+                
+                const requirements = result.requirements;
+                const modal = document.createElement('div');
+                modal.className = 'modal show';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width: 800px;">
+                        <div class="modal-header">
+                            <h3>Order Requirements</h3>
+                            <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                        </div>
+                        <div>
+                            <h4>Panels Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Panel</th>
+                                        <th>Quantity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.panels_required.map(p => `
+                                        <tr>
+                                            <td>${p.panel_name}</td>
+                                            <td>${p.total_quantity.toFixed(2)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                            
+                            <h4>Raw Materials Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Material</th>
+                                        <th>Quantity</th>
+                                        <th>Unit</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.raw_materials_required.map(m => {
+                                        const shortfall = Math.max(0, parseFloat(m.total_quantity) - parseFloat(m.available || 0));
+                                        return `
+                                            <tr>
+                                                <td>${m.name}</td>
+                                                <td>${parseFloat(m.total_quantity).toFixed(2)}</td>
+                                                <td>${m.unit}</td>
+                                                <td>${parseFloat(m.available || 0).toFixed(2)}</td>
+                                                <td><span class="badge ${shortfall > 0 ? 'badge-danger' : 'badge-success'}">${shortfall.toFixed(2)}</span></td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showAlert('Error loading requirements', 'error');
+            }
+        }
+        
+        async function updateOrderStatus(orderId) {
+            const status = prompt('Enter new status (pending, in_progress, completed, cancelled):');
+            if (!status) return;
+            
+            try {
+                await apiCall(`/orders/${orderId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ status })
+                });
+                showAlert('Order status updated');
+                loadOrders();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        }
+        
+        document.getElementById('orderForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiCall('/orders', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        product_id: document.getElementById('orderProduct').value,
+                        quantity: document.getElementById('orderQty').value,
+                        order_date: document.getElementById('orderDate').value
+                    })
+                });
+                showAlert('Order created');
+                hideModal('orderModal');
+                loadOrders();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        init();
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Production Dashboard</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="stock.html" class="btn btn-secondary btn-sm">Stock</a>
+            <a href="panels.html" class="btn btn-secondary btn-sm">Panels</a>
+            <a href="products.html" class="btn btn-secondary btn-sm">Products</a>
+            <a href="production-orders.html" class="btn btn-secondary btn-sm">Orders</a>
+            <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
+            <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
+            <a href="users.html" class="btn btn-secondary btn-sm admin-only">Users</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="grid grid-3">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Stock Alerts</h2>
+                </div>
+                <div id="stockAlerts">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h2>Overdue Reminders</h2>
+                </div>
+                <div id="overdueReminders">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h2>My Tasks</h2>
+                </div>
+                <div id="myTasks">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h2>Recent Orders</h2>
+            </div>
+            <div id="recentOrders">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        async function loadDashboard() {
+            await initNavbar();
+            
+            // Load stock alerts
+            try {
+                const stockData = await apiCall('/stock');
+                const lowStock = stockData.items.filter(item => 
+                    parseFloat(item.current_quantity) <= parseFloat(item.min_quantity)
+                );
+                
+                const alertsDiv = document.getElementById('stockAlerts');
+                if (lowStock.length === 0) {
+                    alertsDiv.innerHTML = '<p>No low stock alerts</p>';
+                } else {
+                    alertsDiv.innerHTML = lowStock.map(item => `
+                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
+                            <strong>${item.name}</strong><br>
+                            <small>Current: ${item.current_quantity} ${item.unit} (Min: ${item.min_quantity})</small>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                document.getElementById('stockAlerts').innerHTML = '<p>Error loading alerts</p>';
+            }
+            
+            // Load overdue reminders
+            try {
+                const remindersData = await apiCall('/reminders/overdue');
+                const remindersDiv = document.getElementById('overdueReminders');
+                if (remindersData.reminders.length === 0) {
+                    remindersDiv.innerHTML = '<p>No overdue reminders</p>';
+                } else {
+                    remindersDiv.innerHTML = remindersData.reminders.slice(0, 5).map(reminder => `
+                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
+                            <strong>${reminder.stock_item_name}</strong><br>
+                            <small>Due: ${formatDate(reminder.next_check_date)}</small>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                document.getElementById('overdueReminders').innerHTML = '<p>Error loading reminders</p>';
+            }
+            
+            // Load my tasks
+            try {
+                const tasksData = await apiCall('/tasks/my?status=pending');
+                const tasksDiv = document.getElementById('myTasks');
+                if (tasksData.tasks.length === 0) {
+                    tasksDiv.innerHTML = '<p>No pending tasks</p>';
+                } else {
+                    tasksDiv.innerHTML = tasksData.tasks.slice(0, 5).map(task => `
+                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
+                            <strong>${task.title}</strong><br>
+                            <small>Due: ${task.due_date ? formatDate(task.due_date) : 'No date'}</small>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                document.getElementById('myTasks').innerHTML = '<p>Error loading tasks</p>';
+            }
+            
+            // Load recent orders
+            try {
+                const ordersData = await apiCall('/orders');
+                const ordersDiv = document.getElementById('recentOrders');
+                if (ordersData.orders.length === 0) {
+                    ordersDiv.innerHTML = '<p>No recent orders</p>';
+                } else {
+                    ordersDiv.innerHTML = `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Quantity</th>
+                                    <th>Status</th>
+                                    <th>Order Date</th>
+                                    <th>Created By</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${ordersData.orders.slice(0, 10).map(order => `
+                                    <tr>
+                                        <td>${order.product_name || 'Unknown'}</td>
+                                        <td>${order.quantity}</td>
+                                        <td><span class="badge badge-info">${order.status}</span></td>
+                                        <td>${formatDate(order.order_date)}</td>
+                                        <td>${order.created_by_name || '-'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('recentOrders').innerHTML = '<p>Error loading orders</p>';
+            }
+        }
+        
+        loadDashboard();
+    </script>
+</body>
+</html>
+

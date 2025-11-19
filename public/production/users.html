@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>User Management</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Production Users</h2>
+                <button onclick="showAddUserModal()" class="btn btn-primary">Add User</button>
+            </div>
+            <div id="usersList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Modal -->
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="userModalTitle">Add User</h3>
+                <button class="modal-close" onclick="hideModal('userModal')">&times;</button>
+            </div>
+            <form id="userForm">
+                <input type="hidden" id="userId">
+                <div class="form-group">
+                    <label class="form-label">Username *</label>
+                    <input type="text" id="userUsername" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password <span id="passwordRequired">*</span></label>
+                    <input type="password" id="userPassword" class="form-input">
+                    <small style="color: #6c757d;">Leave blank to keep existing password</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Role *</label>
+                    <select id="userRole" class="form-select" required>
+                        <option value="manager">Manager</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('userModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            if (currentUser.role !== 'admin') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            initNavbar();
+            loadUsers();
+        }
+        
+        async function loadUsers() {
+            try {
+                const data = await apiCall('/users');
+                const usersList = document.getElementById('usersList');
+                
+                if (data.users.length === 0) {
+                    usersList.innerHTML = '<p>No users found</p>';
+                    return;
+                }
+                
+                usersList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.users.map(user => `
+                                <tr>
+                                    <td><strong>${user.username}</strong></td>
+                                    <td><span class="badge badge-info">${user.role}</span></td>
+                                    <td>${formatDate(user.created_at)}</td>
+                                    <td>
+                                        <button onclick="editUser(${user.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                        ${user.id !== currentUser.id ? `
+                                            <button onclick="deleteUser(${user.id})" class="btn btn-danger btn-sm">Delete</button>
+                                        ` : ''}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('usersList').innerHTML = '<p>Error loading users</p>';
+            }
+        }
+        
+        function showAddUserModal() {
+            document.getElementById('userModalTitle').textContent = 'Add User';
+            document.getElementById('userForm').reset();
+            document.getElementById('userId').value = '';
+            document.getElementById('passwordRequired').style.display = 'inline';
+            document.getElementById('userPassword').required = true;
+            showModal('userModal');
+        }
+        
+        async function editUser(id) {
+            try {
+                const data = await apiCall('/users');
+                const user = data.users.find(u => u.id === id);
+                if (!user) return;
+                
+                document.getElementById('userModalTitle').textContent = 'Edit User';
+                document.getElementById('userId').value = user.id;
+                document.getElementById('userUsername').value = user.username;
+                document.getElementById('userRole').value = user.role;
+                document.getElementById('userPassword').value = '';
+                document.getElementById('passwordRequired').style.display = 'none';
+                document.getElementById('userPassword').required = false;
+                showModal('userModal');
+            } catch (error) {
+                showAlert('Error loading user', 'error');
+            }
+        }
+        
+        async function deleteUser(id) {
+            if (!confirm('Delete this user? This action cannot be undone.')) return;
+            try {
+                await apiCall(`/users/${id}`, { method: 'DELETE' });
+                showAlert('User deleted');
+                loadUsers();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        }
+        
+        document.getElementById('userForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('userId').value;
+            const username = document.getElementById('userUsername').value;
+            const password = document.getElementById('userPassword').value;
+            const role = document.getElementById('userRole').value;
+            
+            try {
+                if (id) {
+                    // Update user
+                    await apiCall(`/users/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ username, role, password: password || null })
+                    });
+                    showAlert('User updated');
+                } else {
+                    // Create user
+                    if (!password) {
+                        showAlert('Password is required for new users', 'error');
+                        return;
+                    }
+                    await apiCall('/users', {
+                        method: 'POST',
+                        body: JSON.stringify({ username, password, role })
+                    });
+                    showAlert('User created');
+                }
+                hideModal('userModal');
+                loadUsers();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        init();
+    </script>
+</body>
+</html>
+

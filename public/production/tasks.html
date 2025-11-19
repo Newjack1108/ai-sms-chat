@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasks - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Task Management</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Tasks</h2>
+                <button onclick="showAddTaskModal()" class="btn btn-primary">Add Task</button>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <button onclick="loadTasks()" class="btn btn-secondary btn-sm">All Tasks</button>
+                <button onclick="loadMyTasks()" class="btn btn-secondary btn-sm">My Tasks</button>
+                <button onclick="loadOverdueTasks()" class="btn btn-secondary btn-sm">Overdue</button>
+            </div>
+            <div id="tasksList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Task Modal -->
+    <div id="taskModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="taskModalTitle">Add Task</h3>
+                <button class="modal-close" onclick="hideModal('taskModal')">&times;</button>
+            </div>
+            <form id="taskForm">
+                <input type="hidden" id="taskId">
+                <div class="form-group">
+                    <label class="form-label">Title *</label>
+                    <input type="text" id="taskTitle" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="taskDescription" class="form-textarea"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Assign To</label>
+                    <select id="taskAssignedTo" class="form-select">
+                        <option value="">Unassigned</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Due Date</label>
+                    <input type="date" id="taskDueDate" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select id="taskStatus" class="form-select">
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('taskModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Task Details Modal -->
+    <div id="taskDetailsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="taskDetailsTitle">Task Details</h3>
+                <button class="modal-close" onclick="hideModal('taskDetailsModal')">&times;</button>
+            </div>
+            <div id="taskDetailsContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let users = [];
+        let currentFilter = 'all';
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            await loadUsers();
+            loadTasks();
+        }
+        
+        async function loadUsers() {
+            try {
+                const data = await apiCall('/users');
+                users = data.users;
+                
+                const select = document.getElementById('taskAssignedTo');
+                select.innerHTML = '<option value="">Unassigned</option>';
+                users.forEach(user => {
+                    select.innerHTML += `<option value="${user.id}">${user.username} (${user.role})</option>`;
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+        
+        async function loadTasks(filter = {}) {
+            try {
+                const queryParams = new URLSearchParams();
+                if (filter.status) queryParams.append('status', filter.status);
+                if (filter.assigned_to_user_id) queryParams.append('assigned_to_user_id', filter.assigned_to_user_id);
+                if (filter.overdue) queryParams.append('overdue', 'true');
+                
+                const data = await apiCall(`/tasks?${queryParams.toString()}`);
+                const tasksList = document.getElementById('tasksList');
+                
+                if (data.tasks.length === 0) {
+                    tasksList.innerHTML = '<p>No tasks found</p>';
+                    return;
+                }
+                
+                const today = new Date().toISOString().split('T')[0];
+                
+                tasksList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Assigned To</th>
+                                <th>Status</th>
+                                <th>Due Date</th>
+                                <th>Created By</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.tasks.map(task => {
+                                const isOverdue = task.due_date && task.due_date < today && task.status !== 'completed';
+                                return `
+                                    <tr>
+                                        <td><strong>${task.title}</strong></td>
+                                        <td>${task.assigned_to_name || 'Unassigned'}</td>
+                                        <td><span class="badge badge-info">${task.status}</span></td>
+                                        <td>
+                                            ${task.due_date ? formatDate(task.due_date) : '-'}
+                                            ${isOverdue ? '<span class="badge badge-danger">Overdue</span>' : ''}
+                                        </td>
+                                        <td>${task.created_by_name || '-'}</td>
+                                        <td>
+                                            <button onclick="viewTaskDetails(${task.id})" class="btn btn-primary btn-sm">View</button>
+                                            ${task.status !== 'completed' ? `
+                                                <button onclick="completeTask(${task.id})" class="btn btn-success btn-sm">Complete</button>
+                                            ` : ''}
+                                            ${currentUser.role === 'admin' ? `
+                                                <button onclick="editTask(${task.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                                <button onclick="deleteTask(${task.id})" class="btn btn-danger btn-sm">Delete</button>
+                                            ` : ''}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('tasksList').innerHTML = '<p>Error loading tasks</p>';
+            }
+        }
+        
+        function loadMyTasks() {
+            currentFilter = 'my';
+            loadTasks({ assigned_to_user_id: currentUser.id });
+        }
+        
+        function loadOverdueTasks() {
+            currentFilter = 'overdue';
+            loadTasks({ overdue: true });
+        }
+        
+        function showAddTaskModal() {
+            document.getElementById('taskModalTitle').textContent = 'Add Task';
+            document.getElementById('taskForm').reset();
+            document.getElementById('taskId').value = '';
+            document.getElementById('taskStatus').value = 'pending';
+            showModal('taskModal');
+        }
+        
+        async function editTask(id) {
+            try {
+                const data = await apiCall('/tasks');
+                const task = data.tasks.find(t => t.id === id);
+                if (!task) return;
+                
+                document.getElementById('taskModalTitle').textContent = 'Edit Task';
+                document.getElementById('taskId').value = task.id;
+                document.getElementById('taskTitle').value = task.title;
+                document.getElementById('taskDescription').value = task.description || '';
+                document.getElementById('taskAssignedTo').value = task.assigned_to_user_id || '';
+                document.getElementById('taskDueDate').value = task.due_date || '';
+                document.getElementById('taskStatus').value = task.status;
+                showModal('taskModal');
+            } catch (error) {
+                showAlert('Error loading task', 'error');
+            }
+        }
+        
+        async function viewTaskDetails(id) {
+            try {
+                const taskData = await apiCall('/tasks');
+                const task = taskData.tasks.find(t => t.id === id);
+                if (!task) return;
+                
+                const commentsData = await apiCall(`/tasks/${id}/comments`);
+                
+                document.getElementById('taskDetailsTitle').textContent = task.title;
+                document.getElementById('taskDetailsContent').innerHTML = `
+                    <div style="margin-bottom: 20px;">
+                        <p><strong>Description:</strong> ${task.description || 'No description'}</p>
+                        <p><strong>Status:</strong> <span class="badge badge-info">${task.status}</span></p>
+                        <p><strong>Assigned To:</strong> ${task.assigned_to_name || 'Unassigned'}</p>
+                        <p><strong>Due Date:</strong> ${task.due_date ? formatDate(task.due_date) : 'No due date'}</p>
+                        <p><strong>Created By:</strong> ${task.created_by_name || '-'}</p>
+                        ${task.completed_at ? `<p><strong>Completed:</strong> ${formatDateTime(task.completed_at)} by ${task.completed_by_name || '-'}</p>` : ''}
+                    </div>
+                    
+                    <h4>Comments</h4>
+                    <div id="taskComments" style="margin-bottom: 20px; max-height: 300px; overflow-y: auto;">
+                        ${commentsData.comments.length === 0 ? '<p>No comments</p>' : commentsData.comments.map(comment => `
+                            <div style="padding: 10px; border-bottom: 1px solid #e9ecef; margin-bottom: 10px;">
+                                <strong>${comment.user_name}</strong> - ${formatDateTime(comment.created_at)}
+                                <p>${comment.comment}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    <form id="commentForm">
+                        <div class="form-group">
+                            <label class="form-label">Add Comment</label>
+                            <textarea id="commentText" class="form-textarea" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add Comment</button>
+                    </form>
+                `;
+                
+                document.getElementById('commentForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    try {
+                        await apiCall(`/tasks/${id}/comments`, {
+                            method: 'POST',
+                            body: JSON.stringify({ comment: document.getElementById('commentText').value })
+                        });
+                        showAlert('Comment added');
+                        viewTaskDetails(id);
+                    } catch (error) {
+                        showAlert(error.message, 'error');
+                    }
+                });
+                
+                showModal('taskDetailsModal');
+            } catch (error) {
+                showAlert('Error loading task details', 'error');
+            }
+        }
+        
+        async function completeTask(id) {
+            if (!confirm('Mark this task as complete?')) return;
+            try {
+                await apiCall(`/tasks/${id}/complete`, { method: 'POST' });
+                showAlert('Task marked as complete');
+                loadTasks();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        }
+        
+        async function deleteTask(id) {
+            if (!confirm('Delete this task?')) return;
+            try {
+                await apiCall(`/tasks/${id}`, { method: 'DELETE' });
+                showAlert('Task deleted');
+                loadTasks();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        }
+        
+        document.getElementById('taskForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('taskId').value;
+            const data = {
+                title: document.getElementById('taskTitle').value,
+                description: document.getElementById('taskDescription').value,
+                assigned_to_user_id: document.getElementById('taskAssignedTo').value || null,
+                due_date: document.getElementById('taskDueDate').value || null,
+                status: document.getElementById('taskStatus').value
+            };
+            
+            try {
+                if (id) {
+                    await apiCall(`/tasks/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Task updated');
+                } else {
+                    await apiCall('/tasks', {
+                        method: 'POST',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Task created');
+                }
+                hideModal('taskModal');
+                loadTasks();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        init();
+    </script>
+</body>
+</html>
+

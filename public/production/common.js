@@ -1,0 +1,141 @@
+// Common JavaScript functions for production system
+
+const API_BASE = '/production/api';
+
+// API helper function
+async function apiCall(endpoint, options = {}) {
+    try {
+        const response = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Request failed');
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('API call error:', error);
+        throw error;
+    }
+}
+
+// Check authentication
+async function checkAuth() {
+    try {
+        const response = await fetch(`${API_BASE}/me`);
+        if (!response.ok) {
+            window.location.href = '/production/login.html';
+            return null;
+        }
+        const data = await response.json();
+        return data.user;
+    } catch (error) {
+        window.location.href = '/production/login.html';
+        return null;
+    }
+}
+
+// Logout
+async function logout() {
+    try {
+        await apiCall('/logout', { method: 'POST' });
+        window.location.href = '/production/login.html';
+    } catch (error) {
+        console.error('Logout error:', error);
+        window.location.href = '/production/login.html';
+    }
+}
+
+// Format currency
+function formatCurrency(amount) {
+    return new Intl.NumberFormat('en-GB', {
+        style: 'currency',
+        currency: 'GBP'
+    }).format(amount || 0);
+}
+
+// Format date
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+
+// Format datetime
+function formatDateTime(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleString('en-GB', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Show alert
+function showAlert(message, type = 'success') {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type}`;
+    alertDiv.textContent = message;
+    
+    const container = document.querySelector('.container') || document.body;
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    setTimeout(() => {
+        alertDiv.remove();
+    }, 5000);
+}
+
+// Show modal
+function showModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('show');
+    }
+}
+
+// Hide modal
+function hideModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('show');
+    }
+}
+
+// Close modal on outside click
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+        e.target.classList.remove('show');
+    }
+});
+
+// Initialize navbar
+async function initNavbar() {
+    const user = await checkAuth();
+    if (user) {
+        const userInfo = document.getElementById('userInfo');
+        if (userInfo) {
+            userInfo.textContent = `${user.username} (${user.role})`;
+        }
+        
+        // Hide admin-only menu items
+        if (user.role !== 'admin') {
+            const adminItems = document.querySelectorAll('.admin-only');
+            adminItems.forEach(item => item.style.display = 'none');
+        }
+    }
+}
+

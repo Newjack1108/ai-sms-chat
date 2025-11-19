@@ -114,6 +114,53 @@ app.use((req, res, next) => {
 // Serve static files
 app.use(express.static('public'));
 
+// Production system routes and authentication
+const productionRoutes = require('./production-routes');
+const { initializeProductionDatabase, ProductionDatabase } = require('./production-database');
+const { createDefaultAdmin } = require('./production-auth');
+
+// Production authentication middleware
+function requireProductionAuth(req, res, next) {
+    if (req.session && req.session.production_authenticated && req.session.production_user) {
+        return next();
+    }
+    
+    // For API routes, return 401
+    if (req.path.startsWith('/production/api/')) {
+        return res.status(401).json({
+            success: false,
+            error: 'Authentication required',
+            requiresLogin: true
+        });
+    }
+    
+    // For HTML pages, redirect to login
+    return res.redirect('/production/login.html');
+}
+
+// Production routes (login endpoint is handled inside the routes file)
+app.use('/production/api', productionRoutes);
+
+// Serve production static files (CSS, JS) without authentication
+app.use('/production', express.static(path.join(__dirname, 'public', 'production')));
+
+// Production login page (no auth required)
+app.get('/production/login.html', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'production', 'login.html'));
+});
+
+// Production root - redirect to dashboard (requires auth)
+app.get('/production', requireProductionAuth, (req, res) => {
+    res.redirect('/production/dashboard.html');
+});
+
+// Production HTML pages (protected)
+app.get('/production/*.html', requireProductionAuth, (req, res) => {
+    const fileName = req.path.replace('/production/', '') || 'dashboard.html';
+    const filePath = path.join(__dirname, 'public', 'production', fileName);
+    res.sendFile(filePath);
+});
+
 // Database is now persistent - no more in-memory storage
 console.log('💾 Using SQLite database for persistent storage');
 
@@ -486,11 +533,19 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
         
         // Build filtered labeled answers for leadPayload
         const filteredLabeledAnswersForPayload = {};
+        const labeledAnswersArray = [];
         Object.entries(labeledAnswers).forEach(([key, value]) => {
             if (value && typeof value === 'string' && value.trim().length > 0) {
                 filteredLabeledAnswersForPayload[key] = value;
+                // Collect q1_labeled, q2_labeled, etc. for the combined field
+                if (key.startsWith('q') && key.endsWith('_labeled')) {
+                    labeledAnswersArray.push(value);
+                }
             }
         });
+        
+        // Create a combined field with all labeled answers on separate lines
+        const labeledAnswersCombined = labeledAnswersArray.join('\n');
         
         const leadPayload = {
             id: lead.id,
@@ -507,6 +562,7 @@ async function sendToCRMWebhook(lead, eventType = 'lead_qualified', eventDetails
             answers_structured: structuredAnswers,
             answers_flat: flatAnswers,
             answers_labeled: filteredLabeledAnswersForPayload,
+            answers_labeled_combined: labeledAnswersCombined,
             returning_customer: Boolean(lead.returning_customer),
             times_qualified: lead.times_qualified || 0
         };
@@ -3737,6 +3793,17 @@ async function startServer() {
         
         // Load settings from database after database is initialized
         await loadSettingsFromDatabase();
+        
+        // Initialize production database
+        try {
+            await initializeProductionDatabase();
+            console.log('✅ Production database initialized');
+            
+            // Create default admin user if none exists
+            await createDefaultAdmin();
+        } catch (error) {
+            console.error('❌ Error initializing production database:', error);
+        }
         
         // Start reminder checker (checkInterval is in minutes)
         const checkIntervalMs = REMINDER_INTERVALS.checkInterval * 60 * 1000;

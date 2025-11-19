@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Management - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Stock Management</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Stock Items</h2>
+                <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Stock Item</button>
+            </div>
+            <div id="stockList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Stock Modal -->
+    <div id="stockModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="stockModalTitle">Add Stock Item</h3>
+                <button class="modal-close" onclick="hideModal('stockModal')">&times;</button>
+            </div>
+            <form id="stockForm">
+                <input type="hidden" id="stockId">
+                <div class="form-group">
+                    <label class="form-label">Name *</label>
+                    <input type="text" id="stockName" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="stockDescription" class="form-textarea"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Unit (Metric) *</label>
+                    <input type="text" id="stockUnit" class="form-input" required placeholder="e.g., m, m², kg, litres, pieces">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Current Quantity</label>
+                    <input type="number" step="0.01" id="stockCurrentQty" class="form-input" value="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Minimum Quantity</label>
+                    <input type="number" step="0.01" id="stockMinQty" class="form-input" value="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Location</label>
+                    <input type="text" id="stockLocation" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Cost per Unit (GBP)</label>
+                    <input type="number" step="0.01" id="stockCost" class="form-input" value="0">
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('stockModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Stock Movement Modal -->
+    <div id="movementModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Record Stock Movement</h3>
+                <button class="modal-close" onclick="hideModal('movementModal')">&times;</button>
+            </div>
+            <form id="movementForm">
+                <input type="hidden" id="movementStockId">
+                <div class="form-group">
+                    <label class="form-label">Movement Type *</label>
+                    <select id="movementType" class="form-select" required>
+                        <option value="in">Stock In</option>
+                        <option value="out">Stock Out</option>
+                        <option value="adjustment">Adjustment</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quantity *</label>
+                    <input type="number" step="0.01" id="movementQty" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Reference</label>
+                    <input type="text" id="movementRef" class="form-input" placeholder="e.g., PO123, Invoice #456">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Cost (GBP)</label>
+                    <input type="number" step="0.01" id="movementCost" class="form-input" value="0">
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('movementModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Record</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            loadStock();
+        }
+        
+        async function loadStock() {
+            try {
+                const data = await apiCall('/stock');
+                const stockList = document.getElementById('stockList');
+                
+                if (data.items.length === 0) {
+                    stockList.innerHTML = '<p>No stock items found</p>';
+                    return;
+                }
+                
+                stockList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Current Qty</th>
+                                <th>Min Qty</th>
+                                <th>Unit</th>
+                                <th>Location</th>
+                                <th>Cost/Unit</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.items.map(item => {
+                                const currentQty = parseFloat(item.current_quantity) || 0;
+                                const minQty = parseFloat(item.min_quantity) || 0;
+                                const isLow = currentQty <= minQty;
+                                return `
+                                    <tr>
+                                        <td><strong>${item.name}</strong></td>
+                                        <td>${currentQty.toFixed(2)}</td>
+                                        <td>${minQty.toFixed(2)}</td>
+                                        <td>${item.unit}</td>
+                                        <td>${item.location || '-'}</td>
+                                        <td>${formatCurrency(item.cost_per_unit_gbp)}</td>
+                                        <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
+                                        <td>
+                                            <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
+                                            ${currentUser.role === 'admin' ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('stockList').innerHTML = '<p>Error loading stock</p>';
+            }
+        }
+        
+        function showAddStockModal() {
+            document.getElementById('stockModalTitle').textContent = 'Add Stock Item';
+            document.getElementById('stockForm').reset();
+            document.getElementById('stockId').value = '';
+            showModal('stockModal');
+        }
+        
+        async function editStock(id) {
+            try {
+                const data = await apiCall(`/stock`);
+                const item = data.items.find(i => i.id === id);
+                if (!item) return;
+                
+                document.getElementById('stockModalTitle').textContent = 'Edit Stock Item';
+                document.getElementById('stockId').value = item.id;
+                document.getElementById('stockName').value = item.name;
+                document.getElementById('stockDescription').value = item.description || '';
+                document.getElementById('stockUnit').value = item.unit;
+                document.getElementById('stockCurrentQty').value = item.current_quantity;
+                document.getElementById('stockMinQty').value = item.min_quantity;
+                document.getElementById('stockLocation').value = item.location || '';
+                document.getElementById('stockCost').value = item.cost_per_unit_gbp;
+                showModal('stockModal');
+            } catch (error) {
+                showAlert('Error loading stock item', 'error');
+            }
+        }
+        
+        document.getElementById('stockForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('stockId').value;
+            const data = {
+                name: document.getElementById('stockName').value,
+                description: document.getElementById('stockDescription').value,
+                unit: document.getElementById('stockUnit').value,
+                min_quantity: document.getElementById('stockMinQty').value,
+                location: document.getElementById('stockLocation').value,
+                cost_per_unit_gbp: document.getElementById('stockCost').value
+            };
+            
+            try {
+                if (id) {
+                    await apiCall(`/stock/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Stock item updated');
+                } else {
+                    data.current_quantity = document.getElementById('stockCurrentQty').value;
+                    await apiCall('/stock', {
+                        method: 'POST',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Stock item created');
+                }
+                hideModal('stockModal');
+                loadStock();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        function showMovementModal(stockId) {
+            document.getElementById('movementStockId').value = stockId;
+            document.getElementById('movementForm').reset();
+            showModal('movementModal');
+        }
+        
+        document.getElementById('movementForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const stockId = document.getElementById('movementStockId').value;
+            const data = {
+                movement_type: document.getElementById('movementType').value,
+                quantity: document.getElementById('movementQty').value,
+                reference: document.getElementById('movementRef').value,
+                cost_gbp: document.getElementById('movementCost').value
+            };
+            
+            try {
+                await apiCall(`/stock/${stockId}/movement`, {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                showAlert('Stock movement recorded');
+                hideModal('movementModal');
+                loadStock();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        init();
+    </script>
+</body>
+</html>
+

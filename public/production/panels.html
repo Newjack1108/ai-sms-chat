@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panels & BOM - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Panels & BOM Management</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Panels</h2>
+                <button onclick="showAddPanelModal()" class="btn btn-primary admin-only">Add Panel</button>
+            </div>
+            <div id="panelsList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Panel Modal -->
+    <div id="panelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="panelModalTitle">Add Panel</h3>
+                <button class="modal-close" onclick="hideModal('panelModal')">&times;</button>
+            </div>
+            <form id="panelForm">
+                <input type="hidden" id="panelId">
+                <div class="form-group">
+                    <label class="form-label">Name *</label>
+                    <input type="text" id="panelName" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="panelDescription" class="form-textarea"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Panel Type</label>
+                    <input type="text" id="panelType" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Cost (GBP)</label>
+                    <input type="number" step="0.01" id="panelCost" class="form-input" value="0">
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('panelModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- BOM Modal -->
+    <div id="bomModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="bomModalTitle">Panel BOM</h3>
+                <button class="modal-close" onclick="hideModal('bomModal')">&times;</button>
+            </div>
+            <div id="bomContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let stockItems = [];
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            await loadStockItems();
+            loadPanels();
+        }
+        
+        async function loadStockItems() {
+            try {
+                const data = await apiCall('/stock');
+                stockItems = data.items;
+            } catch (error) {
+                console.error('Error loading stock items:', error);
+            }
+        }
+        
+        async function loadPanels() {
+            try {
+                const data = await apiCall('/panels');
+                const panelsList = document.getElementById('panelsList');
+                
+                if (data.panels.length === 0) {
+                    panelsList.innerHTML = '<p>No panels found</p>';
+                    return;
+                }
+                
+                panelsList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Cost</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.panels.map(panel => `
+                                <tr>
+                                    <td><strong>${panel.name}</strong></td>
+                                    <td>${panel.panel_type || '-'}</td>
+                                    <td><span class="badge badge-info">${panel.status}</span></td>
+                                    <td>${formatCurrency(panel.cost_gbp)}</td>
+                                    <td>
+                                        <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
+                                        ${currentUser.role === 'admin' ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('panelsList').innerHTML = '<p>Error loading panels</p>';
+            }
+        }
+        
+        function showAddPanelModal() {
+            document.getElementById('panelModalTitle').textContent = 'Add Panel';
+            document.getElementById('panelForm').reset();
+            document.getElementById('panelId').value = '';
+            showModal('panelModal');
+        }
+        
+        async function editPanel(id) {
+            try {
+                const data = await apiCall('/panels');
+                const panel = data.panels.find(p => p.id === id);
+                if (!panel) return;
+                
+                document.getElementById('panelModalTitle').textContent = 'Edit Panel';
+                document.getElementById('panelId').value = panel.id;
+                document.getElementById('panelName').value = panel.name;
+                document.getElementById('panelDescription').value = panel.description || '';
+                document.getElementById('panelType').value = panel.panel_type || '';
+                document.getElementById('panelCost').value = panel.cost_gbp;
+                showModal('panelModal');
+            } catch (error) {
+                showAlert('Error loading panel', 'error');
+            }
+        }
+        
+        async function viewBOM(panelId) {
+            try {
+                const bomData = await apiCall(`/panels/${panelId}/bom`);
+                const stockData = await apiCall('/stock');
+                
+                document.getElementById('bomModalTitle').textContent = 'Panel BOM';
+                document.getElementById('bomContent').innerHTML = `
+                    <div style="margin-bottom: 20px;">
+                        ${currentUser.role === 'admin' ? `
+                            <button onclick="showAddBOMItem(${panelId})" class="btn btn-primary">Add BOM Item</button>
+                        ` : ''}
+                    </div>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Stock Item</th>
+                                <th>Quantity Required</th>
+                                <th>Unit</th>
+                                ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${bomData.bom.length === 0 ? '<tr><td colspan="4">No BOM items</td></tr>' : bomData.bom.map(item => `
+                                <tr>
+                                    <td>${item.stock_item_name}</td>
+                                    <td>${item.quantity_required}</td>
+                                    <td>${item.unit}</td>
+                                    ${currentUser.role === 'admin' ? `
+                                        <td>
+                                            <button onclick="deleteBOMItem(${item.id}, ${panelId})" class="btn btn-danger btn-sm">Delete</button>
+                                        </td>
+                                    ` : ''}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showModal('bomModal');
+            } catch (error) {
+                showAlert('Error loading BOM', 'error');
+            }
+        }
+        
+        function showAddBOMItem(panelId) {
+            const bomContent = document.getElementById('bomContent');
+            bomContent.innerHTML = `
+                <h4>Add BOM Item</h4>
+                <form id="bomForm">
+                    <input type="hidden" id="bomPanelId" value="${panelId}">
+                    <div class="form-group">
+                        <label class="form-label">Stock Item *</label>
+                        <select id="bomStockItem" class="form-select" required>
+                            <option value="">Select stock item</option>
+                            ${stockItems.map(item => `<option value="${item.id}">${item.name} (${item.unit})</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Quantity Required *</label>
+                        <input type="number" step="0.01" id="bomQty" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Unit *</label>
+                        <input type="text" id="bomUnit" class="form-input" required>
+                    </div>
+                    <div class="text-right">
+                        <button type="button" onclick="viewBOM(${panelId})" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add</button>
+                    </div>
+                </form>
+            `;
+            
+            document.getElementById('bomForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                try {
+                    await apiCall(`/panels/${panelId}/bom`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            stock_item_id: document.getElementById('bomStockItem').value,
+                            quantity_required: document.getElementById('bomQty').value,
+                            unit: document.getElementById('bomUnit').value
+                        })
+                    });
+                    showAlert('BOM item added');
+                    viewBOM(panelId);
+                } catch (error) {
+                    showAlert(error.message, 'error');
+                }
+            });
+        }
+        
+        async function deleteBOMItem(bomId, panelId) {
+            if (!confirm('Delete this BOM item?')) return;
+            try {
+                await apiCall(`/panels/${panelId}/bom/${bomId}`, { method: 'DELETE' });
+                showAlert('BOM item deleted');
+                viewBOM(panelId);
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        }
+        
+        document.getElementById('panelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('panelId').value;
+            const data = {
+                name: document.getElementById('panelName').value,
+                description: document.getElementById('panelDescription').value,
+                panel_type: document.getElementById('panelType').value,
+                cost_gbp: document.getElementById('panelCost').value,
+                status: 'active'
+            };
+            
+            try {
+                if (id) {
+                    await apiCall(`/panels/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Panel updated');
+                } else {
+                    await apiCall('/panels', {
+                        method: 'POST',
+                        body: JSON.stringify(data)
+                    });
+                    showAlert('Panel created');
+                }
+                hideModal('panelModal');
+                loadPanels();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        init();
+    </script>
+</body>
+</html>
+
