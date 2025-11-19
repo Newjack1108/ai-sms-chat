@@ -183,7 +183,7 @@
                             ${clockIns.map(entry => {
                                 const clockInTime = new Date(entry.clock_in_time);
                                 const location = entry.clock_in_latitude && entry.clock_in_longitude 
-                                    ? `${entry.clock_in_latitude.toFixed(6)}, ${entry.clock_in_longitude.toFixed(6)}`
+                                    ? `${parseFloat(entry.clock_in_latitude).toFixed(6)}, ${parseFloat(entry.clock_in_longitude).toFixed(6)}`
                                     : 'Not available';
                                 return `
                                     <tr>
@@ -198,7 +198,22 @@
                     </table>
                 `;
             } catch (error) {
-                document.getElementById('activeClockIns').innerHTML = '<p>Error loading active clock ins</p>';
+                console.error('Error loading active clock ins:', error);
+                let errorMsg = 'Unknown error';
+                if (error.message) {
+                    errorMsg = error.message;
+                } else if (error.details) {
+                    errorMsg = error.details;
+                } else if (typeof error === 'string') {
+                    errorMsg = error;
+                }
+                document.getElementById('activeClockIns').innerHTML = `
+                    <div style="padding: 20px; background: #fee; border: 1px solid #e74c3c; border-radius: 8px;">
+                        <p style="color: #e74c3c; font-weight: 600; margin-bottom: 10px;">Error loading active clock ins</p>
+                        <p style="color: #c33; font-size: 14px;">${escapeHtml(errorMsg)}</p>
+                        <p style="color: #999; font-size: 12px; margin-top: 10px;">Check the server console for more details.</p>
+                    </div>
+                `;
             }
         }
         
@@ -446,6 +461,13 @@
                 showAlert('Error saving notice: ' + error.message, 'error');
             }
         });
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
         
         // Cleanup interval on page unload
         window.addEventListener('beforeunload', () => {

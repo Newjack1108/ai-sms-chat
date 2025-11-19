@@ -839,7 +839,12 @@ router.get('/timesheet/active', requireProductionAuth, requireManager, async (re
         res.json({ success: true, clockIns: activeClockIns });
     } catch (error) {
         console.error('Get active clock ins error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get active clock ins' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to get active clock ins',
+            details: error.message 
+        });
     }
 });
 
