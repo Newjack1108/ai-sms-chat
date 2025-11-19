@@ -121,6 +121,17 @@
                     return;
                 }
                 
+                // Calculate costs for all products
+                const productsWithCosts = await Promise.all(data.products.map(async (product) => {
+                    try {
+                        const costData = await apiCall(`/products/${product.id}/cost`);
+                        return { ...product, calculated_cost: costData.cost };
+                    } catch (error) {
+                        console.error(`Error calculating cost for product ${product.id}:`, error);
+                        return { ...product, calculated_cost: product.cost_gbp || 0 };
+                    }
+                }));
+                
                 productsList.innerHTML = `
                     <table class="table">
                         <thead>
@@ -133,12 +144,12 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.products.map(product => `
+                            ${productsWithCosts.map(product => `
                                 <tr>
                                     <td><strong>${product.name}</strong></td>
                                     <td>${product.product_type || '-'}</td>
                                     <td><span class="badge badge-info">${product.status}</span></td>
-                                    <td>${formatCurrency(product.cost_gbp)}</td>
+                                    <td>${formatCurrency(product.calculated_cost)}</td>
                                     <td>
                                         <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
                                         ${currentUser.role === 'admin' ? `<button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
