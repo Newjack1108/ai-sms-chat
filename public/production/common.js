@@ -13,7 +13,29 @@ async function apiCall(endpoint, options = {}) {
             }
         });
         
-        const data = await response.json();
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('Non-JSON response from', endpoint, ':', text.substring(0, 200));
+            
+            // Handle authentication errors
+            if (response.status === 401 || response.status === 403) {
+                window.location.href = '/production/login.html';
+                return;
+            }
+            
+            // Try to parse as JSON anyway (some servers don't set content-type correctly)
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Server returned HTML instead of JSON (${response.status}): ${response.statusText}. Check if the API endpoint exists.`);
+            }
+        } else {
+            data = await response.json();
+        }
         
         if (!response.ok) {
             throw new Error(data.error || 'Request failed');
