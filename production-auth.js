@@ -8,8 +8,15 @@ function requireProductionAuth(req, res, next) {
         return next();
     }
     
-    // For API routes, return 401
-    if (req.path.startsWith('/production/api/')) {
+    // Check if this is an API route
+    // Routes in production-routes.js are mounted at /production/api, so originalUrl will contain that
+    // Or check if request expects JSON (API calls)
+    const isApiRoute = (req.originalUrl && req.originalUrl.startsWith('/production/api/')) ||
+                       (req.baseUrl && req.baseUrl.includes('/production/api')) ||
+                       req.get('Accept')?.includes('application/json') ||
+                       (req.method !== 'GET' && req.get('Content-Type')?.includes('application/json'));
+    
+    if (isApiRoute) {
         return res.status(401).json({
             success: false,
             error: 'Authentication required',

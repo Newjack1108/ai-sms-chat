@@ -7,8 +7,10 @@ async function apiCall(endpoint, options = {}) {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
+            credentials: 'same-origin', // Include cookies for session
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json',
                 ...options.headers
             }
         });
