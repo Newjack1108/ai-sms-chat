@@ -23,28 +23,42 @@ async function apiCall(endpoint, options = {}) {
         // Check if response is JSON
         const contentType = response.headers.get('content-type');
         let data;
+        let text;
         
+        // Clone response to read as text first (in case we need to check if it's HTML)
         if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('Non-JSON response from', endpoint, ':', text.substring(0, 200));
+            text = await response.text();
+            console.error('Non-JSON response from', endpoint, 'Status:', response.status, 'Content:', text.substring(0, 200));
             
             // Try to parse as JSON anyway (some servers don't set content-type correctly)
             try {
                 data = JSON.parse(text);
             } catch (e) {
-                throw new Error(`Server returned HTML instead of JSON (${response.status}): ${response.statusText}. Check if the API endpoint exists.`);
+                // If it's HTML, it's likely a 404 or error page
+                if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+                    throw new Error(`Server returned HTML page (${response.status}): ${response.statusText}. The API endpoint may not exist or there was a server error.`);
+                }
+                throw new Error(`Server returned non-JSON response (${response.status}): ${response.statusText}`);
             }
         } else {
-            data = await response.json();
+            // Read as JSON
+            try {
+                data = await response.json();
+            } catch (e) {
+                // If JSON parsing fails, try reading as text
+                text = await response.clone().text();
+                console.error('JSON parse failed, response text:', text.substring(0, 200));
+                throw new Error(`Failed to parse JSON response: ${e.message}`);
+            }
         }
         
         if (!response.ok) {
             // Check if it's an auth error in the JSON response
-            if (data.requiresLogin || response.status === 401 || response.status === 403) {
+            if (data && (data.requiresLogin || response.status === 401 || response.status === 403)) {
                 window.location.href = '/production/login.html';
                 return null;
             }
-            throw new Error(data.error || 'Request failed');
+            throw new Error(data?.error || `Request failed with status ${response.status}`);
         }
         
         return data;
