@@ -3796,13 +3796,20 @@ async function startServer() {
         
         // Initialize production database
         try {
+            console.log('🔧 Initializing production database...');
             await initializeProductionDatabase();
             console.log('✅ Production database initialized');
             
             // Create default admin user if none exists
-            await createDefaultAdmin();
+            console.log('🔧 Checking for default admin user...');
+            const adminCreated = await createDefaultAdmin();
+            if (adminCreated) {
+                console.log('✅ Default admin user created successfully');
+            }
         } catch (error) {
             console.error('❌ Error initializing production database:', error);
+            console.error('   Error details:', error.message);
+            console.error('   Stack:', error.stack);
         }
         
         // Start reminder checker (checkInterval is in minutes)

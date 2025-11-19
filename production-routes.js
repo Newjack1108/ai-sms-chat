@@ -35,6 +35,38 @@ router.get('/me', requireProductionAuth, (req, res) => {
     res.json({ success: true, user: req.session.production_user });
 });
 
+// Manual admin creation endpoint (for troubleshooting - remove in production if desired)
+router.post('/create-admin', async (req, res) => {
+    try {
+        const { password = 'admin123' } = req.body;
+        const { hashPassword } = require('./production-auth');
+        const users = await ProductionDatabase.getAllUsers();
+        
+        // Check if admin already exists
+        const adminExists = users.some(u => u.username === 'admin');
+        if (adminExists) {
+            return res.json({ 
+                success: false, 
+                message: 'Admin user already exists',
+                users: users.length 
+            });
+        }
+        
+        // Create admin user
+        const passwordHash = await hashPassword(password);
+        const user = await ProductionDatabase.createUser('admin', passwordHash, 'admin');
+        
+        res.json({ 
+            success: true, 
+            message: 'Admin user created successfully',
+            user: { id: user.id, username: user.username, role: user.role }
+        });
+    } catch (error) {
+        console.error('Create admin error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ============ USER MANAGEMENT ROUTES (Admin only) ============
 
 router.get('/users', requireProductionAuth, requireAdmin, async (req, res) => {

@@ -84,13 +84,23 @@ async function hashPassword(password) {
 async function createDefaultAdmin() {
     try {
         const users = await ProductionDatabase.getAllUsers();
+        console.log(`📊 Production users found: ${users.length}`);
         if (users.length === 0) {
+            console.log('🔧 Creating default admin user...');
             const passwordHash = await hashPassword('admin123');
-            await ProductionDatabase.createUser('admin', passwordHash, 'admin');
+            const user = await ProductionDatabase.createUser('admin', passwordHash, 'admin');
             console.log('✅ Created default production admin user (username: admin, password: admin123)');
+            console.log(`   User ID: ${user.id}`);
+            return true;
+        } else {
+            console.log('ℹ️ Production users already exist, skipping default admin creation');
+            return false;
         }
     } catch (error) {
-        console.error('Error creating default admin:', error);
+        console.error('❌ Error creating default admin:', error);
+        console.error('   Error details:', error.message);
+        console.error('   Stack:', error.stack);
+        return false;
     }
 }
 
