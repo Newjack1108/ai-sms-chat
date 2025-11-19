@@ -1735,15 +1735,64 @@ class ProductionDatabase {
     }
     
     static async updateProductOrder(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.product_id !== undefined) {
+            updates.push(`product_id = $${paramIndex}`);
+            values.push(data.product_id);
+            paramIndex++;
+        }
+        if (data.quantity !== undefined) {
+            updates.push(`quantity = $${paramIndex}`);
+            values.push(data.quantity);
+            paramIndex++;
+        }
+        if (data.order_date !== undefined) {
+            updates.push(`order_date = $${paramIndex}`);
+            values.push(data.order_date);
+            paramIndex++;
+        }
+        if (data.status !== undefined) {
+            updates.push(`status = $${paramIndex}`);
+            values.push(data.status);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getProductOrderById(id);
+        }
+        
+        values.push(id);
+        
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE product_orders SET status = $1 WHERE id = $2 RETURNING *`,
-                [data.status, id]
+                `UPDATE product_orders SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+                values
             );
             return result.rows[0];
         } else {
-            db.prepare(`UPDATE product_orders SET status = ? WHERE id = ?`).run(data.status, id);
+            const setClause = updates.map((update, idx) => {
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE product_orders SET ${setClause} WHERE id = ?`).run(...values);
             return this.getProductOrderById(id);
+        }
+    }
+    
+    static async deleteProductOrder(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `DELETE FROM product_orders WHERE id = $1 RETURNING *`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            const order = this.getProductOrderById(id);
+            db.prepare(`DELETE FROM product_orders WHERE id = ?`).run(id);
+            return order;
         }
     }
     

@@ -689,13 +689,33 @@ router.get('/orders/:id', requireProductionAuth, async (req, res) => {
 router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id);
-        const { status } = req.body;
+        const { product_id, quantity, order_date, status } = req.body;
         
-        const order = await ProductionDatabase.updateProductOrder(orderId, { status });
+        const updateData = {};
+        if (product_id !== undefined) updateData.product_id = parseInt(product_id);
+        if (quantity !== undefined) updateData.quantity = parseInt(quantity);
+        if (order_date !== undefined) updateData.order_date = order_date;
+        if (status !== undefined) updateData.status = status;
+        
+        const order = await ProductionDatabase.updateProductOrder(orderId, updateData);
         res.json({ success: true, order });
     } catch (error) {
         console.error('Update order error:', error);
         res.status(500).json({ success: false, error: 'Failed to update order' });
+    }
+});
+
+router.delete('/orders/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const order = await ProductionDatabase.deleteProductOrder(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        res.json({ success: true, message: 'Order deleted successfully' });
+    } catch (error) {
+        console.error('Delete order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete order' });
     }
 });
 
