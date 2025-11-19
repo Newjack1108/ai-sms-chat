@@ -192,10 +192,16 @@ async function initNavbar() {
             userInfo.textContent = `${user.username} (${user.role})`;
         }
         
-        // Hide admin-only menu items
-        if (user.role !== 'admin') {
+        // Hide admin-only menu items for non-admin users
+        if (user.role !== 'admin' && user.role !== 'manager') {
             const adminItems = document.querySelectorAll('.admin-only');
             adminItems.forEach(item => item.style.display = 'none');
+        }
+        
+        // Hide manager-only items for staff
+        if (user.role === 'staff') {
+            const managerItems = document.querySelectorAll('.manager-only');
+            managerItems.forEach(item => item.style.display = 'none');
         }
     }
 }

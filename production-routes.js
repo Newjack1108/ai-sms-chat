@@ -86,7 +86,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        if (!['admin', 'manager'].includes(role)) {
+        if (!['admin', 'manager', 'staff'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -108,7 +108,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
         const { username, role, password } = req.body;
         const userId = parseInt(req.params.id);
         
-        if (role && !['admin', 'manager'].includes(role)) {
+        if (role && !['admin', 'manager', 'staff'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         

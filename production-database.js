@@ -57,7 +57,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'manager')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
@@ -384,7 +384,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'manager')),
+                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
