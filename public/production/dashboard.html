@@ -34,34 +34,7 @@
     </nav>
     
     <div class="container" style="position: relative; z-index: 1;">
-        <div class="grid grid-4" style="margin-bottom: 20px;">
-            <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                    <h2 style="color: white; margin: 0;">Total WIP Value</h2>
-                </div>
-                <div style="padding: 20px; text-align: center;">
-                    <div id="totalWIPValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
-                </div>
-            </div>
-            
-            <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
-                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                    <h2 style="color: white; margin: 0;">Total Stock Value</h2>
-                </div>
-                <div style="padding: 20px; text-align: center;">
-                    <div id="totalStockValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
-                </div>
-            </div>
-            
-            <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
-                <div class="card-header" style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                    <h2 style="color: white; margin: 0;">Total Panel Value</h2>
-                </div>
-                <div style="padding: 20px; text-align: center;">
-                    <div id="totalPanelValue" style="font-size: 32px; font-weight: bold;">£0.00</div>
-                </div>
-            </div>
-            
+        <div class="grid grid-3" style="margin-bottom: 20px;">
             <div class="card" id="lastWeekCard">
                 <div class="card-header">
                     <h2>Last Week's Performance</h2>
@@ -70,9 +43,7 @@
                     <div class="loading">Loading...</div>
                 </div>
             </div>
-        </div>
-        
-        <div class="grid grid-3">
+            
             <div class="card">
                 <div class="card-header">
                     <h2>Stock Alerts</h2>
@@ -90,7 +61,9 @@
                     <div class="loading">Loading...</div>
                 </div>
             </div>
-            
+        </div>
+        
+        <div class="grid grid-3">
             <div class="card">
                 <div class="card-header">
                     <h2>My Tasks</h2>
@@ -107,6 +80,30 @@
             </div>
             <div id="recentOrders">
                 <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- Value Summary Cards at Bottom -->
+        <div class="grid grid-3" style="margin-top: 20px;">
+            <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total WIP Value</div>
+                    <div id="totalWIPValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
+                </div>
+            </div>
+            
+            <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total Stock Value</div>
+                    <div id="totalStockValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
+                </div>
+            </div>
+            
+            <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 15px;">
+                <div style="text-align: center;">
+                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total Panel Value</div>
+                    <div id="totalPanelValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
+                </div>
             </div>
         </div>
     </div>
