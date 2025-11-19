@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Planner - Production System</title>
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .build-rate-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .build-rate-indicator.green {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #28a745;
+        }
+        .build-rate-indicator.yellow {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffc107;
+        }
+        .build-rate-indicator.red {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #dc3545;
+        }
+        .week-selector {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .planner-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .summary-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .summary-card h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+        .summary-card p {
+            margin: 0;
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1>Production Planner</h1>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <a href="panels.html" class="btn btn-secondary btn-sm">Panels</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="week-selector">
+            <label><strong>Select Week:</strong></label>
+            <input type="date" id="weekStartDate" class="form-input" onchange="loadPlanner()">
+            <button onclick="createNewWeek()" class="btn btn-primary">New Week</button>
+            <button onclick="loadPlanner()" class="btn btn-secondary">Refresh</button>
+        </div>
+        
+        <div id="plannerContent">
+            <div class="loading">Select a week to view planner</div>
+        </div>
+    </div>
+    
+    <!-- Planner Modal -->
+    <div id="plannerModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="plannerModalTitle">Weekly Planner</h3>
+                <button class="modal-close" onclick="hideModal('plannerModal')">&times;</button>
+            </div>
+            <form id="plannerForm">
+                <input type="hidden" id="plannerId">
+                <div class="form-group">
+                    <label class="form-label">Week Start Date *</label>
+                    <input type="date" id="plannerWeekStart" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Staff Available</label>
+                    <input type="number" id="plannerStaff" class="form-input" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Hours Available</label>
+                    <input type="number" step="0.5" id="plannerHours" class="form-input" value="40" min="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea id="plannerNotes" class="form-input" rows="3"></textarea>
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('plannerModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Add Panel Modal -->
+    <div id="addPanelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Panel to Planner</h3>
+                <button class="modal-close" onclick="hideModal('addPanelModal')">&times;</button>
+            </div>
+            <form id="addPanelForm">
+                <div class="form-group">
+                    <label class="form-label">Panel *</label>
+                    <select id="panelSelect" class="form-select" required>
+                        <option value="">Select panel...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quantity to Build *</label>
+                    <input type="number" step="0.01" id="panelQuantity" class="form-input" required min="0.01">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Priority</label>
+                    <select id="panelPriority" class="form-select">
+                        <option value="high">High</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('addPanelModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Low Stock Panel Selector Modal -->
+    <div id="lowStockModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>Add Low Stock Panels</h3>
+                <button class="modal-close" onclick="hideModal('lowStockModal')">&times;</button>
+            </div>
+            <div id="lowStockList">
+                <div class="loading">Loading...</div>
+            </div>
+            <div class="text-right" style="margin-top: 20px;">
+                <button type="button" onclick="hideModal('lowStockModal')" class="btn btn-secondary">Cancel</button>
+                <button onclick="addSelectedLowStockPanels()" class="btn btn-primary">Add Selected</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let currentPlannerId = null;
+        let allPanels = [];
+        let lowStockPanels = [];
+        
+        async function init() {
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+            
+            // Set default week to current week (Monday)
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday
+            const monday = new Date(today.setDate(diff));
+            monday.setHours(0, 0, 0, 0);
+            document.getElementById('weekStartDate').value = monday.toISOString().split('T')[0];
+            
+            await loadAllPanels();
+            loadPlanner();
+        }
+        
+        async function loadAllPanels() {
+            try {
+                const data = await apiCall('/panels');
+                allPanels = data.panels;
+                
+                // Populate panel select
+                const select = document.getElementById('panelSelect');
+                select.innerHTML = '<option value="">Select panel...</option>';
+                allPanels.forEach(panel => {
+                    const option = document.createElement('option');
+                    option.value = panel.id;
+                    option.textContent = `${panel.name} (${parseFloat(panel.labour_hours || 0).toFixed(2)} hrs each)`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading panels:', error);
+            }
+        }
+        
+        async function loadPlanner() {
+            const weekStart = document.getElementById('weekStartDate').value;
+            if (!weekStart) {
+                document.getElementById('plannerContent').innerHTML = '<p>Please select a week</p>';
+                return;
+            }
+            
+            try {
+                // Try to get existing planner for this week
+                const planners = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
+                let planner = planners.planners.find(p => p.week_start_date === weekStart);
+                
+                if (!planner) {
+                    // Create new planner for this week
+                    planner = await apiCall('/planner', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            week_start_date: weekStart,
+                            staff_available: 1,
+                            hours_available: 40
+                        })
+                    });
+                    planner = planner.planner;
+                }
+                
+                currentPlannerId = planner.id;
+                await displayPlanner(planner.id);
+            } catch (error) {
+                console.error('Error loading planner:', error);
+                showAlert('Error loading planner', 'error');
+            }
+        }
+        
+        async function displayPlanner(plannerId) {
+            try {
+                const data = await apiCall(`/planner/${plannerId}`);
+                const planner = data.planner;
+                const items = data.items;
+                const buildRate = data.build_rate;
+                
+                const weekStart = new Date(planner.week_start_date);
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekEnd.getDate() + 6);
+                
+                let content = `
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</h2>
+                            <div>
+                                <button onclick="editPlanner(${planner.id})" class="btn btn-secondary btn-sm">Edit Capacity</button>
+                                <button onclick="showAddPanelModal()" class="btn btn-primary btn-sm">Add Panel</button>
+                                <button onclick="showLowStockModal()" class="btn btn-success btn-sm">Add Low Stock</button>
+                            </div>
+                        </div>
+                        
+                        <div class="planner-summary">
+                            <div class="summary-card">
+                                <h4>Staff Available</h4>
+                                <p>${planner.staff_available}</p>
+                            </div>
+                            <div class="summary-card">
+                                <h4>Hours Available</h4>
+                                <p>${buildRate.hours_available.toFixed(1)}</p>
+                            </div>
+                            <div class="summary-card">
+                                <h4>Hours Required</h4>
+                                <p>${buildRate.hours_required.toFixed(1)}</p>
+                            </div>
+                            <div class="summary-card">
+                                <h4>Build Rate</h4>
+                                <p>${buildRate.build_rate_percent.toFixed(1)}%</p>
+                            </div>
+                        </div>
+                        
+                        <div style="text-align: center; margin: 20px 0;">
+                            <div class="build-rate-indicator ${buildRate.indicator}">
+                                <span style="font-size: 36px;">${buildRate.emoji}</span>
+                                <div>
+                                    <div>${buildRate.build_rate_percent.toFixed(1)}%</div>
+                                    <div style="font-size: 14px; font-weight: normal;">
+                                        ${buildRate.hours_required > buildRate.hours_available 
+                                            ? `${buildRate.hours_shortfall.toFixed(1)} hours short` 
+                                            : `${buildRate.hours_excess.toFixed(1)} hours spare`}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${buildRate.hours_required > buildRate.hours_available ? `
+                            <div class="alert alert-warning">
+                                <strong>Warning:</strong> Scheduled production exceeds available hours by ${buildRate.hours_shortfall.toFixed(1)} hours.
+                                Consider reducing quantities, adding staff, or extending the timeline.
+                            </div>
+                        ` : ''}
+                        
+                        <h3>Production Schedule</h3>
+                        ${items.length === 0 ? '<p>No panels scheduled for this week</p>' : `
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Panel</th>
+                                        <th>Quantity</th>
+                                        <th>Hours/Unit</th>
+                                        <th>Total Hours</th>
+                                        <th>Priority</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${items.map(item => {
+                                        const hoursPerUnit = parseFloat(item.labour_hours || 0);
+                                        const totalHours = hoursPerUnit * parseFloat(item.quantity_to_build);
+                                        return `
+                                            <tr>
+                                                <td><strong>${item.panel_name}</strong></td>
+                                                <td>${parseFloat(item.quantity_to_build).toFixed(2)}</td>
+                                                <td>${hoursPerUnit.toFixed(2)}</td>
+                                                <td>${totalHours.toFixed(2)}</td>
+                                                <td><span class="badge badge-${item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'info'}">${item.priority}</span></td>
+                                                <td><span class="badge badge-info">${item.status}</span></td>
+                                                <td>
+                                                    <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                                    <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        `}
+                    </div>
+                `;
+                
+                document.getElementById('plannerContent').innerHTML = content;
+            } catch (error) {
+                console.error('Error displaying planner:', error);
+                showAlert('Error displaying planner', 'error');
+            }
+        }
+        
+        function createNewWeek() {
+            document.getElementById('plannerModalTitle').textContent = 'New Weekly Planner';
+            document.getElementById('plannerForm').reset();
+            document.getElementById('plannerId').value = '';
+            document.getElementById('plannerWeekStart').value = document.getElementById('weekStartDate').value;
+            showModal('plannerModal');
+        }
+        
+        async function editPlanner(id) {
+            try {
+                const data = await apiCall(`/planner/${id}`);
+                const planner = data.planner;
+                
+                document.getElementById('plannerModalTitle').textContent = 'Edit Weekly Planner';
+                document.getElementById('plannerId').value = planner.id;
+                document.getElementById('plannerWeekStart').value = planner.week_start_date;
+                document.getElementById('plannerStaff').value = planner.staff_available;
+                document.getElementById('plannerHours').value = planner.hours_available;
+                document.getElementById('plannerNotes').value = planner.notes || '';
+                showModal('plannerModal');
+            } catch (error) {
+                showAlert('Error loading planner', 'error');
+            }
+        }
+        
+        function showAddPanelModal() {
+            document.getElementById('addPanelForm').reset();
+            showModal('addPanelModal');
+        }
+        
+        async function showLowStockModal() {
+            try {
+                const data = await apiCall('/planner/low-stock-panels');
+                lowStockPanels = data.panels;
+                
+                if (lowStockPanels.length === 0) {
+                    document.getElementById('lowStockList').innerHTML = '<p>No panels are currently low on stock</p>';
+                } else {
+                    document.getElementById('lowStockList').innerHTML = `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="selectAllLowStock" onchange="toggleAllLowStock()"></th>
+                                    <th>Panel</th>
+                                    <th>Current</th>
+                                    <th>Min Stock</th>
+                                    <th>Shortfall</th>
+                                    <th>Suggested Qty</th>
+                                    <th>Hours/Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${lowStockPanels.map(panel => `
+                                    <tr>
+                                        <td><input type="checkbox" class="low-stock-checkbox" data-panel-id="${panel.id}" data-suggested="${panel.suggested_quantity}" data-hours="${panel.labour_hours || 0}"></td>
+                                        <td><strong>${panel.name}</strong></td>
+                                        <td>${panel.current_quantity.toFixed(2)}</td>
+                                        <td>${panel.min_stock.toFixed(2)}</td>
+                                        <td>${panel.shortfall.toFixed(2)}</td>
+                                        <td>${panel.suggested_quantity}</td>
+                                        <td>${parseFloat(panel.labour_hours || 0).toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                }
+                showModal('lowStockModal');
+            } catch (error) {
+                showAlert('Error loading low stock panels', 'error');
+            }
+        }
+        
+        function toggleAllLowStock() {
+            const selectAll = document.getElementById('selectAllLowStock');
+            const checkboxes = document.querySelectorAll('.low-stock-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+        }
+        
+        async function addSelectedLowStockPanels() {
+            const selected = document.querySelectorAll('.low-stock-checkbox:checked');
+            if (selected.length === 0) {
+                showAlert('Please select at least one panel', 'error');
+                return;
+            }
+            
+            try {
+                for (const checkbox of selected) {
+                    await apiCall(`/planner/${currentPlannerId}/items`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            panel_id: parseInt(checkbox.dataset.panelId),
+                            quantity_to_build: parseFloat(checkbox.dataset.suggested),
+                            priority: 'high'
+                        })
+                    });
+                }
+                showAlert('Panels added to planner');
+                hideModal('lowStockModal');
+                loadPlanner();
+            } catch (error) {
+                showAlert('Error adding panels', 'error');
+            }
+        }
+        
+        async function editPlannerItem(id) {
+            // Simple edit - just allow changing quantity, priority, status
+            const data = await apiCall(`/planner/${currentPlannerId}`);
+            const item = data.items.find(i => i.id === id);
+            if (!item) return;
+            
+            const newQty = prompt('Quantity to build:', item.quantity_to_build);
+            if (newQty === null) return;
+            
+            const newPriority = prompt('Priority (high/medium/low):', item.priority);
+            if (newPriority === null) return;
+            
+            const newStatus = prompt('Status (planned/in_progress/completed):', item.status);
+            if (newStatus === null) return;
+            
+            try {
+                await apiCall(`/planner/items/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        quantity_to_build: parseFloat(newQty),
+                        priority: newPriority,
+                        status: newStatus
+                    })
+                });
+                showAlert('Item updated');
+                loadPlanner();
+            } catch (error) {
+                showAlert('Error updating item', 'error');
+            }
+        }
+        
+        async function deletePlannerItem(id) {
+            if (!confirm('Remove this panel from the planner?')) return;
+            
+            try {
+                await apiCall(`/planner/items/${id}`, { method: 'DELETE' });
+                showAlert('Panel removed');
+                loadPlanner();
+            } catch (error) {
+                showAlert('Error removing panel', 'error');
+            }
+        }
+        
+        document.getElementById('plannerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('plannerId').value;
+            const data = {
+                week_start_date: document.getElementById('plannerWeekStart').value,
+                staff_available: parseInt(document.getElementById('plannerStaff').value),
+                hours_available: parseFloat(document.getElementById('plannerHours').value),
+                notes: document.getElementById('plannerNotes').value
+            };
+            
+            try {
+                if (id) {
+                    await apiCall(`/planner/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    await apiCall('/planner', {
+                        method: 'POST',
+                        body: JSON.stringify(data)
+                    });
+                }
+                showAlert('Planner saved');
+                hideModal('plannerModal');
+                loadPlanner();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        document.getElementById('addPanelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentPlannerId) {
+                showAlert('Please select a week first', 'error');
+                return;
+            }
+            
+            try {
+                await apiCall(`/planner/${currentPlannerId}/items`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        panel_id: parseInt(document.getElementById('panelSelect').value),
+                        quantity_to_build: parseFloat(document.getElementById('panelQuantity').value),
+                        priority: document.getElementById('panelPriority').value
+                    })
+                });
+                showAlert('Panel added to planner');
+                hideModal('addPanelModal');
+                loadPlanner();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
+        function formatDate(date) {
+            return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        
+        init();
+    </script>
+</body>
+</html>
+

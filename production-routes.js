@@ -756,6 +756,160 @@ router.delete('/reminders/:id', requireProductionAuth, requireAdmin, async (req,
     }
 });
 
+// ============ PLANNER ROUTES ============
+
+router.get('/planner', requireProductionAuth, async (req, res) => {
+    try {
+        const { start_date, end_date } = req.query;
+        const planners = await ProductionDatabase.getAllWeeklyPlanners(start_date, end_date);
+        res.json({ success: true, planners });
+    } catch (error) {
+        console.error('Get planners error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get planners' });
+    }
+});
+
+router.get('/planner/low-stock-panels', requireProductionAuth, async (req, res) => {
+    try {
+        const panels = await ProductionDatabase.getLowStockPanels();
+        res.json({ success: true, panels });
+    } catch (error) {
+        console.error('Get low stock panels error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get low stock panels' });
+    }
+});
+
+router.post('/planner', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const { week_start_date, staff_available, hours_available, notes } = req.body;
+        if (!week_start_date) {
+            return res.status(400).json({ success: false, error: 'Week start date is required' });
+        }
+        
+        const planner = await ProductionDatabase.createWeeklyPlanner({
+            week_start_date,
+            staff_available: parseInt(staff_available) || 1,
+            hours_available: parseFloat(hours_available) || 40,
+            notes
+        });
+        res.json({ success: true, planner });
+    } catch (error) {
+        console.error('Create planner error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create planner' });
+    }
+});
+
+router.get('/planner/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        const planner = await ProductionDatabase.getWeeklyPlannerById(plannerId);
+        if (!planner) {
+            return res.status(404).json({ success: false, error: 'Planner not found' });
+        }
+        
+        const items = await ProductionDatabase.getPlannerItems(plannerId);
+        const buildRate = await ProductionDatabase.calculatePlannerBuildRate(plannerId);
+        
+        res.json({ success: true, planner, items, build_rate: buildRate });
+    } catch (error) {
+        console.error('Get planner error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get planner' });
+    }
+});
+
+router.put('/planner/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        const { staff_available, hours_available, notes } = req.body;
+        
+        const planner = await ProductionDatabase.updateWeeklyPlanner(plannerId, {
+            staff_available: parseInt(staff_available),
+            hours_available: parseFloat(hours_available),
+            notes
+        });
+        res.json({ success: true, planner });
+    } catch (error) {
+        console.error('Update planner error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update planner' });
+    }
+});
+
+router.delete('/planner/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        await ProductionDatabase.deleteWeeklyPlanner(plannerId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete planner error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete planner' });
+    }
+});
+
+router.get('/planner/:id/build-rate', requireProductionAuth, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        const buildRate = await ProductionDatabase.calculatePlannerBuildRate(plannerId);
+        if (!buildRate) {
+            return res.status(404).json({ success: false, error: 'Planner not found' });
+        }
+        res.json({ success: true, build_rate: buildRate });
+    } catch (error) {
+        console.error('Calculate build rate error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate build rate' });
+    }
+});
+
+router.post('/planner/:id/items', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        const { panel_id, quantity_to_build, priority, status } = req.body;
+        
+        if (!panel_id || !quantity_to_build) {
+            return res.status(400).json({ success: false, error: 'Panel ID and quantity are required' });
+        }
+        
+        const item = await ProductionDatabase.addPlannerItem(
+            plannerId,
+            parseInt(panel_id),
+            parseFloat(quantity_to_build),
+            priority || 'medium',
+            status || 'planned'
+        );
+        res.json({ success: true, item });
+    } catch (error) {
+        console.error('Add planner item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to add planner item' });
+    }
+});
+
+router.put('/planner/items/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id);
+        const { quantity_to_build, priority, status } = req.body;
+        
+        const item = await ProductionDatabase.updatePlannerItem(itemId, {
+            quantity_to_build: parseFloat(quantity_to_build),
+            priority,
+            status
+        });
+        res.json({ success: true, item });
+    } catch (error) {
+        console.error('Update planner item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update planner item' });
+    }
+});
+
+router.delete('/planner/items/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id);
+        await ProductionDatabase.deletePlannerItem(itemId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete planner item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete planner item' });
+    }
+});
+
 // ============ TASK MANAGEMENT ROUTES ============
 
 router.get('/tasks', requireProductionAuth, async (req, res) => {

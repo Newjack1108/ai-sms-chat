@@ -232,6 +232,33 @@ function initializeSQLite() {
         )
     `);
     
+    // Weekly planner table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS weekly_planner (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start_date TEXT NOT NULL UNIQUE,
+            staff_available INTEGER DEFAULT 1,
+            hours_available REAL DEFAULT 40,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Planner items table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS planner_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            planner_id INTEGER NOT NULL,
+            panel_id INTEGER NOT NULL,
+            quantity_to_build REAL NOT NULL,
+            priority TEXT DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
+            status TEXT DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (planner_id) REFERENCES weekly_planner(id) ON DELETE CASCADE,
+            FOREIGN KEY (panel_id) REFERENCES panels(id)
+        )
+    `);
+    
     // Create indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
@@ -242,6 +269,9 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
+        CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id);
+        CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id);
+        CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date);
     `);
     
     // Migrate existing panels table to add new columns
@@ -446,6 +476,31 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Weekly planner table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS weekly_planner (
+                id SERIAL PRIMARY KEY,
+                week_start_date DATE NOT NULL UNIQUE,
+                staff_available INTEGER DEFAULT 1,
+                hours_available DECIMAL(10,2) DEFAULT 40,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Planner items table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS planner_items (
+                id SERIAL PRIMARY KEY,
+                planner_id INTEGER NOT NULL REFERENCES weekly_planner(id) ON DELETE CASCADE,
+                panel_id INTEGER NOT NULL REFERENCES panels(id),
+                quantity_to_build DECIMAL(10,2) NOT NULL,
+                priority VARCHAR(20) DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
+                status VARCHAR(20) DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
         // Create indexes
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_stock ON bom_items(stock_item_id)`);
@@ -455,6 +510,9 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date)`);
         
         // Migrate existing panels table to add new columns
         await pool.query(`
@@ -1036,6 +1094,218 @@ class ProductionDatabase {
         }
         
         return wipData;
+    }
+    
+    // ============ PLANNER OPERATIONS ============
+    
+    static async createWeeklyPlanner(data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
+                 VALUES ($1, $2, $3, $4) RETURNING *`,
+                [data.week_start_date, data.staff_available || 1, data.hours_available || 40, data.notes]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
+                 VALUES (?, ?, ?, ?)`
+            );
+            const info = stmt.run(data.week_start_date, data.staff_available || 1, data.hours_available || 40, data.notes);
+            return this.getWeeklyPlannerById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getWeeklyPlannerById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM weekly_planner WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM weekly_planner WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getWeeklyPlannerByDate(weekStartDate) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM weekly_planner WHERE week_start_date = $1`, [weekStartDate]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM weekly_planner WHERE week_start_date = ?`).get(weekStartDate) || null;
+        }
+    }
+    
+    static async getAllWeeklyPlanners(startDate, endDate) {
+        if (isPostgreSQL) {
+            if (startDate && endDate) {
+                const result = await pool.query(
+                    `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN $1 AND $2 ORDER BY week_start_date`,
+                    [startDate, endDate]
+                );
+                return result.rows;
+            } else {
+                const result = await pool.query(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`);
+                return result.rows;
+            }
+        } else {
+            if (startDate && endDate) {
+                return db.prepare(
+                    `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN ? AND ? ORDER BY week_start_date`
+                ).all(startDate, endDate);
+            } else {
+                return db.prepare(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`).all();
+            }
+        }
+    }
+    
+    static async updateWeeklyPlanner(id, data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE weekly_planner SET staff_available = $1, hours_available = $2, notes = $3
+                 WHERE id = $4 RETURNING *`,
+                [data.staff_available, data.hours_available, data.notes, id]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(
+                `UPDATE weekly_planner SET staff_available = ?, hours_available = ?, notes = ?
+                 WHERE id = ?`
+            ).run(data.staff_available, data.hours_available, data.notes, id);
+            return this.getWeeklyPlannerById(id);
+        }
+    }
+    
+    static async deleteWeeklyPlanner(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM weekly_planner WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM weekly_planner WHERE id = ?`).run(id);
+        }
+    }
+    
+    static async addPlannerItem(plannerId, panelId, quantityToBuild, priority, status) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO planner_items (planner_id, panel_id, quantity_to_build, priority, status)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [plannerId, panelId, quantityToBuild, priority || 'medium', status || 'planned']
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO planner_items (planner_id, panel_id, quantity_to_build, priority, status)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(plannerId, panelId, quantityToBuild, priority || 'medium', status || 'planned');
+            return this.getPlannerItemById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getPlannerItemById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM planner_items WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM planner_items WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getPlannerItems(plannerId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT pi.*, p.name as panel_name, p.labour_hours, p.min_stock, p.built_quantity
+                 FROM planner_items pi
+                 JOIN panels p ON pi.panel_id = p.id
+                 WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`,
+                [plannerId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT pi.*, p.name as panel_name, p.labour_hours, p.min_stock, p.built_quantity
+                 FROM planner_items pi
+                 JOIN panels p ON pi.panel_id = p.id
+                 WHERE pi.planner_id = ? ORDER BY pi.priority DESC, pi.created_at`
+            ).all(plannerId);
+        }
+    }
+    
+    static async updatePlannerItem(id, data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE planner_items SET quantity_to_build = $1, priority = $2, status = $3
+                 WHERE id = $4 RETURNING *`,
+                [data.quantity_to_build, data.priority, data.status, id]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(
+                `UPDATE planner_items SET quantity_to_build = ?, priority = ?, status = ?
+                 WHERE id = ?`
+            ).run(data.quantity_to_build, data.priority, data.status, id);
+            return this.getPlannerItemById(id);
+        }
+    }
+    
+    static async deletePlannerItem(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM planner_items WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM planner_items WHERE id = ?`).run(id);
+        }
+    }
+    
+    static async calculatePlannerBuildRate(plannerId) {
+        const planner = await this.getWeeklyPlannerById(plannerId);
+        if (!planner) return null;
+        
+        const items = await this.getPlannerItems(plannerId);
+        let totalHoursRequired = 0;
+        
+        for (const item of items) {
+            const labourHours = parseFloat(item.labour_hours || 0);
+            const quantity = parseFloat(item.quantity_to_build || 0);
+            totalHoursRequired += labourHours * quantity;
+        }
+        
+        const hoursAvailable = parseFloat(planner.hours_available || 0);
+        const buildRate = hoursAvailable > 0 ? (hoursAvailable / totalHoursRequired) * 100 : 0;
+        
+        return {
+            hours_available: hoursAvailable,
+            hours_required: totalHoursRequired,
+            hours_shortfall: Math.max(0, totalHoursRequired - hoursAvailable),
+            hours_excess: Math.max(0, hoursAvailable - totalHoursRequired),
+            build_rate_percent: buildRate,
+            is_feasible: totalHoursRequired <= hoursAvailable,
+            indicator: buildRate > 100 ? 'green' : (buildRate >= 80 ? 'yellow' : 'red'),
+            emoji: buildRate > 100 ? '😊' : (buildRate >= 80 ? '😐' : '😟')
+        };
+    }
+    
+    static async getLowStockPanels() {
+        const panels = await this.getAllPanels();
+        const lowStockPanels = [];
+        
+        for (const panel of panels) {
+            const builtQty = parseFloat(panel.built_quantity || 0);
+            const minStock = parseFloat(panel.min_stock || 0);
+            
+            if (minStock > 0 && builtQty < minStock) {
+                const shortfall = minStock - builtQty;
+                // Suggest building enough to reach minimum + 20% buffer
+                const suggestedQuantity = Math.ceil(shortfall * 1.2);
+                
+                lowStockPanels.push({
+                    ...panel,
+                    current_quantity: builtQty,
+                    min_stock: minStock,
+                    shortfall: shortfall,
+                    suggested_quantity: suggestedQuantity
+                });
+            }
+        }
+        
+        return lowStockPanels;
     }
     
     // ============ SETTINGS OPERATIONS ============
