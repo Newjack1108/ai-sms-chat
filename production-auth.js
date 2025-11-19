@@ -18,7 +18,7 @@ function requireProductionAuth(req, res, next) {
     }
     
     // For HTML pages, redirect to login
-    return res.redirect('/production/login');
+    return res.redirect('/production/login.html');
 }
 
 // Middleware to check if user is admin
