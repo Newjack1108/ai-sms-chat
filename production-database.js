@@ -251,6 +251,8 @@ function initializeSQLite() {
             planner_id INTEGER NOT NULL,
             panel_id INTEGER NOT NULL,
             quantity_to_build REAL NOT NULL,
+            quantity_built REAL DEFAULT 0,
+            hours_used REAL DEFAULT 0,
             priority TEXT DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
             status TEXT DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -293,6 +295,23 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Migration check skipped:', error.message);
+    }
+    
+    // Migrate existing planner_items table to add new columns
+    try {
+        const plannerColumns = db.prepare("PRAGMA table_info(planner_items)").all();
+        const plannerColumnNames = plannerColumns.map(col => col.name);
+        
+        if (!plannerColumnNames.includes('quantity_built')) {
+            db.exec('ALTER TABLE planner_items ADD COLUMN quantity_built REAL DEFAULT 0');
+            console.log('✅ Added quantity_built column to planner_items');
+        }
+        if (!plannerColumnNames.includes('hours_used')) {
+            db.exec('ALTER TABLE planner_items ADD COLUMN hours_used REAL DEFAULT 0');
+            console.log('✅ Added hours_used column to planner_items');
+        }
+    } catch (error) {
+        console.log('⚠️ Planner items migration check skipped:', error.message);
     }
     
     // Insert default labour rate if not exists
@@ -495,6 +514,8 @@ async function initializePostgreSQL() {
                 planner_id INTEGER NOT NULL REFERENCES weekly_planner(id) ON DELETE CASCADE,
                 panel_id INTEGER NOT NULL REFERENCES panels(id),
                 quantity_to_build DECIMAL(10,2) NOT NULL,
+                quantity_built DECIMAL(10,2) DEFAULT 0,
+                hours_used DECIMAL(10,2) DEFAULT 0,
                 priority VARCHAR(20) DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
                 status VARCHAR(20) DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -537,6 +558,26 @@ async function initializePostgreSQL() {
                     WHERE table_name='panels' AND column_name='labour_hours'
                 ) THEN
                     ALTER TABLE panels ADD COLUMN labour_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+            END $$;
+        `);
+        
+        // Migrate existing planner_items table to add new columns
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='quantity_built'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN quantity_built DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='hours_used'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN hours_used DECIMAL(10,2) DEFAULT 0;
                 END IF;
             END $$;
         `);
@@ -1232,18 +1273,98 @@ class ProductionDatabase {
     static async updatePlannerItem(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE planner_items SET quantity_to_build = $1, priority = $2, status = $3
-                 WHERE id = $4 RETURNING *`,
-                [data.quantity_to_build, data.priority, data.status, id]
+                `UPDATE planner_items SET quantity_to_build = $1, quantity_built = $2, hours_used = $3, priority = $4, status = $5
+                 WHERE id = $6 RETURNING *`,
+                [
+                    data.quantity_to_build,
+                    data.quantity_built !== undefined ? data.quantity_built : null,
+                    data.hours_used !== undefined ? data.hours_used : null,
+                    data.priority,
+                    data.status,
+                    id
+                ]
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE planner_items SET quantity_to_build = ?, priority = ?, status = ?
+                `UPDATE planner_items SET quantity_to_build = ?, quantity_built = ?, hours_used = ?, priority = ?, status = ?
                  WHERE id = ?`
-            ).run(data.quantity_to_build, data.priority, data.status, id);
+            ).run(
+                data.quantity_to_build,
+                data.quantity_built !== undefined ? data.quantity_built : null,
+                data.hours_used !== undefined ? data.hours_used : null,
+                data.priority,
+                data.status,
+                id
+            );
             return this.getPlannerItemById(id);
         }
+    }
+    
+    static async calculatePlannerEfficiency(plannerId) {
+        const planner = await this.getWeeklyPlannerById(plannerId);
+        if (!planner) return null;
+        
+        const items = await this.getPlannerItems(plannerId);
+        let totalHoursPlanned = 0;
+        let totalHoursUsed = 0;
+        let totalPanelsPlanned = 0;
+        let totalPanelsBuilt = 0;
+        
+        for (const item of items) {
+            const labourHours = parseFloat(item.labour_hours || 0);
+            const qtyPlanned = parseFloat(item.quantity_to_build || 0);
+            const qtyBuilt = parseFloat(item.quantity_built || 0);
+            const hoursUsed = parseFloat(item.hours_used || 0);
+            
+            totalHoursPlanned += labourHours * qtyPlanned;
+            totalHoursUsed += hoursUsed;
+            totalPanelsPlanned += qtyPlanned;
+            totalPanelsBuilt += qtyBuilt;
+        }
+        
+        const hoursAvailable = parseFloat(planner.hours_available || 0);
+        
+        // Calculate expected hours based on what was actually built
+        let totalExpectedHours = 0;
+        for (const item of items) {
+            const labourHours = parseFloat(item.labour_hours || 0);
+            const qtyBuilt = parseFloat(item.quantity_built || 0);
+            totalExpectedHours += labourHours * qtyBuilt;
+        }
+        
+        // Efficiency calculations
+        // Hours efficiency: expected hours (based on built panels) vs actual hours used
+        const hoursEfficiency = totalHoursUsed > 0 ? (totalExpectedHours / totalHoursUsed) * 100 : (totalExpectedHours > 0 ? 0 : 100);
+        // Panels efficiency: built vs planned
+        const panelsEfficiency = totalPanelsPlanned > 0 ? (totalPanelsBuilt / totalPanelsPlanned) * 100 : 0;
+        
+        // Overall efficiency (average of hours and panels)
+        const overallEfficiency = totalHoursUsed > 0 || totalPanelsPlanned > 0 ? (hoursEfficiency + panelsEfficiency) / 2 : 100;
+        
+        // Determine indicator
+        let indicator = 'green';
+        let emoji = '😊';
+        if (overallEfficiency < 80) {
+            indicator = 'red';
+            emoji = '😟';
+        } else if (overallEfficiency < 95) {
+            indicator = 'yellow';
+            emoji = '😐';
+        }
+        
+        return {
+            hours_available: hoursAvailable,
+            hours_planned: totalHoursPlanned,
+            hours_used: totalHoursUsed,
+            hours_efficiency: hoursEfficiency,
+            panels_planned: totalPanelsPlanned,
+            panels_built: totalPanelsBuilt,
+            panels_efficiency: panelsEfficiency,
+            overall_efficiency: overallEfficiency,
+            indicator: indicator,
+            emoji: emoji
+        };
     }
     
     static async deletePlannerItem(id) {

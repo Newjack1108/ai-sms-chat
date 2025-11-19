@@ -899,10 +899,12 @@ router.post('/planner/:id/items', requireProductionAuth, requireManager, async (
 router.put('/planner/items/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
-        const { quantity_to_build, priority, status } = req.body;
+        const { quantity_to_build, quantity_built, hours_used, priority, status } = req.body;
         
         const item = await ProductionDatabase.updatePlannerItem(itemId, {
             quantity_to_build: parseFloat(quantity_to_build),
+            quantity_built: quantity_built !== undefined ? parseFloat(quantity_built) : undefined,
+            hours_used: hours_used !== undefined ? parseFloat(hours_used) : undefined,
             priority,
             status
         });
@@ -910,6 +912,20 @@ router.put('/planner/items/:id', requireProductionAuth, requireManager, async (r
     } catch (error) {
         console.error('Update planner item error:', error);
         res.status(500).json({ success: false, error: 'Failed to update planner item' });
+    }
+});
+
+router.get('/planner/:id/efficiency', requireProductionAuth, async (req, res) => {
+    try {
+        const plannerId = parseInt(req.params.id);
+        const efficiency = await ProductionDatabase.calculatePlannerEfficiency(plannerId);
+        if (!efficiency) {
+            return res.status(404).json({ success: false, error: 'Planner not found' });
+        }
+        res.json({ success: true, efficiency });
+    } catch (error) {
+        console.error('Calculate efficiency error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate efficiency' });
     }
 });
 
