@@ -1268,7 +1268,8 @@ class ProductionDatabase {
         }
         
         const hoursAvailable = parseFloat(planner.hours_available || 0);
-        const buildRate = hoursAvailable > 0 ? (hoursAvailable / totalHoursRequired) * 100 : 0;
+        // Handle division by zero - if no hours required, we're at 100% (nothing to do)
+        const buildRate = totalHoursRequired > 0 ? (hoursAvailable / totalHoursRequired) * 100 : (hoursAvailable > 0 ? 100 : 0);
         
         return {
             hours_available: hoursAvailable,

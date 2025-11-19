@@ -808,7 +808,21 @@ router.get('/planner/:id', requireProductionAuth, async (req, res) => {
         }
         
         const items = await ProductionDatabase.getPlannerItems(plannerId);
-        const buildRate = await ProductionDatabase.calculatePlannerBuildRate(plannerId);
+        let buildRate = await ProductionDatabase.calculatePlannerBuildRate(plannerId);
+        
+        // Ensure buildRate is never null
+        if (!buildRate) {
+            buildRate = {
+                hours_available: parseFloat(planner.hours_available || 0),
+                hours_required: 0,
+                hours_shortfall: 0,
+                hours_excess: parseFloat(planner.hours_available || 0),
+                build_rate_percent: 100,
+                is_feasible: true,
+                indicator: 'green',
+                emoji: '😊'
+            };
+        }
         
         res.json({ success: true, planner, items, build_rate: buildRate });
     } catch (error) {

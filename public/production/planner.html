@@ -222,26 +222,42 @@
             try {
                 // Try to get existing planner for this week
                 const planners = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
-                let planner = planners.planners.find(p => p.week_start_date === weekStart);
+                let planner = planners.planners.find(p => {
+                    // Handle both date formats (with or without time)
+                    const plannerDate = p.week_start_date.split('T')[0];
+                    return plannerDate === weekStart;
+                });
                 
                 if (!planner) {
                     // Create new planner for this week
-                    planner = await apiCall('/planner', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            week_start_date: weekStart,
-                            staff_available: 1,
-                            hours_available: 40
-                        })
-                    });
-                    planner = planner.planner;
+                    try {
+                        const result = await apiCall('/planner', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                week_start_date: weekStart,
+                                staff_available: 1,
+                                hours_available: 40
+                            })
+                        });
+                        planner = result.planner;
+                    } catch (createError) {
+                        // If creation fails (e.g., duplicate), try to fetch again
+                        const plannersRetry = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
+                        planner = plannersRetry.planners.find(p => {
+                            const plannerDate = p.week_start_date.split('T')[0];
+                            return plannerDate === weekStart;
+                        });
+                        if (!planner) {
+                            throw createError;
+                        }
+                    }
                 }
                 
                 currentPlannerId = planner.id;
                 await displayPlanner(planner.id);
             } catch (error) {
                 console.error('Error loading planner:', error);
-                showAlert('Error loading planner', 'error');
+                showAlert('Error loading planner: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         
@@ -249,8 +265,17 @@
             try {
                 const data = await apiCall(`/planner/${plannerId}`);
                 const planner = data.planner;
-                const items = data.items;
-                const buildRate = data.build_rate;
+                const items = data.items || [];
+                const buildRate = data.build_rate || {
+                    hours_available: parseFloat(planner.hours_available || 0),
+                    hours_required: 0,
+                    hours_shortfall: 0,
+                    hours_excess: parseFloat(planner.hours_available || 0),
+                    build_rate_percent: 100,
+                    is_feasible: true,
+                    indicator: 'green',
+                    emoji: '😊'
+                };
                 
                 const weekStart = new Date(planner.week_start_date);
                 const weekEnd = new Date(weekStart);
@@ -270,7 +295,7 @@
                         <div class="planner-summary">
                             <div class="summary-card">
                                 <h4>Staff Available</h4>
-                                <p>${planner.staff_available}</p>
+                                <p>${planner.staff_available || 1}</p>
                             </div>
                             <div class="summary-card">
                                 <h4>Hours Available</h4>
