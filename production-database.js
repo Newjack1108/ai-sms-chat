@@ -2670,71 +2670,87 @@ class ProductionDatabase {
     
     // Weekly timesheet operations
     static async getOrCreateWeeklyTimesheet(userId, weekStartDate) {
-        // weekStartDate should be a Monday date in YYYY-MM-DD format
-        const weekStart = new Date(weekStartDate);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
-        
-        const weekStartStr = weekStart.toISOString().split('T')[0];
-        const weekEndStr = weekEnd.toISOString().split('T')[0];
-        
-        if (isPostgreSQL) {
-            // Try to get existing
-            let result = await pool.query(
-                `SELECT * FROM weekly_timesheets 
-                 WHERE user_id = $1 AND week_start_date = $2`,
-                [userId, weekStartStr]
-            );
+        try {
+            // weekStartDate should be a Monday date in YYYY-MM-DD format
+            const weekStart = new Date(weekStartDate);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
             
-            if (result.rows.length > 0) {
+            const weekStartStr = weekStart.toISOString().split('T')[0];
+            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            
+            if (isPostgreSQL) {
+                // Try to get existing
+                let result = await pool.query(
+                    `SELECT * FROM weekly_timesheets 
+                     WHERE user_id = $1 AND week_start_date = $2`,
+                    [userId, weekStartStr]
+                );
+                
+                if (result.rows.length > 0) {
+                    return result.rows[0];
+                }
+                
+                // Create new
+                result = await pool.query(
+                    `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
+                     VALUES ($1, $2, $3) RETURNING *`,
+                    [userId, weekStartStr, weekEndStr]
+                );
                 return result.rows[0];
+            } else {
+                let existing = db.prepare(
+                    `SELECT * FROM weekly_timesheets 
+                     WHERE user_id = ? AND week_start_date = ?`
+                ).get(userId, weekStartStr);
+                
+                if (existing) {
+                    return existing;
+                }
+                
+                const stmt = db.prepare(
+                    `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
+                     VALUES (?, ?, ?)`
+                );
+                const info = stmt.run(userId, weekStartStr, weekEndStr);
+                return db.prepare(`SELECT * FROM weekly_timesheets WHERE id = ?`).get(info.lastInsertRowid);
             }
-            
-            // Create new
-            result = await pool.query(
-                `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
-                 VALUES ($1, $2, $3) RETURNING *`,
-                [userId, weekStartStr, weekEndStr]
-            );
-            return result.rows[0];
-        } else {
-            let existing = db.prepare(
-                `SELECT * FROM weekly_timesheets 
-                 WHERE user_id = ? AND week_start_date = ?`
-            ).get(userId, weekStartStr);
-            
-            if (existing) {
-                return existing;
+        } catch (error) {
+            console.error('Error in getOrCreateWeeklyTimesheet:', error);
+            if (error.code === '42P01') { // Table doesn't exist
+                throw new Error('Database tables not initialized. Please restart the server.');
             }
-            
-            const stmt = db.prepare(
-                `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
-                 VALUES (?, ?, ?)`
-            );
-            const info = stmt.run(userId, weekStartStr, weekEndStr);
-            return db.prepare(`SELECT * FROM weekly_timesheets WHERE id = ?`).get(info.lastInsertRowid);
+            throw error;
         }
     }
     
     static async getWeeklyTimesheet(userId, weekStartDate) {
-        if (isPostgreSQL) {
-            const result = await pool.query(
-                `SELECT wt.*, u.username,
-                 (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
-                 FROM weekly_timesheets wt
-                 LEFT JOIN production_users u ON wt.user_id = u.id
-                 WHERE wt.user_id = $1 AND wt.week_start_date = $2`,
-                [userId, weekStartDate]
-            );
-            return result.rows[0] || null;
-        } else {
-            return db.prepare(
-                `SELECT wt.*, u.username,
-                 (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
-                 FROM weekly_timesheets wt
-                 LEFT JOIN production_users u ON wt.user_id = u.id
-                 WHERE wt.user_id = ? AND wt.week_start_date = ?`
-            ).get(userId, weekStartDate) || null;
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT wt.*, u.username,
+                     (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
+                     FROM weekly_timesheets wt
+                     LEFT JOIN production_users u ON wt.user_id = u.id
+                     WHERE wt.user_id = $1 AND wt.week_start_date = $2`,
+                    [userId, weekStartDate]
+                );
+                return result.rows[0] || null;
+            } else {
+                return db.prepare(
+                    `SELECT wt.*, u.username,
+                     (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
+                     FROM weekly_timesheets wt
+                     LEFT JOIN production_users u ON wt.user_id = u.id
+                     WHERE wt.user_id = ? AND wt.week_start_date = ?`
+                ).get(userId, weekStartDate) || null;
+            }
+        } catch (error) {
+            console.error('Error in getWeeklyTimesheet:', error);
+            if (error.code === '42P01') { // Table doesn't exist
+                throw new Error('Database tables not initialized. Please restart the server.');
+            }
+            throw error;
         }
     }
     
