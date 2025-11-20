@@ -167,6 +167,84 @@
         </div>
     </div>
     
+    <!-- Amendment Review Modal -->
+    <div id="amendmentReviewModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>Review Time Amendment</h3>
+                <button class="modal-close" onclick="hideModal('amendmentReviewModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="amendmentReviewForm">
+                    <input type="hidden" id="reviewAmendmentId">
+                    <input type="hidden" id="reviewAmendmentStatus">
+                    
+                    <div class="form-group">
+                        <label><strong>Staff:</strong></label>
+                        <div id="reviewStaffName" style="padding: 8px; background: #f5f5f5; border-radius: 4px;"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label><strong>Reason:</strong></label>
+                        <div id="reviewReason" style="padding: 8px; background: #f5f5f5; border-radius: 4px; min-height: 40px;"></div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0;">
+                        <div>
+                            <h4 style="margin-bottom: 10px; color: #666;">Original Times</h4>
+                            <div class="form-group">
+                                <label>Clock In:</label>
+                                <div id="reviewOriginalIn" style="padding: 8px; background: #fee; border-radius: 4px;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Clock Out:</label>
+                                <div id="reviewOriginalOut" style="padding: 8px; background: #fee; border-radius: 4px;"></div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <h4 style="margin-bottom: 10px; color: #666;">Requested Times</h4>
+                            <div class="form-group">
+                                <label>Clock In:</label>
+                                <div id="reviewRequestedIn" style="padding: 8px; background: #fff8e1; border-radius: 4px;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Clock Out:</label>
+                                <div id="reviewRequestedOut" style="padding: 8px; background: #fff8e1; border-radius: 4px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="border-top: 2px solid #4CBB17; padding-top: 15px; margin-top: 20px;">
+                        <h4 style="margin-bottom: 10px; color: #4CBB17;">Final Approved Times</h4>
+                        <p style="font-size: 12px; color: #666; margin-bottom: 15px;">You can modify the times if needed before approving:</p>
+                        
+                        <div class="form-group">
+                            <label for="reviewApprovedIn">Clock In Time *</label>
+                            <input type="datetime-local" id="reviewApprovedIn" class="form-input" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="reviewApprovedOut">Clock Out Time *</label>
+                            <input type="datetime-local" id="reviewApprovedOut" class="form-input" required>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="reviewNotes">Review Notes</label>
+                        <textarea id="reviewNotes" class="form-input" rows="3" placeholder="Optional notes about this amendment..."></textarea>
+                    </div>
+                    
+                    <div class="text-right" style="margin-top: 20px;">
+                        <button type="button" onclick="hideModal('amendmentReviewModal')" class="btn btn-secondary">Cancel</button>
+                        <button type="button" onclick="submitAmendmentReview('rejected')" class="btn btn-danger">Reject</button>
+                        <button type="button" onclick="submitAmendmentReview('approved')" class="btn btn-success">Approve</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
     <script src="common.js"></script>
     <script>
         let currentUser = null;
@@ -684,8 +762,7 @@
                                         <td><small>In: ${amendedIn}<br>Out: ${amendedOut}</small></td>
                                         <td>${escapeHtml(amendment.reason || '')}</td>
                                         <td>
-                                            <button onclick="reviewAmendment(${amendment.id}, 'approved')" class="btn btn-success btn-sm">Approve</button>
-                                            <button onclick="reviewAmendment(${amendment.id}, 'rejected')" class="btn btn-danger btn-sm">Reject</button>
+                                            <button onclick="showAmendmentReviewModal(${amendment.id})" class="btn btn-primary btn-sm">Review</button>
                                         </td>
                                     </tr>
                                 `;
@@ -699,21 +776,100 @@
             }
         }
         
-        async function reviewAmendment(amendmentId, status) {
-            const reviewNotes = prompt(`Enter review notes (optional):`);
-            if (reviewNotes === null && status === 'rejected') {
-                return; // User cancelled
+        let currentAmendmentData = null;
+        
+        async function showAmendmentReviewModal(amendmentId) {
+            try {
+                // Get amendment details
+                const amendments = await apiCall('/clock/amendments/pending');
+                const amendment = amendments.amendments.find(a => a.id === amendmentId);
+                
+                if (!amendment) {
+                    showAlert('Amendment not found', 'error');
+                    return;
+                }
+                
+                currentAmendmentData = amendment;
+                
+                // Populate modal
+                document.getElementById('reviewAmendmentId').value = amendmentId;
+                document.getElementById('reviewStaffName').textContent = amendment.username || 'Unknown';
+                document.getElementById('reviewReason').textContent = amendment.reason || 'No reason provided';
+                
+                // Original times
+                if (amendment.original_clock_in_time) {
+                    document.getElementById('reviewOriginalIn').textContent = formatDateTime(amendment.original_clock_in_time);
+                } else {
+                    document.getElementById('reviewOriginalIn').textContent = 'Not set';
+                }
+                
+                if (amendment.original_clock_out_time) {
+                    document.getElementById('reviewOriginalOut').textContent = formatDateTime(amendment.original_clock_out_time);
+                } else {
+                    document.getElementById('reviewOriginalOut').textContent = 'Not set';
+                }
+                
+                // Requested times
+                if (amendment.amended_clock_in_time) {
+                    document.getElementById('reviewRequestedIn').textContent = formatDateTime(amendment.amended_clock_in_time);
+                    const clockIn = new Date(amendment.amended_clock_in_time);
+                    const localDateTime = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                    document.getElementById('reviewApprovedIn').value = localDateTime;
+                } else {
+                    document.getElementById('reviewRequestedIn').textContent = 'Not set';
+                }
+                
+                if (amendment.amended_clock_out_time) {
+                    document.getElementById('reviewRequestedOut').textContent = formatDateTime(amendment.amended_clock_out_time);
+                    const clockOut = new Date(amendment.amended_clock_out_time);
+                    const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                    document.getElementById('reviewApprovedOut').value = localDateTime;
+                } else {
+                    document.getElementById('reviewRequestedOut').textContent = 'Not set';
+                }
+                
+                // Clear review notes
+                document.getElementById('reviewNotes').value = '';
+                
+                // Show modal
+                document.getElementById('amendmentReviewModal').style.display = 'block';
+            } catch (error) {
+                showAlert('Error loading amendment: ' + error.message, 'error');
             }
+        }
+        
+        async function submitAmendmentReview(status) {
+            if (!currentAmendmentData) {
+                showAlert('No amendment data loaded', 'error');
+                return;
+            }
+            
+            const amendmentId = parseInt(document.getElementById('reviewAmendmentId').value);
+            const approvedClockIn = document.getElementById('reviewApprovedIn').value;
+            const approvedClockOut = document.getElementById('reviewApprovedOut').value;
+            const reviewNotes = document.getElementById('reviewNotes').value;
+            
+            if (!approvedClockIn || !approvedClockOut) {
+                showAlert('Please enter both clock in and clock out times', 'error');
+                return;
+            }
+            
+            // Convert to ISO strings
+            const clockInISO = new Date(approvedClockIn).toISOString();
+            const clockOutISO = new Date(approvedClockOut).toISOString();
             
             try {
                 await apiCall(`/clock/amendments/${amendmentId}/review`, {
                     method: 'PUT',
                     body: JSON.stringify({
                         status: status,
-                        review_notes: reviewNotes || ''
+                        review_notes: reviewNotes || '',
+                        approved_clock_in_time: status === 'approved' ? clockInISO : null,
+                        approved_clock_out_time: status === 'approved' ? clockOutISO : null
                     })
                 });
                 showAlert(`Amendment ${status} successfully`);
+                hideModal('amendmentReviewModal');
                 await loadPendingAmendments();
             } catch (error) {
                 showAlert('Error reviewing amendment: ' + error.message, 'error');

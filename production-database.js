@@ -3042,32 +3042,58 @@ class ProductionDatabase {
         }
     }
     
-    static async reviewAmendment(amendmentId, reviewerId, status, reviewNotes) {
+    static async reviewAmendment(amendmentId, reviewerId, status, reviewNotes, approvedClockIn = null, approvedClockOut = null) {
         const reviewedAt = new Date().toISOString();
         
         if (isPostgreSQL) {
-            const result = await pool.query(
-                `UPDATE timesheet_amendments 
-                 SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4
-                 WHERE id = $5 RETURNING *`,
-                [status, reviewerId, reviewedAt, reviewNotes, amendmentId]
-            );
-            return result.rows[0];
+            // If approved and approved times provided, update the amended times
+            if (status === 'approved' && approvedClockIn && approvedClockOut) {
+                const result = await pool.query(
+                    `UPDATE timesheet_amendments 
+                     SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4,
+                         amended_clock_in_time = $5, amended_clock_out_time = $6
+                     WHERE id = $7 RETURNING *`,
+                    [status, reviewerId, reviewedAt, reviewNotes, approvedClockIn, approvedClockOut, amendmentId]
+                );
+                return result.rows[0];
+            } else {
+                const result = await pool.query(
+                    `UPDATE timesheet_amendments 
+                     SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4
+                     WHERE id = $5 RETURNING *`,
+                    [status, reviewerId, reviewedAt, reviewNotes, amendmentId]
+                );
+                return result.rows[0];
+            }
         } else {
-            db.prepare(
-                `UPDATE timesheet_amendments 
-                 SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?
-                 WHERE id = ?`
-            ).run(status, reviewerId, reviewedAt, reviewNotes, amendmentId);
+            // If approved and approved times provided, update the amended times
+            if (status === 'approved' && approvedClockIn && approvedClockOut) {
+                db.prepare(
+                    `UPDATE timesheet_amendments 
+                     SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?,
+                         amended_clock_in_time = ?, amended_clock_out_time = ?
+                     WHERE id = ?`
+                ).run(status, reviewerId, reviewedAt, reviewNotes, approvedClockIn, approvedClockOut, amendmentId);
+            } else {
+                db.prepare(
+                    `UPDATE timesheet_amendments 
+                     SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?
+                     WHERE id = ?`
+                ).run(status, reviewerId, reviewedAt, reviewNotes, amendmentId);
+            }
             return db.prepare(`SELECT * FROM timesheet_amendments WHERE id = ?`).get(amendmentId);
         }
     }
     
-    static async applyAmendment(amendmentId) {
+    static async applyAmendment(amendmentId, approvedClockIn = null, approvedClockOut = null) {
         const amendment = await this.getAmendmentById(amendmentId);
         if (!amendment || amendment.status !== 'approved') {
             throw new Error('Amendment not found or not approved');
         }
+        
+        // Use approved times if provided (manager modified), otherwise use requested times
+        const finalClockIn = approvedClockIn || amendment.amended_clock_in_time;
+        const finalClockOut = approvedClockOut || amendment.amended_clock_out_time;
         
         // Update the timesheet entry
         if (isPostgreSQL) {
@@ -3075,14 +3101,14 @@ class ProductionDatabase {
                 `UPDATE timesheet_entries 
                  SET clock_in_time = $1, clock_out_time = $2, updated_at = CURRENT_TIMESTAMP
                  WHERE id = $3`,
-                [amendment.amended_clock_in_time, amendment.amended_clock_out_time, amendment.timesheet_entry_id]
+                [finalClockIn, finalClockOut, amendment.timesheet_entry_id]
             );
         } else {
             db.prepare(
                 `UPDATE timesheet_entries 
                  SET clock_in_time = ?, clock_out_time = ?, updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?`
-            ).run(amendment.amended_clock_in_time, amendment.amended_clock_out_time, amendment.timesheet_entry_id);
+            ).run(finalClockIn, finalClockOut, amendment.timesheet_entry_id);
         }
         
         // Recalculate hours

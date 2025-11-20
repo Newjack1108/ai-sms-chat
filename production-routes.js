@@ -1162,17 +1162,29 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
     try {
         const amendmentId = parseInt(req.params.id);
         const reviewerId = req.session.production_user.id;
-        const { status, review_notes } = req.body;
+        const { status, review_notes, approved_clock_in_time, approved_clock_out_time } = req.body;
         
         if (!['approved', 'rejected'].includes(status)) {
             return res.status(400).json({ success: false, error: 'Invalid status' });
         }
         
-        const amendment = await ProductionDatabase.reviewAmendment(amendmentId, reviewerId, status, review_notes);
+        // If approved, require the approved times
+        if (status === 'approved' && (!approved_clock_in_time || !approved_clock_out_time)) {
+            return res.status(400).json({ success: false, error: 'Approved clock in and out times are required' });
+        }
         
-        // If approved, apply the amendment
+        const amendment = await ProductionDatabase.reviewAmendment(
+            amendmentId, 
+            reviewerId, 
+            status, 
+            review_notes,
+            status === 'approved' ? approved_clock_in_time : null,
+            status === 'approved' ? approved_clock_out_time : null
+        );
+        
+        // If approved, apply the amendment with the approved times
         if (status === 'approved') {
-            await ProductionDatabase.applyAmendment(amendmentId);
+            await ProductionDatabase.applyAmendment(amendmentId, approved_clock_in_time, approved_clock_out_time);
         }
         
         res.json({ success: true, amendment });
