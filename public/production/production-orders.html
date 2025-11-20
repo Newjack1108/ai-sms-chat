@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Production Orders - Production System</title>
+    <title>Works Orders - Production System</title>
     <link rel="stylesheet" href="common.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="navbar-logo">
             <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
-            <h1>Production Orders</h1>
+            <h1>Works Orders</h1>
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
@@ -22,8 +22,8 @@
     <div class="container">
         <div class="card">
             <div class="card-header">
-                <h2>Orders</h2>
-                <button onclick="showAddOrderModal()" class="btn btn-primary">Add Order</button>
+                <h2>Works Orders</h2>
+                <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
             </div>
             <div id="ordersList">
                 <div class="loading">Loading...</div>
@@ -36,7 +36,7 @@
             </div>
             <div id="calculatorContent">
                 <div class="form-group">
-                    <label class="form-label">Select Orders to Calculate</label>
+                    <label class="form-label">Select Works Orders to Calculate</label>
                     <div id="ordersCheckboxes"></div>
                 </div>
                 <button onclick="calculateRequirements()" class="btn btn-primary">Calculate Requirements</button>
@@ -49,7 +49,7 @@
     <div id="orderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Add Order</h3>
+                <h3>Add Works Order</h3>
                 <button class="modal-close" onclick="hideModal('orderModal')">&times;</button>
             </div>
             <form id="orderForm">
@@ -69,7 +69,7 @@
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('orderModal')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create Order</button>
+                    <button type="submit" class="btn btn-primary">Create Works Order</button>
                 </div>
             </form>
         </div>
@@ -79,7 +79,7 @@
     <div id="editOrderModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Edit Order</h3>
+                <h3>Edit Works Order</h3>
                 <button class="modal-close" onclick="hideModal('editOrderModal')">&times;</button>
             </div>
             <form id="editOrderForm">
@@ -109,7 +109,7 @@
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('editOrderModal')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Update Order</button>
+                    <button type="submit" class="btn btn-primary">Update Works Order</button>
                 </div>
             </form>
         </div>
@@ -119,7 +119,7 @@
     <div id="updateStatusModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Update Order Status</h3>
+                <h3>Update Works Order Status</h3>
                 <button class="modal-close" onclick="hideModal('updateStatusModal')">&times;</button>
             </div>
             <form id="updateStatusForm">
@@ -180,7 +180,7 @@
                 const ordersList = document.getElementById('ordersList');
                 
                 if (orders.length === 0) {
-                    ordersList.innerHTML = '<p>No orders found</p>';
+                    ordersList.innerHTML = '<p>No works orders found</p>';
                     updateOrdersCheckboxes();
                     return;
                 }
@@ -218,14 +218,14 @@
                 `;
                 updateOrdersCheckboxes();
             } catch (error) {
-                document.getElementById('ordersList').innerHTML = '<p>Error loading orders</p>';
+                document.getElementById('ordersList').innerHTML = '<p>Error loading works orders</p>';
             }
         }
         
         function updateOrdersCheckboxes() {
             const checkboxesDiv = document.getElementById('ordersCheckboxes');
             if (orders.length === 0) {
-                checkboxesDiv.innerHTML = '<p>No orders available</p>';
+                checkboxesDiv.innerHTML = '<p>No works orders available</p>';
                 return;
             }
             

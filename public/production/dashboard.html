@@ -25,7 +25,7 @@
             <a href="wip.html" class="btn btn-secondary btn-sm manager-only">WIP</a>
             <a href="planner.html" class="btn btn-secondary btn-sm manager-only">Planner</a>
             <a href="products.html" class="btn btn-secondary btn-sm manager-only">Products</a>
-            <a href="production-orders.html" class="btn btn-secondary btn-sm manager-only">Orders</a>
+            <a href="production-orders.html" class="btn btn-secondary btn-sm manager-only">Works Orders</a>
             <a href="tasks.html" class="btn btn-secondary btn-sm manager-only">Tasks</a>
             <a href="reminders.html" class="btn btn-secondary btn-sm manager-only">Reminders</a>
             <a href="timesheet.html" class="btn btn-secondary btn-sm">Clock ON/OFF</a>
@@ -76,7 +76,7 @@
         
         <div class="card">
             <div class="card-header">
-                <h2>Recent Orders</h2>
+                <h2>Recent Works Orders</h2>
             </div>
             <div id="recentOrders">
                 <div class="loading">Loading...</div>
@@ -237,7 +237,7 @@
                 const ordersData = await apiCall('/orders');
                 const ordersDiv = document.getElementById('recentOrders');
                 if (ordersData.orders.length === 0) {
-                    ordersDiv.innerHTML = '<p>No recent orders</p>';
+                    ordersDiv.innerHTML = '<p>No recent works orders</p>';
                 } else {
                     ordersDiv.innerHTML = `
                         <table class="table">
@@ -265,7 +265,7 @@
                     `;
                 }
             } catch (error) {
-                document.getElementById('recentOrders').innerHTML = '<p>Error loading orders</p>';
+                document.getElementById('recentOrders').innerHTML = '<p>Error loading works orders</p>';
             }
         }
         
