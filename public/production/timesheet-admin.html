@@ -750,14 +750,15 @@
                         </thead>
                         <tbody>
                             ${amendments.map(amendment => {
-                                const originalIn = amendment.original_clock_in_time ? formatDate(new Date(amendment.original_clock_in_time)) : '-';
-                                const originalOut = amendment.original_clock_out_time ? formatDate(new Date(amendment.original_clock_out_time)) : '-';
-                                const amendedIn = amendment.amended_clock_in_time ? formatDate(new Date(amendment.amended_clock_in_time)) : '-';
-                                const amendedOut = amendment.amended_clock_out_time ? formatDate(new Date(amendment.amended_clock_out_time)) : '-';
+                                const originalIn = amendment.original_clock_in_time ? formatDateTime(new Date(amendment.original_clock_in_time)) : '-';
+                                const originalOut = amendment.original_clock_out_time ? formatDateTime(new Date(amendment.original_clock_out_time)) : '-';
+                                const amendedIn = amendment.amended_clock_in_time ? formatDateTime(new Date(amendment.amended_clock_in_time)) : '-';
+                                const amendedOut = amendment.amended_clock_out_time ? formatDateTime(new Date(amendment.amended_clock_out_time)) : '-';
+                                const dateStr = amendment.original_clock_in_time ? new Date(amendment.original_clock_in_time).toISOString().split('T')[0] : '-';
                                 return `
                                     <tr>
                                         <td>${escapeHtml(amendment.username || 'Unknown')}</td>
-                                        <td>${originalIn.split(' ')[0]}</td>
+                                        <td>${dateStr}</td>
                                         <td><small>In: ${originalIn}<br>Out: ${originalOut}</small></td>
                                         <td><small>In: ${amendedIn}<br>Out: ${amendedOut}</small></td>
                                         <td>${escapeHtml(amendment.reason || '')}</td>
