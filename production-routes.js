@@ -1211,19 +1211,31 @@ router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireMan
         const weekStartDate = req.params.weekStart;
         const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
         
+        // Helper function to round to 15-minute intervals (0.25 hour increments)
+        const roundToQuarterHour = (hours) => {
+            if (!hours || isNaN(hours)) return 0;
+            return Math.round(parseFloat(hours) * 4) / 4;
+        };
+        
         // Generate CSV
         const csvRows = [];
         csvRows.push('Staff Name,Week Start,Regular Hours,Overtime Hours (1.25x),Weekend Hours (1.5x),Overnight Hours (1.25x),Total Hours,Days Worked');
         
         summary.forEach(row => {
+            const regular = roundToQuarterHour(row.total_regular_hours || 0);
+            const overtime = roundToQuarterHour(row.total_overtime_hours || 0);
+            const weekend = roundToQuarterHour(row.total_weekend_hours || 0);
+            const overnight = roundToQuarterHour(row.total_overnight_hours || 0);
+            const total = roundToQuarterHour(row.total_hours || 0);
+            
             csvRows.push([
                 row.username || '',
                 row.week_start_date || '',
-                row.total_regular_hours || 0,
-                row.total_overtime_hours || 0,
-                row.total_weekend_hours || 0,
-                row.total_overnight_hours || 0,
-                row.total_hours || 0,
+                regular.toFixed(2),
+                overtime.toFixed(2),
+                weekend.toFixed(2),
+                overnight.toFixed(2),
+                total.toFixed(2),
                 row.days_worked || 0
             ].join(','));
         });

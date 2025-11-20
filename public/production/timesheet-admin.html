@@ -276,6 +276,14 @@
                 loadPendingAmendments()
             ]);
             
+            // Initialize payroll week selector to current week
+            const weekSelect = document.getElementById('payrollWeekSelect');
+            if (weekSelect) {
+                weekSelect.value = getCurrentWeekStart();
+                // Load payroll summary for current week
+                await loadPayrollSummary();
+            }
+            
             // Auto-refresh active clock ins every 30 seconds
             refreshInterval = setInterval(loadActiveClockIns, 30000);
         }
@@ -888,6 +896,26 @@
             return monday.toISOString().split('T')[0];
         }
         
+        // Round hours to 15-minute intervals (0.25 hour increments)
+        function roundToQuarterHour(hours) {
+            if (!hours || isNaN(hours)) return 0;
+            // Round to nearest 0.25 (15 minutes)
+            return Math.round(parseFloat(hours) * 4) / 4;
+        }
+        
+        // Format hours as hours and minutes (e.g., "8h 15m" or "8.25h")
+        function formatHours(hours) {
+            const rounded = roundToQuarterHour(hours);
+            const wholeHours = Math.floor(rounded);
+            const minutes = Math.round((rounded - wholeHours) * 60);
+            
+            if (minutes === 0) {
+                return `${wholeHours}h`;
+            } else {
+                return `${wholeHours}h ${minutes}m`;
+            }
+        }
+        
         async function loadPayrollSummary() {
             const weekStart = document.getElementById('payrollWeekSelect').value || getCurrentWeekStart();
             
@@ -911,14 +939,14 @@
                 exportBtn.style.display = 'inline-block';
                 exportBtn.onclick = () => exportPayroll(weekStart);
                 
-                // Calculate totals
+                // Calculate totals (with rounding to 15-minute intervals)
                 let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
                 summary.forEach(row => {
-                    totalRegular += parseFloat(row.total_regular_hours || 0);
-                    totalOvertime += parseFloat(row.total_overtime_hours || 0);
-                    totalWeekend += parseFloat(row.total_weekend_hours || 0);
-                    totalOvernight += parseFloat(row.total_overnight_hours || 0);
-                    totalHours += parseFloat(row.total_hours || 0);
+                    totalRegular += roundToQuarterHour(parseFloat(row.total_regular_hours || 0));
+                    totalOvertime += roundToQuarterHour(parseFloat(row.total_overtime_hours || 0));
+                    totalWeekend += roundToQuarterHour(parseFloat(row.total_weekend_hours || 0));
+                    totalOvernight += roundToQuarterHour(parseFloat(row.total_overnight_hours || 0));
+                    totalHours += roundToQuarterHour(parseFloat(row.total_hours || 0));
                 });
                 
                 summaryEl.innerHTML = `
@@ -935,32 +963,41 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${summary.map(row => `
+                            ${summary.map(row => {
+                                const regular = roundToQuarterHour(parseFloat(row.total_regular_hours || 0));
+                                const overtime = roundToQuarterHour(parseFloat(row.total_overtime_hours || 0));
+                                const weekend = roundToQuarterHour(parseFloat(row.total_weekend_hours || 0));
+                                const overnight = roundToQuarterHour(parseFloat(row.total_overnight_hours || 0));
+                                const total = roundToQuarterHour(parseFloat(row.total_hours || 0));
+                                return `
                                 <tr>
                                     <td><strong>${escapeHtml(row.username || 'Unknown')}</strong></td>
-                                    <td>${parseFloat(row.total_regular_hours || 0).toFixed(2)}h</td>
-                                    <td>${parseFloat(row.total_overtime_hours || 0).toFixed(2)}h</td>
-                                    <td>${parseFloat(row.total_weekend_hours || 0).toFixed(2)}h</td>
-                                    <td>${parseFloat(row.total_overnight_hours || 0).toFixed(2)}h</td>
-                                    <td><strong>${parseFloat(row.total_hours || 0).toFixed(2)}h</strong></td>
+                                    <td>${formatHours(regular)}</td>
+                                    <td>${formatHours(overtime)}</td>
+                                    <td>${formatHours(weekend)}</td>
+                                    <td>${formatHours(overnight)}</td>
+                                    <td><strong>${formatHours(total)}</strong></td>
                                     <td>${row.days_worked || 0}</td>
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                             <tr style="background: #f8f9fa; font-weight: 700;">
                                 <td><strong>TOTALS</strong></td>
-                                <td>${totalRegular.toFixed(2)}h</td>
-                                <td>${totalOvertime.toFixed(2)}h</td>
-                                <td>${totalWeekend.toFixed(2)}h</td>
-                                <td>${totalOvernight.toFixed(2)}h</td>
-                                <td><strong>${totalHours.toFixed(2)}h</strong></td>
+                                <td>${formatHours(totalRegular)}</td>
+                                <td>${formatHours(totalOvertime)}</td>
+                                <td>${formatHours(totalWeekend)}</td>
+                                <td>${formatHours(totalOvernight)}</td>
+                                <td><strong>${formatHours(totalHours)}</strong></td>
                                 <td>-</td>
                             </tr>
                         </tbody>
                     </table>
                 `;
             } catch (error) {
+                console.error('Error loading payroll summary:', error);
                 document.getElementById('payrollSummary').innerHTML = 
-                    '<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading payroll summary</p>';
+                    `<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading payroll summary: ${error.message || 'Unknown error'}</p>`;
+                showAlert('Error loading payroll summary: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         
@@ -998,14 +1035,6 @@
                 showAlert('Error exporting payroll: ' + error.message, 'error');
             }
         }
-        
-        // Initialize payroll week selector to current week
-        document.addEventListener('DOMContentLoaded', () => {
-            const weekSelect = document.getElementById('payrollWeekSelect');
-            if (weekSelect) {
-                weekSelect.value = getCurrentWeekStart();
-            }
-        });
         
         // Cleanup interval on page unload
         window.addEventListener('beforeunload', () => {
