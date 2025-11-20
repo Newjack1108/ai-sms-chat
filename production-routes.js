@@ -1012,15 +1012,29 @@ router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) =
         const userId = req.session.production_user.id;
         const weekStartDate = req.params.weekStart;
         
+        // Calculate week end date
+        const weekStart = new Date(weekStartDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        
         const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
         if (!weeklyTimesheet) {
             const created = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
             const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(created.id);
-            return res.json({ success: true, weeklyTimesheet: created, dailyEntries });
+            
+            // Also get all timesheet entries for this week
+            const timesheetEntries = await ProductionDatabase.getTimesheetHistory(userId, weekStartDate, weekEndStr);
+            
+            return res.json({ success: true, weeklyTimesheet: created, dailyEntries, timesheetEntries });
         }
         
         const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
-        res.json({ success: true, weeklyTimesheet, dailyEntries });
+        
+        // Also get all timesheet entries for this week
+        const timesheetEntries = await ProductionDatabase.getTimesheetHistory(userId, weekStartDate, weekEndStr);
+        
+        res.json({ success: true, weeklyTimesheet, dailyEntries, timesheetEntries });
     } catch (error) {
         console.error('Get weekly timesheet error:', error);
         console.error('Error stack:', error.stack);

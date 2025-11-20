@@ -206,6 +206,12 @@
             border-color: #4CBB17;
         }
         
+        .day-entry.has-clock-times {
+            background: white;
+            border-color: #808080;
+            border-left: 4px solid #4CBB17;
+        }
+        
         .day-header {
             display: flex;
             justify-content: space-between;
@@ -773,15 +779,59 @@
                 
                 const weeklyTimesheet = data.weeklyTimesheet;
                 const dailyEntries = data.dailyEntries || [];
+                const timesheetEntries = data.timesheetEntries || [];
                 
                 console.log('Weekly timesheet:', weeklyTimesheet);
                 console.log('Daily entries count:', dailyEntries.length);
-                console.log('Daily entries:', dailyEntries);
+                console.log('Timesheet entries count:', timesheetEntries.length);
                 
                 // Create a map of daily entries by date
                 const entriesMap = {};
                 dailyEntries.forEach(entry => {
                     entriesMap[entry.entry_date] = entry;
+                });
+                
+                // Also map timesheet entries by date (for entries that don't have daily entries)
+                timesheetEntries.forEach(te => {
+                    const clockInDate = new Date(te.clock_in_time);
+                    const dateStr = clockInDate.toISOString().split('T')[0];
+                    
+                    // Only add if there's no daily entry for this date, or if daily entry doesn't have times
+                    if (!entriesMap[dateStr] || !entriesMap[dateStr].clock_in_time) {
+                        if (!entriesMap[dateStr]) {
+                            entriesMap[dateStr] = {
+                                entry_date: dateStr,
+                                timesheet_entry_id: te.id,
+                                clock_in_time: te.clock_in_time,
+                                clock_out_time: te.clock_out_time,
+                                regular_hours: te.regular_hours || 0,
+                                overtime_hours: te.overtime_hours || 0,
+                                weekend_hours: te.weekend_hours || 0,
+                                overnight_hours: te.overnight_hours || 0,
+                                total_hours: te.total_hours || 0
+                            };
+                        } else {
+                            // Merge timesheet entry data into daily entry
+                            entriesMap[dateStr].timesheet_entry_id = te.id;
+                            entriesMap[dateStr].clock_in_time = entriesMap[dateStr].clock_in_time || te.clock_in_time;
+                            entriesMap[dateStr].clock_out_time = entriesMap[dateStr].clock_out_time || te.clock_out_time;
+                            if (!entriesMap[dateStr].regular_hours && te.regular_hours) {
+                                entriesMap[dateStr].regular_hours = te.regular_hours;
+                            }
+                            if (!entriesMap[dateStr].overtime_hours && te.overtime_hours) {
+                                entriesMap[dateStr].overtime_hours = te.overtime_hours;
+                            }
+                            if (!entriesMap[dateStr].weekend_hours && te.weekend_hours) {
+                                entriesMap[dateStr].weekend_hours = te.weekend_hours;
+                            }
+                            if (!entriesMap[dateStr].overnight_hours && te.overnight_hours) {
+                                entriesMap[dateStr].overnight_hours = te.overnight_hours;
+                            }
+                            if (!entriesMap[dateStr].total_hours && te.total_hours) {
+                                entriesMap[dateStr].total_hours = te.total_hours;
+                            }
+                        }
+                    }
                 });
                 
                 // Display week range
@@ -837,20 +887,30 @@
                     
                     const hasHours = dayTotal > 0;
                     const hasEntry = entry !== null;
+                    const hasClockTimes = entry && (entry.clock_in_time || entry.clock_out_time);
                     
                     html += `
-                        <div class="day-entry ${hasHours ? 'has-hours' : ''}">
+                        <div class="day-entry ${hasHours ? 'has-hours' : (hasClockTimes ? 'has-clock-times' : '')}">
                             <div class="day-header">
                                 <div>
                                     <span class="day-name">${dayName}</span>
                                     <span class="day-date">${formatDate(date)}</span>
                                 </div>
-                                ${hasEntry && entry.timesheet_entry_id ? `
+                                ${hasClockTimes && entry.timesheet_entry_id ? `
                                     <button class="edit-times-btn" onclick="showAmendmentModal(${entry.timesheet_entry_id}, '${entry.clock_in_time || ''}', '${entry.clock_out_time || ''}')">
                                         Edit Times
                                     </button>
                                 ` : ''}
                             </div>
+                            ${hasClockTimes ? `
+                                <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid #4CBB17;">
+                                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 5px;">Clock Times:</div>
+                                    <div style="font-size: 14px; color: #555;">
+                                        ${clockInTime ? `<strong>Clock In:</strong> ${clockInTime}` : '<span style="color: #999;">No clock in recorded</span>'}
+                                        ${clockOutTime ? `<br><strong>Clock Out:</strong> ${clockOutTime}` : clockInTime ? '<br><span style="color: #999;">No clock out recorded</span>' : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
                             ${hasHours ? `
                                 <div class="day-hours">
                                     ${regularHours > 0 ? `
@@ -878,7 +938,6 @@
                                         </div>
                                     ` : ''}
                                 </div>
-                                ${clockInTime ? `<div style="font-size: 12px; color: #666; margin-top: 5px;">In: ${clockInTime}${clockOutTime ? ` | Out: ${clockOutTime}` : ''}</div>` : ''}
                             ` : ''}
                             ${isCurrentWeek ? `
                                 <div class="day-notes">
