@@ -2450,6 +2450,30 @@ class ProductionDatabase {
         }
     }
     
+    // Count completed timesheet entries for a specific date
+    static async countEntriesForDate(userId, dateStr) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT COUNT(*) as count
+                 FROM timesheet_entries
+                 WHERE user_id = $1 
+                 AND DATE(clock_in_time) = $2
+                 AND clock_out_time IS NOT NULL`,
+                [userId, dateStr]
+            );
+            return parseInt(result.rows[0].count) || 0;
+        } else {
+            const result = db.prepare(
+                `SELECT COUNT(*) as count
+                 FROM timesheet_entries
+                 WHERE user_id = ? 
+                 AND DATE(clock_in_time) = ?
+                 AND clock_out_time IS NOT NULL`
+            ).get(userId, dateStr);
+            return parseInt(result.count) || 0;
+        }
+    }
+    
     // Check for duplicate or overlapping timesheet entries
     static async checkDuplicateTimes(userId, clockInTime, clockOutTime, excludeEntryId = null) {
         if (isPostgreSQL) {

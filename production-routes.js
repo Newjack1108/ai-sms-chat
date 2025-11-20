@@ -807,7 +807,17 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job ID is required' });
         }
         
-        // Allow multiple clock-ins per day - no check needed
+        // Check if user already has 2 completed entries for today
+        const today = new Date().toISOString().split('T')[0];
+        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
+        
+        if (completedEntriesCount >= 2) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Maximum of 2 clock in/out entries per day allowed. You have already completed 2 entries today.' 
+            });
+        }
+        
         const entry = await ProductionDatabase.clockIn(userId, parseInt(job_id), latitude, longitude);
         res.json({ success: true, entry });
     } catch (error) {
@@ -933,6 +943,17 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
         
         if (!job_id) {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
+        }
+        
+        // Check if user already has 2 completed entries for today
+        const today = new Date().toISOString().split('T')[0];
+        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
+        
+        if (completedEntriesCount >= 2) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Maximum of 2 clock in/out entries per day allowed. You have already completed 2 entries today.' 
+            });
         }
         
         const entry = await ProductionDatabase.clockIn(userId, job_id, latitude, longitude);
@@ -1119,6 +1140,17 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ 
                 success: false, 
                 error: 'Missing times can only be added for dates up to 10 days back. Please contact a manager for older entries.' 
+            });
+        }
+        
+        // Check if user already has 2 completed entries for this date
+        const dateStr = entryDate.toISOString().split('T')[0];
+        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, dateStr);
+        
+        if (completedEntriesCount >= 2) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Maximum of 2 clock in/out entries per day allowed. You already have 2 completed entries for this date.' 
             });
         }
         
