@@ -1200,53 +1200,6 @@
             loadWeeklyTimesheet(date.toISOString().split('T')[0]);
         }
         
-        // Activity points functions
-        function renderActivities(dailyNotes, dateStr, canEdit) {
-            let activities = [];
-            
-            if (dailyNotes) {
-                try {
-                    // Try to parse as JSON array
-                    const parsed = JSON.parse(dailyNotes);
-                    if (Array.isArray(parsed)) {
-                        activities = parsed;
-                    } else if (typeof parsed === 'string') {
-                        // Legacy: single text note, convert to array
-                        activities = [{ timestamp: new Date().toISOString(), note: parsed }];
-                    }
-                } catch (e) {
-                    // Not JSON, treat as legacy single text note
-                    if (dailyNotes.trim()) {
-                        activities = [{ timestamp: new Date().toISOString(), note: dailyNotes }];
-                    }
-                }
-            }
-            
-            if (activities.length === 0) {
-                return '<p style="color: #999; font-size: 13px; padding: 10px; text-align: center;">No activities recorded yet</p>';
-            }
-            
-            return activities.map((activity, index) => {
-                const time = new Date(activity.timestamp);
-                const timeStr = formatDateTime(time);
-                return `
-                    <div class="activity-item" style="background: #f8f9fa; padding: 10px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #4CBB17;">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div style="flex: 1;">
-                                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">${timeStr}</div>
-                                <div style="font-size: 14px; color: #2c3e50;">${escapeHtml(activity.note || '')}</div>
-                            </div>
-                            ${canEdit ? `
-                                <button onclick="deleteActivity('${dateStr}', ${index})" class="btn btn-danger btn-sm" style="margin-left: 10px; padding: 4px 8px; font-size: 12px;">
-                                    ×
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-        
         function showAddActivityForm(dateStr) {
             const form = document.getElementById(`add-activity-form-${dateStr}`);
             if (form) {
