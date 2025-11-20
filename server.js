@@ -163,6 +163,14 @@ app.get('/production', requireProductionAuth, (req, res) => {
 
 // Production HTML pages (protected)
 app.get('/production/*.html', requireProductionAuth, (req, res) => {
+    // Redirect staff users to timesheet page (except timesheet.html itself)
+    if (req.session.production_user && 
+        req.session.production_user.role === 'staff' && 
+        !req.path.includes('timesheet.html') && 
+        !req.path.includes('login.html')) {
+        return res.redirect('/production/timesheet.html');
+    }
+    
     const fileName = req.path.replace('/production/', '') || 'dashboard.html';
     const filePath = path.join(__dirname, 'public', 'production', fileName);
     res.sendFile(filePath);
