@@ -1047,6 +1047,17 @@
             }
         });
         
+        // Call init when DOM is ready
+        console.log('=== SCRIPT LOADED, CALLING INIT ===');
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('=== DOMContentLoaded EVENT, CALLING INIT ===');
+                init();
+            });
+        } else {
+            console.log('=== DOM ALREADY READY, CALLING INIT IMMEDIATELY ===');
+            init();
+        }
     </script>
 </body>
 </html>
