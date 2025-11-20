@@ -1119,11 +1119,28 @@
                             dayEntries.forEach((day, idx) => {
                                 const clockIn = day.clock_in_time ? formatDateTime(new Date(day.clock_in_time)) : '-';
                                 const clockOut = day.clock_out_time ? formatDateTime(new Date(day.clock_out_time)) : '-';
+                                const hasInLocation = day.clock_in_latitude && day.clock_in_longitude;
+                                const hasOutLocation = day.clock_out_latitude && day.clock_out_longitude;
                                 const regular = roundToQuarterHour(parseFloat(day.regular_hours || 0));
                                 const overtime = roundToQuarterHour(parseFloat(day.overtime_hours || 0));
                                 const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
                                 const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
                                 const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
+                                
+                                let locationHtml = '<small style="color: #666;">';
+                                if (hasInLocation || hasOutLocation) {
+                                    locationHtml += '<div style="margin-bottom: 4px;">';
+                                    if (hasInLocation) {
+                                        locationHtml += `<button onclick="openMap(${day.clock_in_latitude}, ${day.clock_in_longitude})" class="btn btn-sm" style="padding: 2px 6px; font-size: 10px; background: #4CBB17; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 4px;" title="View clock-in location">In 🗺️</button>`;
+                                    }
+                                    if (hasOutLocation) {
+                                        locationHtml += `<button onclick="openMap(${day.clock_out_latitude}, ${day.clock_out_longitude})" class="btn btn-sm" style="padding: 2px 6px; font-size: 10px; background: #808080; color: white; border: none; border-radius: 3px; cursor: pointer;" title="View clock-out location">Out 🗺️</button>`;
+                                    }
+                                    locationHtml += '</div>';
+                                } else {
+                                    locationHtml += 'N/A';
+                                }
+                                locationHtml += '</small>';
                                 
                                 dailyHtml += `
                                     <tr ${idx === 0 ? `style="border-top: 2px solid #4CBB17;"` : ''}>
@@ -1131,6 +1148,7 @@
                                         <td>${escapeHtml(day.job_name || '-')}</td>
                                         <td>${clockIn}</td>
                                         <td>${clockOut}</td>
+                                        <td>${locationHtml}</td>
                                         <td>${formatHours(regular)}</td>
                                         <td>${formatHours(overtime)}</td>
                                         <td>${formatHours(weekend)}</td>
