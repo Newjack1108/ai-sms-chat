@@ -472,13 +472,14 @@
                 showAlert('Error loading some data. Please refresh the page.', 'error');
             }
             
-            // Load weekly timesheet
-            try {
-                await loadWeeklyTimesheet();
-            } catch (error) {
+            // Load weekly timesheet (don't block on error)
+            loadWeeklyTimesheet().catch(error => {
                 console.error('Error loading weekly timesheet in init:', error);
-                // Error already handled in loadWeeklyTimesheet
-            }
+                const content = document.getElementById('weeklyTimesheetContent');
+                if (content) {
+                    content.innerHTML = `<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet. Please refresh the page.<br><small>${escapeHtml(error.message || 'Unknown error')}</small></p>`;
+                }
+            });
         }
         
         function requestLocation() {
@@ -722,8 +723,24 @@
             }
             currentWeekStart = weekStart;
             
+            const content = document.getElementById('weeklyTimesheetContent');
+            if (!content) {
+                console.error('weeklyTimesheetContent element not found');
+                return;
+            }
+            
+            // Show loading state
+            content.innerHTML = '<div class="loading">Loading weekly timesheet...</div>';
+            
             try {
+                console.log('Loading weekly timesheet for week:', weekStart);
                 const data = await apiCall(`/clock/weekly/${weekStart}`);
+                console.log('Weekly timesheet data received:', data);
+                
+                if (!data || !data.success) {
+                    throw new Error(data?.error || 'Failed to load weekly timesheet');
+                }
+                
                 const weeklyTimesheet = data.weeklyTimesheet;
                 const dailyEntries = data.dailyEntries || [];
                 
@@ -872,9 +889,20 @@
                 content.innerHTML = html;
             } catch (error) {
                 console.error('Error loading weekly timesheet:', error);
+                console.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack,
+                    name: error.name
+                });
                 const errorMsg = error.message || 'Failed to load weekly timesheet';
-                document.getElementById('weeklyTimesheetContent').innerHTML = 
-                    `<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet: ${escapeHtml(errorMsg)}</p>`;
+                const content = document.getElementById('weeklyTimesheetContent');
+                if (content) {
+                    content.innerHTML = 
+                        `<p style="text-align: center; color: #e74c3c; padding: 20px;">
+                            Error loading weekly timesheet: ${escapeHtml(errorMsg)}
+                            <br><small>Check browser console for details</small>
+                        </p>`;
+                }
             }
         }
         

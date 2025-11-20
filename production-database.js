@@ -2916,24 +2916,34 @@ class ProductionDatabase {
     }
     
     static async getDailyEntriesForWeek(weeklyTimesheetId) {
-        if (isPostgreSQL) {
-            const result = await pool.query(
-                `SELECT tde.*, te.clock_in_time, te.clock_out_time
-                 FROM timesheet_daily_entries tde
-                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
-                 WHERE tde.weekly_timesheet_id = $1
-                 ORDER BY tde.entry_date`,
-                [weeklyTimesheetId]
-            );
-            return result.rows;
-        } else {
-            return db.prepare(
-                `SELECT tde.*, te.clock_in_time, te.clock_out_time
-                 FROM timesheet_daily_entries tde
-                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
-                 WHERE tde.weekly_timesheet_id = ?
-                 ORDER BY tde.entry_date`
-            ).all(weeklyTimesheetId);
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                     FROM timesheet_daily_entries tde
+                     LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                     WHERE tde.weekly_timesheet_id = $1
+                     ORDER BY tde.entry_date`,
+                    [weeklyTimesheetId]
+                );
+                return result.rows || [];
+            } else {
+                return db.prepare(
+                    `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                     FROM timesheet_daily_entries tde
+                     LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                     WHERE tde.weekly_timesheet_id = ?
+                     ORDER BY tde.entry_date`
+                ).all(weeklyTimesheetId) || [];
+            }
+        } catch (error) {
+            console.error('Error in getDailyEntriesForWeek:', error);
+            if (error.code === '42P01') { // Table doesn't exist
+                throw new Error('Database tables not initialized. Please restart the server.');
+            }
+            // Return empty array on error rather than throwing
+            console.warn('Returning empty array for daily entries due to error');
+            return [];
         }
     }
     
