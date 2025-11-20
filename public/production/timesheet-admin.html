@@ -1169,6 +1169,17 @@
             }
         }
         
+        // Open map with coordinates
+        function openMap(latitude, longitude) {
+            if (!latitude || !longitude) {
+                showAlert('Location coordinates not available', 'error');
+                return;
+            }
+            // Open in Google Maps (can be changed to OpenStreetMap or other providers)
+            const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
+            window.open(url, '_blank');
+        }
+        
         async function exportPayroll(weekStart = null) {
             if (!weekStart) {
                 weekStart = document.getElementById('payrollWeekSelect').value || getCurrentWeekStart();
