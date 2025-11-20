@@ -907,11 +907,11 @@
             return monday.toISOString().split('T')[0];
         }
         
-        // Round hours to 15-minute intervals (0.25 hour increments)
+        // Round hours down to 15-minute intervals (0.25 hour increments)
         function roundToQuarterHour(hours) {
             if (!hours || isNaN(hours)) return 0;
-            // Round to nearest 0.25 (15 minutes)
-            return Math.round(parseFloat(hours) * 4) / 4;
+            // Always round down to nearest 0.25 (15 minutes)
+            return Math.floor(parseFloat(hours) * 4) / 4;
         }
         
         // Format hours as hours and minutes (e.g., "5hrs 30mins")
