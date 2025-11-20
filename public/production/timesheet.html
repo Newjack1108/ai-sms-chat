@@ -1011,19 +1011,33 @@
                     
                     // Get all timesheet entries for this date
                     const dayEntries = timesheetEntriesByDate[dateStr] || [];
-                    const regularHours = parseFloat(entry?.regular_hours) || 0;
-                    const overtimeHours = parseFloat(entry?.overtime_hours) || 0;
-                    const weekendHours = parseFloat(entry?.weekend_hours) || 0;
-                    const overnightHours = parseFloat(entry?.overnight_hours) || 0;
-                    const dayTotal = parseFloat(entry?.total_hours) || 0;
+                    
+                    // Calculate totals from all timesheet entries for this day (more accurate than daily entry)
+                    let dayRegular = 0, dayOvertime = 0, dayWeekend = 0, dayOvernight = 0, dayTotal = 0;
+                    dayEntries.forEach(te => {
+                        if (te.clock_out_time) { // Only count completed entries
+                            dayRegular += parseFloat(te.regular_hours || 0);
+                            dayOvertime += parseFloat(te.overtime_hours || 0);
+                            dayWeekend += parseFloat(te.weekend_hours || 0);
+                            dayOvernight += parseFloat(te.overnight_hours || 0);
+                            dayTotal += parseFloat(te.total_hours || 0);
+                        }
+                    });
+                    
+                    // Use daily entry totals if available and no timesheet entries, otherwise use calculated totals
+                    const regularHours = dayEntries.length > 0 ? dayRegular : (parseFloat(entry?.regular_hours) || 0);
+                    const overtimeHours = dayEntries.length > 0 ? dayOvertime : (parseFloat(entry?.overtime_hours) || 0);
+                    const weekendHours = dayEntries.length > 0 ? dayWeekend : (parseFloat(entry?.weekend_hours) || 0);
+                    const overnightHours = dayEntries.length > 0 ? dayOvernight : (parseFloat(entry?.overnight_hours) || 0);
+                    const dayTotalHours = dayEntries.length > 0 ? dayTotal : (parseFloat(entry?.total_hours) || 0);
                     
                     totalRegular += regularHours;
                     totalOvertime += overtimeHours;
                     totalWeekend += weekendHours;
                     totalOvernight += overnightHours;
-                    totalHours += dayTotal;
+                    totalHours += dayTotalHours;
                     
-                    const hasHours = dayTotal > 0;
+                    const hasHours = dayTotalHours > 0;
                     const hasEntry = entry !== null;
                     const hasClockTimes = dayEntries.length > 0;
                     
@@ -1108,6 +1122,12 @@
                                         <div class="hour-item overnight">
                                             <div class="hour-label">Overnight (1.25x)</div>
                                             <div class="hour-value">${overnightHours.toFixed(2)}h</div>
+                                        </div>
+                                    ` : ''}
+                                    ${dayTotalHours > 0 ? `
+                                        <div class="hour-item total" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: 600;">
+                                            <div class="hour-label">Day Total</div>
+                                            <div class="hour-value">${dayTotalHours.toFixed(2)}h</div>
                                         </div>
                                     ` : ''}
                                 </div>
