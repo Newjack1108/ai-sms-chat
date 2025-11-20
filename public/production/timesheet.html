@@ -1095,7 +1095,7 @@
                                     <input 
                                         type="checkbox" 
                                         id="overnight-${dateStr}" 
-                                        ${entry && (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1') ? 'checked' : ''}
+                                        ${entry && entry.overnight_away ? 'checked' : ''}
                                         onchange="saveOvernightAway('${dateStr}', this.checked)"
                                     >
                                     <label for="overnight-${dateStr}">Overnight away from home</label>
@@ -1336,14 +1336,33 @@
         
         async function saveOvernightAway(date, overnightAway) {
             if (!currentWeekStart) return;
+            
+            // Preserve checkbox state during save
+            const checkbox = document.getElementById(`overnight-${date}`);
+            if (checkbox) {
+                checkbox.disabled = true;
+            }
+            
             try {
-                await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
+                const response = await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
                     method: 'PUT',
                     body: JSON.stringify({ overnight_away: overnightAway })
                 });
-                // Reload to update hours
+                
+                // Ensure checkbox reflects the saved state
+                if (checkbox) {
+                    checkbox.checked = overnightAway;
+                    checkbox.disabled = false;
+                }
+                
+                // Reload to update hours (this will refresh the checkbox state from server)
                 await loadWeeklyTimesheet(currentWeekStart);
             } catch (error) {
+                // Revert checkbox on error
+                if (checkbox) {
+                    checkbox.checked = !overnightAway;
+                    checkbox.disabled = false;
+                }
                 showAlert('Failed to save overnight away status', 'error');
             }
         }

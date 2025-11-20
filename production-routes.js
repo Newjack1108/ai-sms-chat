@@ -1057,20 +1057,36 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         
         const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
         
-        // If overnight_away changed and there's a timesheet entry, recalculate hours
-        if (overnight_away !== undefined && dailyEntry.timesheet_entry_id) {
-            await ProductionDatabase.calculateTimesheetHours(dailyEntry.timesheet_entry_id, overnight_away);
-            // Update daily entry with new calculated hours
-            const entry = await ProductionDatabase.getTimesheetEntryById(dailyEntry.timesheet_entry_id);
-            if (entry) {
-                await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
-                    regular_hours: entry.regular_hours,
-                    overtime_hours: entry.overtime_hours,
-                    weekend_hours: entry.weekend_hours,
-                    overnight_hours: entry.overnight_hours,
-                    total_hours: entry.total_hours
-                });
+        // If overnight_away changed, recalculate hours for ALL entries for this day
+        if (overnight_away !== undefined) {
+            // Get all timesheet entries for this date
+            const weekStart = new Date(weekStartDate);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            
+            const allEntries = await ProductionDatabase.getTimesheetHistory(userId, weekStartDate, weekEndStr);
+            const dayEntries = allEntries.filter(te => {
+                const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+                return teDate === entryDate && te.clock_out_time;
+            });
+            
+            // Recalculate hours for each entry
+            for (const entry of dayEntries) {
+                await ProductionDatabase.calculateTimesheetHours(entry.id, overnight_away);
             }
+            
+            // Aggregate hours from all entries for this day
+            const aggregatedHours = await ProductionDatabase.aggregateDailyHours(userId, entryDate, overnight_away);
+            
+            // Update daily entry with aggregated hours
+            await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
+                regular_hours: aggregatedHours.regular_hours,
+                overtime_hours: aggregatedHours.overtime_hours,
+                weekend_hours: aggregatedHours.weekend_hours,
+                overnight_hours: aggregatedHours.overnight_hours,
+                total_hours: aggregatedHours.total_hours
+            });
         }
         
         res.json({ success: true, dailyEntry: updated });
