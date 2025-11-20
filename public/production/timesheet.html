@@ -1086,16 +1086,16 @@
                                 <div class="day-activities">
                                     <div class="activities-header">
                                         <strong>Daily Activities</strong>
-                                        ${isToday && currentStatus && currentStatus.clocked_in ? `
+                                        ${isToday ? `
                                             <button class="btn btn-primary btn-sm" onclick="showAddActivityForm('${dateStr}')" style="margin-left: 10px;">
                                                 + Add Activity
                                             </button>
                                         ` : ''}
                                     </div>
                                     <div id="activities-${dateStr}" class="activities-list">
-                                        ${renderActivities(entry ? entry.daily_notes : null, dateStr, isToday && currentStatus && currentStatus.clocked_in)}
+                                        ${renderActivities(entry ? entry.daily_notes : null, dateStr, isToday)}
                                     </div>
-                                    ${isToday && currentStatus && currentStatus.clocked_in ? `
+                                    ${isToday ? `
                                         <div id="add-activity-form-${dateStr}" class="add-activity-form" style="display: none; margin-top: 10px;">
                                             <textarea 
                                                 id="activity-input-${dateStr}" 
@@ -1114,7 +1114,7 @@
                                     <input 
                                         type="checkbox" 
                                         id="overnight-${dateStr}" 
-                                        ${entry && entry.overnight_away ? 'checked' : ''}
+                                        ${entry && (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1') ? 'checked' : ''}
                                         onchange="saveOvernightAway('${dateStr}', this.checked)"
                                     >
                                     <label for="overnight-${dateStr}">Overnight away from home</label>
@@ -1273,8 +1273,8 @@
                 
                 // Refresh the activities display
                 if (activitiesEl) {
-                    const canEdit = dateStr === new Date().toISOString().split('T')[0] && currentStatus && currentStatus.clocked_in;
-                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, canEdit);
+                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, isToday);
                 }
                 
                 // Clear and hide form
@@ -1329,8 +1329,8 @@
                 // Refresh the activities display
                 const activitiesEl = document.getElementById(`activities-${dateStr}`);
                 if (activitiesEl) {
-                    const canEdit = dateStr === new Date().toISOString().split('T')[0] && currentStatus && currentStatus.clocked_in;
-                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, canEdit);
+                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, isToday);
                 }
                 
                 showAlert('Activity deleted', 'success');

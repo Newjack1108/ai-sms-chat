@@ -2917,6 +2917,7 @@ class ProductionDatabase {
     
     static async getDailyEntriesForWeek(weeklyTimesheetId) {
         try {
+            let entries;
             if (isPostgreSQL) {
                 const result = await pool.query(
                     `SELECT tde.*, te.clock_in_time, te.clock_out_time
@@ -2926,9 +2927,9 @@ class ProductionDatabase {
                      ORDER BY tde.entry_date`,
                     [weeklyTimesheetId]
                 );
-                return result.rows || [];
+                entries = result.rows || [];
             } else {
-                return db.prepare(
+                entries = db.prepare(
                     `SELECT tde.*, te.clock_in_time, te.clock_out_time
                      FROM timesheet_daily_entries tde
                      LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
@@ -2936,6 +2937,12 @@ class ProductionDatabase {
                      ORDER BY tde.entry_date`
                 ).all(weeklyTimesheetId) || [];
             }
+            
+            // Normalize overnight_away to boolean for consistency (SQLite returns 0/1, PostgreSQL returns true/false)
+            return entries.map(entry => ({
+                ...entry,
+                overnight_away: entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1'
+            }));
         } catch (error) {
             console.error('Error in getDailyEntriesForWeek:', error);
             if (error.code === '42P01') { // Table doesn't exist
