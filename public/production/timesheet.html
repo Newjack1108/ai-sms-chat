@@ -161,7 +161,7 @@
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
-            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm manager-only">Dashboard</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
     </nav>
@@ -218,6 +218,14 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
+            
+            // Hide dashboard link for staff
+            if (currentUser.role === 'staff') {
+                const dashboardLink = document.querySelector('a[href="dashboard.html"]');
+                if (dashboardLink) {
+                    dashboardLink.style.display = 'none';
+                }
+            }
             
             // Request location permission
             requestLocation();
