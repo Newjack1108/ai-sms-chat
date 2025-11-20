@@ -35,6 +35,28 @@
             margin-bottom: 30px;
         }
         
+        .logo-placeholder {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 20px;
+            background: #f0f0f0;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 12px;
+            text-align: center;
+            padding: 10px;
+        }
+        
+        .logo-placeholder img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        
         .login-header h1 {
             color: #2c3e50;
             font-size: 28px;
@@ -115,6 +137,9 @@
 <body>
     <div class="login-container">
         <div class="login-header">
+            <div class="logo-placeholder">
+                <span>Logo<br>Placeholder</span>
+            </div>
             <h1>Production System</h1>
             <p>Stock Control & Management</p>
         </div>
