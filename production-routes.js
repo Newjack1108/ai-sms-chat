@@ -807,14 +807,23 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job ID is required' });
         }
         
-        // Check if user already has 2 completed entries for today
+        // Check if user already has a completed entry for today
         const today = new Date().toISOString().split('T')[0];
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         
-        if (completedEntriesCount >= 2) {
+        if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Maximum of 2 clock in/out entries per day allowed. You have already completed 2 entries today.' 
+                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed.' 
+            });
+        }
+        
+        // Check if user is already clocked in (has an active entry)
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        if (currentStatus) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'You are already clocked in. Please clock out first.' 
             });
         }
         
@@ -945,14 +954,23 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
         }
         
-        // Check if user already has 2 completed entries for today
+        // Check if user already has a completed entry for today
         const today = new Date().toISOString().split('T')[0];
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         
-        if (completedEntriesCount >= 2) {
+        if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Maximum of 2 clock in/out entries per day allowed. You have already completed 2 entries today.' 
+                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed.' 
+            });
+        }
+        
+        // Check if user is already clocked in (has an active entry)
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        if (currentStatus) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'You are already clocked in. Please clock out first.' 
             });
         }
         
@@ -1148,14 +1166,14 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Check if user already has 2 completed entries for this date
+        // Check if user already has a completed entry for this date
         const dateStr = entryDate.toISOString().split('T')[0];
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, dateStr);
         
-        if (completedEntriesCount >= 2) {
+        if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Maximum of 2 clock in/out entries per day allowed. You already have 2 completed entries for this date.' 
+                error: 'You already have a clock in/out entry for this date. Only one entry per day is allowed. Please use "Edit Times" to amend it.' 
             });
         }
         
@@ -1330,6 +1348,23 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
     } catch (error) {
         console.error('Review amendment error:', error);
         res.status(500).json({ success: false, error: 'Failed to review amendment' });
+    }
+});
+
+// Delete timesheet entry (admin only)
+router.delete('/clock/entries/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const entryId = parseInt(req.params.id);
+        const entry = await ProductionDatabase.deleteTimesheetEntry(entryId);
+        
+        if (!entry) {
+            return res.status(404).json({ success: false, error: 'Timesheet entry not found' });
+        }
+        
+        res.json({ success: true, message: 'Timesheet entry deleted successfully' });
+    } catch (error) {
+        console.error('Delete timesheet entry error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete timesheet entry' });
     }
 });
 

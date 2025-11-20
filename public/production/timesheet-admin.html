@@ -1093,7 +1093,7 @@
                             entriesByDate[date].push(day);
                         });
                         
-                        let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Location</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th></tr></thead><tbody>';
+                        let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Location</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th><th>Actions</th></tr></thead><tbody>';
                         
                         // Sort dates
                         const sortedDates = Object.keys(entriesByDate).sort();
@@ -1153,6 +1153,14 @@
                                         <td>${formatHours(weekend)}</td>
                                         <td>${formatHours(overnight)}</td>
                                         <td>${formatHours(total)}</td>
+                                        <td>
+                                            <button onclick="deleteTimesheetEntry(${day.id}, ${userId}, '${weekStart}')" 
+                                                    class="btn btn-danger btn-sm" 
+                                                    style="padding: 4px 8px; font-size: 11px;"
+                                                    title="Delete this entry">
+                                                🗑️ Delete
+                                            </button>
+                                        </td>
                                     </tr>
                                 `;
                             });
@@ -1167,6 +1175,7 @@
                                         <td>${formatHours(dayWeekend)}</td>
                                         <td>${formatHours(dayOvernight)}</td>
                                         <td><strong>${formatHours(dayTotal)}</strong></td>
+                                        <td></td>
                                     </tr>
                                 `;
                             }
@@ -1195,6 +1204,40 @@
             // Open in Google Maps (can be changed to OpenStreetMap or other providers)
             const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
             window.open(url, '_blank');
+        }
+        
+        // Delete timesheet entry
+        async function deleteTimesheetEntry(entryId, userId, weekStart) {
+            if (!confirm('Are you sure you want to delete this timesheet entry? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await apiCall(`/clock/entries/${entryId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response && response.success) {
+                    showAlert('Timesheet entry deleted successfully', 'success');
+                    // Reload the daily breakdown
+                    const row = document.getElementById(`daily-${userId}`);
+                    if (row && row.style.display !== 'none') {
+                        // Clear content and reload
+                        const content = document.getElementById(`daily-content-${userId}`);
+                        if (content) {
+                            content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
+                        }
+                        await toggleDailyBreakdown(userId, weekStart);
+                    }
+                    // Reload payroll summary
+                    await loadPayrollSummary();
+                } else {
+                    throw new Error(response?.error || 'Failed to delete entry');
+                }
+            } catch (error) {
+                console.error('Error deleting timesheet entry:', error);
+                showAlert('Failed to delete timesheet entry: ' + (error.message || 'Unknown error'), 'error');
+            }
         }
         
         async function exportPayroll(weekStart = null) {

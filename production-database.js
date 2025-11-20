@@ -2401,6 +2401,96 @@ class ProductionDatabase {
         }
     }
     
+    static async deleteTimesheetEntry(id) {
+        if (isPostgreSQL) {
+            // First get the entry to find associated daily entry
+            const entry = await this.getTimesheetEntryById(id);
+            if (!entry) {
+                return null;
+            }
+            
+            // Delete the timesheet entry (cascade will handle related data)
+            const result = await pool.query(
+                `DELETE FROM timesheet_entries WHERE id = $1 RETURNING *`,
+                [id]
+            );
+            
+            // If there's a daily entry linked to this, recalculate hours for that day
+            if (entry.clock_out_time) {
+                const clockInDate = new Date(entry.clock_in_time);
+                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                
+                // Find the weekly timesheet for this date
+                const dayOfWeek = clockInDate.getDay();
+                const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+                const monday = new Date(clockInDate);
+                monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                monday.setHours(0, 0, 0, 0);
+                const weekStartDate = monday.toISOString().split('T')[0];
+                
+                const weeklyTimesheet = await this.getWeeklyTimesheet(entry.user_id, weekStartDate);
+                if (weeklyTimesheet) {
+                    const dailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+                    if (dailyEntry) {
+                        // Recalculate hours for remaining entries on this day
+                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, dailyEntry.overnight_away);
+                        await this.updateDailyEntry(dailyEntry.id, {
+                            regular_hours: aggregatedHours.regular_hours,
+                            overtime_hours: aggregatedHours.overtime_hours,
+                            weekend_hours: aggregatedHours.weekend_hours,
+                            overnight_hours: aggregatedHours.overnight_hours,
+                            total_hours: aggregatedHours.total_hours
+                        });
+                    }
+                }
+            }
+            
+            return result.rows[0] || null;
+        } else {
+            // First get the entry to find associated daily entry
+            const entry = await this.getTimesheetEntryById(id);
+            if (!entry) {
+                return null;
+            }
+            
+            // Delete the timesheet entry
+            const stmt = db.prepare(`DELETE FROM timesheet_entries WHERE id = ?`);
+            stmt.run(id);
+            
+            // If there's a daily entry linked to this, recalculate hours for that day
+            if (entry.clock_out_time) {
+                const clockInDate = new Date(entry.clock_in_time);
+                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                
+                // Find the weekly timesheet for this date
+                const dayOfWeek = clockInDate.getDay();
+                const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+                const monday = new Date(clockInDate);
+                monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                monday.setHours(0, 0, 0, 0);
+                const weekStartDate = monday.toISOString().split('T')[0];
+                
+                const weeklyTimesheet = await this.getWeeklyTimesheet(entry.user_id, weekStartDate);
+                if (weeklyTimesheet) {
+                    const dailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+                    if (dailyEntry) {
+                        // Recalculate hours for remaining entries on this day
+                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, dailyEntry.overnight_away);
+                        await this.updateDailyEntry(dailyEntry.id, {
+                            regular_hours: aggregatedHours.regular_hours,
+                            overtime_hours: aggregatedHours.overtime_hours,
+                            weekend_hours: aggregatedHours.weekend_hours,
+                            overnight_hours: aggregatedHours.overnight_hours,
+                            total_hours: aggregatedHours.total_hours
+                        });
+                    }
+                }
+            }
+            
+            return entry;
+        }
+    }
+    
     static async getActiveClockIns() {
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -3459,6 +3549,7 @@ class ProductionDatabase {
             // Get all timesheet entries for the week, grouped by date
             const result = await pool.query(
                 `SELECT 
+                    te.id,
                     DATE(te.clock_in_time) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
@@ -3492,6 +3583,7 @@ class ProductionDatabase {
             // Get all timesheet entries for the week, grouped by date
             const result = db.prepare(
                 `SELECT 
+                    te.id,
                     DATE(te.clock_in_time) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
