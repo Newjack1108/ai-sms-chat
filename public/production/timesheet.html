@@ -162,35 +162,80 @@
         
         .week-header {
             display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #808080;
+        }
+        
+        .week-header-top {
+            display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #808080;
         }
         
         .week-header h2 {
             color: #4CBB17;
+            margin: 0;
+            font-size: 18px;
         }
         
         .week-navigation {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            align-items: center;
         }
         
         .week-navigation button {
-            padding: 8px 15px;
+            padding: 6px 10px;
             border: 1px solid #808080;
             background: white;
-            border-radius: 6px;
+            border-radius: 4px;
             cursor: pointer;
             color: #4CBB17;
             font-weight: 600;
+            font-size: 12px;
+            min-width: 40px;
         }
         
         .week-navigation button:hover {
             background: #f5f5f5;
             border-color: #4CBB17;
+        }
+        
+        .week-range-display {
+            text-align: center;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 14px;
+            padding: 5px 0;
+        }
+        
+        @media (max-width: 768px) {
+            .week-header {
+                padding: 12px;
+            }
+            
+            .week-header h2 {
+                font-size: 16px;
+            }
+            
+            .week-navigation {
+                gap: 6px;
+            }
+            
+            .week-navigation button {
+                padding: 5px 8px;
+                font-size: 11px;
+                min-width: 35px;
+            }
+            
+            .week-range-display {
+                font-size: 13px;
+            }
         }
         
         .day-entry {
@@ -396,12 +441,14 @@
             <!-- Weekly Timesheet -->
             <div class="weekly-timesheet">
                 <div class="week-header">
-                    <h2>Weekly Timesheet</h2>
-                    <div class="week-navigation">
-                        <button onclick="previousWeek()">← Previous</button>
-                        <span id="weekRange" style="font-weight: 600; padding: 0 15px;"></span>
-                        <button onclick="nextWeek()">Next →</button>
+                    <div class="week-header-top">
+                        <h2>Weekly Timesheet</h2>
+                        <div class="week-navigation">
+                            <button onclick="previousWeek()" title="Previous week">←</button>
+                            <button onclick="nextWeek()" title="Next week">→</button>
+                        </div>
                     </div>
+                    <div class="week-range-display" id="weekRange"></div>
                 </div>
                 <div id="weeklyTimesheetContent">
                     <div class="loading">Loading timesheet...</div>
