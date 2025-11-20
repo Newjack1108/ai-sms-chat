@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timesheet - Clock In/Out</title>
+    <title>Clock ON/OFF</title>
     <link rel="stylesheet" href="common.css">
     <style>
         .timesheet-container {
@@ -151,13 +151,189 @@
         .location-status.success {
             color: #27ae60;
         }
+        
+        .weekly-timesheet {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .week-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .week-navigation {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .week-navigation button {
+            padding: 8px 15px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .week-navigation button:hover {
+            background: #f5f5f5;
+        }
+        
+        .day-entry {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #fafafa;
+        }
+        
+        .day-entry.has-hours {
+            background: white;
+            border-color: #667eea;
+        }
+        
+        .day-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .day-name {
+            font-weight: 600;
+            font-size: 16px;
+            color: #2c3e50;
+        }
+        
+        .day-date {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .day-hours {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .hour-item {
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .hour-item.regular { border-left: 3px solid #3498db; }
+        .hour-item.overtime { border-left: 3px solid #f39c12; }
+        .hour-item.weekend { border-left: 3px solid #9b59b6; }
+        .hour-item.overnight { border-left: 3px solid #e74c3c; }
+        
+        .hour-label {
+            font-weight: 600;
+            color: #555;
+        }
+        
+        .hour-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+        
+        .day-notes {
+            margin-top: 10px;
+        }
+        
+        .day-notes textarea {
+            width: 100%;
+            min-height: 60px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        
+        .overnight-checkbox {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .edit-times-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .edit-times-btn:hover {
+            background: #5568d3;
+        }
+        
+        .amendment-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .amendment-badge.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .amendment-badge.approved {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .amendment-badge.rejected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .weekly-summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .summary-total {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 2px solid rgba(255,255,255,0.3);
+            font-weight: 700;
+            font-size: 18px;
+        }
     </style>
 </head>
 <body>
     <nav class="navbar">
         <div class="navbar-logo">
             <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'">
-            <h1>Timesheet</h1>
+            <h1>Clock ON/OFF</h1>
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
@@ -203,6 +379,60 @@
                 
                 <div class="location-status" id="locationStatus"></div>
             </div>
+            
+            <!-- Weekly Timesheet -->
+            <div class="weekly-timesheet">
+                <div class="week-header">
+                    <h2>Weekly Timesheet</h2>
+                    <div class="week-navigation">
+                        <button onclick="previousWeek()">← Previous</button>
+                        <span id="weekRange" style="font-weight: 600; padding: 0 15px;"></span>
+                        <button onclick="nextWeek()">Next →</button>
+                    </div>
+                </div>
+                <div id="weeklyTimesheetContent">
+                    <div class="loading">Loading timesheet...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Time Amendment Modal -->
+    <div id="amendmentModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Edit Clock Times</h3>
+                <span class="close" onclick="closeAmendmentModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="amendmentForm">
+                    <input type="hidden" id="amendmentEntryId">
+                    <div class="form-group">
+                        <label>Original Clock In:</label>
+                        <div id="originalClockIn" style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Original Clock Out:</label>
+                        <div id="originalClockOut" style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="amendedClockIn">New Clock In Time *</label>
+                        <input type="datetime-local" id="amendedClockIn" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="amendedClockOut">New Clock Out Time *</label>
+                        <input type="datetime-local" id="amendedClockOut" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="amendmentReason">Reason for Amendment *</label>
+                        <textarea id="amendmentReason" class="form-control" rows="3" required placeholder="Please explain why you need to change these times..."></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeAmendmentModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Submit Request</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
     
@@ -236,6 +466,9 @@
                 loadJobs(),
                 loadClockStatus()
             ]);
+            
+            // Load weekly timesheet
+            await loadWeeklyTimesheet();
         }
         
         function requestLocation() {
@@ -319,7 +552,7 @@
         
         async function loadClockStatus() {
             try {
-                const data = await apiCall('/timesheet/status');
+                const data = await apiCall('/clock/status');
                 currentStatus = data.status;
                 updateUI();
             } catch (error) {
@@ -383,7 +616,7 @@
             clockInBtn.textContent = 'Clocking in...';
             
             try {
-                await apiCall('/timesheet/clock-in', {
+                await apiCall('/clock/clock-in', {
                     method: 'POST',
                     body: JSON.stringify({
                         job_id: jobId,
@@ -419,7 +652,7 @@
             clockOutBtn.textContent = 'Clocking out...';
             
             try {
-                await apiCall('/timesheet/clock-out', {
+                await apiCall('/clock/clock-out', {
                     method: 'POST',
                     body: JSON.stringify({
                         latitude: currentLocation ? currentLocation.latitude : null,
@@ -428,6 +661,7 @@
                 });
                 showAlert('Clocked out successfully');
                 await loadClockStatus();
+                await loadWeeklyTimesheet(currentWeekStart || getCurrentWeekStart());
             } catch (error) {
                 showAlert(error.message || 'Failed to clock out', 'error');
             } finally {
@@ -442,7 +676,292 @@
             return div.innerHTML;
         }
         
-        init();
+        // Weekly timesheet functions
+        let currentWeekStart = null;
+        
+        function getCurrentWeekStart() {
+            const today = new Date();
+            const dayOfWeek = today.getDay();
+            const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+            const monday = new Date(today);
+            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+            monday.setHours(0, 0, 0, 0);
+            return monday.toISOString().split('T')[0];
+        }
+        
+        function getWeekDates(weekStart) {
+            const start = new Date(weekStart);
+            const dates = [];
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(start);
+                date.setDate(start.getDate() + i);
+                dates.push(date.toISOString().split('T')[0]);
+            }
+            return dates;
+        }
+        
+        function getDayName(dateStr) {
+            const date = new Date(dateStr);
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return days[date.getDay()];
+        }
+        
+        async function loadWeeklyTimesheet(weekStart = null) {
+            if (!weekStart) {
+                weekStart = getCurrentWeekStart();
+            }
+            currentWeekStart = weekStart;
+            
+            try {
+                const data = await apiCall(`/clock/weekly/${weekStart}`);
+                const weeklyTimesheet = data.weeklyTimesheet;
+                const dailyEntries = data.dailyEntries || [];
+                
+                // Create a map of daily entries by date
+                const entriesMap = {};
+                dailyEntries.forEach(entry => {
+                    entriesMap[entry.entry_date] = entry;
+                });
+                
+                // Display week range
+                const weekDates = getWeekDates(weekStart);
+                const startDate = new Date(weekDates[0]);
+                const endDate = new Date(weekDates[6]);
+                document.getElementById('weekRange').textContent = 
+                    `${formatDate(startDate)} - ${formatDate(endDate)}`;
+                
+                // Display daily entries
+                const content = document.getElementById('weeklyTimesheetContent');
+                let html = '';
+                let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
+                
+                weekDates.forEach(dateStr => {
+                    const entry = entriesMap[dateStr] || null;
+                    const dayName = getDayName(dateStr);
+                    const date = new Date(dateStr);
+                    const isCurrentWeek = weekStart === getCurrentWeekStart();
+                    
+                    let clockInTime = '';
+                    let clockOutTime = '';
+                    let regularHours = 0, overtimeHours = 0, weekendHours = 0, overnightHours = 0, dayTotal = 0;
+                    let amendmentStatus = '';
+                    
+                    if (entry) {
+                        if (entry.clock_in_time) {
+                            clockInTime = formatDate(new Date(entry.clock_in_time));
+                        }
+                        if (entry.clock_out_time) {
+                            clockOutTime = formatDate(new Date(entry.clock_out_time));
+                        }
+                        regularHours = entry.regular_hours || 0;
+                        overtimeHours = entry.overtime_hours || 0;
+                        weekendHours = entry.weekend_hours || 0;
+                        overnightHours = entry.overnight_hours || 0;
+                        dayTotal = entry.total_hours || 0;
+                        
+                        totalRegular += regularHours;
+                        totalOvertime += overtimeHours;
+                        totalWeekend += weekendHours;
+                        totalOvernight += overnightHours;
+                        totalHours += dayTotal;
+                    }
+                    
+                    const hasHours = dayTotal > 0;
+                    const hasEntry = entry !== null;
+                    
+                    html += `
+                        <div class="day-entry ${hasHours ? 'has-hours' : ''}">
+                            <div class="day-header">
+                                <div>
+                                    <span class="day-name">${dayName}</span>
+                                    <span class="day-date">${formatDate(date)}</span>
+                                </div>
+                                ${hasEntry && entry.timesheet_entry_id ? `
+                                    <button class="edit-times-btn" onclick="showAmendmentModal(${entry.timesheet_entry_id}, '${entry.clock_in_time || ''}', '${entry.clock_out_time || ''}')">
+                                        Edit Times
+                                    </button>
+                                ` : ''}
+                            </div>
+                            ${hasHours ? `
+                                <div class="day-hours">
+                                    ${regularHours > 0 ? `
+                                        <div class="hour-item regular">
+                                            <div class="hour-label">Regular</div>
+                                            <div class="hour-value">${regularHours.toFixed(2)}h</div>
+                                        </div>
+                                    ` : ''}
+                                    ${overtimeHours > 0 ? `
+                                        <div class="hour-item overtime">
+                                            <div class="hour-label">Overtime (1.25x)</div>
+                                            <div class="hour-value">${overtimeHours.toFixed(2)}h</div>
+                                        </div>
+                                    ` : ''}
+                                    ${weekendHours > 0 ? `
+                                        <div class="hour-item weekend">
+                                            <div class="hour-label">Weekend (1.5x)</div>
+                                            <div class="hour-value">${weekendHours.toFixed(2)}h</div>
+                                        </div>
+                                    ` : ''}
+                                    ${overnightHours > 0 ? `
+                                        <div class="hour-item overnight">
+                                            <div class="hour-label">Overnight (1.25x)</div>
+                                            <div class="hour-value">${overnightHours.toFixed(2)}h</div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                ${clockInTime ? `<div style="font-size: 12px; color: #666; margin-top: 5px;">In: ${clockInTime}${clockOutTime ? ` | Out: ${clockOutTime}` : ''}</div>` : ''}
+                            ` : ''}
+                            ${isCurrentWeek ? `
+                                <div class="day-notes">
+                                    <textarea 
+                                        id="notes-${dateStr}" 
+                                        placeholder="What did you do today?"
+                                        onblur="saveDailyNotes('${dateStr}', this.value)"
+                                    >${entry ? (entry.daily_notes || '') : ''}</textarea>
+                                </div>
+                                <div class="overnight-checkbox">
+                                    <input 
+                                        type="checkbox" 
+                                        id="overnight-${dateStr}" 
+                                        ${entry && entry.overnight_away ? 'checked' : ''}
+                                        onchange="saveOvernightAway('${dateStr}', this.checked)"
+                                    >
+                                    <label for="overnight-${dateStr}">Overnight away from home</label>
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+                
+                // Add weekly summary
+                html += `
+                    <div class="weekly-summary">
+                        <div class="summary-row">
+                            <span>Regular Hours:</span>
+                            <span>${totalRegular.toFixed(2)}h</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Overtime Hours (1.25x):</span>
+                            <span>${totalOvertime.toFixed(2)}h</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Weekend Hours (1.5x):</span>
+                            <span>${totalWeekend.toFixed(2)}h</span>
+                        </div>
+                        <div class="summary-row">
+                            <span>Overnight Hours (1.25x):</span>
+                            <span>${totalOvernight.toFixed(2)}h</span>
+                        </div>
+                        <div class="summary-row summary-total">
+                            <span>Total Hours:</span>
+                            <span>${totalHours.toFixed(2)}h</span>
+                        </div>
+                    </div>
+                `;
+                
+                content.innerHTML = html;
+            } catch (error) {
+                document.getElementById('weeklyTimesheetContent').innerHTML = 
+                    '<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet</p>';
+            }
+        }
+        
+        function previousWeek() {
+            if (!currentWeekStart) return;
+            const date = new Date(currentWeekStart);
+            date.setDate(date.getDate() - 7);
+            loadWeeklyTimesheet(date.toISOString().split('T')[0]);
+        }
+        
+        function nextWeek() {
+            if (!currentWeekStart) return;
+            const date = new Date(currentWeekStart);
+            date.setDate(date.getDate() + 7);
+            loadWeeklyTimesheet(date.toISOString().split('T')[0]);
+        }
+        
+        async function saveDailyNotes(date, notes) {
+            if (!currentWeekStart) return;
+            try {
+                await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ daily_notes: notes })
+                });
+            } catch (error) {
+                showAlert('Failed to save notes', 'error');
+            }
+        }
+        
+        async function saveOvernightAway(date, overnightAway) {
+            if (!currentWeekStart) return;
+            try {
+                await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ overnight_away: overnightAway })
+                });
+                // Reload to update hours
+                await loadWeeklyTimesheet(currentWeekStart);
+            } catch (error) {
+                showAlert('Failed to save overnight away status', 'error');
+            }
+        }
+        
+        // Time amendment functions
+        function showAmendmentModal(entryId, clockInTime, clockOutTime) {
+            document.getElementById('amendmentEntryId').value = entryId;
+            document.getElementById('originalClockIn').textContent = clockInTime ? formatDate(new Date(clockInTime)) : 'Not set';
+            document.getElementById('originalClockOut').textContent = clockOutTime ? formatDate(new Date(clockOutTime)) : 'Not set';
+            
+            // Set default values to current times
+            if (clockInTime) {
+                const clockIn = new Date(clockInTime);
+                const localDateTime = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                document.getElementById('amendedClockIn').value = localDateTime;
+            }
+            if (clockOutTime) {
+                const clockOut = new Date(clockOutTime);
+                const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                document.getElementById('amendedClockOut').value = localDateTime;
+            }
+            
+            document.getElementById('amendmentModal').style.display = 'block';
+        }
+        
+        function closeAmendmentModal() {
+            document.getElementById('amendmentModal').style.display = 'none';
+            document.getElementById('amendmentForm').reset();
+        }
+        
+        document.getElementById('amendmentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const entryId = parseInt(document.getElementById('amendmentEntryId').value);
+            const amendedClockIn = document.getElementById('amendedClockIn').value;
+            const amendedClockOut = document.getElementById('amendedClockOut').value;
+            const reason = document.getElementById('amendmentReason').value;
+            
+            // Convert local datetime to ISO string
+            const clockInISO = new Date(amendedClockIn).toISOString();
+            const clockOutISO = new Date(amendedClockOut).toISOString();
+            
+            try {
+                await apiCall('/clock/amendments', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        entry_id: entryId,
+                        amended_clock_in_time: clockInISO,
+                        amended_clock_out_time: clockOutISO,
+                        reason: reason
+                    })
+                });
+                showAlert('Amendment request submitted. Waiting for approval.');
+                closeAmendmentModal();
+                await loadWeeklyTimesheet(currentWeekStart);
+            } catch (error) {
+                showAlert(error.message || 'Failed to submit amendment request', 'error');
+            }
+        });
+        
     </script>
 </body>
 </html>

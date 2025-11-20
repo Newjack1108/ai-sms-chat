@@ -928,6 +928,284 @@ router.delete('/timesheet/notices/:id', requireProductionAuth, requireManager, a
     }
 });
 
+// ============ CLOCK ON/OFF ROUTES (Weekly Timesheet System) ============
+
+// Clock in/out (aliases for backward compatibility, also available as /clock/clock-in and /clock/clock-out)
+router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { job_id, latitude, longitude } = req.body;
+        
+        if (!job_id) {
+            return res.status(400).json({ success: false, error: 'Job/site is required' });
+        }
+        
+        const entry = await ProductionDatabase.clockIn(userId, job_id, latitude, longitude);
+        res.json({ success: true, entry });
+    } catch (error) {
+        console.error('Clock in error:', error);
+        res.status(500).json({ success: false, error: 'Failed to clock in' });
+    }
+});
+
+router.post('/clock/clock-out', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { latitude, longitude } = req.body;
+        
+        const entry = await ProductionDatabase.clockOut(userId, latitude, longitude);
+        if (!entry) {
+            return res.status(400).json({ success: false, error: 'No active clock-in found' });
+        }
+        res.json({ success: true, entry });
+    } catch (error) {
+        console.error('Clock out error:', error);
+        res.status(500).json({ success: false, error: 'Failed to clock out' });
+    }
+});
+
+router.get('/clock/status', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const status = await ProductionDatabase.getCurrentClockStatus(userId);
+        res.json({ success: true, status });
+    } catch (error) {
+        console.error('Get clock status error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get clock status' });
+    }
+});
+
+// Weekly timesheet routes
+router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+        const monday = new Date(today.setDate(diff));
+        monday.setHours(0, 0, 0, 0);
+        const weekStartDate = monday.toISOString().split('T')[0];
+        
+        const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
+        if (!weeklyTimesheet) {
+            // Create if doesn't exist
+            const created = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(created.id);
+            return res.json({ success: true, weeklyTimesheet: created, dailyEntries });
+        }
+        
+        const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
+        res.json({ success: true, weeklyTimesheet, dailyEntries });
+    } catch (error) {
+        console.error('Get current weekly timesheet error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get weekly timesheet' });
+    }
+});
+
+router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const weekStartDate = req.params.weekStart;
+        
+        const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
+        if (!weeklyTimesheet) {
+            const created = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(created.id);
+            return res.json({ success: true, weeklyTimesheet: created, dailyEntries });
+        }
+        
+        const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
+        res.json({ success: true, weeklyTimesheet, dailyEntries });
+    } catch (error) {
+        console.error('Get weekly timesheet error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get weekly timesheet' });
+    }
+});
+
+router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const weekStartDate = req.params.weekStart;
+        const entryDate = req.params.date;
+        const { daily_notes, overnight_away } = req.body;
+        
+        const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+        const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate);
+        
+        const updateData = {};
+        if (daily_notes !== undefined) updateData.daily_notes = daily_notes;
+        if (overnight_away !== undefined) updateData.overnight_away = overnight_away;
+        
+        const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
+        
+        // If overnight_away changed and there's a timesheet entry, recalculate hours
+        if (overnight_away !== undefined && dailyEntry.timesheet_entry_id) {
+            await ProductionDatabase.calculateTimesheetHours(dailyEntry.timesheet_entry_id, overnight_away);
+            // Update daily entry with new calculated hours
+            const entry = await ProductionDatabase.getTimesheetEntryById(dailyEntry.timesheet_entry_id);
+            if (entry) {
+                await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
+                    regular_hours: entry.regular_hours,
+                    overtime_hours: entry.overtime_hours,
+                    weekend_hours: entry.weekend_hours,
+                    overnight_hours: entry.overnight_hours,
+                    total_hours: entry.total_hours
+                });
+            }
+        }
+        
+        res.json({ success: true, dailyEntry: updated });
+    } catch (error) {
+        console.error('Update daily entry error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update daily entry' });
+    }
+});
+
+// Time amendment routes
+router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { entry_id, amended_clock_in_time, amended_clock_out_time, reason } = req.body;
+        
+        if (!entry_id || !amended_clock_in_time || !reason) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        const amendment = await ProductionDatabase.requestTimeAmendment(
+            entry_id,
+            userId,
+            amended_clock_in_time,
+            amended_clock_out_time,
+            reason
+        );
+        
+        res.json({ success: true, amendment });
+    } catch (error) {
+        console.error('Request amendment error:', error);
+        res.status(500).json({ success: false, error: 'Failed to request amendment' });
+    }
+});
+
+router.get('/clock/amendments/pending', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const amendments = await ProductionDatabase.getPendingAmendments();
+        res.json({ success: true, amendments });
+    } catch (error) {
+        console.error('Get pending amendments error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get pending amendments' });
+    }
+});
+
+router.get('/clock/amendments/my', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const amendments = await ProductionDatabase.getUserAmendments(userId);
+        res.json({ success: true, amendments });
+    } catch (error) {
+        console.error('Get user amendments error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get amendments' });
+    }
+});
+
+router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const amendmentId = parseInt(req.params.id);
+        const reviewerId = req.session.production_user.id;
+        const { status, review_notes } = req.body;
+        
+        if (!['approved', 'rejected'].includes(status)) {
+            return res.status(400).json({ success: false, error: 'Invalid status' });
+        }
+        
+        const amendment = await ProductionDatabase.reviewAmendment(amendmentId, reviewerId, status, review_notes);
+        
+        // If approved, apply the amendment
+        if (status === 'approved') {
+            await ProductionDatabase.applyAmendment(amendmentId);
+        }
+        
+        res.json({ success: true, amendment });
+    } catch (error) {
+        console.error('Review amendment error:', error);
+        res.status(500).json({ success: false, error: 'Failed to review amendment' });
+    }
+});
+
+// Payroll routes
+router.get('/clock/payroll/:weekStart', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const weekStartDate = req.params.weekStart;
+        const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
+        res.json({ success: true, summary });
+    } catch (error) {
+        console.error('Get payroll summary error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get payroll summary' });
+    }
+});
+
+router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const weekStartDate = req.params.weekStart;
+        const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
+        
+        // Generate CSV
+        const csvRows = [];
+        csvRows.push('Staff Name,Week Start,Regular Hours,Overtime Hours (1.25x),Weekend Hours (1.5x),Overnight Hours (1.25x),Total Hours,Days Worked');
+        
+        summary.forEach(row => {
+            csvRows.push([
+                row.username || '',
+                row.week_start_date || '',
+                row.total_regular_hours || 0,
+                row.total_overtime_hours || 0,
+                row.total_weekend_hours || 0,
+                row.total_overnight_hours || 0,
+                row.total_hours || 0,
+                row.days_worked || 0
+            ].join(','));
+        });
+        
+        const csv = csvRows.join('\n');
+        
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="payroll-${weekStartDate}.csv"`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export payroll error:', error);
+        res.status(500).json({ success: false, error: 'Failed to export payroll' });
+    }
+});
+
+// Admin routes for viewing all staff timesheets
+router.get('/clock/weekly/all/:weekStart', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const weekStartDate = req.params.weekStart;
+        const payroll = await ProductionDatabase.getPayrollSummary(weekStartDate);
+        res.json({ success: true, payroll });
+    } catch (error) {
+        console.error('Get all weekly timesheets error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get weekly timesheets' });
+    }
+});
+
+router.get('/clock/weekly/user/:userId/:weekStart', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const weekStartDate = req.params.weekStart;
+        
+        const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
+        if (!weeklyTimesheet) {
+            return res.json({ success: true, weeklyTimesheet: null, dailyEntries: [] });
+        }
+        
+        const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
+        res.json({ success: true, weeklyTimesheet, dailyEntries });
+    } catch (error) {
+        console.error('Get user weekly timesheet error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get weekly timesheet' });
+    }
+});
+
 // ============ STOCK CHECK REMINDERS ROUTES ============
 
 router.get('/reminders', requireProductionAuth, async (req, res) => {

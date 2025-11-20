@@ -403,6 +403,109 @@ function initializeSQLite() {
         console.log('⚠️ Role constraint migration check skipped:', error.message);
     }
     
+    // Migrate timesheet_entries to add hour calculation columns
+    try {
+        const columns = db.prepare("PRAGMA table_info(timesheet_entries)").all();
+        const columnNames = columns.map(col => col.name);
+        
+        if (!columnNames.includes('regular_hours')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN regular_hours REAL DEFAULT 0');
+            console.log('✅ Added regular_hours column to timesheet_entries');
+        }
+        if (!columnNames.includes('overtime_hours')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN overtime_hours REAL DEFAULT 0');
+            console.log('✅ Added overtime_hours column to timesheet_entries');
+        }
+        if (!columnNames.includes('weekend_hours')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN weekend_hours REAL DEFAULT 0');
+            console.log('✅ Added weekend_hours column to timesheet_entries');
+        }
+        if (!columnNames.includes('overnight_hours')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN overnight_hours REAL DEFAULT 0');
+            console.log('✅ Added overnight_hours column to timesheet_entries');
+        }
+        if (!columnNames.includes('total_hours')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN total_hours REAL DEFAULT 0');
+            console.log('✅ Added total_hours column to timesheet_entries');
+        }
+        if (!columnNames.includes('calculated_at')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN calculated_at TEXT');
+            console.log('✅ Added calculated_at column to timesheet_entries');
+        }
+    } catch (error) {
+        console.log('⚠️ Timesheet entries migration check skipped:', error.message);
+    }
+    
+    // Create weekly_timesheets table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS weekly_timesheets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            week_start_date TEXT NOT NULL,
+            week_end_date TEXT NOT NULL,
+            status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'submitted', 'approved')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            UNIQUE(user_id, week_start_date)
+        )
+    `);
+    
+    // Create timesheet_daily_entries table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS timesheet_daily_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            weekly_timesheet_id INTEGER NOT NULL,
+            entry_date TEXT NOT NULL,
+            timesheet_entry_id INTEGER,
+            daily_notes TEXT,
+            overnight_away INTEGER DEFAULT 0,
+            regular_hours REAL DEFAULT 0,
+            overtime_hours REAL DEFAULT 0,
+            weekend_hours REAL DEFAULT 0,
+            overnight_hours REAL DEFAULT 0,
+            total_hours REAL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (weekly_timesheet_id) REFERENCES weekly_timesheets(id),
+            FOREIGN KEY (timesheet_entry_id) REFERENCES timesheet_entries(id),
+            UNIQUE(weekly_timesheet_id, entry_date)
+        )
+    `);
+    
+    // Create timesheet_amendments table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS timesheet_amendments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timesheet_entry_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            original_clock_in_time TEXT NOT NULL,
+            original_clock_out_time TEXT,
+            amended_clock_in_time TEXT NOT NULL,
+            amended_clock_out_time TEXT,
+            reason TEXT NOT NULL,
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+            reviewed_by INTEGER,
+            reviewed_at TEXT,
+            review_notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (timesheet_entry_id) REFERENCES timesheet_entries(id),
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            FOREIGN KEY (reviewed_by) REFERENCES production_users(id)
+        )
+    `);
+    
+    // Create indexes for new tables
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_user ON weekly_timesheets(user_id);
+        CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_week ON weekly_timesheets(week_start_date);
+        CREATE INDEX IF NOT EXISTS idx_daily_entries_weekly ON timesheet_daily_entries(weekly_timesheet_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_entries_date ON timesheet_daily_entries(entry_date);
+        CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id);
+        CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id);
+        CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status);
+    `);
+    
     console.log('✅ Production SQLite database initialized');
 }
 
@@ -761,6 +864,116 @@ async function initializePostgreSQL() {
         if (parseInt(settingCheck.rows[0].count) === 0) {
             await pool.query(`INSERT INTO production_settings (key, value) VALUES ('labour_rate_per_hour', '25.00')`);
         }
+        
+        // Migrate timesheet_entries to add hour calculation columns
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='regular_hours'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN regular_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='overtime_hours'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN overtime_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='weekend_hours'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN weekend_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='overnight_hours'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN overnight_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='total_hours'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN total_hours DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='calculated_at'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN calculated_at TIMESTAMP;
+                END IF;
+            END $$;
+        `);
+        
+        // Create weekly_timesheets table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS weekly_timesheets (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                week_start_date DATE NOT NULL,
+                week_end_date DATE NOT NULL,
+                status VARCHAR(20) DEFAULT 'draft' CHECK(status IN ('draft', 'submitted', 'approved')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, week_start_date)
+            )
+        `);
+        
+        // Create timesheet_daily_entries table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS timesheet_daily_entries (
+                id SERIAL PRIMARY KEY,
+                weekly_timesheet_id INTEGER NOT NULL REFERENCES weekly_timesheets(id),
+                entry_date DATE NOT NULL,
+                timesheet_entry_id INTEGER REFERENCES timesheet_entries(id),
+                daily_notes TEXT,
+                overnight_away BOOLEAN DEFAULT FALSE,
+                regular_hours DECIMAL(10,2) DEFAULT 0,
+                overtime_hours DECIMAL(10,2) DEFAULT 0,
+                weekend_hours DECIMAL(10,2) DEFAULT 0,
+                overnight_hours DECIMAL(10,2) DEFAULT 0,
+                total_hours DECIMAL(10,2) DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(weekly_timesheet_id, entry_date)
+            )
+        `);
+        
+        // Create timesheet_amendments table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS timesheet_amendments (
+                id SERIAL PRIMARY KEY,
+                timesheet_entry_id INTEGER NOT NULL REFERENCES timesheet_entries(id),
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                original_clock_in_time TIMESTAMP NOT NULL,
+                original_clock_out_time TIMESTAMP,
+                amended_clock_in_time TIMESTAMP NOT NULL,
+                amended_clock_out_time TIMESTAMP,
+                reason TEXT NOT NULL,
+                status VARCHAR(20) DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+                reviewed_by INTEGER REFERENCES production_users(id),
+                reviewed_at TIMESTAMP,
+                review_notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Create indexes for new tables
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_user ON weekly_timesheets(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_week ON weekly_timesheets(week_start_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_entries_weekly ON timesheet_daily_entries(weekly_timesheet_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_entries_date ON timesheet_daily_entries(entry_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status)`);
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -2086,6 +2299,8 @@ class ProductionDatabase {
     
     static async clockOut(userId, latitude, longitude) {
         const clockOutTime = new Date().toISOString();
+        let updatedEntry;
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `UPDATE timesheet_entries 
@@ -2094,7 +2309,7 @@ class ProductionDatabase {
                  RETURNING *`,
                 [clockOutTime, latitude, longitude, userId]
             );
-            return result.rows[0] || null;
+            updatedEntry = result.rows[0] || null;
         } else {
             // Get the entry before updating
             const currentEntry = this.getCurrentClockStatus(userId);
@@ -2107,8 +2322,58 @@ class ProductionDatabase {
                  WHERE user_id = ? AND clock_out_time IS NULL`
             ).run(clockOutTime, latitude, longitude, clockOutTime, userId);
             // Return the updated entry
-            return this.getTimesheetEntryById(currentEntry.id);
+            updatedEntry = this.getTimesheetEntryById(currentEntry.id);
         }
+        
+        if (!updatedEntry) {
+            return null;
+        }
+        
+        // Calculate hours and create/update daily entry
+        try {
+            // Get clock-in date to determine which week
+            const clockInDate = new Date(updatedEntry.clock_in_time);
+            const clockInDateStr = clockInDate.toISOString().split('T')[0];
+            
+            // Find Monday of that week
+            const dayOfWeek = clockInDate.getDay();
+            const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust when day is Sunday
+            const monday = new Date(clockInDate);
+            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+            monday.setHours(0, 0, 0, 0);
+            const weekStartDate = monday.toISOString().split('T')[0];
+            
+            // Get or create weekly timesheet
+            const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            
+            // Get or create daily entry
+            const dailyEntry = await this.getOrCreateDailyEntry(
+                weeklyTimesheet.id,
+                clockInDateStr,
+                updatedEntry.id
+            );
+            
+            // Check if overnight away for this day
+            const overnightAway = dailyEntry.overnight_away || false;
+            
+            // Calculate hours
+            const calculatedHours = await this.calculateTimesheetHours(updatedEntry.id, overnightAway);
+            
+            // Update daily entry with calculated hours
+            await this.updateDailyEntry(dailyEntry.id, {
+                timesheet_entry_id: updatedEntry.id,
+                regular_hours: calculatedHours.regular_hours,
+                overtime_hours: calculatedHours.overtime_hours,
+                weekend_hours: calculatedHours.weekend_hours,
+                overnight_hours: calculatedHours.overnight_hours,
+                total_hours: calculatedHours.total_hours
+            });
+        } catch (error) {
+            console.error('Error calculating hours or updating daily entry:', error);
+            // Don't fail clock out if calculation fails
+        }
+        
+        return updatedEntry;
     }
     
     static async getTimesheetEntryById(id) {
@@ -2329,6 +2594,544 @@ class ProductionDatabase {
             const notice = this.getTimesheetNoticeById(id);
             db.prepare(`DELETE FROM timesheet_notices WHERE id = ?`).run(id);
             return notice;
+        }
+    }
+    
+    // ============ HOUR CALCULATION AND WEEKLY TIMESHEETS ============
+    
+    // Calculate hours for a timesheet entry
+    static async calculateTimesheetHours(entryId, overnightAway = false) {
+        const entry = await this.getTimesheetEntryById(entryId);
+        if (!entry || !entry.clock_out_time) {
+            return null;
+        }
+        
+        const clockIn = new Date(entry.clock_in_time);
+        const clockOut = new Date(entry.clock_out_time);
+        const totalHours = (clockOut - clockIn) / (1000 * 60 * 60); // Convert to hours
+        
+        const clockInDate = new Date(clockIn);
+        const dayOfWeek = clockInDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
+        
+        let regularHours = 0;
+        let overtimeHours = 0;
+        let weekendHours = 0;
+        let overnightHours = 0;
+        let calculatedTotal = 0;
+        
+        if (overnightAway) {
+            // All hours are overnight (1.25x)
+            overnightHours = totalHours;
+            calculatedTotal = totalHours;
+        } else if (isWeekend) {
+            // All hours are weekend (1.5x)
+            weekendHours = totalHours;
+            calculatedTotal = totalHours;
+        } else {
+            // Monday-Friday: subtract 1 hour break, then calculate
+            const netHours = Math.max(0, totalHours - 1);
+            if (netHours <= 8) {
+                regularHours = netHours;
+            } else {
+                regularHours = 8;
+                overtimeHours = netHours - 8;
+            }
+            calculatedTotal = netHours;
+        }
+        
+        const calculatedAt = new Date().toISOString();
+        
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE timesheet_entries 
+                 SET regular_hours = $1, overtime_hours = $2, weekend_hours = $3, 
+                     overnight_hours = $4, total_hours = $5, calculated_at = $6
+                 WHERE id = $7`,
+                [regularHours, overtimeHours, weekendHours, overnightHours, calculatedTotal, calculatedAt, entryId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE timesheet_entries 
+                 SET regular_hours = ?, overtime_hours = ?, weekend_hours = ?, 
+                     overnight_hours = ?, total_hours = ?, calculated_at = ?
+                 WHERE id = ?`
+            ).run(regularHours, overtimeHours, weekendHours, overnightHours, calculatedTotal, calculatedAt, entryId);
+        }
+        
+        return {
+            regular_hours: regularHours,
+            overtime_hours: overtimeHours,
+            weekend_hours: weekendHours,
+            overnight_hours: overnightHours,
+            total_hours: calculatedTotal
+        };
+    }
+    
+    // Weekly timesheet operations
+    static async getOrCreateWeeklyTimesheet(userId, weekStartDate) {
+        // weekStartDate should be a Monday date in YYYY-MM-DD format
+        const weekStart = new Date(weekStartDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
+        
+        const weekStartStr = weekStart.toISOString().split('T')[0];
+        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        
+        if (isPostgreSQL) {
+            // Try to get existing
+            let result = await pool.query(
+                `SELECT * FROM weekly_timesheets 
+                 WHERE user_id = $1 AND week_start_date = $2`,
+                [userId, weekStartStr]
+            );
+            
+            if (result.rows.length > 0) {
+                return result.rows[0];
+            }
+            
+            // Create new
+            result = await pool.query(
+                `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
+                 VALUES ($1, $2, $3) RETURNING *`,
+                [userId, weekStartStr, weekEndStr]
+            );
+            return result.rows[0];
+        } else {
+            let existing = db.prepare(
+                `SELECT * FROM weekly_timesheets 
+                 WHERE user_id = ? AND week_start_date = ?`
+            ).get(userId, weekStartStr);
+            
+            if (existing) {
+                return existing;
+            }
+            
+            const stmt = db.prepare(
+                `INSERT INTO weekly_timesheets (user_id, week_start_date, week_end_date)
+                 VALUES (?, ?, ?)`
+            );
+            const info = stmt.run(userId, weekStartStr, weekEndStr);
+            return db.prepare(`SELECT * FROM weekly_timesheets WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+    
+    static async getWeeklyTimesheet(userId, weekStartDate) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT wt.*, u.username,
+                 (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
+                 FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.user_id = $1 AND wt.week_start_date = $2`,
+                [userId, weekStartDate]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT wt.*, u.username,
+                 (SELECT COUNT(*) FROM timesheet_daily_entries WHERE weekly_timesheet_id = wt.id) as day_count
+                 FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.user_id = ? AND wt.week_start_date = ?`
+            ).get(userId, weekStartDate) || null;
+        }
+    }
+    
+    static async updateWeeklyTimesheet(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.status !== undefined) {
+            updates.push(isPostgreSQL ? `status = $${paramIndex}` : `status = ?`);
+            values.push(data.status);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getWeeklyTimesheetById(id);
+        }
+        
+        if (isPostgreSQL) {
+            values.push(id);
+            const result = await pool.query(
+                `UPDATE weekly_timesheets SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramIndex} RETURNING *`,
+                values
+            );
+            return result.rows[0];
+        } else {
+            values.push(id);
+            const setClause = updates.map((update, idx) => {
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE weekly_timesheets SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values);
+            return this.getWeeklyTimesheetById(id);
+        }
+    }
+    
+    static async getWeeklyTimesheetById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT wt.*, u.username FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.id = $1`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT wt.*, u.username FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.id = ?`
+            ).get(id) || null;
+        }
+    }
+    
+    // Daily entry operations
+    static async getOrCreateDailyEntry(weeklyTimesheetId, entryDate, timesheetEntryId = null) {
+        if (isPostgreSQL) {
+            let result = await pool.query(
+                `SELECT * FROM timesheet_daily_entries 
+                 WHERE weekly_timesheet_id = $1 AND entry_date = $2`,
+                [weeklyTimesheetId, entryDate]
+            );
+            
+            if (result.rows.length > 0) {
+                return result.rows[0];
+            }
+            
+            result = await pool.query(
+                `INSERT INTO timesheet_daily_entries (weekly_timesheet_id, entry_date, timesheet_entry_id)
+                 VALUES ($1, $2, $3) RETURNING *`,
+                [weeklyTimesheetId, entryDate, timesheetEntryId]
+            );
+            return result.rows[0];
+        } else {
+            let existing = db.prepare(
+                `SELECT * FROM timesheet_daily_entries 
+                 WHERE weekly_timesheet_id = ? AND entry_date = ?`
+            ).get(weeklyTimesheetId, entryDate);
+            
+            if (existing) {
+                return existing;
+            }
+            
+            const stmt = db.prepare(
+                `INSERT INTO timesheet_daily_entries (weekly_timesheet_id, entry_date, timesheet_entry_id)
+                 VALUES (?, ?, ?)`
+            );
+            const info = stmt.run(weeklyTimesheetId, entryDate, timesheetEntryId);
+            return db.prepare(`SELECT * FROM timesheet_daily_entries WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+    
+    static async updateDailyEntry(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.daily_notes !== undefined) {
+            updates.push(isPostgreSQL ? `daily_notes = $${paramIndex}` : `daily_notes = ?`);
+            values.push(data.daily_notes);
+            paramIndex++;
+        }
+        if (data.overnight_away !== undefined) {
+            updates.push(isPostgreSQL ? `overnight_away = $${paramIndex}` : `overnight_away = ?`);
+            values.push(data.overnight_away ? (isPostgreSQL ? true : 1) : (isPostgreSQL ? false : 0));
+            paramIndex++;
+        }
+        if (data.regular_hours !== undefined) {
+            updates.push(isPostgreSQL ? `regular_hours = $${paramIndex}` : `regular_hours = ?`);
+            values.push(data.regular_hours);
+            paramIndex++;
+        }
+        if (data.overtime_hours !== undefined) {
+            updates.push(isPostgreSQL ? `overtime_hours = $${paramIndex}` : `overtime_hours = ?`);
+            values.push(data.overtime_hours);
+            paramIndex++;
+        }
+        if (data.weekend_hours !== undefined) {
+            updates.push(isPostgreSQL ? `weekend_hours = $${paramIndex}` : `weekend_hours = ?`);
+            values.push(data.weekend_hours);
+            paramIndex++;
+        }
+        if (data.overnight_hours !== undefined) {
+            updates.push(isPostgreSQL ? `overnight_hours = $${paramIndex}` : `overnight_hours = ?`);
+            values.push(data.overnight_hours);
+            paramIndex++;
+        }
+        if (data.total_hours !== undefined) {
+            updates.push(isPostgreSQL ? `total_hours = $${paramIndex}` : `total_hours = ?`);
+            values.push(data.total_hours);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getDailyEntryById(id);
+        }
+        
+        if (isPostgreSQL) {
+            values.push(id);
+            const result = await pool.query(
+                `UPDATE timesheet_daily_entries SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${paramIndex} RETURNING *`,
+                values
+            );
+            return result.rows[0];
+        } else {
+            values.push(id);
+            const setClause = updates.map((update, idx) => {
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE timesheet_daily_entries SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values);
+            return this.getDailyEntryById(id);
+        }
+    }
+    
+    static async getDailyEntryById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM timesheet_daily_entries WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM timesheet_daily_entries WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getDailyEntriesForWeek(weeklyTimesheetId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                 FROM timesheet_daily_entries tde
+                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                 WHERE tde.weekly_timesheet_id = $1
+                 ORDER BY tde.entry_date`,
+                [weeklyTimesheetId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                 FROM timesheet_daily_entries tde
+                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                 WHERE tde.weekly_timesheet_id = ?
+                 ORDER BY tde.entry_date`
+            ).all(weeklyTimesheetId);
+        }
+    }
+    
+    static async getDailyEntryByDate(weeklyTimesheetId, date) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                 FROM timesheet_daily_entries tde
+                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                 WHERE tde.weekly_timesheet_id = $1 AND tde.entry_date = $2`,
+                [weeklyTimesheetId, date]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT tde.*, te.clock_in_time, te.clock_out_time
+                 FROM timesheet_daily_entries tde
+                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
+                 WHERE tde.weekly_timesheet_id = ? AND tde.entry_date = ?`
+            ).get(weeklyTimesheetId, date) || null;
+        }
+    }
+    
+    // Amendment operations
+    static async requestTimeAmendment(entryId, userId, amendedClockIn, amendedClockOut, reason) {
+        const entry = await this.getTimesheetEntryById(entryId);
+        if (!entry) {
+            throw new Error('Timesheet entry not found');
+        }
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                [entryId, userId, entry.clock_in_time, entry.clock_out_time, 
+                 amendedClockIn, amendedClockOut, reason]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(entryId, userId, entry.clock_in_time, entry.clock_out_time,
+                                 amendedClockIn, amendedClockOut, reason);
+            return db.prepare(`SELECT * FROM timesheet_amendments WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+    
+    static async getPendingAmendments() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT ta.*, u.username, te.clock_in_time as current_clock_in, te.clock_out_time as current_clock_out
+                 FROM timesheet_amendments ta
+                 LEFT JOIN production_users u ON ta.user_id = u.id
+                 LEFT JOIN timesheet_entries te ON ta.timesheet_entry_id = te.id
+                 WHERE ta.status = 'pending'
+                 ORDER BY ta.created_at DESC`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT ta.*, u.username, te.clock_in_time as current_clock_in, te.clock_out_time as current_clock_out
+                 FROM timesheet_amendments ta
+                 LEFT JOIN production_users u ON ta.user_id = u.id
+                 LEFT JOIN timesheet_entries te ON ta.timesheet_entry_id = te.id
+                 WHERE ta.status = 'pending'
+                 ORDER BY ta.created_at DESC`
+            ).all();
+        }
+    }
+    
+    static async getUserAmendments(userId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT ta.*, te.clock_in_time as current_clock_in, te.clock_out_time as current_clock_out
+                 FROM timesheet_amendments ta
+                 LEFT JOIN timesheet_entries te ON ta.timesheet_entry_id = te.id
+                 WHERE ta.user_id = $1
+                 ORDER BY ta.created_at DESC`,
+                [userId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT ta.*, te.clock_in_time as current_clock_in, te.clock_out_time as current_clock_out
+                 FROM timesheet_amendments ta
+                 LEFT JOIN timesheet_entries te ON ta.timesheet_entry_id = te.id
+                 WHERE ta.user_id = ?
+                 ORDER BY ta.created_at DESC`
+            ).all(userId);
+        }
+    }
+    
+    static async reviewAmendment(amendmentId, reviewerId, status, reviewNotes) {
+        const reviewedAt = new Date().toISOString();
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE timesheet_amendments 
+                 SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4
+                 WHERE id = $5 RETURNING *`,
+                [status, reviewerId, reviewedAt, reviewNotes, amendmentId]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(
+                `UPDATE timesheet_amendments 
+                 SET status = ?, reviewed_by = ?, reviewed_at = ?, review_notes = ?
+                 WHERE id = ?`
+            ).run(status, reviewerId, reviewedAt, reviewNotes, amendmentId);
+            return db.prepare(`SELECT * FROM timesheet_amendments WHERE id = ?`).get(amendmentId);
+        }
+    }
+    
+    static async applyAmendment(amendmentId) {
+        const amendment = await this.getAmendmentById(amendmentId);
+        if (!amendment || amendment.status !== 'approved') {
+            throw new Error('Amendment not found or not approved');
+        }
+        
+        // Update the timesheet entry
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE timesheet_entries 
+                 SET clock_in_time = $1, clock_out_time = $2, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $3`,
+                [amendment.amended_clock_in_time, amendment.amended_clock_out_time, amendment.timesheet_entry_id]
+            );
+        } else {
+            db.prepare(
+                `UPDATE timesheet_entries 
+                 SET clock_in_time = ?, clock_out_time = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`
+            ).run(amendment.amended_clock_in_time, amendment.amended_clock_out_time, amendment.timesheet_entry_id);
+        }
+        
+        // Recalculate hours
+        const dailyEntry = await this.getDailyEntryByTimesheetEntryId(amendment.timesheet_entry_id);
+        if (dailyEntry) {
+            const overnightAway = dailyEntry.overnight_away;
+            await this.calculateTimesheetHours(amendment.timesheet_entry_id, overnightAway);
+        }
+        
+        return amendment;
+    }
+    
+    static async getAmendmentById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM timesheet_amendments WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM timesheet_amendments WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getDailyEntryByTimesheetEntryId(timesheetEntryId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM timesheet_daily_entries WHERE timesheet_entry_id = $1`,
+                [timesheetEntryId]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM timesheet_daily_entries WHERE timesheet_entry_id = ?`).get(timesheetEntryId) || null;
+        }
+    }
+    
+    // Payroll operations
+    static async getPayrollSummary(weekStartDate) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT 
+                    u.id as user_id,
+                    u.username,
+                    wt.week_start_date,
+                    COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
+                    COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
+                    COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
+                    COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
+                    COALESCE(SUM(tde.total_hours), 0) as total_hours,
+                    COUNT(DISTINCT tde.id) as days_worked
+                 FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 LEFT JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
+                 WHERE wt.week_start_date = $1
+                 GROUP BY u.id, u.username, wt.week_start_date
+                 ORDER BY u.username`,
+                [weekStartDate]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT 
+                    u.id as user_id,
+                    u.username,
+                    wt.week_start_date,
+                    COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
+                    COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
+                    COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
+                    COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
+                    COALESCE(SUM(tde.total_hours), 0) as total_hours,
+                    COUNT(DISTINCT tde.id) as days_worked
+                 FROM weekly_timesheets wt
+                 LEFT JOIN production_users u ON wt.user_id = u.id
+                 LEFT JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
+                 WHERE wt.week_start_date = ?
+                 GROUP BY u.id, u.username, wt.week_start_date
+                 ORDER BY u.username`
+            ).all(weekStartDate);
         }
     }
     
