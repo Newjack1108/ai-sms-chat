@@ -461,14 +461,24 @@
             requestLocation();
             
             // Load initial data
-            await Promise.all([
-                loadNotices(),
-                loadJobs(),
-                loadClockStatus()
-            ]);
+            try {
+                await Promise.all([
+                    loadNotices(),
+                    loadJobs(),
+                    loadClockStatus()
+                ]);
+            } catch (error) {
+                console.error('Error loading initial data:', error);
+                showAlert('Error loading some data. Please refresh the page.', 'error');
+            }
             
             // Load weekly timesheet
-            await loadWeeklyTimesheet();
+            try {
+                await loadWeeklyTimesheet();
+            } catch (error) {
+                console.error('Error loading weekly timesheet in init:', error);
+                // Error already handled in loadWeeklyTimesheet
+            }
         }
         
         function requestLocation() {
@@ -861,8 +871,10 @@
                 
                 content.innerHTML = html;
             } catch (error) {
+                console.error('Error loading weekly timesheet:', error);
+                const errorMsg = error.message || 'Failed to load weekly timesheet';
                 document.getElementById('weeklyTimesheetContent').innerHTML = 
-                    '<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet</p>';
+                    `<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet: ${escapeHtml(errorMsg)}</p>`;
             }
         }
         

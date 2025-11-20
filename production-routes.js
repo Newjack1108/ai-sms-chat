@@ -981,8 +981,8 @@ router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
         const userId = req.session.production_user.id;
         const today = new Date();
         const dayOfWeek = today.getDay();
-        const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-        const monday = new Date(today.setDate(diff));
+        const monday = new Date(today);
+        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
         monday.setHours(0, 0, 0, 0);
         const weekStartDate = monday.toISOString().split('T')[0];
         
@@ -998,7 +998,12 @@ router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
         res.json({ success: true, weeklyTimesheet, dailyEntries });
     } catch (error) {
         console.error('Get current weekly timesheet error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get weekly timesheet' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Failed to get weekly timesheet',
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
@@ -1018,7 +1023,12 @@ router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) =
         res.json({ success: true, weeklyTimesheet, dailyEntries });
     } catch (error) {
         console.error('Get weekly timesheet error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get weekly timesheet' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Failed to get weekly timesheet',
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
