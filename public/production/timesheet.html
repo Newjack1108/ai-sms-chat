@@ -1031,7 +1031,6 @@
                     // Can amend if there are existing entries within 10 days, OR if it's within 10 days and no entries exist (to add missing times)
                     let canAmend = false;
                     let canAddMissing = false;
-                    const today = new Date();
                     const tenDaysAgo = new Date(today);
                     tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
                     tenDaysAgo.setHours(0, 0, 0, 0);
