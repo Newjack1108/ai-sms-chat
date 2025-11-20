@@ -810,10 +810,10 @@
                     
                     if (entry) {
                         if (entry.clock_in_time) {
-                            clockInTime = formatDate(new Date(entry.clock_in_time));
+                            clockInTime = formatDateTime(new Date(entry.clock_in_time));
                         }
                         if (entry.clock_out_time) {
-                            clockOutTime = formatDate(new Date(entry.clock_out_time));
+                            clockOutTime = formatDateTime(new Date(entry.clock_out_time));
                         }
                         regularHours = entry.regular_hours || 0;
                         overtimeHours = entry.overtime_hours || 0;
@@ -994,8 +994,8 @@
         // Time amendment functions
         function showAmendmentModal(entryId, clockInTime, clockOutTime) {
             document.getElementById('amendmentEntryId').value = entryId;
-            document.getElementById('originalClockIn').textContent = clockInTime ? formatDate(new Date(clockInTime)) : 'Not set';
-            document.getElementById('originalClockOut').textContent = clockOutTime ? formatDate(new Date(clockOutTime)) : 'Not set';
+            document.getElementById('originalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
+            document.getElementById('originalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
             
             // Set default values to current times
             if (clockInTime) {
