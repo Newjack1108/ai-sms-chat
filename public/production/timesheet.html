@@ -438,6 +438,7 @@
     
     <script src="common.js"></script>
     <script>
+        console.log('=== TIMESHEET PAGE SCRIPT LOADING ===');
         let currentUser = null;
         let currentStatus = null;
         let jobs = [];
@@ -445,8 +446,15 @@
         let locationError = false;
         
         async function init() {
+            console.log('=== INIT FUNCTION CALLED ===');
+            console.log('Checking auth...');
             currentUser = await checkAuth();
-            if (!currentUser) return;
+            console.log('Auth check complete, user:', currentUser ? currentUser.username : 'null');
+            if (!currentUser) {
+                console.log('No current user, returning from init');
+                return;
+            }
+            console.log('Initializing navbar...');
             initNavbar();
             
             // Hide dashboard link for staff
@@ -473,8 +481,10 @@
             }
             
             // Load weekly timesheet (don't block on error)
-            console.log('Starting to load weekly timesheet...');
+            console.log('=== ABOUT TO LOAD WEEKLY TIMESHEET ===');
+            console.log('Checking if weeklyTimesheetContent exists:', !!document.getElementById('weeklyTimesheetContent'));
             setTimeout(() => {
+                console.log('=== INSIDE setTimeout, CALLING loadWeeklyTimesheet ===');
                 loadWeeklyTimesheet().catch(error => {
                     console.error('Error loading weekly timesheet in init:', error);
                     console.error('Error stack:', error.stack);
