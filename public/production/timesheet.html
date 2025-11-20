@@ -872,11 +872,12 @@
                         if (entry.clock_out_time) {
                             clockOutTime = formatDateTime(new Date(entry.clock_out_time));
                         }
-                        regularHours = entry.regular_hours || 0;
-                        overtimeHours = entry.overtime_hours || 0;
-                        weekendHours = entry.weekend_hours || 0;
-                        overnightHours = entry.overnight_hours || 0;
-                        dayTotal = entry.total_hours || 0;
+                        // Convert to numbers to ensure they're numeric
+                        regularHours = parseFloat(entry.regular_hours) || 0;
+                        overtimeHours = parseFloat(entry.overtime_hours) || 0;
+                        weekendHours = parseFloat(entry.weekend_hours) || 0;
+                        overnightHours = parseFloat(entry.overnight_hours) || 0;
+                        dayTotal = parseFloat(entry.total_hours) || 0;
                         
                         totalRegular += regularHours;
                         totalOvertime += overtimeHours;
@@ -961,28 +962,34 @@
                     `;
                 });
                 
-                // Add weekly summary
+                // Add weekly summary (ensure totals are numbers)
+                const finalRegular = parseFloat(totalRegular) || 0;
+                const finalOvertime = parseFloat(totalOvertime) || 0;
+                const finalWeekend = parseFloat(totalWeekend) || 0;
+                const finalOvernight = parseFloat(totalOvernight) || 0;
+                const finalTotal = parseFloat(totalHours) || 0;
+                
                 html += `
                     <div class="weekly-summary">
                         <div class="summary-row">
                             <span>Regular Hours:</span>
-                            <span>${totalRegular.toFixed(2)}h</span>
+                            <span>${finalRegular.toFixed(2)}h</span>
                         </div>
                         <div class="summary-row">
                             <span>Overtime Hours (1.25x):</span>
-                            <span>${totalOvertime.toFixed(2)}h</span>
+                            <span>${finalOvertime.toFixed(2)}h</span>
                         </div>
                         <div class="summary-row">
                             <span>Weekend Hours (1.5x):</span>
-                            <span>${totalWeekend.toFixed(2)}h</span>
+                            <span>${finalWeekend.toFixed(2)}h</span>
                         </div>
                         <div class="summary-row">
                             <span>Overnight Hours (1.25x):</span>
-                            <span>${totalOvernight.toFixed(2)}h</span>
+                            <span>${finalOvernight.toFixed(2)}h</span>
                         </div>
                         <div class="summary-row summary-total">
                             <span>Total Hours:</span>
-                            <span>${totalHours.toFixed(2)}h</span>
+                            <span>${finalTotal.toFixed(2)}h</span>
                         </div>
                     </div>
                 `;
