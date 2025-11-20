@@ -747,7 +747,7 @@
         }
         
         async function addToStock(panelId, quantity, plannerItemId) {
-            if (!confirm(`Add ${quantity.toFixed(2)} units to panel stock?`)) {
+            if (!confirm(`Add ${quantity.toFixed(2)} units to panel stock and remove from planner?`)) {
                 return;
             }
             
@@ -762,7 +762,10 @@
                     })
                 });
                 
-                showAlert(`Added ${quantity.toFixed(2)} units to panel stock`, 'success');
+                // Remove the planner item after successfully adding to stock
+                await apiCall(`/planner/items/${plannerItemId}`, { method: 'DELETE' });
+                
+                showAlert(`Added ${quantity.toFixed(2)} units to panel stock and removed from planner`, 'success');
                 // Reload planner to refresh data
                 loadPlanner();
             } catch (error) {
