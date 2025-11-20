@@ -2409,7 +2409,19 @@ class ProductionDatabase {
                 return null;
             }
             
-            // Delete the timesheet entry (cascade will handle related data)
+            // First delete related amendments
+            await pool.query(
+                `DELETE FROM timesheet_amendments WHERE timesheet_entry_id = $1`,
+                [id]
+            );
+            
+            // Update daily entries to remove reference to this entry
+            await pool.query(
+                `UPDATE timesheet_daily_entries SET timesheet_entry_id = NULL WHERE timesheet_entry_id = $1`,
+                [id]
+            );
+            
+            // Delete the timesheet entry
             const result = await pool.query(
                 `DELETE FROM timesheet_entries WHERE id = $1 RETURNING *`,
                 [id]
@@ -2452,6 +2464,12 @@ class ProductionDatabase {
             if (!entry) {
                 return null;
             }
+            
+            // First delete related amendments
+            db.prepare(`DELETE FROM timesheet_amendments WHERE timesheet_entry_id = ?`).run(id);
+            
+            // Update daily entries to remove reference to this entry
+            db.prepare(`UPDATE timesheet_daily_entries SET timesheet_entry_id = NULL WHERE timesheet_entry_id = ?`).run(id);
             
             // Delete the timesheet entry
             const stmt = db.prepare(`DELETE FROM timesheet_entries WHERE id = ?`);

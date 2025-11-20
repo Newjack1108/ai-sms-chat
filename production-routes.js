@@ -1364,7 +1364,12 @@ router.delete('/clock/entries/:id', requireProductionAuth, requireAdmin, async (
         res.json({ success: true, message: 'Timesheet entry deleted successfully' });
     } catch (error) {
         console.error('Delete timesheet entry error:', error);
-        res.status(500).json({ success: false, error: 'Failed to delete timesheet entry' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to delete timesheet entry',
+            details: error.message 
+        });
     }
 });
 
