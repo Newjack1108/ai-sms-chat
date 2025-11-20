@@ -2450,6 +2450,82 @@ class ProductionDatabase {
         }
     }
     
+    // Check for duplicate or overlapping timesheet entries
+    static async checkDuplicateTimes(userId, clockInTime, clockOutTime, excludeEntryId = null) {
+        if (isPostgreSQL) {
+            let query = `
+                SELECT te.* 
+                FROM timesheet_entries te
+                WHERE te.user_id = $1 
+                AND te.clock_out_time IS NOT NULL
+                AND (
+                    -- Exact duplicate times
+                    (te.clock_in_time = $2 AND te.clock_out_time = $3)
+                    OR
+                    -- Overlapping: new entry starts during existing entry
+                    (te.clock_in_time <= $2 AND te.clock_out_time > $2)
+                    OR
+                    -- Overlapping: new entry ends during existing entry
+                    (te.clock_in_time < $3 AND te.clock_out_time >= $3)
+                    OR
+                    -- Overlapping: new entry completely contains existing entry
+                    (te.clock_in_time >= $2 AND te.clock_out_time <= $3)
+                    OR
+                    -- Overlapping: existing entry completely contains new entry
+                    (te.clock_in_time <= $2 AND te.clock_out_time >= $3)
+                )
+            `;
+            const params = [userId, clockInTime, clockOutTime];
+            
+            if (excludeEntryId) {
+                query += ` AND te.id != $4`;
+                params.push(excludeEntryId);
+            }
+            
+            const result = await pool.query(query, params);
+            return result.rows;
+        } else {
+            let query = `
+                SELECT te.* 
+                FROM timesheet_entries te
+                WHERE te.user_id = ? 
+                AND te.clock_out_time IS NOT NULL
+                AND (
+                    -- Exact duplicate times
+                    (te.clock_in_time = ? AND te.clock_out_time = ?)
+                    OR
+                    -- Overlapping: new entry starts during existing entry
+                    (te.clock_in_time <= ? AND te.clock_out_time > ?)
+                    OR
+                    -- Overlapping: new entry ends during existing entry
+                    (te.clock_in_time < ? AND te.clock_out_time >= ?)
+                    OR
+                    -- Overlapping: new entry completely contains existing entry
+                    (te.clock_in_time >= ? AND te.clock_out_time <= ?)
+                    OR
+                    -- Overlapping: existing entry completely contains new entry
+                    (te.clock_in_time <= ? AND te.clock_out_time >= ?)
+                )
+            `;
+            
+            const params = [
+                userId, 
+                clockInTime, clockOutTime,  // exact duplicate (2 params)
+                clockInTime, clockInTime,   // starts during (2 params)
+                clockOutTime, clockOutTime, // ends during (2 params)
+                clockInTime, clockOutTime, // contains (2 params)
+                clockInTime, clockOutTime   // contained by (2 params)
+            ];
+            
+            if (excludeEntryId) {
+                query += ` AND te.id != ?`;
+                params.push(excludeEntryId);
+            }
+            
+            return db.prepare(query).all(...params);
+        }
+    }
+    
     // Timesheet notices operations
     static async createTimesheetNotice(title, message, priority, expiresAt, createdBy) {
         if (isPostgreSQL) {

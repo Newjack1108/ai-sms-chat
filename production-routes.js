@@ -1122,13 +1122,12 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Check if entry already exists for this date
-        const dateStr = entryDate.toISOString().split('T')[0];
-        const existingEntries = await ProductionDatabase.getTimesheetHistory(userId, dateStr, dateStr);
-        if (existingEntries && existingEntries.length > 0) {
+        // Check for duplicate or overlapping times
+        const duplicates = await ProductionDatabase.checkDuplicateTimes(userId, clock_in_time, clock_out_time);
+        if (duplicates && duplicates.length > 0) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'An entry already exists for this date. Please use "Edit Times" to amend it.' 
+                error: 'A timesheet entry with overlapping or duplicate times already exists for this period. Please use "Edit Times" to amend the existing entry.' 
             });
         }
         
@@ -1184,6 +1183,22 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             });
         }
         
+        // Check for duplicate or overlapping times (excluding the current entry being amended)
+        if (amended_clock_out_time) {
+            const duplicates = await ProductionDatabase.checkDuplicateTimes(
+                userId, 
+                amended_clock_in_time, 
+                amended_clock_out_time, 
+                entry_id // Exclude the current entry
+            );
+            if (duplicates && duplicates.length > 0) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+                });
+            }
+        }
+        
         const amendment = await ProductionDatabase.requestTimeAmendment(
             entry_id,
             userId,
@@ -1235,7 +1250,32 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
             return res.status(400).json({ success: false, error: 'Approved clock in and out times are required' });
         }
         
-        const amendment = await ProductionDatabase.reviewAmendment(
+        // Get the amendment to find the entry and user
+        const amendment = await ProductionDatabase.getAmendmentById(amendmentId);
+        if (!amendment) {
+            return res.status(404).json({ success: false, error: 'Amendment not found' });
+        }
+        
+        // If approved, check for duplicate or overlapping times (excluding the current entry being amended)
+        if (status === 'approved') {
+            const entry = await ProductionDatabase.getTimesheetEntryById(amendment.timesheet_entry_id);
+            if (entry) {
+                const duplicates = await ProductionDatabase.checkDuplicateTimes(
+                    entry.user_id, 
+                    approved_clock_in_time, 
+                    approved_clock_out_time, 
+                    amendment.timesheet_entry_id // Exclude the current entry
+                );
+                if (duplicates && duplicates.length > 0) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        error: 'The approved times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+                    });
+                }
+            }
+        }
+        
+        const reviewedAmendment = await ProductionDatabase.reviewAmendment(
             amendmentId, 
             reviewerId, 
             status, 
@@ -1249,7 +1289,7 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
             await ProductionDatabase.applyAmendment(amendmentId, approved_clock_in_time, approved_clock_out_time);
         }
         
-        res.json({ success: true, amendment });
+        res.json({ success: true, amendment: reviewedAmendment });
     } catch (error) {
         console.error('Review amendment error:', error);
         res.status(500).json({ success: false, error: 'Failed to review amendment' });
