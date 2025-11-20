@@ -601,7 +601,7 @@
                 const clockInTime = new Date(currentStatus.clock_in_time);
                 clockDetails.innerHTML = `
                     <div>Job: ${escapeHtml(currentStatus.job_name || 'Unknown')}</div>
-                    <div>Clocked in: ${formatDate(clockInTime)}</div>
+                    <div>Clocked in: ${formatDateTime(clockInTime)}</div>
                 `;
                 
                 jobSelectGroup.style.display = 'none';
