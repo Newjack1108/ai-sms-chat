@@ -990,16 +990,16 @@
                     const hasEntry = entry !== null;
                     const hasClockTimes = dayEntries.length > 0;
                     
-                    // Check if amendment is allowed (current week or one week back)
+                    // Check if amendment is allowed (up to 10 days back)
                     let canAmend = false;
                     if (hasClockTimes && entry.timesheet_entry_id) {
                         const today = new Date();
-                        const oneWeekAgo = new Date(today);
-                        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-                        oneWeekAgo.setHours(0, 0, 0, 0);
+                        const tenDaysAgo = new Date(today);
+                        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+                        tenDaysAgo.setHours(0, 0, 0, 0);
                         const entryDate = new Date(dateStr);
                         entryDate.setHours(0, 0, 0, 0);
-                        canAmend = entryDate >= oneWeekAgo;
+                        canAmend = entryDate >= tenDaysAgo;
                     }
                     
                     html += `
@@ -1369,17 +1369,17 @@
         
         // Time amendment functions
         function showAmendmentModal(entryId, clockInTime, clockOutTime) {
-            // Check if amendment is allowed (current week or one week back)
+            // Check if amendment is allowed (up to 10 days back)
             const clockInDate = clockInTime ? new Date(clockInTime) : new Date();
             const today = new Date();
-            const oneWeekAgo = new Date(today);
-            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-            oneWeekAgo.setHours(0, 0, 0, 0);
+            const tenDaysAgo = new Date(today);
+            tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+            tenDaysAgo.setHours(0, 0, 0, 0);
             const entryDate = new Date(clockInDate);
             entryDate.setHours(0, 0, 0, 0);
             
-            if (entryDate < oneWeekAgo) {
-                showAlert('Amendments are only allowed for the current week and one week back. Payroll is processed by Wednesday the week after completion.', 'error');
+            if (entryDate < tenDaysAgo) {
+                showAlert('Amendments are only allowed for entries up to 10 days back. Please contact a manager for older entries.', 'error');
                 return;
             }
             
