@@ -369,6 +369,9 @@
                                                 <td><span class="badge badge-info">${item.status}</span></td>
                                                 <td>
                                                     <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                                    ${qtyBuilt > 0 ? `
+                                                        <button onclick="addToStock(${item.panel_id}, ${qtyBuilt}, ${item.id})" class="btn btn-success btn-sm" title="Add built quantity to panel stock">Add to Stock</button>
+                                                    ` : ''}
                                                     <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                 </td>
                                             </tr>
@@ -741,6 +744,31 @@
         
         function formatDate(date) {
             return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        
+        async function addToStock(panelId, quantity, plannerItemId) {
+            if (!confirm(`Add ${quantity.toFixed(2)} units to panel stock?`)) {
+                return;
+            }
+            
+            try {
+                // Record panel movement to add to stock
+                await apiCall(`/panels/${panelId}/movement`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        movement_type: 'build',
+                        quantity: quantity,
+                        reference: `Planner Item #${plannerItemId}`
+                    })
+                });
+                
+                showAlert(`Added ${quantity.toFixed(2)} units to panel stock`, 'success');
+                // Reload planner to refresh data
+                loadPlanner();
+            } catch (error) {
+                console.error('Error adding to stock:', error);
+                showAlert('Error adding to stock: ' + (error.message || 'Unknown error'), 'error');
+            }
         }
         
         init();
