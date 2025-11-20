@@ -3119,45 +3119,151 @@ class ProductionDatabase {
     // Payroll operations
     static async getPayrollSummary(weekStartDate) {
         if (isPostgreSQL) {
+            // Calculate week end date
+            const weekStart = new Date(weekStartDate);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            
             const result = await pool.query(
                 `SELECT 
                     u.id as user_id,
                     u.username,
-                    wt.week_start_date,
-                    COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
-                    COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
-                    COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
-                    COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
-                    COALESCE(SUM(tde.total_hours), 0) as total_hours,
-                    COUNT(DISTINCT tde.id) as days_worked
-                 FROM weekly_timesheets wt
-                 LEFT JOIN production_users u ON wt.user_id = u.id
+                    $1::date as week_start_date,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tde.regular_hours > 0 THEN tde.regular_hours
+                            WHEN te.regular_hours > 0 THEN te.regular_hours
+                            ELSE 0
+                        END
+                    ), 0) as total_regular_hours,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tde.overtime_hours > 0 THEN tde.overtime_hours
+                            WHEN te.overtime_hours > 0 THEN te.overtime_hours
+                            ELSE 0
+                        END
+                    ), 0) as total_overtime_hours,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tde.weekend_hours > 0 THEN tde.weekend_hours
+                            WHEN te.weekend_hours > 0 THEN te.weekend_hours
+                            ELSE 0
+                        END
+                    ), 0) as total_weekend_hours,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tde.overnight_hours > 0 THEN tde.overnight_hours
+                            WHEN te.overnight_hours > 0 THEN te.overnight_hours
+                            ELSE 0
+                        END
+                    ), 0) as total_overnight_hours,
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN tde.total_hours > 0 THEN tde.total_hours
+                            WHEN te.total_hours > 0 THEN te.total_hours
+                            ELSE 0
+                        END
+                    ), 0) as total_hours,
+                    COUNT(DISTINCT COALESCE(tde.id, te.id)) as days_worked
+                 FROM production_users u
+                 LEFT JOIN weekly_timesheets wt ON u.id = wt.user_id AND wt.week_start_date = $1::date
                  LEFT JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
-                 WHERE wt.week_start_date = $1
-                 GROUP BY u.id, u.username, wt.week_start_date
+                 LEFT JOIN timesheet_entries te ON u.id = te.user_id 
+                     AND te.clock_out_time IS NOT NULL
+                     AND DATE(te.clock_in_time) >= $1::date
+                     AND DATE(te.clock_in_time) <= $2::date
+                     AND NOT EXISTS (
+                         SELECT 1 FROM timesheet_daily_entries tde2 
+                         WHERE tde2.timesheet_entry_id = te.id
+                     )
+                 WHERE u.role = 'staff' OR u.role = 'manager' OR u.role = 'admin'
+                 GROUP BY u.id, u.username
+                 HAVING COALESCE(SUM(
+                     CASE 
+                         WHEN tde.total_hours > 0 THEN tde.total_hours
+                         WHEN te.total_hours > 0 THEN te.total_hours
+                         ELSE 0
+                     END
+                 ), 0) > 0
                  ORDER BY u.username`,
-                [weekStartDate]
+                [weekStartDate, weekEndStr]
             );
             return result.rows;
         } else {
-            return db.prepare(
+            // Calculate week end date
+            const weekStart = new Date(weekStartDate);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            
+            // SQLite version - simpler approach: get from daily entries first, fallback to timesheet entries
+            const dailyEntriesResult = db.prepare(
                 `SELECT 
                     u.id as user_id,
                     u.username,
                     wt.week_start_date,
-                    COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
-                    COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
-                    COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
-                    COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
-                    COALESCE(SUM(tde.total_hours), 0) as total_hours,
+                    SUM(tde.regular_hours) as total_regular_hours,
+                    SUM(tde.overtime_hours) as total_overtime_hours,
+                    SUM(tde.weekend_hours) as total_weekend_hours,
+                    SUM(tde.overnight_hours) as total_overnight_hours,
+                    SUM(tde.total_hours) as total_hours,
                     COUNT(DISTINCT tde.id) as days_worked
                  FROM weekly_timesheets wt
                  LEFT JOIN production_users u ON wt.user_id = u.id
                  LEFT JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date = ?
-                 GROUP BY u.id, u.username, wt.week_start_date
-                 ORDER BY u.username`
+                 GROUP BY u.id, u.username, wt.week_start_date`
             ).all(weekStartDate);
+            
+            // Also get hours from timesheet_entries that don't have daily entries
+            const timesheetEntriesResult = db.prepare(
+                `SELECT 
+                    u.id as user_id,
+                    u.username,
+                    SUM(te.regular_hours) as total_regular_hours,
+                    SUM(te.overtime_hours) as total_overtime_hours,
+                    SUM(te.weekend_hours) as total_weekend_hours,
+                    SUM(te.overnight_hours) as total_overnight_hours,
+                    SUM(te.total_hours) as total_hours,
+                    COUNT(DISTINCT DATE(te.clock_in_time)) as days_worked
+                 FROM timesheet_entries te
+                 LEFT JOIN production_users u ON te.user_id = u.id
+                 WHERE te.clock_out_time IS NOT NULL
+                     AND DATE(te.clock_in_time) >= ?
+                     AND DATE(te.clock_in_time) <= ?
+                     AND NOT EXISTS (
+                         SELECT 1 FROM timesheet_daily_entries tde 
+                         WHERE tde.timesheet_entry_id = te.id
+                     )
+                 GROUP BY u.id, u.username`
+            ).all(weekStartDate, weekEndStr);
+            
+            // Merge results
+            const userMap = {};
+            dailyEntriesResult.forEach(row => {
+                userMap[row.user_id] = row;
+            });
+            
+            timesheetEntriesResult.forEach(row => {
+                if (userMap[row.user_id]) {
+                    // Add to existing
+                    userMap[row.user_id].total_regular_hours = (userMap[row.user_id].total_regular_hours || 0) + (row.total_regular_hours || 0);
+                    userMap[row.user_id].total_overtime_hours = (userMap[row.user_id].total_overtime_hours || 0) + (row.total_overtime_hours || 0);
+                    userMap[row.user_id].total_weekend_hours = (userMap[row.user_id].total_weekend_hours || 0) + (row.total_weekend_hours || 0);
+                    userMap[row.user_id].total_overnight_hours = (userMap[row.user_id].total_overnight_hours || 0) + (row.total_overnight_hours || 0);
+                    userMap[row.user_id].total_hours = (userMap[row.user_id].total_hours || 0) + (row.total_hours || 0);
+                    userMap[row.user_id].days_worked = (userMap[row.user_id].days_worked || 0) + (row.days_worked || 0);
+                } else {
+                    // New user
+                    userMap[row.user_id] = {
+                        ...row,
+                        week_start_date: weekStartDate
+                    };
+                }
+            });
+            
+            return Object.values(userMap).sort((a, b) => (a.username || '').localeCompare(b.username || ''));
         }
     }
     
