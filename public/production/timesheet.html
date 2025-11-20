@@ -305,6 +305,38 @@
             color: #2c3e50;
         }
         
+        .day-activities {
+            margin-top: 10px;
+        }
+        
+        .activities-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .activities-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .activity-item {
+            transition: background 0.2s;
+        }
+        
+        .activity-item:hover {
+            background: #f0f0f0 !important;
+        }
+        
+        .add-activity-form {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        
         .day-notes {
             margin-top: 10px;
         }
@@ -793,6 +825,53 @@
             return days[date.getDay()];
         }
         
+        // Activity points functions
+        function renderActivities(dailyNotes, dateStr, canEdit) {
+            let activities = [];
+            
+            if (dailyNotes) {
+                try {
+                    // Try to parse as JSON array
+                    const parsed = JSON.parse(dailyNotes);
+                    if (Array.isArray(parsed)) {
+                        activities = parsed;
+                    } else if (typeof parsed === 'string') {
+                        // Legacy: single text note, convert to array
+                        activities = [{ timestamp: new Date().toISOString(), note: parsed }];
+                    }
+                } catch (e) {
+                    // Not JSON, treat as legacy single text note
+                    if (dailyNotes.trim()) {
+                        activities = [{ timestamp: new Date().toISOString(), note: dailyNotes }];
+                    }
+                }
+            }
+            
+            if (activities.length === 0) {
+                return '<p style="color: #999; font-size: 13px; padding: 10px; text-align: center;">No activities recorded yet</p>';
+            }
+            
+            return activities.map((activity, index) => {
+                const time = new Date(activity.timestamp);
+                const timeStr = formatDateTime(time);
+                return `
+                    <div class="activity-item" style="background: #f8f9fa; padding: 10px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #4CBB17;">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">${timeStr}</div>
+                                <div style="font-size: 14px; color: #2c3e50;">${escapeHtml(activity.note || '')}</div>
+                            </div>
+                            ${canEdit ? `
+                                <button onclick="deleteActivity('${dateStr}', ${index})" class="btn btn-danger btn-sm" style="margin-left: 10px; padding: 4px 8px; font-size: 12px;">
+                                    ×
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         async function loadWeeklyTimesheet(weekStart = null) {
             if (!weekStart) {
                 weekStart = getCurrentWeekStart();
@@ -906,6 +985,8 @@
                     const dayName = getDayName(dateStr);
                     const date = new Date(dateStr);
                     const isCurrentWeek = weekStart === getCurrentWeekStart();
+                    const today = new Date();
+                    const isToday = dateStr === today.toISOString().split('T')[0];
                     
                     let clockInTime = '';
                     let clockOutTime = '';
@@ -1002,12 +1083,32 @@
                                 </div>
                             ` : ''}
                             ${isCurrentWeek ? `
-                                <div class="day-notes">
-                                    <textarea 
-                                        id="notes-${dateStr}" 
-                                        placeholder="What did you do today?"
-                                        onblur="saveDailyNotes('${dateStr}', this.value)"
-                                    >${entry ? (entry.daily_notes || '') : ''}</textarea>
+                                <div class="day-activities">
+                                    <div class="activities-header">
+                                        <strong>Daily Activities</strong>
+                                        ${isToday && currentStatus && currentStatus.clocked_in ? `
+                                            <button class="btn btn-primary btn-sm" onclick="showAddActivityForm('${dateStr}')" style="margin-left: 10px;">
+                                                + Add Activity
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                    <div id="activities-${dateStr}" class="activities-list">
+                                        ${renderActivities(entry ? entry.daily_notes : null, dateStr, isToday && currentStatus && currentStatus.clocked_in)}
+                                    </div>
+                                    ${isToday && currentStatus && currentStatus.clocked_in ? `
+                                        <div id="add-activity-form-${dateStr}" class="add-activity-form" style="display: none; margin-top: 10px;">
+                                            <textarea 
+                                                id="activity-input-${dateStr}" 
+                                                placeholder="What are you doing now? (e.g., 'Installing panels on site A', 'Break time', 'Meeting with client')"
+                                                rows="2"
+                                                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 8px;"
+                                            ></textarea>
+                                            <div style="display: flex; gap: 8px;">
+                                                <button class="btn btn-success btn-sm" onclick="addActivity('${dateStr}')">Save</button>
+                                                <button class="btn btn-secondary btn-sm" onclick="hideAddActivityForm('${dateStr}')">Cancel</button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
                                 </div>
                                 <div class="overnight-checkbox">
                                     <input 
@@ -1099,7 +1200,195 @@
             loadWeeklyTimesheet(date.toISOString().split('T')[0]);
         }
         
+        // Activity points functions
+        function renderActivities(dailyNotes, dateStr, canEdit) {
+            let activities = [];
+            
+            if (dailyNotes) {
+                try {
+                    // Try to parse as JSON array
+                    const parsed = JSON.parse(dailyNotes);
+                    if (Array.isArray(parsed)) {
+                        activities = parsed;
+                    } else if (typeof parsed === 'string') {
+                        // Legacy: single text note, convert to array
+                        activities = [{ timestamp: new Date().toISOString(), note: parsed }];
+                    }
+                } catch (e) {
+                    // Not JSON, treat as legacy single text note
+                    if (dailyNotes.trim()) {
+                        activities = [{ timestamp: new Date().toISOString(), note: dailyNotes }];
+                    }
+                }
+            }
+            
+            if (activities.length === 0) {
+                return '<p style="color: #999; font-size: 13px; padding: 10px; text-align: center;">No activities recorded yet</p>';
+            }
+            
+            return activities.map((activity, index) => {
+                const time = new Date(activity.timestamp);
+                const timeStr = formatDateTime(time);
+                return `
+                    <div class="activity-item" style="background: #f8f9fa; padding: 10px; margin-bottom: 8px; border-radius: 6px; border-left: 3px solid #4CBB17;">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px; color: #666; margin-bottom: 4px;">${timeStr}</div>
+                                <div style="font-size: 14px; color: #2c3e50;">${escapeHtml(activity.note || '')}</div>
+                            </div>
+                            ${canEdit ? `
+                                <button onclick="deleteActivity('${dateStr}', ${index})" class="btn btn-danger btn-sm" style="margin-left: 10px; padding: 4px 8px; font-size: 12px;">
+                                    ×
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function showAddActivityForm(dateStr) {
+            const form = document.getElementById(`add-activity-form-${dateStr}`);
+            if (form) {
+                form.style.display = 'block';
+                const input = document.getElementById(`activity-input-${dateStr}`);
+                if (input) {
+                    input.focus();
+                }
+            }
+        }
+        
+        function hideAddActivityForm(dateStr) {
+            const form = document.getElementById(`add-activity-form-${dateStr}`);
+            if (form) {
+                form.style.display = 'none';
+                const input = document.getElementById(`activity-input-${dateStr}`);
+                if (input) {
+                    input.value = '';
+                }
+            }
+        }
+        
+        async function addActivity(dateStr) {
+            const input = document.getElementById(`activity-input-${dateStr}`);
+            if (!input || !input.value.trim()) {
+                showAlert('Please enter an activity', 'error');
+                return;
+            }
+            
+            if (!currentWeekStart) {
+                showAlert('Error: No week start date', 'error');
+                return;
+            }
+            
+            try {
+                // Get current activities
+                const activitiesEl = document.getElementById(`activities-${dateStr}`);
+                let activities = [];
+                
+                // Try to get existing activities from the daily entry
+                const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
+                if (weeklyData.success && weeklyData.weeklyTimesheet && weeklyData.dailyEntries) {
+                    const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
+                    if (dayEntry && dayEntry.daily_notes) {
+                        try {
+                            const parsed = JSON.parse(dayEntry.daily_notes);
+                            if (Array.isArray(parsed)) {
+                                activities = parsed;
+                            } else if (typeof parsed === 'string' && parsed.trim()) {
+                                activities = [{ timestamp: new Date().toISOString(), note: parsed }];
+                            }
+                        } catch (e) {
+                            if (dayEntry.daily_notes.trim()) {
+                                activities = [{ timestamp: new Date().toISOString(), note: dayEntry.daily_notes }];
+                            }
+                        }
+                    }
+                }
+                
+                // Add new activity
+                activities.push({
+                    timestamp: new Date().toISOString(),
+                    note: input.value.trim()
+                });
+                
+                // Save as JSON
+                await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
+                });
+                
+                // Refresh the activities display
+                if (activitiesEl) {
+                    const canEdit = dateStr === new Date().toISOString().split('T')[0] && currentStatus && currentStatus.clocked_in;
+                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, canEdit);
+                }
+                
+                // Clear and hide form
+                input.value = '';
+                hideAddActivityForm(dateStr);
+                
+                showAlert('Activity added', 'success');
+            } catch (error) {
+                console.error('Error adding activity:', error);
+                showAlert('Failed to add activity: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function deleteActivity(dateStr, index) {
+            if (!confirm('Delete this activity?')) return;
+            
+            if (!currentWeekStart) {
+                showAlert('Error: No week start date', 'error');
+                return;
+            }
+            
+            try {
+                // Get current activities
+                const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
+                let activities = [];
+                
+                if (weeklyData.success && weeklyData.weeklyTimesheet && weeklyData.dailyEntries) {
+                    const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
+                    if (dayEntry && dayEntry.daily_notes) {
+                        try {
+                            const parsed = JSON.parse(dayEntry.daily_notes);
+                            if (Array.isArray(parsed)) {
+                                activities = parsed;
+                            }
+                        } catch (e) {
+                            // Not JSON, can't delete individual items
+                            showAlert('Cannot delete from legacy format', 'error');
+                            return;
+                        }
+                    }
+                }
+                
+                // Remove activity at index
+                activities.splice(index, 1);
+                
+                // Save updated activities
+                await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
+                });
+                
+                // Refresh the activities display
+                const activitiesEl = document.getElementById(`activities-${dateStr}`);
+                if (activitiesEl) {
+                    const canEdit = dateStr === new Date().toISOString().split('T')[0] && currentStatus && currentStatus.clocked_in;
+                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, canEdit);
+                }
+                
+                showAlert('Activity deleted', 'success');
+            } catch (error) {
+                console.error('Error deleting activity:', error);
+                showAlert('Failed to delete activity: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
         async function saveDailyNotes(date, notes) {
+            // Legacy function - kept for compatibility but activities are now handled via addActivity
             if (!currentWeekStart) return;
             try {
                 await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
