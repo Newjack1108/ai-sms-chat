@@ -473,13 +473,19 @@
             }
             
             // Load weekly timesheet (don't block on error)
-            loadWeeklyTimesheet().catch(error => {
-                console.error('Error loading weekly timesheet in init:', error);
-                const content = document.getElementById('weeklyTimesheetContent');
-                if (content) {
-                    content.innerHTML = `<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet. Please refresh the page.<br><small>${escapeHtml(error.message || 'Unknown error')}</small></p>`;
-                }
-            });
+            console.log('Starting to load weekly timesheet...');
+            setTimeout(() => {
+                loadWeeklyTimesheet().catch(error => {
+                    console.error('Error loading weekly timesheet in init:', error);
+                    console.error('Error stack:', error.stack);
+                    const content = document.getElementById('weeklyTimesheetContent');
+                    if (content) {
+                        content.innerHTML = `<p style="text-align: center; color: #e74c3c; padding: 20px;">Error loading weekly timesheet. Please refresh the page.<br><small>${escapeHtml(error.message || 'Unknown error')}</small></p>`;
+                    } else {
+                        console.error('weeklyTimesheetContent element not found for error display');
+                    }
+                });
+            }, 100); // Small delay to ensure DOM is ready
         }
         
         function requestLocation() {
@@ -734,15 +740,26 @@
             
             try {
                 console.log('Loading weekly timesheet for week:', weekStart);
+                console.log('API endpoint:', `/clock/weekly/${weekStart}`);
                 const data = await apiCall(`/clock/weekly/${weekStart}`);
                 console.log('Weekly timesheet data received:', data);
+                console.log('Data type:', typeof data);
+                console.log('Data keys:', data ? Object.keys(data) : 'null/undefined');
                 
-                if (!data || !data.success) {
-                    throw new Error(data?.error || 'Failed to load weekly timesheet');
+                if (!data) {
+                    throw new Error('No data received from API');
+                }
+                
+                if (!data.success) {
+                    throw new Error(data?.error || 'API returned success: false');
                 }
                 
                 const weeklyTimesheet = data.weeklyTimesheet;
                 const dailyEntries = data.dailyEntries || [];
+                
+                console.log('Weekly timesheet:', weeklyTimesheet);
+                console.log('Daily entries count:', dailyEntries.length);
+                console.log('Daily entries:', dailyEntries);
                 
                 // Create a map of daily entries by date
                 const entriesMap = {};
@@ -754,11 +771,19 @@
                 const weekDates = getWeekDates(weekStart);
                 const startDate = new Date(weekDates[0]);
                 const endDate = new Date(weekDates[6]);
-                document.getElementById('weekRange').textContent = 
-                    `${formatDate(startDate)} - ${formatDate(endDate)}`;
+                const weekRangeEl = document.getElementById('weekRange');
+                if (weekRangeEl) {
+                    weekRangeEl.textContent = `${formatDate(startDate)} - ${formatDate(endDate)}`;
+                } else {
+                    console.warn('weekRange element not found');
+                }
                 
                 // Display daily entries
                 const content = document.getElementById('weeklyTimesheetContent');
+                if (!content) {
+                    console.error('weeklyTimesheetContent not found after API call');
+                    return;
+                }
                 let html = '';
                 let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
                 
@@ -886,7 +911,17 @@
                     </div>
                 `;
                 
+                console.log('Generated HTML length:', html.length);
+                console.log('Setting innerHTML on content element');
                 content.innerHTML = html;
+                console.log('innerHTML set successfully');
+                
+                // Verify it was set
+                if (content.innerHTML.length === 0) {
+                    console.error('WARNING: innerHTML is empty after setting!');
+                } else {
+                    console.log('innerHTML set successfully, length:', content.innerHTML.length);
+                }
             } catch (error) {
                 console.error('Error loading weekly timesheet:', error);
                 console.error('Error details:', {
