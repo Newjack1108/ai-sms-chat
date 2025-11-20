@@ -914,17 +914,16 @@
             return Math.round(parseFloat(hours) * 4) / 4;
         }
         
-        // Format hours as hours and minutes (e.g., "8h 15m" or "8.25h")
+        // Format hours as hours and minutes (e.g., "5hrs 30mins")
         function formatHours(hours) {
+            if (!hours || isNaN(hours) || hours === 0) {
+                return '0hrs 0mins';
+            }
             const rounded = roundToQuarterHour(hours);
             const wholeHours = Math.floor(rounded);
             const minutes = Math.round((rounded - wholeHours) * 60);
             
-            if (minutes === 0) {
-                return `${wholeHours}h`;
-            } else {
-                return `${wholeHours}h ${minutes}m`;
-            }
+            return `${wholeHours}hrs ${minutes}mins`;
         }
         
         async function loadPayrollSummary() {
