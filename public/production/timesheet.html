@@ -848,6 +848,25 @@
             return monday.toISOString().split('T')[0];
         }
         
+        // Round hours down to 15-minute intervals (0.25 hour increments)
+        function roundToQuarterHour(hours) {
+            if (!hours || isNaN(hours)) return 0;
+            // Always round down to nearest 0.25 (15 minutes)
+            return Math.floor(parseFloat(hours) * 4) / 4;
+        }
+        
+        // Format hours as hours and minutes (e.g., "5hrs 30mins")
+        function formatHours(hours) {
+            if (!hours || isNaN(hours) || hours === 0) {
+                return '0hrs 0mins';
+            }
+            const rounded = roundToQuarterHour(hours);
+            const wholeHours = Math.floor(rounded);
+            const minutes = Math.round((rounded - wholeHours) * 60);
+            
+            return `${wholeHours}hrs ${minutes}mins`;
+        }
+        
         function getWeekDates(weekStart) {
             const start = new Date(weekStart);
             const dates = [];
@@ -1106,31 +1125,31 @@
                                     ${regularHours > 0 ? `
                                         <div class="hour-item regular">
                                             <div class="hour-label">Regular</div>
-                                            <div class="hour-value">${regularHours.toFixed(2)}h</div>
+                                            <div class="hour-value">${formatHours(regularHours)}</div>
                                         </div>
                                     ` : ''}
                                     ${overtimeHours > 0 ? `
                                         <div class="hour-item overtime">
                                             <div class="hour-label">Overtime (1.25x)</div>
-                                            <div class="hour-value">${overtimeHours.toFixed(2)}h</div>
+                                            <div class="hour-value">${formatHours(overtimeHours)}</div>
                                         </div>
                                     ` : ''}
                                     ${weekendHours > 0 ? `
                                         <div class="hour-item weekend">
                                             <div class="hour-label">Weekend (1.5x)</div>
-                                            <div class="hour-value">${weekendHours.toFixed(2)}h</div>
+                                            <div class="hour-value">${formatHours(weekendHours)}</div>
                                         </div>
                                     ` : ''}
                                     ${overnightHours > 0 ? `
                                         <div class="hour-item overnight">
                                             <div class="hour-label">Overnight (1.25x)</div>
-                                            <div class="hour-value">${overnightHours.toFixed(2)}h</div>
+                                            <div class="hour-value">${formatHours(overnightHours)}</div>
                                         </div>
                                     ` : ''}
                                     ${dayTotalHours > 0 ? `
                                         <div class="hour-item total" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; font-weight: 600;">
                                             <div class="hour-label">Day Total</div>
-                                            <div class="hour-value">${dayTotalHours.toFixed(2)}h</div>
+                                            <div class="hour-value">${formatHours(dayTotalHours)}</div>
                                         </div>
                                     ` : ''}
                                 </div>
@@ -1188,23 +1207,23 @@
                     <div class="weekly-summary">
                         <div class="summary-row">
                             <span>Regular Hours:</span>
-                            <span>${finalRegular.toFixed(2)}h</span>
+                            <span>${formatHours(finalRegular)}</span>
                         </div>
                         <div class="summary-row">
                             <span>Overtime Hours (1.25x):</span>
-                            <span>${finalOvertime.toFixed(2)}h</span>
+                            <span>${formatHours(finalOvertime)}</span>
                         </div>
                         <div class="summary-row">
                             <span>Weekend Hours (1.5x):</span>
-                            <span>${finalWeekend.toFixed(2)}h</span>
+                            <span>${formatHours(finalWeekend)}</span>
                         </div>
                         <div class="summary-row">
                             <span>Overnight Hours (1.25x):</span>
-                            <span>${finalOvernight.toFixed(2)}h</span>
+                            <span>${formatHours(finalOvernight)}</span>
                         </div>
                         <div class="summary-row summary-total">
                             <span>Total Hours:</span>
-                            <span>${finalTotal.toFixed(2)}h</span>
+                            <span>${formatHours(finalTotal)}</span>
                         </div>
                     </div>
                 `;
