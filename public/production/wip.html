@@ -41,6 +41,9 @@
         let labourRate = 25;
         
         async function init() {
+            // Redirect staff users
+            if (await restrictStaffAccess()) return;
+            
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();

@@ -163,7 +163,12 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    window.location.href = '/production/dashboard.html';
+                    // Redirect staff to timesheet, others to dashboard
+                    if (data.user && data.user.role === 'staff') {
+                        window.location.href = '/production/timesheet.html';
+                    } else {
+                        window.location.href = '/production/dashboard.html';
+                    }
                 } else {
                     errorMessage.textContent = data.error || 'Login failed';
                     errorMessage.classList.add('show');

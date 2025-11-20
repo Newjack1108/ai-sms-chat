@@ -185,6 +185,19 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// Check if user is staff and redirect to timesheet if they try to access restricted pages
+async function restrictStaffAccess() {
+    const user = await checkAuth();
+    if (user && user.role === 'staff') {
+        // Staff can only access timesheet page
+        if (!window.location.pathname.includes('timesheet.html') && !window.location.pathname.includes('login.html')) {
+            window.location.href = '/production/timesheet.html';
+            return true;
+        }
+    }
+    return false;
+}
+
 // Initialize navbar
 async function initNavbar() {
     const user = await checkAuth();

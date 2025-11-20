@@ -111,6 +111,15 @@
     <script src="common.js"></script>
     <script>
         async function loadDashboard() {
+            const user = await checkAuth();
+            if (!user) return;
+            
+            // Redirect staff users to timesheet page
+            if (user.role === 'staff') {
+                window.location.href = 'timesheet.html';
+                return;
+            }
+            
             await initNavbar();
             
             // Load dashboard summary
