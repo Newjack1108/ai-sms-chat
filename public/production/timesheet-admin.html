@@ -445,7 +445,8 @@
                         <tbody>
                             ${clockIns.map(entry => {
                                 const clockInTime = new Date(entry.clock_in_time);
-                                const location = entry.clock_in_latitude && entry.clock_in_longitude 
+                                const hasLocation = entry.clock_in_latitude && entry.clock_in_longitude;
+                                const location = hasLocation
                                     ? `${parseFloat(entry.clock_in_latitude).toFixed(6)}, ${parseFloat(entry.clock_in_longitude).toFixed(6)}`
                                     : 'Not available';
                                 return `
@@ -453,7 +454,17 @@
                                         <td><strong>${entry.username || 'Unknown'}</strong></td>
                                         <td>${entry.job_name || 'Unknown'}</td>
                                         <td>${formatDate(clockInTime)}</td>
-                                        <td><small>${location}</small></td>
+                                        <td>
+                                            <small>${location}</small>
+                                            ${hasLocation ? `
+                                                <button onclick="openMap(${entry.clock_in_latitude}, ${entry.clock_in_longitude})" 
+                                                        class="btn btn-sm" 
+                                                        style="margin-left: 8px; padding: 2px 8px; font-size: 11px; background: #4CBB17; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                                                        title="View on map">
+                                                    🗺️ Map
+                                                </button>
+                                            ` : ''}
+                                        </td>
                                     </tr>
                                 `;
                             }).join('')}
@@ -1083,7 +1094,7 @@
                             entriesByDate[date].push(day);
                         });
                         
-                        let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th></tr></thead><tbody>';
+                        let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Location</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th></tr></thead><tbody>';
                         
                         // Sort dates
                         const sortedDates = Object.keys(entriesByDate).sort();
@@ -1133,7 +1144,7 @@
                             if (dayEntries.length > 1) {
                                 dailyHtml += `
                                     <tr style="background: #f0f0f0; font-weight: 600;">
-                                        <td colspan="4" style="text-align: right;">Daily Total:</td>
+                                        <td colspan="5" style="text-align: right;">Daily Total:</td>
                                         <td>${formatHours(dayRegular)}</td>
                                         <td>${formatHours(dayOvertime)}</td>
                                         <td>${formatHours(dayWeekend)}</td>
