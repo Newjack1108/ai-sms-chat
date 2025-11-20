@@ -1095,6 +1095,33 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
+        // Check if amendment is within allowed time window (current week or one week back)
+        const entry = await ProductionDatabase.getTimesheetEntryById(entry_id);
+        if (!entry) {
+            return res.status(404).json({ success: false, error: 'Timesheet entry not found' });
+        }
+        
+        // Verify the entry belongs to the user
+        if (entry.user_id !== userId) {
+            return res.status(403).json({ success: false, error: 'You can only amend your own timesheet entries' });
+        }
+        
+        // Calculate the cutoff date (one week back from today)
+        const today = new Date();
+        const oneWeekAgo = new Date(today);
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        oneWeekAgo.setHours(0, 0, 0, 0);
+        
+        const entryDate = new Date(entry.clock_in_time);
+        entryDate.setHours(0, 0, 0, 0);
+        
+        if (entryDate < oneWeekAgo) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Amendments are only allowed for the current week and one week back. Payroll is processed by Wednesday the week after completion.' 
+            });
+        }
+        
         const amendment = await ProductionDatabase.requestTimeAmendment(
             entry_id,
             userId,
