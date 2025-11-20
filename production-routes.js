@@ -1096,6 +1096,57 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
     }
 });
 
+// Missing times route (for days they forgot to clock in)
+router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const { job_id, clock_in_time, clock_out_time, reason } = req.body;
+        
+        if (!job_id || !clock_in_time || !clock_out_time || !reason) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        // Check if within allowed time window (up to 10 days back)
+        const today = new Date();
+        const tenDaysAgo = new Date(today);
+        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+        tenDaysAgo.setHours(0, 0, 0, 0);
+        
+        const entryDate = new Date(clock_in_time);
+        entryDate.setHours(0, 0, 0, 0);
+        
+        if (entryDate < tenDaysAgo) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing times can only be added for dates up to 10 days back. Please contact a manager for older entries.' 
+            });
+        }
+        
+        // Check if entry already exists for this date
+        const dateStr = entryDate.toISOString().split('T')[0];
+        const existingEntries = await ProductionDatabase.getTimesheetHistory(userId, dateStr, dateStr);
+        if (existingEntries && existingEntries.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'An entry already exists for this date. Please use "Edit Times" to amend it.' 
+            });
+        }
+        
+        const result = await ProductionDatabase.createMissingTimesheetEntry(
+            userId,
+            job_id,
+            clock_in_time,
+            clock_out_time,
+            reason
+        );
+        
+        res.json({ success: true, entry: result.entry, amendment: result.amendment });
+    } catch (error) {
+        console.error('Create missing times error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create missing times entry' });
+    }
+});
+
 // Time amendment routes
 router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
     try {

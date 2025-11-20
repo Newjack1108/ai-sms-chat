@@ -528,6 +528,43 @@
         </div>
     </div>
     
+    <!-- Add Missing Times Modal -->
+    <div id="addMissingTimesModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Add Missing Clock Times</h3>
+                <span class="close" onclick="closeAddMissingTimesModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="addMissingTimesForm">
+                    <input type="hidden" id="missingTimesDate">
+                    <div class="form-group">
+                        <label for="missingTimesJob">Job/Site *</label>
+                        <select id="missingTimesJob" class="form-control" required>
+                            <option value="">Select a job/site</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="missingTimesClockIn">Clock In Time *</label>
+                        <input type="datetime-local" id="missingTimesClockIn" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="missingTimesClockOut">Clock Out Time *</label>
+                        <input type="datetime-local" id="missingTimesClockOut" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="missingTimesReason">Reason *</label>
+                        <textarea id="missingTimesReason" class="form-control" rows="3" required placeholder="Please explain why you forgot to clock in/out..."></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeAddMissingTimesModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Submit Request</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
     <script src="common.js"></script>
     <script>
         console.log('=== TIMESHEET PAGE SCRIPT LOADING ===');
@@ -991,15 +1028,24 @@
                     const hasClockTimes = dayEntries.length > 0;
                     
                     // Check if amendment is allowed (up to 10 days back)
+                    // Can amend if there are existing entries within 10 days, OR if it's within 10 days and no entries exist (to add missing times)
                     let canAmend = false;
-                    if (hasClockTimes && entry.timesheet_entry_id) {
-                        const today = new Date();
-                        const tenDaysAgo = new Date(today);
-                        tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
-                        tenDaysAgo.setHours(0, 0, 0, 0);
-                        const entryDate = new Date(dateStr);
-                        entryDate.setHours(0, 0, 0, 0);
-                        canAmend = entryDate >= tenDaysAgo;
+                    let canAddMissing = false;
+                    const today = new Date();
+                    const tenDaysAgo = new Date(today);
+                    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+                    tenDaysAgo.setHours(0, 0, 0, 0);
+                    const entryDate = new Date(dateStr);
+                    entryDate.setHours(0, 0, 0, 0);
+                    const isWithin10Days = entryDate >= tenDaysAgo;
+                    
+                    if (hasClockTimes && dayEntries.length > 0) {
+                        // Check if any entry has a timesheet_entry_id and is within 10 days
+                        const hasValidEntry = dayEntries.some(te => te.id && isWithin10Days);
+                        canAmend = hasValidEntry;
+                    } else if (!hasClockTimes && isWithin10Days) {
+                        // Can add missing times if no clock-in exists and within 10 days
+                        canAddMissing = true;
                     }
                     
                     html += `
@@ -1009,11 +1055,15 @@
                                     <span class="day-name">${dayName}</span>
                                     <span class="day-date">${formatDate(date)}</span>
                                 </div>
-                                ${canAmend ? `
-                                    <button class="edit-times-btn" onclick="showAmendmentModal(${entry.timesheet_entry_id}, '${entry.clock_in_time || ''}', '${entry.clock_out_time || ''}')">
+                                ${canAmend && dayEntries.length > 0 ? `
+                                    <button class="edit-times-btn" onclick="showAmendmentModal(${dayEntries[0].id}, '${dayEntries[0].clock_in_time || ''}', '${dayEntries[0].clock_out_time || ''}')">
                                         Edit Times
                                     </button>
-                                ` : hasClockTimes && entry.timesheet_entry_id ? `
+                                ` : canAddMissing ? `
+                                    <button class="edit-times-btn" onclick="showAddMissingTimesModal('${dateStr}')" style="background: #808080;">
+                                        Add Missing Times
+                                    </button>
+                                ` : hasClockTimes && !isWithin10Days ? `
                                     <span style="font-size: 11px; color: #999; font-style: italic;">Too old to amend</span>
                                 ` : ''}
                             </div>
@@ -1406,6 +1456,88 @@
             document.getElementById('amendmentModal').style.display = 'none';
             document.getElementById('amendmentForm').reset();
         }
+        
+        function showAddMissingTimesModal(dateStr) {
+            // Check if within 10 days
+            const today = new Date();
+            const tenDaysAgo = new Date(today);
+            tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+            tenDaysAgo.setHours(0, 0, 0, 0);
+            const entryDate = new Date(dateStr);
+            entryDate.setHours(0, 0, 0, 0);
+            
+            if (entryDate < tenDaysAgo) {
+                showAlert('Missing times can only be added for dates up to 10 days back. Please contact a manager for older entries.', 'error');
+                return;
+            }
+            
+            document.getElementById('missingTimesDate').value = dateStr;
+            
+            // Populate job dropdown
+            const jobSelect = document.getElementById('missingTimesJob');
+            jobSelect.innerHTML = '<option value="">Select a job/site</option>';
+            jobs.forEach(job => {
+                const option = document.createElement('option');
+                option.value = job.id;
+                option.textContent = job.name;
+                jobSelect.appendChild(option);
+            });
+            
+            // Set default times for the date (9 AM to 5 PM)
+            const date = new Date(dateStr);
+            date.setHours(9, 0, 0, 0);
+            const localDateTimeIn = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            document.getElementById('missingTimesClockIn').value = localDateTimeIn;
+            
+            date.setHours(17, 0, 0, 0);
+            const localDateTimeOut = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            document.getElementById('missingTimesClockOut').value = localDateTimeOut;
+            
+            document.getElementById('addMissingTimesModal').style.display = 'block';
+        }
+        
+        function closeAddMissingTimesModal() {
+            document.getElementById('addMissingTimesModal').style.display = 'none';
+            document.getElementById('addMissingTimesForm').reset();
+        }
+        
+        document.getElementById('addMissingTimesForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const dateStr = document.getElementById('missingTimesDate').value;
+            const jobId = parseInt(document.getElementById('missingTimesJob').value);
+            const clockIn = document.getElementById('missingTimesClockIn').value;
+            const clockOut = document.getElementById('missingTimesClockOut').value;
+            const reason = document.getElementById('missingTimesReason').value;
+            
+            // Convert local datetime to ISO string
+            const clockInISO = new Date(clockIn).toISOString();
+            const clockOutISO = new Date(clockOut).toISOString();
+            
+            try {
+                const data = await apiCall('/clock/missing-times', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        job_id: jobId,
+                        clock_in_time: clockInISO,
+                        clock_out_time: clockOutISO,
+                        reason: reason
+                    })
+                });
+                
+                if (data.success) {
+                    showAlert('Missing times request submitted successfully. It will be reviewed by a manager.', 'success');
+                    closeAddMissingTimesModal();
+                    // Reload the weekly timesheet
+                    await loadWeeklyTimesheet();
+                } else {
+                    showAlert(data.error || 'Failed to submit missing times request', 'error');
+                }
+            } catch (error) {
+                console.error('Add missing times error:', error);
+                showAlert('Failed to submit missing times request', 'error');
+            }
+        });
         
         document.getElementById('amendmentForm').addEventListener('submit', async (e) => {
             e.preventDefault();
