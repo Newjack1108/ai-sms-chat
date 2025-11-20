@@ -1164,7 +1164,7 @@
                                     <input 
                                         type="checkbox" 
                                         id="overnight-${dateStr}" 
-                                        ${entry && entry.overnight_away ? 'checked' : ''}
+                                        ${entry && (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1') ? 'checked' : ''}
                                         onchange="saveOvernightAway('${dateStr}', this.checked)"
                                     >
                                     <label for="overnight-${dateStr}">Overnight away from home</label>
@@ -1408,9 +1408,14 @@
             
             // Preserve checkbox state during save
             const checkbox = document.getElementById(`overnight-${date}`);
-            if (checkbox) {
-                checkbox.disabled = true;
+            if (!checkbox) {
+                console.error('Checkbox not found for date:', date);
+                return;
             }
+            
+            // Store the intended state
+            const intendedState = overnightAway;
+            checkbox.disabled = true;
             
             try {
                 const response = await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
@@ -1418,21 +1423,32 @@
                     body: JSON.stringify({ overnight_away: overnightAway })
                 });
                 
-                // Ensure checkbox reflects the saved state
-                if (checkbox) {
-                    checkbox.checked = overnightAway;
+                if (response && response.success) {
+                    // Ensure checkbox reflects the saved state immediately
+                    checkbox.checked = intendedState;
                     checkbox.disabled = false;
+                    
+                    // Reload to update hours (this will refresh the checkbox state from server)
+                    // But we'll preserve the checkbox state during reload
+                    const savedState = intendedState;
+                    await loadWeeklyTimesheet(currentWeekStart);
+                    
+                    // After reload, ensure checkbox is still in correct state
+                    setTimeout(() => {
+                        const reloadedCheckbox = document.getElementById(`overnight-${date}`);
+                        if (reloadedCheckbox && reloadedCheckbox.checked !== savedState) {
+                            reloadedCheckbox.checked = savedState;
+                        }
+                    }, 100);
+                } else {
+                    throw new Error(response?.error || 'Failed to save');
                 }
-                
-                // Reload to update hours (this will refresh the checkbox state from server)
-                await loadWeeklyTimesheet(currentWeekStart);
             } catch (error) {
+                console.error('Error saving overnight away:', error);
                 // Revert checkbox on error
-                if (checkbox) {
-                    checkbox.checked = !overnightAway;
-                    checkbox.disabled = false;
-                }
-                showAlert('Failed to save overnight away status', 'error');
+                checkbox.checked = !intendedState;
+                checkbox.disabled = false;
+                showAlert('Failed to save overnight away status: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         

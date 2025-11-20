@@ -3060,12 +3060,20 @@ class ProductionDatabase {
     }
     
     static async getDailyEntryById(id) {
+        let entry;
         if (isPostgreSQL) {
             const result = await pool.query(`SELECT * FROM timesheet_daily_entries WHERE id = $1`, [id]);
-            return result.rows[0] || null;
+            entry = result.rows[0] || null;
         } else {
-            return db.prepare(`SELECT * FROM timesheet_daily_entries WHERE id = ?`).get(id) || null;
+            entry = db.prepare(`SELECT * FROM timesheet_daily_entries WHERE id = ?`).get(id) || null;
         }
+        
+        // Normalize overnight_away to boolean
+        if (entry) {
+            entry.overnight_away = entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1';
+        }
+        
+        return entry;
     }
     
     static async getDailyEntriesForWeek(weeklyTimesheetId) {

@@ -1078,6 +1078,11 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         
         const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
         
+        // Normalize overnight_away in response
+        if (updated) {
+            updated.overnight_away = updated.overnight_away === true || updated.overnight_away === 1 || updated.overnight_away === '1';
+        }
+        
         // If overnight_away changed, recalculate hours for ALL entries for this day
         if (overnight_away !== undefined) {
             // Get all timesheet entries for this date
