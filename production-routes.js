@@ -807,12 +807,7 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job ID is required' });
         }
         
-        // Check if already clocked in
-        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
-        if (currentStatus) {
-            return res.status(400).json({ success: false, error: 'You are already clocked in' });
-        }
-        
+        // Allow multiple clock-ins per day - no check needed
         const entry = await ProductionDatabase.clockIn(userId, parseInt(job_id), latitude, longitude);
         res.json({ success: true, entry });
     } catch (error) {

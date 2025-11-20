@@ -1073,32 +1073,75 @@
                             return;
                         }
                         
+                        // Group entries by date to show daily totals
+                        const entriesByDate = {};
+                        dailyBreakdown.forEach(day => {
+                            const date = day.entry_date;
+                            if (!entriesByDate[date]) {
+                                entriesByDate[date] = [];
+                            }
+                            entriesByDate[date].push(day);
+                        });
+                        
                         let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th></tr></thead><tbody>';
                         
-                        dailyBreakdown.forEach(day => {
-                            const date = new Date(day.entry_date);
-                            const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-                            const clockIn = day.clock_in_time ? formatDateTime(new Date(day.clock_in_time)) : '-';
-                            const clockOut = day.clock_out_time ? formatDateTime(new Date(day.clock_out_time)) : '-';
-                            const regular = roundToQuarterHour(parseFloat(day.regular_hours || 0));
-                            const overtime = roundToQuarterHour(parseFloat(day.overtime_hours || 0));
-                            const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
-                            const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
-                            const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
+                        // Sort dates
+                        const sortedDates = Object.keys(entriesByDate).sort();
+                        
+                        sortedDates.forEach(date => {
+                            const dayEntries = entriesByDate[date];
+                            const dateObj = new Date(date);
+                            const dateStr = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
                             
-                            dailyHtml += `
-                                <tr>
-                                    <td><strong>${dateStr}</strong></td>
-                                    <td>${escapeHtml(day.job_name || '-')}</td>
-                                    <td>${clockIn}</td>
-                                    <td>${clockOut}</td>
-                                    <td>${formatHours(regular)}</td>
-                                    <td>${formatHours(overtime)}</td>
-                                    <td>${formatHours(weekend)}</td>
-                                    <td>${formatHours(overnight)}</td>
-                                    <td><strong>${formatHours(total)}</strong></td>
-                                </tr>
-                            `;
+                            // Calculate daily totals
+                            let dayRegular = 0, dayOvertime = 0, dayWeekend = 0, dayOvernight = 0, dayTotal = 0;
+                            
+                            dayEntries.forEach(day => {
+                                dayRegular += roundToQuarterHour(parseFloat(day.regular_hours || 0));
+                                dayOvertime += roundToQuarterHour(parseFloat(day.overtime_hours || 0));
+                                dayWeekend += roundToQuarterHour(parseFloat(day.weekend_hours || 0));
+                                dayOvernight += roundToQuarterHour(parseFloat(day.overnight_hours || 0));
+                                dayTotal += roundToQuarterHour(parseFloat(day.total_hours || 0));
+                            });
+                            
+                            // Show each entry
+                            dayEntries.forEach((day, idx) => {
+                                const clockIn = day.clock_in_time ? formatDateTime(new Date(day.clock_in_time)) : '-';
+                                const clockOut = day.clock_out_time ? formatDateTime(new Date(day.clock_out_time)) : '-';
+                                const regular = roundToQuarterHour(parseFloat(day.regular_hours || 0));
+                                const overtime = roundToQuarterHour(parseFloat(day.overtime_hours || 0));
+                                const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
+                                const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
+                                const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
+                                
+                                dailyHtml += `
+                                    <tr ${idx === 0 ? `style="border-top: 2px solid #4CBB17;"` : ''}>
+                                        <td ${idx === 0 ? `rowspan="${dayEntries.length}" style="vertical-align: top; font-weight: 600;"` : ''}>${idx === 0 ? dateStr : ''}</td>
+                                        <td>${escapeHtml(day.job_name || '-')}</td>
+                                        <td>${clockIn}</td>
+                                        <td>${clockOut}</td>
+                                        <td>${formatHours(regular)}</td>
+                                        <td>${formatHours(overtime)}</td>
+                                        <td>${formatHours(weekend)}</td>
+                                        <td>${formatHours(overnight)}</td>
+                                        <td>${formatHours(total)}</td>
+                                    </tr>
+                                `;
+                            });
+                            
+                            // Add daily total row if multiple entries
+                            if (dayEntries.length > 1) {
+                                dailyHtml += `
+                                    <tr style="background: #f0f0f0; font-weight: 600;">
+                                        <td colspan="4" style="text-align: right;">Daily Total:</td>
+                                        <td>${formatHours(dayRegular)}</td>
+                                        <td>${formatHours(dayOvertime)}</td>
+                                        <td>${formatHours(dayWeekend)}</td>
+                                        <td>${formatHours(dayOvernight)}</td>
+                                        <td><strong>${formatHours(dayTotal)}</strong></td>
+                                    </tr>
+                                `;
+                            }
                         });
                         
                         dailyHtml += '</tbody></table></div>';

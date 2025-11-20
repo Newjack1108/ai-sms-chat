@@ -913,50 +913,34 @@
                 
                 // Create a map of daily entries by date
                 const entriesMap = {};
+                const timesheetEntriesByDate = {}; // Group all timesheet entries by date
+                
+                // Map daily entries
                 dailyEntries.forEach(entry => {
                     entriesMap[entry.entry_date] = entry;
+                    timesheetEntriesByDate[entry.entry_date] = [];
                 });
                 
-                // Also map timesheet entries by date (for entries that don't have daily entries)
+                // Group all timesheet entries by date
                 timesheetEntries.forEach(te => {
                     const clockInDate = new Date(te.clock_in_time);
                     const dateStr = clockInDate.toISOString().split('T')[0];
                     
-                    // Only add if there's no daily entry for this date, or if daily entry doesn't have times
-                    if (!entriesMap[dateStr] || !entriesMap[dateStr].clock_in_time) {
-                        if (!entriesMap[dateStr]) {
-                            entriesMap[dateStr] = {
-                                entry_date: dateStr,
-                                timesheet_entry_id: te.id,
-                                clock_in_time: te.clock_in_time,
-                                clock_out_time: te.clock_out_time,
-                                regular_hours: te.regular_hours || 0,
-                                overtime_hours: te.overtime_hours || 0,
-                                weekend_hours: te.weekend_hours || 0,
-                                overnight_hours: te.overnight_hours || 0,
-                                total_hours: te.total_hours || 0
-                            };
-                        } else {
-                            // Merge timesheet entry data into daily entry
-                            entriesMap[dateStr].timesheet_entry_id = te.id;
-                            entriesMap[dateStr].clock_in_time = entriesMap[dateStr].clock_in_time || te.clock_in_time;
-                            entriesMap[dateStr].clock_out_time = entriesMap[dateStr].clock_out_time || te.clock_out_time;
-                            if (!entriesMap[dateStr].regular_hours && te.regular_hours) {
-                                entriesMap[dateStr].regular_hours = te.regular_hours;
-                            }
-                            if (!entriesMap[dateStr].overtime_hours && te.overtime_hours) {
-                                entriesMap[dateStr].overtime_hours = te.overtime_hours;
-                            }
-                            if (!entriesMap[dateStr].weekend_hours && te.weekend_hours) {
-                                entriesMap[dateStr].weekend_hours = te.weekend_hours;
-                            }
-                            if (!entriesMap[dateStr].overnight_hours && te.overnight_hours) {
-                                entriesMap[dateStr].overnight_hours = te.overnight_hours;
-                            }
-                            if (!entriesMap[dateStr].total_hours && te.total_hours) {
-                                entriesMap[dateStr].total_hours = te.total_hours;
-                            }
-                        }
+                    if (!timesheetEntriesByDate[dateStr]) {
+                        timesheetEntriesByDate[dateStr] = [];
+                    }
+                    timesheetEntriesByDate[dateStr].push(te);
+                    
+                    // Ensure daily entry exists for this date
+                    if (!entriesMap[dateStr]) {
+                        entriesMap[dateStr] = {
+                            entry_date: dateStr,
+                            regular_hours: 0,
+                            overtime_hours: 0,
+                            weekend_hours: 0,
+                            overnight_hours: 0,
+                            total_hours: 0
+                        };
                     }
                 });
                 
@@ -988,35 +972,23 @@
                     const today = new Date();
                     const isToday = dateStr === today.toISOString().split('T')[0];
                     
-                    let clockInTime = '';
-                    let clockOutTime = '';
-                    let regularHours = 0, overtimeHours = 0, weekendHours = 0, overnightHours = 0, dayTotal = 0;
-                    let amendmentStatus = '';
+                    // Get all timesheet entries for this date
+                    const dayEntries = timesheetEntriesByDate[dateStr] || [];
+                    const regularHours = parseFloat(entry?.regular_hours) || 0;
+                    const overtimeHours = parseFloat(entry?.overtime_hours) || 0;
+                    const weekendHours = parseFloat(entry?.weekend_hours) || 0;
+                    const overnightHours = parseFloat(entry?.overnight_hours) || 0;
+                    const dayTotal = parseFloat(entry?.total_hours) || 0;
                     
-                    if (entry) {
-                        if (entry.clock_in_time) {
-                            clockInTime = formatDateTime(new Date(entry.clock_in_time));
-                        }
-                        if (entry.clock_out_time) {
-                            clockOutTime = formatDateTime(new Date(entry.clock_out_time));
-                        }
-                        // Convert to numbers to ensure they're numeric
-                        regularHours = parseFloat(entry.regular_hours) || 0;
-                        overtimeHours = parseFloat(entry.overtime_hours) || 0;
-                        weekendHours = parseFloat(entry.weekend_hours) || 0;
-                        overnightHours = parseFloat(entry.overnight_hours) || 0;
-                        dayTotal = parseFloat(entry.total_hours) || 0;
-                        
-                        totalRegular += regularHours;
-                        totalOvertime += overtimeHours;
-                        totalWeekend += weekendHours;
-                        totalOvernight += overnightHours;
-                        totalHours += dayTotal;
-                    }
+                    totalRegular += regularHours;
+                    totalOvertime += overtimeHours;
+                    totalWeekend += weekendHours;
+                    totalOvernight += overnightHours;
+                    totalHours += dayTotal;
                     
                     const hasHours = dayTotal > 0;
                     const hasEntry = entry !== null;
-                    const hasClockTimes = entry && (entry.clock_in_time || entry.clock_out_time);
+                    const hasClockTimes = dayEntries.length > 0;
                     
                     // Check if amendment is allowed (current week or one week back)
                     let canAmend = false;
@@ -1047,10 +1019,19 @@
                             </div>
                             ${hasClockTimes ? `
                                 <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid #4CBB17;">
-                                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 5px;">Clock Times:</div>
+                                    <div style="font-weight: 600; color: #2c3e50; margin-bottom: 8px;">Clock Times:</div>
                                     <div style="font-size: 14px; color: #555;">
-                                        ${clockInTime ? `<strong>Clock In:</strong> ${clockInTime}` : '<span style="color: #999;">No clock in recorded</span>'}
-                                        ${clockOutTime ? `<br><strong>Clock Out:</strong> ${clockOutTime}` : clockInTime ? '<br><span style="color: #999;">No clock out recorded</span>' : ''}
+                                        ${dayEntries.map((te, idx) => {
+                                            const clockIn = te.clock_in_time ? formatDateTime(new Date(te.clock_in_time)) : '-';
+                                            const clockOut = te.clock_out_time ? formatDateTime(new Date(te.clock_out_time)) : '<span style="color: #999;">Not clocked out</span>';
+                                            return `
+                                                <div style="margin-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; padding-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; border-bottom: ${idx < dayEntries.length - 1 ? '1px solid #ddd' : 'none'};">
+                                                    ${dayEntries.length > 1 ? `<strong style="color: #666;">Entry ${idx + 1}:</strong><br>` : ''}
+                                                    <strong>Clock In:</strong> ${clockIn}<br>
+                                                    <strong>Clock Out:</strong> ${clockOut}
+                                                </div>
+                                            `;
+                                        }).join('')}
                                     </div>
                                 </div>
                             ` : ''}

@@ -2356,17 +2356,20 @@ class ProductionDatabase {
             // Check if overnight away for this day
             const overnightAway = dailyEntry.overnight_away || false;
             
-            // Calculate hours
+            // Calculate hours for this specific entry
             const calculatedHours = await this.calculateTimesheetHours(updatedEntry.id, overnightAway);
             
-            // Update daily entry with calculated hours
+            // Aggregate hours from ALL entries for this day
+            const aggregatedHours = await this.aggregateDailyHours(userId, clockInDateStr, overnightAway);
+            
+            // Update daily entry with aggregated hours from all entries
             await this.updateDailyEntry(dailyEntry.id, {
-                timesheet_entry_id: updatedEntry.id,
-                regular_hours: calculatedHours.regular_hours,
-                overtime_hours: calculatedHours.overtime_hours,
-                weekend_hours: calculatedHours.weekend_hours,
-                overnight_hours: calculatedHours.overnight_hours,
-                total_hours: calculatedHours.total_hours
+                timesheet_entry_id: updatedEntry.id, // Keep reference to most recent entry
+                regular_hours: aggregatedHours.regular_hours,
+                overtime_hours: aggregatedHours.overtime_hours,
+                weekend_hours: aggregatedHours.weekend_hours,
+                overnight_hours: aggregatedHours.overnight_hours,
+                total_hours: aggregatedHours.total_hours
             });
         } catch (error) {
             console.error('Error calculating hours or updating daily entry:', error);
@@ -2600,6 +2603,56 @@ class ProductionDatabase {
     // ============ HOUR CALCULATION AND WEEKLY TIMESHEETS ============
     
     // Calculate hours for a timesheet entry
+    // Aggregate hours from all timesheet entries for a specific date
+    static async aggregateDailyHours(userId, entryDate, overnightAway = false) {
+        const dateStr = entryDate instanceof Date ? entryDate.toISOString().split('T')[0] : entryDate;
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT 
+                    SUM(regular_hours) as total_regular,
+                    SUM(overtime_hours) as total_overtime,
+                    SUM(weekend_hours) as total_weekend,
+                    SUM(overnight_hours) as total_overnight,
+                    SUM(total_hours) as total_hours
+                 FROM timesheet_entries
+                 WHERE user_id = $1 
+                   AND DATE(clock_in_time) = $2::date
+                   AND clock_out_time IS NOT NULL`,
+                [userId, dateStr]
+            );
+            
+            return {
+                regular_hours: parseFloat(result.rows[0]?.total_regular || 0),
+                overtime_hours: parseFloat(result.rows[0]?.total_overtime || 0),
+                weekend_hours: parseFloat(result.rows[0]?.total_weekend || 0),
+                overnight_hours: parseFloat(result.rows[0]?.total_overnight || 0),
+                total_hours: parseFloat(result.rows[0]?.total_hours || 0)
+            };
+        } else {
+            const result = db.prepare(
+                `SELECT 
+                    SUM(regular_hours) as total_regular,
+                    SUM(overtime_hours) as total_overtime,
+                    SUM(weekend_hours) as total_weekend,
+                    SUM(overnight_hours) as total_overnight,
+                    SUM(total_hours) as total_hours
+                 FROM timesheet_entries
+                 WHERE user_id = ? 
+                   AND DATE(clock_in_time) = ?
+                   AND clock_out_time IS NOT NULL`
+            ).get(userId, dateStr);
+            
+            return {
+                regular_hours: parseFloat(result?.total_regular || 0),
+                overtime_hours: parseFloat(result?.total_overtime || 0),
+                weekend_hours: parseFloat(result?.total_weekend || 0),
+                overnight_hours: parseFloat(result?.total_overnight || 0),
+                total_hours: parseFloat(result?.total_hours || 0)
+            };
+        }
+    }
+    
     static async calculateTimesheetHours(entryId, overnightAway = false) {
         const entry = await this.getTimesheetEntryById(entryId);
         if (!entry || !entry.clock_out_time) {
@@ -3302,155 +3355,69 @@ class ProductionDatabase {
     
     // Get daily payroll breakdown for a specific user
     static async getPayrollDailyBreakdown(userId, weekStartDate) {
+        // Calculate week end date
+        const weekStart = new Date(weekStartDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        
         if (isPostgreSQL) {
-            const weekStart = new Date(weekStartDate);
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6);
-            const weekEndStr = weekEnd.toISOString().split('T')[0];
-            
+            // Get all timesheet entries for the week, grouped by date
             const result = await pool.query(
                 `SELECT 
-                    tde.entry_date,
-                    tde.regular_hours,
-                    tde.overtime_hours,
-                    tde.weekend_hours,
-                    tde.overnight_hours,
-                    tde.total_hours,
+                    DATE(te.clock_in_time) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
-                    j.name as job_name
-                 FROM timesheet_daily_entries tde
-                 LEFT JOIN weekly_timesheets wt ON tde.weekly_timesheet_id = wt.id
-                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
-                 LEFT JOIN jobs j ON te.job_id = j.id
-                 WHERE wt.user_id = $1 
-                   AND wt.week_start_date = $2::date
-                   AND tde.total_hours > 0
-                 ORDER BY tde.entry_date`,
-                [userId, weekStartDate]
-            );
-            
-            // Also get entries from timesheet_entries that don't have daily entries
-            const fallbackResult = await pool.query(
-                `SELECT 
-                    DATE(te.clock_in_time) as entry_date,
                     te.regular_hours,
                     te.overtime_hours,
                     te.weekend_hours,
                     te.overnight_hours,
                     te.total_hours,
-                    te.clock_in_time,
-                    te.clock_out_time,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
-                 WHERE te.user_id = $1
+                 WHERE te.user_id = $1 
                    AND te.clock_out_time IS NOT NULL
                    AND DATE(te.clock_in_time) >= $2::date
                    AND DATE(te.clock_in_time) <= $3::date
-                   AND NOT EXISTS (
-                       SELECT 1 FROM timesheet_daily_entries tde2 
-                       WHERE tde2.timesheet_entry_id = te.id
-                   )
-                   AND te.total_hours > 0
-                 ORDER BY DATE(te.clock_in_time)`,
+                 ORDER BY DATE(te.clock_in_time), te.clock_in_time`,
                 [userId, weekStartDate, weekEndStr]
             );
             
-            // Combine and deduplicate by date
-            const dailyMap = new Map();
-            
-            result.rows.forEach(row => {
-                const date = row.entry_date;
-                if (!dailyMap.has(date) || (dailyMap.get(date).total_hours || 0) < (row.total_hours || 0)) {
-                    dailyMap.set(date, row);
-                }
+            // Return all entries (no deduplication needed - we want all entries per day)
+            return result.rows.sort((a, b) => {
+                const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
+                if (dateCompare !== 0) return dateCompare;
+                return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
-            
-            fallbackResult.rows.forEach(row => {
-                const date = row.entry_date;
-                if (!dailyMap.has(date)) {
-                    dailyMap.set(date, row);
-                }
-            });
-            
-            return Array.from(dailyMap.values()).sort((a, b) => 
-                new Date(a.entry_date) - new Date(b.entry_date)
-            );
         } else {
-            // Calculate week end date
-            const weekStart = new Date(weekStartDate);
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6);
-            const weekEndStr = weekEnd.toISOString().split('T')[0];
-            
+            // Get all timesheet entries for the week, grouped by date
             const result = db.prepare(
                 `SELECT 
-                    tde.entry_date,
-                    tde.regular_hours,
-                    tde.overtime_hours,
-                    tde.weekend_hours,
-                    tde.overnight_hours,
-                    tde.total_hours,
+                    DATE(te.clock_in_time) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
-                    j.name as job_name
-                 FROM timesheet_daily_entries tde
-                 LEFT JOIN weekly_timesheets wt ON tde.weekly_timesheet_id = wt.id
-                 LEFT JOIN timesheet_entries te ON tde.timesheet_entry_id = te.id
-                 LEFT JOIN jobs j ON te.job_id = j.id
-                 WHERE wt.user_id = ? 
-                   AND wt.week_start_date = ?
-                   AND tde.total_hours > 0
-                 ORDER BY tde.entry_date`
-            ).all(userId, weekStartDate);
-            
-            // Also get entries from timesheet_entries that don't have daily entries
-            const fallbackResult = db.prepare(
-                `SELECT 
-                    DATE(te.clock_in_time) as entry_date,
                     te.regular_hours,
                     te.overtime_hours,
                     te.weekend_hours,
                     te.overnight_hours,
                     te.total_hours,
-                    te.clock_in_time,
-                    te.clock_out_time,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
-                 WHERE te.user_id = ?
+                 WHERE te.user_id = ? 
                    AND te.clock_out_time IS NOT NULL
                    AND DATE(te.clock_in_time) >= ?
                    AND DATE(te.clock_in_time) <= ?
-                   AND NOT EXISTS (
-                       SELECT 1 FROM timesheet_daily_entries tde2 
-                       WHERE tde2.timesheet_entry_id = te.id
-                   )
-                   AND te.total_hours > 0
-                 ORDER BY DATE(te.clock_in_time)`
+                 ORDER BY DATE(te.clock_in_time), te.clock_in_time`
             ).all(userId, weekStartDate, weekEndStr);
             
-            // Combine and deduplicate by date
-            const dailyMap = new Map();
-            
-            result.forEach(row => {
-                const date = row.entry_date;
-                if (!dailyMap.has(date) || (dailyMap.get(date).total_hours || 0) < (row.total_hours || 0)) {
-                    dailyMap.set(date, row);
-                }
+            // Return all entries (no deduplication needed - we want all entries per day)
+            return result.sort((a, b) => {
+                const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
+                if (dateCompare !== 0) return dateCompare;
+                return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
-            
-            fallbackResult.forEach(row => {
-                const date = row.entry_date;
-                if (!dailyMap.has(date)) {
-                    dailyMap.set(date, row);
-                }
-            });
-            
-            return Array.from(dailyMap.values()).sort((a, b) => 
-                new Date(a.entry_date) - new Date(b.entry_date)
-            );
         }
     }
     
