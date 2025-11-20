@@ -370,7 +370,7 @@
                                                 <td>
                                                     <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
                                                     ${qtyBuilt > 0 ? `
-                                                        <button onclick="addToStock(${item.panel_id}, ${qtyBuilt}, ${item.id})" class="btn btn-success btn-sm" title="Add built quantity to panel stock">Add to Stock</button>
+                                                        <button onclick="addToStock(${item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add built quantity to panel stock">Add to Stock</button>
                                                     ` : ''}
                                                     <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                 </td>
@@ -746,12 +746,47 @@
             return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
         }
         
-        async function addToStock(panelId, quantity, plannerItemId) {
-            if (!confirm(`Add ${quantity.toFixed(2)} units to panel stock and remove from planner?`)) {
+        async function addToStock(panelId, quantity, plannerItemId, hoursUsed) {
+            if (!confirm(`Add ${quantity.toFixed(2)} units to panel stock, mark as completed, and remove from planner?\n\nHours used (${hoursUsed.toFixed(2)}) will be deducted from available hours.`)) {
                 return;
             }
             
             try {
+                // First, get the planner item to get planner_id
+                const plannerData = await apiCall(`/planner/${currentPlannerId}`);
+                const item = plannerData.items.find(i => i.id === plannerItemId);
+                if (!item) {
+                    throw new Error('Planner item not found');
+                }
+                
+                // Mark the planner item as completed
+                await apiCall(`/planner/items/${plannerItemId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        quantity_to_build: parseFloat(item.quantity_to_build || 0),
+                        quantity_built: parseFloat(item.quantity_built || 0),
+                        hours_used: parseFloat(hoursUsed || 0),
+                        priority: item.priority,
+                        status: 'completed'
+                    })
+                });
+                
+                // Get current planner to calculate new hours_available
+                const planner = plannerData.planner;
+                const currentHoursAvailable = parseFloat(planner.hours_available || 0);
+                const hoursToDeduct = parseFloat(hoursUsed || 0);
+                const newHoursAvailable = Math.max(0, currentHoursAvailable - hoursToDeduct);
+                
+                // Update planner hours_available
+                await apiCall(`/planner/${currentPlannerId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        staff_available: parseInt(planner.staff_available || 1),
+                        hours_available: newHoursAvailable,
+                        notes: planner.notes || ''
+                    })
+                });
+                
                 // Record panel movement to add to stock
                 await apiCall(`/panels/${panelId}/movement`, {
                     method: 'POST',
@@ -765,7 +800,7 @@
                 // Remove the planner item after successfully adding to stock
                 await apiCall(`/planner/items/${plannerItemId}`, { method: 'DELETE' });
                 
-                showAlert(`Added ${quantity.toFixed(2)} units to panel stock and removed from planner`, 'success');
+                showAlert(`Added ${quantity.toFixed(2)} units to panel stock, marked as completed, and deducted ${hoursToDeduct.toFixed(2)} hours from available hours`, 'success');
                 // Reload planner to refresh data
                 loadPlanner();
             } catch (error) {
