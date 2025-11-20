@@ -783,7 +783,10 @@
                 showAlert('Clocked in successfully');
                 await loadClockStatus();
             } catch (error) {
-                showAlert(error.message || 'Failed to clock in', 'error');
+                const errorMsg = error.message || 'Failed to clock in';
+                showAlert(errorMsg, 'error');
+                // Reload clock status to show current state
+                await loadClockStatus();
             } finally {
                 clockInBtn.disabled = false;
                 clockInBtn.textContent = 'Clock In';

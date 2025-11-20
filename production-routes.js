@@ -814,7 +814,7 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
         if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed.' 
+                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed. If you need to clock in again, please contact an admin to delete the existing entry first.' 
             });
         }
         
@@ -961,7 +961,7 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
         if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed.' 
+                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed. If you need to clock in again, please contact an admin to delete the existing entry first.' 
             });
         }
         
