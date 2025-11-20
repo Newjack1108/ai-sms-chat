@@ -1776,8 +1776,13 @@ class ProductionDatabase {
         }
         
         const hoursAvailable = parseFloat(planner.hours_available || 0);
-        // Handle division by zero - if no hours required, we're at 100% (nothing to do)
-        const buildRate = totalHoursRequired > 0 ? (hoursAvailable / totalHoursRequired) * 100 : (hoursAvailable > 0 ? 100 : 0);
+        // Calculate build rate as hours_required / hours_available * 100
+        // This shows what percentage of available hours are being used
+        const buildRate = hoursAvailable > 0 ? (totalHoursRequired / hoursAvailable) * 100 : (totalHoursRequired > 0 ? 100 : 0);
+        
+        // Color logic: under 80% = red (inefficient), above 80% = green (good utilization)
+        const indicator = buildRate >= 80 ? 'green' : 'red';
+        const emoji = buildRate >= 80 ? '😊' : '😐';
         
         return {
             hours_available: hoursAvailable,
@@ -1786,8 +1791,8 @@ class ProductionDatabase {
             hours_excess: Math.max(0, hoursAvailable - totalHoursRequired),
             build_rate_percent: buildRate,
             is_feasible: totalHoursRequired <= hoursAvailable,
-            indicator: buildRate > 100 ? 'green' : (buildRate >= 80 ? 'yellow' : 'red'),
-            emoji: buildRate > 100 ? '😊' : (buildRate >= 80 ? '😐' : '😟')
+            indicator: indicator,
+            emoji: emoji
         };
     }
     
