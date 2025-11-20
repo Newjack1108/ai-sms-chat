@@ -1206,6 +1206,18 @@ router.get('/clock/payroll/:weekStart', requireProductionAuth, requireManager, a
     }
 });
 
+router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const weekStartDate = req.params.weekStart;
+        const userId = parseInt(req.params.userId);
+        const dailyBreakdown = await ProductionDatabase.getPayrollDailyBreakdown(userId, weekStartDate);
+        res.json({ success: true, dailyBreakdown });
+    } catch (error) {
+        console.error('Get payroll daily breakdown error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get daily breakdown' });
+    }
+});
+
 router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;

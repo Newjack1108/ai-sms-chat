@@ -953,6 +953,7 @@
                     <table class="table" style="font-size: 14px;">
                         <thead>
                             <tr>
+                                <th style="width: 30px;"></th>
                                 <th>Staff Name</th>
                                 <th>Regular Hours</th>
                                 <th>Overtime (1.25x)</th>
@@ -970,7 +971,10 @@
                                 const overnight = roundToQuarterHour(parseFloat(row.total_overnight_hours || 0));
                                 const total = roundToQuarterHour(parseFloat(row.total_hours || 0));
                                 return `
-                                <tr>
+                                <tr class="payroll-row" data-user-id="${row.user_id}" style="cursor: pointer;" onclick="toggleDailyBreakdown(${row.user_id}, '${weekStart}')">
+                                    <td style="text-align: center;">
+                                        <span class="expand-icon" id="icon-${row.user_id}">▶</span>
+                                    </td>
                                     <td><strong>${escapeHtml(row.username || 'Unknown')}</strong></td>
                                     <td>${formatHours(regular)}</td>
                                     <td>${formatHours(overtime)}</td>
@@ -979,9 +983,17 @@
                                     <td><strong>${formatHours(total)}</strong></td>
                                     <td>${row.days_worked || 0}</td>
                                 </tr>
+                                <tr id="daily-${row.user_id}" style="display: none;">
+                                    <td colspan="8" style="padding: 0; background: #f8f9fa;">
+                                        <div id="daily-content-${row.user_id}" style="padding: 15px;">
+                                            <div class="loading">Loading daily breakdown...</div>
+                                        </div>
+                                    </td>
+                                </tr>
                             `;
                             }).join('')}
                             <tr style="background: #f8f9fa; font-weight: 700;">
+                                <td></td>
                                 <td><strong>TOTALS</strong></td>
                                 <td>${formatHours(totalRegular)}</td>
                                 <td>${formatHours(totalOvertime)}</td>
@@ -992,12 +1004,114 @@
                             </tr>
                         </tbody>
                     </table>
+                    <style>
+                        .payroll-row:hover {
+                            background-color: #f0f0f0 !important;
+                        }
+                        .expand-icon {
+                            display: inline-block;
+                            transition: transform 0.2s;
+                            font-size: 10px;
+                            color: #666;
+                        }
+                        .expand-icon.expanded {
+                            transform: rotate(90deg);
+                        }
+                        .daily-breakdown {
+                            margin-top: 10px;
+                        }
+                        .daily-breakdown table {
+                            width: 100%;
+                            font-size: 13px;
+                            background: white;
+                            border-radius: 4px;
+                        }
+                        .daily-breakdown th {
+                            background: #4CBB17;
+                            color: white;
+                            padding: 8px;
+                            text-align: left;
+                            font-weight: 600;
+                        }
+                        .daily-breakdown td {
+                            padding: 8px;
+                            border-bottom: 1px solid #eee;
+                        }
+                        .daily-breakdown tr:last-child td {
+                            border-bottom: none;
+                        }
+                    </style>
                 `;
             } catch (error) {
                 console.error('Error loading payroll summary:', error);
                 document.getElementById('payrollSummary').innerHTML = 
                     `<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading payroll summary: ${error.message || 'Unknown error'}</p>`;
                 showAlert('Error loading payroll summary: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function toggleDailyBreakdown(userId, weekStart) {
+            const row = document.getElementById(`daily-${userId}`);
+            const icon = document.getElementById(`icon-${userId}`);
+            const content = document.getElementById(`daily-content-${userId}`);
+            
+            if (!row || !content) return;
+            
+            if (row.style.display === 'none') {
+                // Expand
+                row.style.display = 'table-row';
+                if (icon) icon.classList.add('expanded');
+                
+                // Load daily breakdown if not already loaded
+                if (content.innerHTML.includes('Loading daily breakdown')) {
+                    try {
+                        const data = await apiCall(`/clock/payroll/${weekStart}/user/${userId}/daily`);
+                        const dailyBreakdown = data.dailyBreakdown || [];
+                        
+                        if (dailyBreakdown.length === 0) {
+                            content.innerHTML = '<p style="text-align: center; padding: 10px; color: #666;">No daily entries found</p>';
+                            return;
+                        }
+                        
+                        let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th></tr></thead><tbody>';
+                        
+                        dailyBreakdown.forEach(day => {
+                            const date = new Date(day.entry_date);
+                            const dateStr = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                            const clockIn = day.clock_in_time ? formatDateTime(new Date(day.clock_in_time)) : '-';
+                            const clockOut = day.clock_out_time ? formatDateTime(new Date(day.clock_out_time)) : '-';
+                            const regular = roundToQuarterHour(parseFloat(day.regular_hours || 0));
+                            const overtime = roundToQuarterHour(parseFloat(day.overtime_hours || 0));
+                            const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
+                            const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
+                            const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
+                            
+                            dailyHtml += `
+                                <tr>
+                                    <td><strong>${dateStr}</strong></td>
+                                    <td>${escapeHtml(day.job_name || '-')}</td>
+                                    <td>${clockIn}</td>
+                                    <td>${clockOut}</td>
+                                    <td>${formatHours(regular)}</td>
+                                    <td>${formatHours(overtime)}</td>
+                                    <td>${formatHours(weekend)}</td>
+                                    <td>${formatHours(overnight)}</td>
+                                    <td><strong>${formatHours(total)}</strong></td>
+                                </tr>
+                            `;
+                        });
+                        
+                        dailyHtml += '</tbody></table></div>';
+                        content.innerHTML = dailyHtml;
+                    } catch (error) {
+                        console.error('Error loading daily breakdown:', error);
+                        content.innerHTML = `<p style="text-align: center; padding: 10px; color: #e74c3c;">Error loading daily breakdown: ${error.message || 'Unknown error'}</p>`;
+                    }
+                }
+            } else {
+                // Collapse
+                row.style.display = 'none';
+                if (icon) icon.classList.remove('expanded');
             }
         }
         
