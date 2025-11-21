@@ -172,6 +172,8 @@
         </div>
     </div>
     
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <script src="common.js"></script>
     <script>
         let currentUser = null;
@@ -576,6 +578,7 @@
             try {
                 const data = await apiCall(`/planner/${plannerId}`);
                 const efficiency = await apiCall(`/planner/${plannerId}/efficiency`);
+                const buildRate = await apiCall(`/planner/${plannerId}/build-rate`);
                 const planner = data.planner;
                 const items = data.items || [];
                 
@@ -583,96 +586,379 @@
                 const weekEnd = new Date(weekStart);
                 weekEnd.setDate(weekEnd.getDate() + 6);
                 
+                // Calculate status and priority breakdowns
+                const statusCounts = { planned: 0, in_progress: 0, completed: 0 };
+                const priorityCounts = { high: 0, medium: 0, low: 0 };
+                items.forEach(item => {
+                    if (item.status) statusCounts[item.status] = (statusCounts[item.status] || 0) + 1;
+                    if (item.priority) priorityCounts[item.priority] = (priorityCounts[item.priority] || 0) + 1;
+                });
+                
+                const completionRate = efficiency.efficiency.panels_planned > 0 
+                    ? (efficiency.efficiency.panels_built / efficiency.efficiency.panels_planned) * 100 
+                    : 0;
+                
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
-                modal.style.maxWidth = '900px';
+                modal.style.maxWidth = '1000px';
                 modal.innerHTML = `
                     <div class="modal-content">
-                        <div class="modal-header">
+                        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
                             <h3>Weekly Production Report</h3>
-                            <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                            <div>
+                                <button onclick="generatePDFReport(${plannerId})" class="btn btn-primary btn-sm" style="margin-right: 10px;">
+                                    📥 Download PDF
+                                </button>
+                                <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                            </div>
                         </div>
-                        <div>
-                            <h4>Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</h4>
+                        <div style="padding: 20px;">
+                            <h4 style="margin-bottom: 20px; color: #2c3e50;">Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</h4>
                             
-                            <div class="planner-summary" style="margin: 20px 0;">
-                                <div class="summary-card">
-                                    <h4>Hours Available</h4>
-                                    <p>${efficiency.efficiency.hours_available.toFixed(1)}</p>
-                                </div>
-                                <div class="summary-card">
-                                    <h4>Hours Planned</h4>
-                                    <p>${efficiency.efficiency.hours_planned.toFixed(1)}</p>
-                                </div>
-                                <div class="summary-card">
-                                    <h4>Hours Used</h4>
-                                    <p>${efficiency.efficiency.hours_used.toFixed(1)}</p>
-                                </div>
-                                <div class="summary-card">
-                                    <h4>Panels Planned</h4>
-                                    <p>${efficiency.efficiency.panels_planned.toFixed(1)}</p>
-                                </div>
-                                <div class="summary-card">
-                                    <h4>Panels Built</h4>
-                                    <p>${efficiency.efficiency.panels_built.toFixed(1)}</p>
+                            <div style="margin-bottom: 30px;">
+                                <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Key Metrics</h5>
+                                <div class="planner-summary">
+                                    <div class="summary-card">
+                                        <h4>Hours Available</h4>
+                                        <p>${efficiency.efficiency.hours_available.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Hours Planned</h4>
+                                        <p>${efficiency.efficiency.hours_planned.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Hours Used</h4>
+                                        <p>${efficiency.efficiency.hours_used.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Hours Spare</h4>
+                                        <p style="color: ${buildRate.build_rate.hours_excess > 0 ? '#28a745' : '#dc3545'}">
+                                            ${buildRate.build_rate.hours_excess.toFixed(1)}
+                                        </p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Panels Planned</h4>
+                                        <p>${efficiency.efficiency.panels_planned.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Panels Built</h4>
+                                        <p>${efficiency.efficiency.panels_built.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Completion Rate</h4>
+                                        <p>${completionRate.toFixed(1)}%</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Staff Available</h4>
+                                        <p>${planner.staff_available || 1}</p>
+                                    </div>
                                 </div>
                             </div>
                             
-                            <div style="text-align: center; margin: 20px 0;">
-                                <div class="build-rate-indicator ${efficiency.efficiency.indicator}">
-                                    <div>
-                                        <div style="font-size: 24px; font-weight: bold;">Efficiency: ${efficiency.efficiency.overall_efficiency.toFixed(1)}%</div>
-                                        <div style="font-size: 14px; font-weight: normal; margin-top: 10px;">
-                                            Hours: ${efficiency.efficiency.hours_efficiency.toFixed(1)}% | 
-                                            Panels: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%
+                            <div style="margin-bottom: 30px;">
+                                <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Performance Indicators</h5>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                    <div style="text-align: center;">
+                                        <div class="build-rate-indicator ${buildRate.build_rate.indicator}">
+                                            <div>
+                                                <div style="font-size: 20px; font-weight: bold;">Build Rate: ${buildRate.build_rate.build_rate_percent.toFixed(1)}%</div>
+                                                <div style="font-size: 12px; font-weight: normal; margin-top: 8px;">
+                                                    ${buildRate.build_rate.hours_shortfall > 0 
+                                                        ? `${buildRate.build_rate.hours_shortfall.toFixed(1)} hours short` 
+                                                        : `${buildRate.build_rate.hours_excess.toFixed(1)} hours spare`}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="text-align: center;">
+                                        <div class="build-rate-indicator ${efficiency.efficiency.indicator}">
+                                            <div>
+                                                <div style="font-size: 20px; font-weight: bold;">Efficiency: ${efficiency.efficiency.overall_efficiency.toFixed(1)}%</div>
+                                                <div style="font-size: 12px; font-weight: normal; margin-top: 8px;">
+                                                    Hours: ${efficiency.efficiency.hours_efficiency.toFixed(1)}% | 
+                                                    Panels: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <h4>Production Details</h4>
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Panel</th>
-                                        <th>Planned</th>
-                                        <th>Built</th>
-                                        <th>Hours Used</th>
-                                        <th>Efficiency</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${items.map(item => {
-                                        const qtyPlanned = parseFloat(item.quantity_to_build || 0);
-                                        const qtyBuilt = parseFloat(item.quantity_built || 0);
-                                        const hoursUsed = parseFloat(item.hours_used || 0);
-                                        const hoursPerUnit = parseFloat(item.labour_hours || 0);
-                                        const expectedHours = hoursPerUnit * qtyBuilt;
-                                        const itemEfficiency = expectedHours > 0 ? (expectedHours / hoursUsed) * 100 : 0;
-                                        const itemIndicator = itemEfficiency >= 95 ? 'green' : (itemEfficiency >= 80 ? 'yellow' : 'red');
-                                        
-                                        return `
+                            <div style="margin-bottom: 30px;">
+                                <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Breakdowns</h5>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                    <div>
+                                        <h6 style="margin-bottom: 10px; color: #495057;">Status Breakdown</h6>
+                                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                                            <div style="margin-bottom: 8px;"><strong>Planned:</strong> ${statusCounts.planned || 0} items</div>
+                                            <div style="margin-bottom: 8px;"><strong>In Progress:</strong> ${statusCounts.in_progress || 0} items</div>
+                                            <div><strong>Completed:</strong> ${statusCounts.completed || 0} items</div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h6 style="margin-bottom: 10px; color: #495057;">Priority Breakdown</h6>
+                                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                                            <div style="margin-bottom: 8px;"><strong>High:</strong> ${priorityCounts.high || 0} items</div>
+                                            <div style="margin-bottom: 8px;"><strong>Medium:</strong> ${priorityCounts.medium || 0} items</div>
+                                            <div><strong>Low:</strong> ${priorityCounts.low || 0} items</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            ${planner.notes ? `
+                                <div style="margin-bottom: 30px;">
+                                    <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Notes</h5>
+                                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #667eea;">
+                                        ${escapeHtml(planner.notes)}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            <div>
+                                <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Production Details</h5>
+                                ${items.length === 0 ? '<p>No items in this week\'s planner</p>' : `
+                                    <table class="table">
+                                        <thead>
                                             <tr>
-                                                <td><strong>${item.panel_name}</strong></td>
-                                                <td>${qtyPlanned.toFixed(2)}</td>
-                                                <td>${qtyBuilt.toFixed(2)}</td>
-                                                <td>${hoursUsed.toFixed(2)}</td>
-                                                <td>
-                                                    <span class="badge badge-${itemIndicator === 'green' ? 'success' : itemIndicator === 'yellow' ? 'warning' : 'danger'}">
-                                                        ${itemEfficiency.toFixed(1)}%
-                                                    </span>
-                                                </td>
+                                                <th>Panel</th>
+                                                <th>Planned</th>
+                                                <th>Built</th>
+                                                <th>Hours Used</th>
+                                                <th>Priority</th>
+                                                <th>Status</th>
+                                                <th>Efficiency</th>
                                             </tr>
-                                        `;
-                                    }).join('')}
-                                </tbody>
-                            </table>
+                                        </thead>
+                                        <tbody>
+                                            ${items.map(item => {
+                                                const qtyPlanned = parseFloat(item.quantity_to_build || 0);
+                                                const qtyBuilt = parseFloat(item.quantity_built || 0);
+                                                const hoursUsed = parseFloat(item.hours_used || 0);
+                                                const hoursPerUnit = parseFloat(item.labour_hours || 0);
+                                                const expectedHours = hoursPerUnit * qtyBuilt;
+                                                const itemEfficiency = expectedHours > 0 ? (expectedHours / hoursUsed) * 100 : 0;
+                                                const itemIndicator = itemEfficiency >= 95 ? 'green' : (itemEfficiency >= 80 ? 'yellow' : 'red');
+                                                
+                                                return `
+                                                    <tr>
+                                                        <td><strong>${item.panel_name}</strong></td>
+                                                        <td>${qtyPlanned.toFixed(2)}</td>
+                                                        <td>${qtyBuilt.toFixed(2)}</td>
+                                                        <td>${hoursUsed.toFixed(2)}</td>
+                                                        <td><span class="badge badge-${item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'info'}">${item.priority || 'N/A'}</span></td>
+                                                        <td><span class="badge badge-info">${item.status || 'N/A'}</span></td>
+                                                        <td>
+                                                            <span class="badge badge-${itemIndicator === 'green' ? 'success' : itemIndicator === 'yellow' ? 'warning' : 'danger'}">
+                                                                ${itemEfficiency.toFixed(1)}%
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                `;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                `}
+                            </div>
                         </div>
                     </div>
                 `;
                 document.body.appendChild(modal);
             } catch (error) {
-                showAlert('Error loading efficiency report', 'error');
+                console.error('Error loading efficiency report:', error);
+                showAlert('Error loading efficiency report: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function generatePDFReport(plannerId) {
+            try {
+                // Fetch all required data
+                const data = await apiCall(`/planner/${plannerId}`);
+                const efficiency = await apiCall(`/planner/${plannerId}/efficiency`);
+                const buildRate = await apiCall(`/planner/${plannerId}/build-rate`);
+                const planner = data.planner;
+                const items = data.items || [];
+                
+                const weekStart = new Date(planner.week_start_date);
+                const weekEnd = new Date(weekStart);
+                weekEnd.setDate(weekEnd.getDate() + 6);
+                
+                // Calculate breakdowns
+                const statusCounts = { planned: 0, in_progress: 0, completed: 0 };
+                const priorityCounts = { high: 0, medium: 0, low: 0 };
+                items.forEach(item => {
+                    if (item.status) statusCounts[item.status] = (statusCounts[item.status] || 0) + 1;
+                    if (item.priority) priorityCounts[item.priority] = (priorityCounts[item.priority] || 0) + 1;
+                });
+                
+                const completionRate = efficiency.efficiency.panels_planned > 0 
+                    ? (efficiency.efficiency.panels_built / efficiency.efficiency.panels_planned) * 100 
+                    : 0;
+                
+                // Initialize PDF
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                let yPos = 20;
+                
+                // Header
+                doc.setFontSize(20);
+                doc.setFont(undefined, 'bold');
+                doc.text('Weekly Production Report', 105, yPos, { align: 'center' });
+                yPos += 10;
+                
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}`, 105, yPos, { align: 'center' });
+                yPos += 15;
+                
+                // Key Metrics Section
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Key Metrics', 14, yPos);
+                yPos += 8;
+                
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                const metrics = [
+                    ['Hours Available', efficiency.efficiency.hours_available.toFixed(1)],
+                    ['Hours Planned', efficiency.efficiency.hours_planned.toFixed(1)],
+                    ['Hours Used', efficiency.efficiency.hours_used.toFixed(1)],
+                    ['Hours Spare', buildRate.build_rate.hours_excess.toFixed(1)],
+                    ['Panels Planned', efficiency.efficiency.panels_planned.toFixed(1)],
+                    ['Panels Built', efficiency.efficiency.panels_built.toFixed(1)],
+                    ['Completion Rate', completionRate.toFixed(1) + '%'],
+                    ['Staff Available', (planner.staff_available || 1).toString()]
+                ];
+                
+                let xPos = 14;
+                metrics.forEach((metric, index) => {
+                    if (index % 2 === 0 && index > 0) {
+                        xPos = 14;
+                        yPos += 7;
+                    }
+                    doc.setFont(undefined, 'bold');
+                    doc.text(metric[0] + ':', xPos, yPos);
+                    doc.setFont(undefined, 'normal');
+                    doc.text(metric[1], xPos + 50, yPos);
+                    if (index % 2 === 0) {
+                        xPos = 105;
+                    }
+                });
+                yPos += 15;
+                
+                // Performance Indicators
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Performance Indicators', 14, yPos);
+                yPos += 8;
+                
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Build Rate: ${buildRate.build_rate.build_rate_percent.toFixed(1)}%`, 14, yPos);
+                doc.text(buildRate.build_rate.hours_shortfall > 0 
+                    ? `Hours Short: ${buildRate.build_rate.hours_shortfall.toFixed(1)}` 
+                    : `Hours Spare: ${buildRate.build_rate.hours_excess.toFixed(1)}`, 14, yPos + 5);
+                yPos += 10;
+                
+                doc.text(`Overall Efficiency: ${efficiency.efficiency.overall_efficiency.toFixed(1)}%`, 14, yPos);
+                doc.text(`Hours Efficiency: ${efficiency.efficiency.hours_efficiency.toFixed(1)}%`, 14, yPos + 5);
+                doc.text(`Panels Efficiency: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%`, 14, yPos + 10);
+                yPos += 18;
+                
+                // Breakdowns
+                doc.setFontSize(14);
+                doc.setFont(undefined, 'bold');
+                doc.text('Breakdowns', 14, yPos);
+                yPos += 8;
+                
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.text('Status Breakdown:', 14, yPos);
+                doc.text(`  Planned: ${statusCounts.planned || 0} items`, 20, yPos + 5);
+                doc.text(`  In Progress: ${statusCounts.in_progress || 0} items`, 20, yPos + 10);
+                doc.text(`  Completed: ${statusCounts.completed || 0} items`, 20, yPos + 15);
+                yPos += 25;
+                
+                doc.text('Priority Breakdown:', 14, yPos);
+                doc.text(`  High: ${priorityCounts.high || 0} items`, 20, yPos + 5);
+                doc.text(`  Medium: ${priorityCounts.medium || 0} items`, 20, yPos + 10);
+                doc.text(`  Low: ${priorityCounts.low || 0} items`, 20, yPos + 15);
+                yPos += 20;
+                
+                // Notes
+                if (planner.notes) {
+                    doc.setFontSize(14);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Notes', 14, yPos);
+                    yPos += 8;
+                    
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'normal');
+                    const notesLines = doc.splitTextToSize(planner.notes, 180);
+                    doc.text(notesLines, 14, yPos);
+                    yPos += notesLines.length * 5 + 5;
+                }
+                
+                // Production Details Table
+                if (items.length > 0) {
+                    doc.setFontSize(14);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Production Details', 14, yPos);
+                    yPos += 5;
+                    
+                    const tableData = items.map(item => {
+                        const qtyPlanned = parseFloat(item.quantity_to_build || 0);
+                        const qtyBuilt = parseFloat(item.quantity_built || 0);
+                        const hoursUsed = parseFloat(item.hours_used || 0);
+                        const hoursPerUnit = parseFloat(item.labour_hours || 0);
+                        const expectedHours = hoursPerUnit * qtyBuilt;
+                        const itemEfficiency = expectedHours > 0 ? (expectedHours / hoursUsed) * 100 : 0;
+                        
+                        return [
+                            item.panel_name || 'N/A',
+                            qtyPlanned.toFixed(2),
+                            qtyBuilt.toFixed(2),
+                            hoursUsed.toFixed(2),
+                            item.priority || 'N/A',
+                            item.status || 'N/A',
+                            itemEfficiency.toFixed(1) + '%'
+                        ];
+                    });
+                    
+                    doc.autoTable({
+                        startY: yPos,
+                        head: [['Panel', 'Planned', 'Built', 'Hours Used', 'Priority', 'Status', 'Efficiency']],
+                        body: tableData,
+                        theme: 'striped',
+                        headStyles: { fillColor: [102, 126, 234], textColor: 255, fontStyle: 'bold' },
+                        styles: { fontSize: 9 },
+                        margin: { left: 14, right: 14 }
+                    });
+                }
+                
+                // Footer
+                const pageCount = doc.internal.getNumberOfPages();
+                for (let i = 1; i <= pageCount; i++) {
+                    doc.setPage(i);
+                    doc.setFontSize(8);
+                    doc.setFont(undefined, 'italic');
+                    doc.text(
+                        `Generated: ${new Date().toLocaleString()} - Page ${i} of ${pageCount}`,
+                        105,
+                        doc.internal.pageSize.height - 10,
+                        { align: 'center' }
+                    );
+                }
+                
+                // Save PDF
+                const fileName = `Weekly_Report_${weekStart.toISOString().split('T')[0]}.pdf`;
+                doc.save(fileName);
+                
+                showAlert('PDF report generated successfully', 'success');
+            } catch (error) {
+                console.error('Error generating PDF:', error);
+                showAlert('Error generating PDF: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         
@@ -744,6 +1030,13 @@
         
         function formatDate(date) {
             return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         async function addToStock(panelId, quantity, plannerItemId, hoursUsed) {
