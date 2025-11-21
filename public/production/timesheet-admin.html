@@ -1088,9 +1088,16 @@
                         dailyBreakdown.forEach(day => {
                             const date = day.entry_date;
                             if (!entriesByDate[date]) {
-                                entriesByDate[date] = [];
+                                entriesByDate[date] = {
+                                    entries: [],
+                                    daily_notes: day.daily_notes || null
+                                };
                             }
-                            entriesByDate[date].push(day);
+                            entriesByDate[date].entries.push(day);
+                            // Use the first entry's daily_notes (they should all be the same for the same date)
+                            if (!entriesByDate[date].daily_notes && day.daily_notes) {
+                                entriesByDate[date].daily_notes = day.daily_notes;
+                            }
                         });
                         
                         let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Location</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th><th>Actions</th></tr></thead><tbody>';
@@ -1099,7 +1106,8 @@
                         const sortedDates = Object.keys(entriesByDate).sort();
                         
                         sortedDates.forEach(date => {
-                            const dayEntries = entriesByDate[date];
+                            const dayData = entriesByDate[date];
+                            const dayEntries = dayData.entries;
                             const dateObj = new Date(date);
                             const dateStr = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
                             
@@ -1178,6 +1186,47 @@
                                         <td></td>
                                     </tr>
                                 `;
+                            }
+                            
+                            // Add activities section for this day
+                            if (dayData.daily_notes) {
+                                let activities = [];
+                                try {
+                                    const parsed = JSON.parse(dayData.daily_notes);
+                                    if (Array.isArray(parsed)) {
+                                        activities = parsed;
+                                    } else if (typeof parsed === 'string' && parsed.trim()) {
+                                        activities = [{ timestamp: new Date().toISOString(), note: parsed }];
+                                    }
+                                } catch (e) {
+                                    if (dayData.daily_notes.trim()) {
+                                        activities = [{ timestamp: new Date().toISOString(), note: dayData.daily_notes }];
+                                    }
+                                }
+                                
+                                if (activities.length > 0) {
+                                    const activitiesHtml = activities.map(activity => {
+                                        const time = new Date(activity.timestamp);
+                                        const timeStr = time.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                                        return `
+                                            <div style="background: #f8f9fa; padding: 8px; margin: 4px 0; border-radius: 4px; border-left: 3px solid #4CBB17; font-size: 12px;">
+                                                <div style="color: #666; margin-bottom: 2px;">${timeStr}</div>
+                                                <div style="color: #2c3e50;">${escapeHtml(activity.note || '')}</div>
+                                            </div>
+                                        `;
+                                    }).join('');
+                                    
+                                    dailyHtml += `
+                                        <tr>
+                                            <td colspan="11" style="padding: 10px; background: #f8f9fa; border-top: 2px solid #ddd;">
+                                                <div style="font-weight: 600; margin-bottom: 8px; color: #667eea;">Daily Activities (${activities.length}):</div>
+                                                <div style="max-height: 200px; overflow-y: auto;">
+                                                    ${activitiesHtml}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }
                             }
                         });
                         

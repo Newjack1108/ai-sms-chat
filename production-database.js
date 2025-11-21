@@ -3570,7 +3570,7 @@ class ProductionDatabase {
         
         if (isPostgreSQL) {
             // Get all timesheet entries for the week, grouped by date
-            const result = await pool.query(
+            const entriesResult = await pool.query(
                 `SELECT 
                     te.id,
                     DATE(te.clock_in_time) as entry_date,
@@ -3596,15 +3596,48 @@ class ProductionDatabase {
                 [userId, weekStartDate, weekEndStr]
             );
             
+            // Get daily notes for the week
+            const weeklyTimesheet = await pool.query(
+                `SELECT id FROM weekly_timesheets 
+                 WHERE user_id = $1 
+                 AND week_start_date = $2`,
+                [userId, weekStartDate]
+            );
+            
+            let dailyNotesMap = {};
+            if (weeklyTimesheet.rows.length > 0) {
+                const dailyNotesResult = await pool.query(
+                    `SELECT entry_date, daily_notes 
+                     FROM timesheet_daily_entries 
+                     WHERE weekly_timesheet_id = $1 
+                     AND entry_date >= $2::date 
+                     AND entry_date <= $3::date`,
+                    [weeklyTimesheet.rows[0].id, weekStartDate, weekEndStr]
+                );
+                
+                dailyNotesResult.rows.forEach(row => {
+                    dailyNotesMap[row.entry_date] = row.daily_notes;
+                });
+            }
+            
+            // Merge daily notes into entries
+            const entries = entriesResult.rows.map(entry => {
+                const entryDate = entry.entry_date;
+                return {
+                    ...entry,
+                    daily_notes: dailyNotesMap[entryDate] || null
+                };
+            });
+            
             // Return all entries (no deduplication needed - we want all entries per day)
-            return result.rows.sort((a, b) => {
+            return entries.sort((a, b) => {
                 const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
                 if (dateCompare !== 0) return dateCompare;
                 return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
         } else {
             // Get all timesheet entries for the week, grouped by date
-            const result = db.prepare(
+            const entriesResult = db.prepare(
                 `SELECT 
                     te.id,
                     DATE(te.clock_in_time) as entry_date,
@@ -3629,8 +3662,39 @@ class ProductionDatabase {
                  ORDER BY DATE(te.clock_in_time), te.clock_in_time`
             ).all(userId, weekStartDate, weekEndStr);
             
+            // Get daily notes for the week
+            const weeklyTimesheet = db.prepare(
+                `SELECT id FROM weekly_timesheets 
+                 WHERE user_id = ? 
+                 AND week_start_date = ?`
+            ).get(userId, weekStartDate);
+            
+            let dailyNotesMap = {};
+            if (weeklyTimesheet) {
+                const dailyNotesResult = db.prepare(
+                    `SELECT entry_date, daily_notes 
+                     FROM timesheet_daily_entries 
+                     WHERE weekly_timesheet_id = ? 
+                     AND entry_date >= ? 
+                     AND entry_date <= ?`
+                ).all(weeklyTimesheet.id, weekStartDate, weekEndStr);
+                
+                dailyNotesResult.forEach(row => {
+                    dailyNotesMap[row.entry_date] = row.daily_notes;
+                });
+            }
+            
+            // Merge daily notes into entries
+            const entries = entriesResult.map(entry => {
+                const entryDate = entry.entry_date;
+                return {
+                    ...entry,
+                    daily_notes: dailyNotesMap[entryDate] || null
+                };
+            });
+            
             // Return all entries (no deduplication needed - we want all entries per day)
-            return result.sort((a, b) => {
+            return entries.sort((a, b) => {
                 const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
                 if (dateCompare !== 0) return dateCompare;
                 return new Date(a.clock_in_time) - new Date(b.clock_in_time);
