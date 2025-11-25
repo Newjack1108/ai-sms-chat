@@ -22,6 +22,16 @@
     <div class="container">
         <div class="card">
             <div class="card-header">
+                <h2>Quotes</h2>
+                <button onclick="showAddQuoteModal()" class="btn btn-primary">Create Quote</button>
+            </div>
+            <div id="quotesList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
                 <h2>Works Orders</h2>
                 <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
             </div>
@@ -42,6 +52,36 @@
                 <button onclick="calculateRequirements()" class="btn btn-primary">Calculate Requirements</button>
                 <div id="requirementsResult" class="mt-20"></div>
             </div>
+        </div>
+    </div>
+    
+    <!-- Quote Modal -->
+    <div id="quoteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Quote</h3>
+                <button class="modal-close" onclick="hideModal('quoteModal')">&times;</button>
+            </div>
+            <form id="quoteForm">
+                <div class="form-group">
+                    <label class="form-label">Product *</label>
+                    <select id="quoteProduct" class="form-select" required>
+                        <option value="">Select product</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quantity *</label>
+                    <input type="number" id="quoteQty" class="form-input" required min="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quote Date</label>
+                    <input type="date" id="quoteDate" class="form-input">
+                </div>
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('quoteModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Quote</button>
+                </div>
+            </form>
         </div>
     </div>
     
@@ -146,6 +186,7 @@
         let currentUser = null;
         let products = [];
         let orders = [];
+        let quotes = [];
         
         async function init() {
             // Redirect staff users
@@ -155,6 +196,7 @@
             if (!currentUser) return;
             initNavbar();
             await loadProducts();
+            loadQuotes();
             loadOrders();
         }
         
@@ -163,13 +205,65 @@
                 const data = await apiCall('/products');
                 products = data.products.filter(p => p.status === 'active');
                 
-                const select = document.getElementById('orderProduct');
-                select.innerHTML = '<option value="">Select product</option>';
+                // Populate order product select
+                const orderSelect = document.getElementById('orderProduct');
+                orderSelect.innerHTML = '<option value="">Select product</option>';
                 products.forEach(product => {
-                    select.innerHTML += `<option value="${product.id}">${product.name}</option>`;
+                    orderSelect.innerHTML += `<option value="${product.id}">${product.name}</option>`;
+                });
+                
+                // Populate quote product select
+                const quoteSelect = document.getElementById('quoteProduct');
+                quoteSelect.innerHTML = '<option value="">Select product</option>';
+                products.forEach(product => {
+                    quoteSelect.innerHTML += `<option value="${product.id}">${product.name}</option>`;
                 });
             } catch (error) {
                 console.error('Error loading products:', error);
+            }
+        }
+        
+        async function loadQuotes() {
+            try {
+                const data = await apiCall('/quotes');
+                quotes = data.quotes;
+                const quotesList = document.getElementById('quotesList');
+                
+                if (quotes.length === 0) {
+                    quotesList.innerHTML = '<p>No quotes found</p>';
+                    return;
+                }
+                
+                quotesList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>Quantity</th>
+                                <th>Quote Date</th>
+                                <th>Created By</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${quotes.map(quote => `
+                                <tr>
+                                    <td><strong>${quote.product_name || 'Unknown'}</strong></td>
+                                    <td>${quote.quantity}</td>
+                                    <td>${formatDate(quote.order_date)}</td>
+                                    <td>${quote.created_by_name || '-'}</td>
+                                    <td>
+                                        <button onclick="convertQuoteToOrder(${quote.id})" class="btn btn-success btn-sm">Convert to Order</button>
+                                        <button onclick="viewQuoteRequirements(${quote.id})" class="btn btn-primary btn-sm">View Requirements</button>
+                                        <button onclick="deleteQuote(${quote.id})" class="btn btn-danger btn-sm">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('quotesList').innerHTML = '<p>Error loading quotes</p>';
             }
         }
         
@@ -237,10 +331,118 @@
             `).join('');
         }
         
+        function showAddQuoteModal() {
+            document.getElementById('quoteForm').reset();
+            document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
+            showModal('quoteModal');
+        }
+        
         function showAddOrderModal() {
             document.getElementById('orderForm').reset();
             document.getElementById('orderDate').value = new Date().toISOString().split('T')[0];
             showModal('orderModal');
+        }
+        
+        async function convertQuoteToOrder(quoteId) {
+            if (!confirm('Are you sure you want to convert this quote to an order?')) {
+                return;
+            }
+            
+            try {
+                await apiCall(`/quotes/${quoteId}/convert-to-order`, {
+                    method: 'POST'
+                });
+                showAlert('Quote converted to order successfully');
+                loadQuotes();
+                loadOrders();
+            } catch (error) {
+                showAlert('Error converting quote to order: ' + error.message, 'error');
+            }
+        }
+        
+        async function viewQuoteRequirements(quoteId) {
+            try {
+                const result = await apiCall(`/orders/${quoteId}/requirements`, {
+                    method: 'POST'
+                });
+                
+                const requirements = result.requirements;
+                const modal = document.createElement('div');
+                modal.className = 'modal show';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width: 800px;">
+                        <div class="modal-header">
+                            <h3>Quote Requirements</h3>
+                            <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                        </div>
+                        <div>
+                            <h4>Panels Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Panel</th>
+                                        <th>Quantity</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.panels_required.map(p => `
+                                        <tr>
+                                            <td>${p.panel_name}</td>
+                                            <td>${p.total_quantity.toFixed(2)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                            
+                            <h4>Raw Materials Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Material</th>
+                                        <th>Quantity</th>
+                                        <th>Unit</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.raw_materials_required.map(m => {
+                                        const shortfall = Math.max(0, parseFloat(m.total_quantity) - parseFloat(m.available || 0));
+                                        return `
+                                            <tr>
+                                                <td>${m.name}</td>
+                                                <td>${parseFloat(m.total_quantity).toFixed(2)}</td>
+                                                <td>${m.unit}</td>
+                                                <td>${parseFloat(m.available || 0).toFixed(2)}</td>
+                                                <td><span class="badge ${shortfall > 0 ? 'badge-danger' : 'badge-success'}">${shortfall.toFixed(2)}</span></td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showAlert('Error loading requirements', 'error');
+            }
+        }
+        
+        async function deleteQuote(quoteId) {
+            if (!confirm('Are you sure you want to delete this quote? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                await apiCall(`/orders/${quoteId}`, {
+                    method: 'DELETE'
+                });
+                showAlert('Quote deleted successfully');
+                loadQuotes();
+            } catch (error) {
+                showAlert('Error deleting quote: ' + error.message, 'error');
+            }
         }
         
         async function calculateRequirements() {
@@ -457,6 +659,25 @@
                 showAlert('Error deleting order: ' + error.message, 'error');
             }
         }
+        
+        document.getElementById('quoteForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                await apiCall('/quotes', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        product_id: document.getElementById('quoteProduct').value,
+                        quantity: document.getElementById('quoteQty').value,
+                        order_date: document.getElementById('quoteDate').value
+                    })
+                });
+                showAlert('Quote created');
+                hideModal('quoteModal');
+                loadQuotes();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
         
         document.getElementById('orderForm').addEventListener('submit', async (e) => {
             e.preventDefault();

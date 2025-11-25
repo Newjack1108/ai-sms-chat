@@ -34,8 +34,48 @@ console.log(`   Password: "${ADMIN_PASSWORD ? '***' : 'empty'}"`);
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// More lenient JSON parser for webhooks (allows empty bodies, etc.)
+app.use(express.json({ 
+    strict: false,
+    verify: (req, res, buf, encoding) => {
+        // Log raw body for webhook endpoints for debugging
+        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate'))) {
+            try {
+                const rawBody = buf.toString(encoding || 'utf8');
+                console.log(`📦 Raw request body for ${req.path}:`, rawBody);
+            } catch (e) {
+                console.log(`⚠️ Could not log raw body:`, e.message);
+            }
+        }
+    }
+}));
 app.use(express.urlencoded({ extended: true }));
+
+// Error handler for JSON parsing errors (must come after JSON middleware)
+app.use((error, req, res, next) => {
+    if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+        console.error('❌ JSON parsing error:', error.message);
+        console.error('   Path:', req.path);
+        console.error('   Method:', req.method);
+        console.error('   Content-Type:', req.headers['content-type']);
+        
+        // For webhook endpoints, provide helpful error messages
+        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate'))) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid JSON in request body',
+                message: 'Please ensure the webhook sends valid JSON with Content-Type: application/json',
+                details: error.message
+            });
+        }
+        
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid JSON format'
+        });
+    }
+    next(error);
+});
 
 // Session middleware
 app.use(session({
@@ -62,7 +102,8 @@ function requireAuth(req, res, next) {
         req.path === '/api/auth/check' ||
         req.path === '/api/logout' ||
         req.path.startsWith('/webhook/') ||
-        (req.method === 'POST' && req.path === '/api/leads')) {
+        (req.method === 'POST' && req.path === '/api/leads') ||
+        (req.method === 'POST' && req.path === '/api/leads/reactivate')) {
         return next();
     }
     
@@ -1969,17 +2010,73 @@ app.post('/api/leads/:leadId/unpause-ai', async (req, res) => {
 // Reactivate lead from external source (Gravity Forms, Facebook Lead Gen, etc.)
 app.post('/api/leads/reactivate', async (req, res) => {
     try {
-        const { phone, source, name, email } = req.body;
+        // Log incoming request for debugging
+        console.log('📥 Incoming lead from external source:');
+        console.log('   Headers:', JSON.stringify(req.headers, null, 2));
+        console.log('   Body:', JSON.stringify(req.body, null, 2));
+        console.log('   Content-Type:', req.headers['content-type']);
         
+        // Handle different data formats (Make.com may send nested data)
+        let phone, source, name, email, initialMessage;
+        
+        // Try direct field access first
+        if (req.body.phone) {
+            phone = req.body.phone;
+            source = req.body.source;
+            name = req.body.name;
+            email = req.body.email;
+            initialMessage = req.body.initialMessage || req.body.message || req.body.notes;
+        } 
+        // Try nested data (Make.com might wrap it)
+        else if (req.body.data) {
+            phone = req.body.data.phone;
+            source = req.body.data.source;
+            name = req.body.data.name;
+            email = req.body.data.email;
+            initialMessage = req.body.data.initialMessage || req.body.data.message || req.body.data.notes;
+        }
+        // Try Facebook Lead Ads format
+        else if (req.body.field_data || req.body.entry) {
+            // Facebook Lead Ads format
+            const fieldData = req.body.field_data || (req.body.entry && req.body.entry[0] && req.body.entry[0].changes && req.body.entry[0].changes[0]?.value?.field_data);
+            if (fieldData && Array.isArray(fieldData)) {
+                fieldData.forEach(field => {
+                    if (field.name === 'phone_number' || field.name === 'phone') {
+                        phone = field.values?.[0] || field.value;
+                    } else if (field.name === 'full_name' || field.name === 'first_name') {
+                        name = field.values?.[0] || field.value || name;
+                    } else if (field.name === 'email') {
+                        email = field.values?.[0] || field.value;
+                    }
+                });
+                source = 'facebook_lead';
+            }
+        }
+        // Try Make.com format variations
+        else {
+            // Try common Make.com field variations
+            phone = req.body.phone || req.body.Phone || req.body.phone_number || req.body['Phone Number'];
+            name = req.body.name || req.body.Name || req.body.full_name || req.body['Full Name'];
+            email = req.body.email || req.body.Email || req.body.email_address || req.body['Email Address'];
+            source = req.body.source || req.body.Source || 'facebook_lead';
+            initialMessage = req.body.initialMessage || req.body.message || req.body.notes || req.body.Notes;
+        }
+        
+        // Clean and validate phone
         if (!phone) {
+            console.error('❌ Missing phone number in request body');
+            console.error('   Available fields:', Object.keys(req.body));
             return res.status(400).json({
                 success: false,
-                message: 'Phone number is required'
+                error: 'Phone number is required',
+                received_fields: Object.keys(req.body),
+                message: 'Please ensure the webhook includes a "phone" field in the request body'
             });
         }
         
         const normalizedPhone = normalizePhoneNumber(phone);
         console.log(`🔄 New lead submission from ${source || 'external'}: ${normalizedPhone}`);
+        console.log(`   Name: ${name || 'Unknown'}, Email: ${email || 'Not provided'}`);
         
         // Check if lead exists
         let lead = await LeadDatabase.checkExistingCustomer(normalizedPhone);
@@ -2032,6 +2129,90 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 // Get fresh lead data
                 lead = await LeadDatabase.getLeadById(lead.id);
                 
+                // Process initialMessage if provided (e.g., from Facebook Lead Ads)
+                if (initialMessage && initialMessage.trim().length > 0) {
+                    console.log(`📝 Processing initial message for returning customer: "${initialMessage}"`);
+                    
+                    try {
+                        // Initialize answers object
+                        lead.answers = lead.answers || {};
+                        let newAnswersFound = 0;
+                        
+                        // Try to extract answers for ALL unanswered questions from the message
+                        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                            const questionKey = `question_${i + 1}`;
+                            
+                            // Skip if already answered
+                            if (lead.answers[questionKey]) {
+                                continue;
+                            }
+                            
+                            const question = CUSTOM_QUESTIONS[i];
+                            const possibleAnswers = typeof question === 'object' ? question.possibleAnswers : '';
+                            
+                            if (!possibleAnswers) {
+                                continue;
+                            }
+                            
+                            // Extract answer for this question
+                            const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
+                            
+                            if (extractedAnswer) {
+                                lead.answers[questionKey] = extractedAnswer;
+                                newAnswersFound++;
+                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                            }
+                        }
+                        
+                        // Update progress if any new answers were found
+                        if (newAnswersFound > 0) {
+                            const newAnsweredCount = Object.keys(lead.answers).length;
+                            lead.progress = Math.round((newAnsweredCount / 4) * 100);
+                            lead.status = lead.progress === 100 ? 'qualified' : 'active';
+                            
+                            // Save extracted answers to database
+                            await LeadDatabase.updateLead(lead.id, {
+                                name: lead.name,
+                                email: lead.email,
+                                status: lead.status,
+                                progress: lead.progress,
+                                qualified: lead.progress === 100,
+                                ai_paused: lead.ai_paused,
+                                post_qualification_response_sent: false,
+                                answers: lead.answers,
+                                qualifiedDate: lead.progress === 100 ? new Date().toISOString() : null,
+                                returning_customer: lead.returning_customer || false,
+                                times_qualified: lead.times_qualified || 0,
+                                first_qualified_date: lead.first_qualified_date,
+                                last_qualified_date: lead.last_qualified_date
+                            });
+                            
+                            // Update last customer message time for reminder tracking
+                            await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+                            
+                            console.log(`✅ Processed initial message: ${newAnswersFound} answers extracted, progress: ${lead.progress}%`);
+                            
+                            // Reload lead with updated data
+                            lead = await LeadDatabase.getLeadById(lead.id);
+                            
+                            // If fully qualified, send webhook
+                            if (lead.progress === 100) {
+                                console.log(`🎉 Returning customer fully qualified from initial message!`);
+                                try {
+                                    await sendToCRMWebhook(lead, 'lead_qualified', {
+                                        qualificationMethod: 'auto_initial_message',
+                                        triggeredBy: 'api_leads_reactivate'
+                                    });
+                                } catch (error) {
+                                    console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('⚠️ Error processing initial message (non-critical):', error.message);
+                    }
+                }
+                
                 // Notify automation about returning customer event
                 try {
                     await sendToCRMWebhook(lead, 'lead_returning_customer', {
@@ -2044,8 +2225,23 @@ app.post('/api/leads/reactivate', async (req, res) => {
                     console.error('⚠️ Failed to send returning customer webhook (non-critical):', error.message);
                 }
                 
-                // Send AI introduction for the NEW inquiry
-                await sendAIIntroduction(lead, true); // Pass true for "returning customer"
+                // Send AI introduction or qualification message for the NEW inquiry
+                try {
+                    // If lead is already fully qualified from initial message, send qualification message instead
+                    if (lead.progress === 100 && lead.qualified) {
+                        console.log(`🎉 Returning customer already qualified from initial message - sending qualification message instead of intro`);
+                        const qualificationMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+                        
+                        await sendSMS(lead.phone, qualificationMessage);
+                        await LeadDatabase.createMessage(lead.id, 'assistant', qualificationMessage);
+                    } else {
+                        // Send normal introduction asking first question
+                        await sendAIIntroduction(lead, true); // Pass true for "returning customer"
+                    }
+                } catch (introError) {
+                    console.error('Error sending AI introduction/qualification:', introError);
+                }
                 
                 res.json({
                     success: true,
@@ -2106,8 +2302,108 @@ app.post('/api/leads/reactivate', async (req, res) => {
             
             console.log(`✅ New lead created: ${lead.name} (ID: ${lead.id})`);
             
-            // Send AI introduction
-            await sendAIIntroduction(lead, false);
+            // Process initialMessage if provided (e.g., from Facebook Lead Ads)
+            if (initialMessage && initialMessage.trim().length > 0) {
+                console.log(`📝 Processing initial message from lead creation: "${initialMessage}"`);
+                
+                try {
+                    // Initialize answers object
+                    lead.answers = lead.answers || {};
+                    let newAnswersFound = 0;
+                    
+                    // Try to extract answers for ALL unanswered questions from the message
+                    for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                        const questionKey = `question_${i + 1}`;
+                        
+                        // Skip if already answered
+                        if (lead.answers[questionKey]) {
+                            continue;
+                        }
+                        
+                        const question = CUSTOM_QUESTIONS[i];
+                        const possibleAnswers = typeof question === 'object' ? question.possibleAnswers : '';
+                        
+                        if (!possibleAnswers) {
+                            continue;
+                        }
+                        
+                        // Extract answer for this question
+                        const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
+                        
+                        if (extractedAnswer) {
+                            lead.answers[questionKey] = extractedAnswer;
+                            newAnswersFound++;
+                            console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                        }
+                    }
+                    
+                    // Update progress if any new answers were found
+                    if (newAnswersFound > 0) {
+                        const newAnsweredCount = Object.keys(lead.answers).length;
+                        lead.progress = Math.round((newAnsweredCount / 4) * 100);
+                        lead.status = lead.progress === 100 ? 'qualified' : 'active';
+                        
+                        // Save extracted answers to database
+                        await LeadDatabase.updateLead(lead.id, {
+                            name: lead.name,
+                            email: lead.email,
+                            status: lead.status,
+                            progress: lead.progress,
+                            qualified: lead.progress === 100,
+                            ai_paused: lead.ai_paused,
+                            post_qualification_response_sent: false,
+                            answers: lead.answers,
+                            qualifiedDate: lead.progress === 100 ? new Date().toISOString() : null,
+                            returning_customer: lead.returning_customer || false,
+                            times_qualified: lead.times_qualified || 0,
+                            first_qualified_date: lead.progress === 100 ? new Date().toISOString() : null,
+                            last_qualified_date: lead.progress === 100 ? new Date().toISOString() : null
+                        });
+                        
+                        // Update last customer message time for reminder tracking
+                        await LeadDatabase.updateLastCustomerMessageTime(lead.id, new Date().toISOString());
+                        
+                        console.log(`✅ Processed initial message: ${newAnswersFound} answers extracted, progress: ${lead.progress}%`);
+                        
+                        // Reload lead with updated data
+                        lead = await LeadDatabase.getLeadById(lead.id);
+                        
+                        // If fully qualified, send webhook
+                        if (lead.progress === 100) {
+                            console.log(`🎉 Lead fully qualified from initial message!`);
+                            try {
+                                await sendToCRMWebhook(lead, 'lead_qualified', {
+                                    qualificationMethod: 'auto_initial_message',
+                                    triggeredBy: 'api_leads_reactivate'
+                                });
+                            } catch (error) {
+                                console.error('⚠️ Failed to send webhook (non-critical):', error.message);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('⚠️ Error processing initial message (non-critical):', error.message);
+                }
+            }
+            
+            // Send AI introduction or qualification message (don't fail the request if this fails)
+            try {
+                // If lead is already fully qualified from initial message, send qualification message instead
+                if (lead.progress === 100 && lead.qualified) {
+                    console.log(`🎉 Lead already qualified from initial message - sending qualification message instead of intro`);
+                    const qualificationMessage = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+                    
+                    await sendSMS(lead.phone, qualificationMessage);
+                    await LeadDatabase.createMessage(lead.id, 'assistant', qualificationMessage);
+                } else {
+                    // Send normal introduction asking first question
+                    await sendAIIntroduction(lead, false); // false = new customer
+                }
+            } catch (introError) {
+                console.error('Error sending AI introduction/qualification:', introError);
+                // Don't fail the lead creation if introduction fails
+            }
             
             res.json({
                 success: true,
@@ -2118,9 +2414,16 @@ app.post('/api/leads/reactivate', async (req, res) => {
         }
     } catch (error) {
         console.error('❌ Error processing external lead:', error);
+        console.error('   Stack:', error.stack);
+        console.error('   Request body:', JSON.stringify(req.body, null, 2));
+        console.error('   Request headers:', JSON.stringify(req.headers, null, 2));
+        
+        // Return detailed error for debugging
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
+            details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+            message: 'Failed to process external lead. Please check the webhook format and ensure all required fields are present.'
         });
     }
 });

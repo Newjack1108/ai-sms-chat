@@ -650,12 +650,74 @@ router.post('/orders/:id/requirements', requireProductionAuth, async (req, res) 
     }
 });
 
+// ============ QUOTES ROUTES ============
+
+router.get('/quotes', requireProductionAuth, async (req, res) => {
+    try {
+        const orders = await ProductionDatabase.getAllProductOrders();
+        // Filter to only return quotes (status = 'quote')
+        const quotes = orders.filter(order => order.status === 'quote');
+        res.json({ success: true, quotes });
+    } catch (error) {
+        console.error('Get quotes error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get quotes' });
+    }
+});
+
+router.post('/quotes', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const { product_id, quantity, order_date } = req.body;
+        if (!product_id || !quantity) {
+            return res.status(400).json({ success: false, error: 'Product ID and quantity are required' });
+        }
+        
+        // Create quote with status 'quote'
+        const quote = await ProductionDatabase.createProductOrder({
+            product_id: parseInt(product_id),
+            quantity: parseInt(quantity),
+            order_date,
+            status: 'quote',
+            created_by: req.session.production_user.id
+        });
+        res.json({ success: true, quote });
+    } catch (error) {
+        console.error('Create quote error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create quote' });
+    }
+});
+
+router.post('/quotes/:id/convert-to-order', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const quoteId = parseInt(req.params.id);
+        const quote = await ProductionDatabase.getProductOrderById(quoteId);
+        
+        if (!quote) {
+            return res.status(404).json({ success: false, error: 'Quote not found' });
+        }
+        
+        if (quote.status !== 'quote') {
+            return res.status(400).json({ success: false, error: 'This is not a quote. Only quotes can be converted to orders.' });
+        }
+        
+        // Convert quote to order by changing status to 'pending'
+        const order = await ProductionDatabase.updateProductOrder(quoteId, {
+            status: 'pending'
+        });
+        res.json({ success: true, order, message: 'Quote converted to order successfully' });
+    } catch (error) {
+        console.error('Convert quote to order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to convert quote to order' });
+    }
+});
+
 // ============ PRODUCT ORDERS ROUTES ============
 
 router.get('/orders', requireProductionAuth, async (req, res) => {
     try {
         const orders = await ProductionDatabase.getAllProductOrders();
-        res.json({ success: true, orders });
+        // Filter out quotes - only return actual orders
+        const actualOrders = orders.filter(order => order.status !== 'quote');
+        res.json({ success: true, orders: actualOrders });
     } catch (error) {
         console.error('Get orders error:', error);
         res.status(500).json({ success: false, error: 'Failed to get orders' });
@@ -669,11 +731,14 @@ router.post('/orders', requireProductionAuth, requireManager, async (req, res) =
             return res.status(400).json({ success: false, error: 'Product ID and quantity are required' });
         }
         
+        // Ensure we don't create quotes through the orders endpoint
+        const orderStatus = status && status !== 'quote' ? status : 'pending';
+        
         const order = await ProductionDatabase.createProductOrder({
             product_id: parseInt(product_id),
             quantity: parseInt(quantity),
             order_date,
-            status,
+            status: orderStatus,
             created_by: req.session.production_user.id
         });
         res.json({ success: true, order });
