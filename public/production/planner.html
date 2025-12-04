@@ -314,18 +314,65 @@
             try {
                 const data = await apiCall('/panels');
                 allPanels = data.panels;
-                
-                // Populate panel select
-                const select = document.getElementById('panelSelect');
-                select.innerHTML = '<option value="">Select built item...</option>';
-                allPanels.forEach(panel => {
-                    const option = document.createElement('option');
-                    option.value = panel.id;
-                    option.textContent = `${panel.name} (${parseFloat(panel.labour_hours || 0).toFixed(2)} hrs each)`;
-                    select.appendChild(option);
-                });
             } catch (error) {
                 console.error('Error loading panels:', error);
+            }
+        }
+        
+        async function loadAllComponents() {
+            try {
+                const data = await apiCall('/components');
+                allComponents = data.components;
+            } catch (error) {
+                console.error('Error loading components:', error);
+            }
+        }
+        
+        function updateItemSelect() {
+            const itemType = document.getElementById('itemTypeSelect').value;
+            const select = document.getElementById('panelSelect');
+            const label = document.getElementById('itemSelectLabel');
+            const itemSelectGroup = document.getElementById('itemSelectGroup');
+            const jobNameGroup = document.getElementById('jobNameGroup');
+            const quantityLabel = document.getElementById('quantityLabel');
+            const quantityHelp = document.getElementById('quantityHelp');
+            
+            if (itemType === 'job') {
+                // Show job name input, hide item select
+                itemSelectGroup.style.display = 'none';
+                jobNameGroup.style.display = 'block';
+                quantityLabel.textContent = 'Hours Required *';
+                quantityHelp.textContent = 'Number of hours this job will take';
+                select.required = false;
+                document.getElementById('jobNameInput').required = true;
+            } else {
+                // Show item select, hide job name input
+                itemSelectGroup.style.display = 'block';
+                jobNameGroup.style.display = 'none';
+                quantityLabel.textContent = 'Quantity to Build *';
+                quantityHelp.textContent = 'Quantity of items to build';
+                select.required = true;
+                document.getElementById('jobNameInput').required = false;
+                
+                select.innerHTML = '<option value="">Select item...</option>';
+                
+                if (itemType === 'component') {
+                    label.textContent = 'Component *';
+                    allComponents.forEach(comp => {
+                        const option = document.createElement('option');
+                        option.value = comp.id;
+                        option.textContent = `${comp.name} (${parseFloat(comp.labour_hours || 0).toFixed(2)} hrs each)`;
+                        select.appendChild(option);
+                    });
+                } else if (itemType === 'built_item') {
+                    label.textContent = 'Built Item *';
+                    allPanels.forEach(panel => {
+                        const option = document.createElement('option');
+                        option.value = panel.id;
+                        option.textContent = `${panel.name} (${parseFloat(panel.labour_hours || 0).toFixed(2)} hrs each)`;
+                        select.appendChild(option);
+                    });
+                }
             }
         }
         
