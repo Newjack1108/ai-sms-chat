@@ -1983,7 +1983,8 @@ router.post('/planner/:id/items', requireProductionAuth, requireManager, async (
         res.json({ success: true, item });
     } catch (error) {
         console.error('Add planner item error:', error);
-        res.status(500).json({ success: false, error: 'Failed to add planner item' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to add planner item: ' + (error.message || 'Unknown error') });
     }
 });
 

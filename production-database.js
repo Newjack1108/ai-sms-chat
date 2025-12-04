@@ -2130,18 +2130,121 @@ class ProductionDatabase {
     
     static async addPlannerItem(plannerId, itemType, itemId, quantityToBuild, priority, status, jobName = null, startDay = null, endDay = null) {
         if (isPostgreSQL) {
+            // Check which columns exist
+            const columnCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'planner_items' 
+                AND column_name IN ('item_type', 'item_id', 'job_name', 'start_day', 'end_day', 'panel_id')
+            `);
+            const existingColumns = columnCheck.rows.map(r => r.column_name);
+            const hasItemType = existingColumns.includes('item_type');
+            const hasItemId = existingColumns.includes('item_id');
+            const hasJobName = existingColumns.includes('job_name');
+            const hasStartDay = existingColumns.includes('start_day');
+            const hasEndDay = existingColumns.includes('end_day');
+            const hasPanelId = existingColumns.includes('panel_id');
+            
+            // Build INSERT statement based on available columns
+            let columns = ['planner_id', 'quantity_to_build', 'priority', 'status'];
+            let values = [plannerId, quantityToBuild, priority || 'medium', status || 'planned'];
+            let paramIndex = 5;
+            
+            if (hasItemType) {
+                columns.push('item_type');
+                values.push(itemType);
+                paramIndex++;
+            }
+            
+            if (hasItemId) {
+                columns.push('item_id');
+                values.push(itemId || null);
+                paramIndex++;
+            } else if (hasPanelId && itemType === 'built_item' && itemId) {
+                // Fallback to panel_id for old schema
+                columns.push('panel_id');
+                values.push(itemId);
+                paramIndex++;
+            }
+            
+            if (hasJobName) {
+                columns.push('job_name');
+                values.push(jobName || null);
+                paramIndex++;
+            }
+            
+            if (hasStartDay) {
+                columns.push('start_day');
+                values.push(startDay);
+                paramIndex++;
+            }
+            
+            if (hasEndDay) {
+                columns.push('end_day');
+                values.push(endDay);
+                paramIndex++;
+            }
+            
+            const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+            const columnsList = columns.join(', ');
+            
             const result = await pool.query(
-                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status, start_day, end_day)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-                [plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned', startDay, endDay]
+                `INSERT INTO planner_items (${columnsList})
+                 VALUES (${placeholders}) RETURNING *`,
+                values
             );
             return result.rows[0];
         } else {
+            // SQLite - check columns
+            const plannerColumns = db.prepare("PRAGMA table_info(planner_items)").all();
+            const plannerColumnNames = plannerColumns.map(col => col.name);
+            const hasItemType = plannerColumnNames.includes('item_type');
+            const hasItemId = plannerColumnNames.includes('item_id');
+            const hasJobName = plannerColumnNames.includes('job_name');
+            const hasStartDay = plannerColumnNames.includes('start_day');
+            const hasEndDay = plannerColumnNames.includes('end_day');
+            const hasPanelId = plannerColumnNames.includes('panel_id');
+            
+            // Build INSERT statement
+            let columns = ['planner_id', 'quantity_to_build', 'priority', 'status'];
+            let values = [plannerId, quantityToBuild, priority || 'medium', status || 'planned'];
+            
+            if (hasItemType) {
+                columns.push('item_type');
+                values.push(itemType);
+            }
+            
+            if (hasItemId) {
+                columns.push('item_id');
+                values.push(itemId || null);
+            } else if (hasPanelId && itemType === 'built_item' && itemId) {
+                columns.push('panel_id');
+                values.push(itemId);
+            }
+            
+            if (hasJobName) {
+                columns.push('job_name');
+                values.push(jobName || null);
+            }
+            
+            if (hasStartDay) {
+                columns.push('start_day');
+                values.push(startDay);
+            }
+            
+            if (hasEndDay) {
+                columns.push('end_day');
+                values.push(endDay);
+            }
+            
+            const placeholders = values.map(() => '?').join(', ');
+            const columnsList = columns.join(', ');
+            
             const stmt = db.prepare(
-                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status, start_day, end_day)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO planner_items (${columnsList})
+                 VALUES (${placeholders})`
             );
-            const info = stmt.run(plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned', startDay, endDay);
+            const info = stmt.run(...values);
             return this.getPlannerItemById(info.lastInsertRowid);
         }
     }
