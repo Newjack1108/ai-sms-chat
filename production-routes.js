@@ -1806,6 +1806,16 @@ router.get('/planner/low-stock-panels', requireProductionAuth, async (req, res) 
     }
 });
 
+router.get('/planner/low-stock-components', requireProductionAuth, async (req, res) => {
+    try {
+        const components = await ProductionDatabase.getLowStockComponents();
+        res.json({ success: true, components });
+    } catch (error) {
+        console.error('Get low stock components error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get low stock components' });
+    }
+});
+
 router.post('/planner', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const { week_start_date, staff_available, hours_available, notes } = req.body;
@@ -1903,18 +1913,47 @@ router.get('/planner/:id/build-rate', requireProductionAuth, async (req, res) =>
 router.post('/planner/:id/items', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const plannerId = parseInt(req.params.id);
-        const { panel_id, quantity_to_build, priority, status } = req.body;
+        const { item_type, item_id, panel_id, job_name, quantity_to_build, priority, status } = req.body;
         
-        if (!panel_id || !quantity_to_build) {
-            return res.status(400).json({ success: false, error: 'Panel ID and quantity are required' });
+        // Support both old format (panel_id) and new format (item_type + item_id/job_name)
+        let finalItemType, finalItemId, finalJobName;
+        if (item_type === 'job') {
+            // Job type - requires job_name and quantity_to_build (hours)
+            if (!job_name || !quantity_to_build) {
+                return res.status(400).json({ success: false, error: 'Job name and hours are required for job items' });
+            }
+            finalItemType = 'job';
+            finalItemId = null;
+            finalJobName = job_name;
+        } else if (item_type && item_id) {
+            // New format for components/built items
+            if (!['component', 'built_item'].includes(item_type)) {
+                return res.status(400).json({ success: false, error: 'Invalid item_type. Must be component, built_item, or job' });
+            }
+            finalItemType = item_type;
+            finalItemId = parseInt(item_id);
+            finalJobName = null;
+        } else if (panel_id) {
+            // Old format (backward compatibility)
+            finalItemType = 'built_item';
+            finalItemId = parseInt(panel_id);
+            finalJobName = null;
+        } else {
+            return res.status(400).json({ success: false, error: 'Item type and ID (or panel_id) and quantity are required' });
+        }
+        
+        if (!quantity_to_build) {
+            return res.status(400).json({ success: false, error: 'Quantity/hours is required' });
         }
         
         const item = await ProductionDatabase.addPlannerItem(
             plannerId,
-            parseInt(panel_id),
+            finalItemType,
+            finalItemId,
             parseFloat(quantity_to_build),
             priority || 'medium',
-            status || 'planned'
+            status || 'planned',
+            finalJobName
         );
         res.json({ success: true, item });
     } catch (error) {

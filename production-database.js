@@ -293,15 +293,16 @@ function initializeSQLite() {
         CREATE TABLE IF NOT EXISTS planner_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             planner_id INTEGER NOT NULL,
-            panel_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL CHECK(item_type IN ('component', 'built_item', 'job')),
+            item_id INTEGER,
+            job_name TEXT,
             quantity_to_build REAL NOT NULL,
             quantity_built REAL DEFAULT 0,
             hours_used REAL DEFAULT 0,
             priority TEXT DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
             status TEXT DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (planner_id) REFERENCES weekly_planner(id) ON DELETE CASCADE,
-            FOREIGN KEY (panel_id) REFERENCES panels(id)
+            FOREIGN KEY (planner_id) REFERENCES weekly_planner(id) ON DELETE CASCADE
         )
     `);
     
@@ -405,6 +406,12 @@ function initializeSQLite() {
         if (!plannerColumnNames.includes('hours_used')) {
             db.exec('ALTER TABLE planner_items ADD COLUMN hours_used REAL DEFAULT 0');
             console.log('✅ Added hours_used column to planner_items');
+        }
+        
+        // Add job_name column for job items
+        if (!plannerColumnNames.includes('job_name')) {
+            db.exec('ALTER TABLE planner_items ADD COLUMN job_name TEXT');
+            console.log('✅ Added job_name column to planner_items');
         }
     } catch (error) {
         console.log('⚠️ Planner items migration check skipped:', error.message);
@@ -786,7 +793,9 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS planner_items (
                 id SERIAL PRIMARY KEY,
                 planner_id INTEGER NOT NULL REFERENCES weekly_planner(id) ON DELETE CASCADE,
-                panel_id INTEGER NOT NULL REFERENCES panels(id),
+                item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('component', 'built_item', 'job')),
+                item_id INTEGER,
+                job_name VARCHAR(255),
                 quantity_to_build DECIMAL(10,2) NOT NULL,
                 quantity_built DECIMAL(10,2) DEFAULT 0,
                 hours_used DECIMAL(10,2) DEFAULT 0,
@@ -946,6 +955,28 @@ async function initializePostgreSQL() {
                     WHERE table_name='planner_items' AND column_name='hours_used'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN hours_used DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                
+                -- Migrate to new structure: panel_id -> item_type + item_id
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='panel_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='item_type'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN item_type VARCHAR(20);
+                    ALTER TABLE planner_items ADD COLUMN item_id INTEGER;
+                    UPDATE planner_items SET item_type = 'built_item', item_id = panel_id WHERE panel_id IS NOT NULL;
+                    ALTER TABLE planner_items ALTER COLUMN item_type SET NOT NULL;
+                END IF;
+                
+                -- Add job_name column for job items
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='job_name'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN job_name VARCHAR(255);
                 END IF;
             END $$;
         `);
@@ -2068,20 +2099,20 @@ class ProductionDatabase {
         }
     }
     
-    static async addPlannerItem(plannerId, panelId, quantityToBuild, priority, status) {
+    static async addPlannerItem(plannerId, itemType, itemId, quantityToBuild, priority, status, jobName = null) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO planner_items (planner_id, panel_id, quantity_to_build, priority, status)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [plannerId, panelId, quantityToBuild, priority || 'medium', status || 'planned']
+                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                [plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned']
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO planner_items (planner_id, panel_id, quantity_to_build, priority, status)
-                 VALUES (?, ?, ?, ?, ?)`
+                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(plannerId, panelId, quantityToBuild, priority || 'medium', status || 'planned');
+            const info = stmt.run(plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned');
             return this.getPlannerItemById(info.lastInsertRowid);
         }
     }
@@ -2098,18 +2129,69 @@ class ProductionDatabase {
     static async getPlannerItems(plannerId) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT pi.*, p.name as panel_name, p.labour_hours, p.min_stock, p.built_quantity
+                `SELECT pi.*, 
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.name
+                     WHEN pi.item_type = 'built_item' THEN p.name
+                     WHEN pi.item_type = 'job' THEN pi.job_name
+                 END as item_name,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.labour_hours
+                     WHEN pi.item_type = 'built_item' THEN p.labour_hours
+                     WHEN pi.item_type = 'job' THEN pi.quantity_to_build
+                 END as labour_hours,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.min_stock
+                     WHEN pi.item_type = 'built_item' THEN p.min_stock
+                 END as min_stock,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.built_quantity
+                     WHEN pi.item_type = 'built_item' THEN p.built_quantity
+                 END as built_quantity,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.id
+                     WHEN pi.item_type = 'built_item' THEN p.id
+                 END as item_id_for_movement
                  FROM planner_items pi
-                 JOIN panels p ON pi.panel_id = p.id
+                 LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
+                 LEFT JOIN panels p ON (pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)
                  WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`,
                 [plannerId]
             );
             return result.rows;
         } else {
             return db.prepare(
-                `SELECT pi.*, p.name as panel_name, p.labour_hours, p.min_stock, p.built_quantity
+                `SELECT pi.*, 
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.name
+                     WHEN pi.item_type = 'built_item' THEN p.name
+                     WHEN pi.item_type = 'job' THEN pi.job_name
+                     WHEN pi.item_type IS NULL THEN p.name
+                 END as item_name,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.labour_hours
+                     WHEN pi.item_type = 'built_item' THEN p.labour_hours
+                     WHEN pi.item_type = 'job' THEN pi.quantity_to_build
+                     WHEN pi.item_type IS NULL THEN p.labour_hours
+                 END as labour_hours,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.min_stock
+                     WHEN pi.item_type = 'built_item' THEN p.min_stock
+                     WHEN pi.item_type IS NULL THEN p.min_stock
+                 END as min_stock,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.built_quantity
+                     WHEN pi.item_type = 'built_item' THEN p.built_quantity
+                     WHEN pi.item_type IS NULL THEN p.built_quantity
+                 END as built_quantity,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.id
+                     WHEN pi.item_type = 'built_item' THEN p.id
+                     WHEN pi.item_type IS NULL THEN p.id
+                 END as item_id_for_movement
                  FROM planner_items pi
-                 JOIN panels p ON pi.panel_id = p.id
+                 LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
+                 LEFT JOIN panels p ON (pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)
                  WHERE pi.planner_id = ? ORDER BY pi.priority DESC, pi.created_at`
             ).all(plannerId);
         }
@@ -2228,9 +2310,15 @@ class ProductionDatabase {
         let totalHoursRequired = 0;
         
         for (const item of items) {
-            const labourHours = parseFloat(item.labour_hours || 0);
-            const quantity = parseFloat(item.quantity_to_build || 0);
-            totalHoursRequired += labourHours * quantity;
+            if (item.item_type === 'job') {
+                // For jobs, quantity_to_build IS the hours required
+                totalHoursRequired += parseFloat(item.quantity_to_build || 0);
+            } else {
+                // For components/built items, multiply labour hours by quantity
+                const labourHours = parseFloat(item.labour_hours || 0);
+                const quantity = parseFloat(item.quantity_to_build || 0);
+                totalHoursRequired += labourHours * quantity;
+            }
         }
         
         const hoursAvailable = parseFloat(planner.hours_available || 0);
@@ -2269,6 +2357,7 @@ class ProductionDatabase {
                 
                 lowStockPanels.push({
                     ...panel,
+                    item_type: 'built_item',
                     current_quantity: builtQty,
                     min_stock: minStock,
                     shortfall: shortfall,
@@ -2278,6 +2367,33 @@ class ProductionDatabase {
         }
         
         return lowStockPanels;
+    }
+    
+    static async getLowStockComponents() {
+        const components = await this.getAllComponents();
+        const lowStockComponents = [];
+        
+        for (const component of components) {
+            const builtQty = parseFloat(component.built_quantity || 0);
+            const minStock = parseFloat(component.min_stock || 0);
+            
+            if (minStock > 0 && builtQty < minStock) {
+                const shortfall = minStock - builtQty;
+                // Suggest building enough to reach minimum + 20% buffer
+                const suggestedQuantity = Math.ceil(shortfall * 1.2);
+                
+                lowStockComponents.push({
+                    ...component,
+                    item_type: 'component',
+                    current_quantity: builtQty,
+                    min_stock: minStock,
+                    shortfall: shortfall,
+                    suggested_quantity: suggestedQuantity
+                });
+            }
+        }
+        
+        return lowStockComponents;
     }
     
     static async getTotalStockValue() {
