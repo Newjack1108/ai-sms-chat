@@ -2157,33 +2157,50 @@ class ProductionDatabase {
     
     static async getPlannerItems(plannerId) {
         if (isPostgreSQL) {
+            // Check if panel_id column exists for backward compatibility
+            const columnCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'planner_items' AND column_name = 'panel_id'
+            `);
+            const hasPanelId = columnCheck.rows.length > 0;
+            
+            const joinCondition = hasPanelId 
+                ? `(pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)`
+                : `(pi.item_type = 'built_item' AND pi.item_id = p.id)`;
+            
             const result = await pool.query(
                 `SELECT pi.*, 
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.name
                      WHEN pi.item_type = 'built_item' THEN p.name
                      WHEN pi.item_type = 'job' THEN pi.job_name
+                     WHEN pi.item_type IS NULL THEN p.name
                  END as item_name,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.labour_hours
                      WHEN pi.item_type = 'built_item' THEN p.labour_hours
                      WHEN pi.item_type = 'job' THEN pi.quantity_to_build
+                     WHEN pi.item_type IS NULL THEN p.labour_hours
                  END as labour_hours,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.min_stock
                      WHEN pi.item_type = 'built_item' THEN p.min_stock
+                     WHEN pi.item_type IS NULL THEN p.min_stock
                  END as min_stock,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.built_quantity
                      WHEN pi.item_type = 'built_item' THEN p.built_quantity
+                     WHEN pi.item_type IS NULL THEN p.built_quantity
                  END as built_quantity,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.id
                      WHEN pi.item_type = 'built_item' THEN p.id
+                     WHEN pi.item_type IS NULL THEN p.id
                  END as item_id_for_movement
                  FROM planner_items pi
                  LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
-                 LEFT JOIN panels p ON (pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)
+                 LEFT JOIN panels p ON ${joinCondition}
                  WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`,
                 [plannerId]
             );

@@ -1872,7 +1872,8 @@ router.get('/planner/:id', requireProductionAuth, async (req, res) => {
         res.json({ success: true, planner, items, build_rate: buildRate });
     } catch (error) {
         console.error('Get planner error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get planner' });
+        console.error('Error details:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to get planner: ' + (error.message || 'Unknown error') });
     }
 });
 
