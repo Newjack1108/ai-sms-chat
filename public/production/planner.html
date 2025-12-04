@@ -412,12 +412,48 @@
             }
         }
         
-        function createNewWeek() {
-            document.getElementById('plannerModalTitle').textContent = 'New Weekly Planner';
-            document.getElementById('plannerForm').reset();
-            document.getElementById('plannerId').value = '';
-            document.getElementById('plannerWeekStart').value = document.getElementById('weekStartDate').value;
-            showModal('plannerModal');
+        async function createNewWeek() {
+            const weekStart = document.getElementById('weekStartDate').value;
+            if (!weekStart) {
+                showAlert('Please select a week first', 'error');
+                return;
+            }
+            
+            try {
+                // Check if planner already exists for this week
+                const planners = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
+                const existingPlanner = planners.planners.find(p => {
+                    const plannerDate = p.week_start_date.split('T')[0];
+                    return plannerDate === weekStart;
+                });
+                
+                if (existingPlanner) {
+                    // Load existing planner for editing
+                    await editPlanner(existingPlanner.id);
+                    return;
+                }
+                
+                // No existing planner, create new one
+                document.getElementById('plannerModalTitle').textContent = 'New Weekly Planner';
+                document.getElementById('plannerForm').reset();
+                document.getElementById('plannerId').value = '';
+                document.getElementById('plannerWeekStart').value = weekStart;
+                document.getElementById('plannerStaff').value = 1;
+                document.getElementById('plannerHours').value = 40;
+                document.getElementById('plannerNotes').value = '';
+                showModal('plannerModal');
+            } catch (error) {
+                console.error('Error checking for existing planner:', error);
+                // If check fails, still allow creating new planner
+                document.getElementById('plannerModalTitle').textContent = 'New Weekly Planner';
+                document.getElementById('plannerForm').reset();
+                document.getElementById('plannerId').value = '';
+                document.getElementById('plannerWeekStart').value = weekStart;
+                document.getElementById('plannerStaff').value = 1;
+                document.getElementById('plannerHours').value = 40;
+                document.getElementById('plannerNotes').value = '';
+                showModal('plannerModal');
+            }
         }
         
         async function editPlanner(id) {
@@ -1031,15 +1067,53 @@
             
             try {
                 if (id) {
+                    // Editing existing planner
                     await apiCall(`/planner/${id}`, {
                         method: 'PUT',
                         body: JSON.stringify(data)
                     });
                 } else {
-                    await apiCall('/planner', {
-                        method: 'POST',
-                        body: JSON.stringify(data)
-                    });
+                    // Creating new planner - check if one already exists first
+                    try {
+                        const planners = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
+                        const existingPlanner = planners.planners.find(p => {
+                            const plannerDate = p.week_start_date.split('T')[0];
+                            return plannerDate === weekStart;
+                        });
+                        
+                        if (existingPlanner) {
+                            // Update existing planner instead
+                            await apiCall(`/planner/${existingPlanner.id}`, {
+                                method: 'PUT',
+                                body: JSON.stringify(data)
+                            });
+                        } else {
+                            // Create new planner
+                            await apiCall('/planner', {
+                                method: 'POST',
+                                body: JSON.stringify(data)
+                            });
+                        }
+                    } catch (createError) {
+                        // If creation fails with duplicate error, try to update existing
+                        if (createError.message && createError.message.includes('already exists')) {
+                            const planners = await apiCall(`/planner?start_date=${weekStart}&end_date=${weekStart}`);
+                            const existingPlanner = planners.planners.find(p => {
+                                const plannerDate = p.week_start_date.split('T')[0];
+                                return plannerDate === weekStart;
+                            });
+                            if (existingPlanner) {
+                                await apiCall(`/planner/${existingPlanner.id}`, {
+                                    method: 'PUT',
+                                    body: JSON.stringify(data)
+                                });
+                            } else {
+                                throw createError;
+                            }
+                        } else {
+                            throw createError;
+                        }
+                    }
                 }
                 showAlert('Planner saved');
                 hideModal('plannerModal');
