@@ -2157,53 +2157,97 @@ class ProductionDatabase {
     
     static async getPlannerItems(plannerId) {
         if (isPostgreSQL) {
-            // Check if panel_id column exists for backward compatibility
+            // Check which columns exist for backward compatibility
             const columnCheck = await pool.query(`
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = 'planner_items' AND column_name = 'panel_id'
+                WHERE table_name = 'planner_items' 
+                AND column_name IN ('panel_id', 'item_type', 'item_id', 'job_name')
             `);
-            const hasPanelId = columnCheck.rows.length > 0;
+            const existingColumns = columnCheck.rows.map(r => r.column_name);
+            const hasPanelId = existingColumns.includes('panel_id');
+            const hasItemType = existingColumns.includes('item_type');
+            const hasItemId = existingColumns.includes('item_id');
+            const hasJobName = existingColumns.includes('job_name');
             
-            const joinCondition = hasPanelId 
-                ? `(pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)`
-                : `(pi.item_type = 'built_item' AND pi.item_id = p.id)`;
+            // Build query based on what columns exist
+            if (!hasItemType) {
+                // Old schema - only panel_id exists
+                const result = await pool.query(
+                    `SELECT pi.*, 
+                     p.name as item_name,
+                     p.labour_hours,
+                     p.min_stock,
+                     p.built_quantity,
+                     p.id as item_id_for_movement
+                     FROM planner_items pi
+                     LEFT JOIN panels p ON pi.panel_id = p.id
+                     WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`,
+                    [plannerId]
+                );
+                // Add default values for new columns
+                return result.rows.map(row => ({
+                    ...row,
+                    item_type: 'built_item',
+                    item_id: row.panel_id,
+                    job_name: null,
+                    start_day: null,
+                    end_day: null
+                }));
+            }
             
-            const result = await pool.query(
-                `SELECT pi.*, 
-                 CASE 
-                     WHEN pi.item_type = 'component' THEN c.name
-                     WHEN pi.item_type = 'built_item' THEN p.name
-                     WHEN pi.item_type = 'job' THEN pi.job_name
-                     WHEN pi.item_type IS NULL THEN p.name
-                 END as item_name,
-                 CASE 
-                     WHEN pi.item_type = 'component' THEN c.labour_hours
-                     WHEN pi.item_type = 'built_item' THEN p.labour_hours
-                     WHEN pi.item_type = 'job' THEN pi.quantity_to_build
-                     WHEN pi.item_type IS NULL THEN p.labour_hours
-                 END as labour_hours,
-                 CASE 
-                     WHEN pi.item_type = 'component' THEN c.min_stock
-                     WHEN pi.item_type = 'built_item' THEN p.min_stock
-                     WHEN pi.item_type IS NULL THEN p.min_stock
-                 END as min_stock,
-                 CASE 
-                     WHEN pi.item_type = 'component' THEN c.built_quantity
-                     WHEN pi.item_type = 'built_item' THEN p.built_quantity
-                     WHEN pi.item_type IS NULL THEN p.built_quantity
-                 END as built_quantity,
-                 CASE 
-                     WHEN pi.item_type = 'component' THEN c.id
-                     WHEN pi.item_type = 'built_item' THEN p.id
-                     WHEN pi.item_type IS NULL THEN p.id
-                 END as item_id_for_movement
-                 FROM planner_items pi
-                 LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
-                 LEFT JOIN panels p ON ${joinCondition}
-                 WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`,
-                [plannerId]
-            );
+            // New schema - build dynamic query
+            let itemNameCase = `CASE 
+                WHEN pi.item_type = 'component' THEN c.name
+                WHEN pi.item_type = 'built_item' THEN p.name`;
+            if (hasJobName) {
+                itemNameCase += `\n                WHEN pi.item_type = 'job' THEN pi.job_name`;
+            }
+            if (hasPanelId) {
+                itemNameCase += `\n                WHEN pi.item_type IS NULL THEN p.name`;
+            }
+            itemNameCase += `\n            END as item_name`;
+            
+            let labourHoursCase = `CASE 
+                WHEN pi.item_type = 'component' THEN c.labour_hours
+                WHEN pi.item_type = 'built_item' THEN p.labour_hours`;
+            if (hasJobName) {
+                labourHoursCase += `\n                WHEN pi.item_type = 'job' THEN pi.quantity_to_build`;
+            }
+            if (hasPanelId) {
+                labourHoursCase += `\n                WHEN pi.item_type IS NULL THEN p.labour_hours`;
+            }
+            labourHoursCase += `\n            END as labour_hours`;
+            
+            let joinCondition = `pi.item_type = 'built_item' AND pi.item_id = p.id`;
+            if (hasPanelId) {
+                joinCondition += ` OR (pi.item_type IS NULL AND pi.panel_id = p.id)`;
+            }
+            
+            let query = `SELECT pi.*, 
+                ${itemNameCase},
+                ${labourHoursCase},
+                CASE 
+                    WHEN pi.item_type = 'component' THEN c.min_stock
+                    WHEN pi.item_type = 'built_item' THEN p.min_stock
+                    ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.min_stock` : ''}
+                END as min_stock,
+                CASE 
+                    WHEN pi.item_type = 'component' THEN c.built_quantity
+                    WHEN pi.item_type = 'built_item' THEN p.built_quantity
+                    ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.built_quantity` : ''}
+                END as built_quantity,
+                CASE 
+                    WHEN pi.item_type = 'component' THEN c.id
+                    WHEN pi.item_type = 'built_item' THEN p.id
+                    ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.id` : ''}
+                END as item_id_for_movement
+                FROM planner_items pi
+                LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
+                LEFT JOIN panels p ON ${joinCondition}
+                WHERE pi.planner_id = $1 ORDER BY pi.priority DESC, pi.created_at`;
+            
+            const result = await pool.query(query, [plannerId]);
             return result.rows;
         } else {
             return db.prepare(
