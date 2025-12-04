@@ -301,6 +301,8 @@ function initializeSQLite() {
             hours_used REAL DEFAULT 0,
             priority TEXT DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
             status TEXT DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
+            start_day INTEGER CHECK(start_day >= 0 AND start_day <= 5),
+            end_day INTEGER CHECK(end_day >= 0 AND end_day <= 5),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (planner_id) REFERENCES weekly_planner(id) ON DELETE CASCADE
         )
@@ -412,6 +414,16 @@ function initializeSQLite() {
         if (!plannerColumnNames.includes('job_name')) {
             db.exec('ALTER TABLE planner_items ADD COLUMN job_name TEXT');
             console.log('✅ Added job_name column to planner_items');
+        }
+        
+        // Add start_day and end_day columns for day assignments
+        if (!plannerColumnNames.includes('start_day')) {
+            db.exec('ALTER TABLE planner_items ADD COLUMN start_day INTEGER');
+            console.log('✅ Added start_day column to planner_items');
+        }
+        if (!plannerColumnNames.includes('end_day')) {
+            db.exec('ALTER TABLE planner_items ADD COLUMN end_day INTEGER');
+            console.log('✅ Added end_day column to planner_items');
         }
     } catch (error) {
         console.log('⚠️ Planner items migration check skipped:', error.message);
@@ -801,6 +813,8 @@ async function initializePostgreSQL() {
                 hours_used DECIMAL(10,2) DEFAULT 0,
                 priority VARCHAR(20) DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
                 status VARCHAR(20) DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
+                start_day INTEGER CHECK(start_day >= 0 AND start_day <= 5),
+                end_day INTEGER CHECK(end_day >= 0 AND end_day <= 5),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -977,6 +991,21 @@ async function initializePostgreSQL() {
                     WHERE table_name='planner_items' AND column_name='job_name'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN job_name VARCHAR(255);
+                END IF;
+                
+                -- Add start_day and end_day columns for day assignments
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='start_day'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN start_day INTEGER;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='end_day'
+                ) THEN
+                    ALTER TABLE planner_items ADD COLUMN end_day INTEGER;
                 END IF;
             END $$;
         `);
@@ -2099,20 +2128,20 @@ class ProductionDatabase {
         }
     }
     
-    static async addPlannerItem(plannerId, itemType, itemId, quantityToBuild, priority, status, jobName = null) {
+    static async addPlannerItem(plannerId, itemType, itemId, quantityToBuild, priority, status, jobName = null, startDay = null, endDay = null) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-                [plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned']
+                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status, start_day, end_day)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+                [plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned', startDay, endDay]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO planner_items (planner_id, item_type, item_id, job_name, quantity_to_build, priority, status, start_day, end_day)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned');
+            const info = stmt.run(plannerId, itemType, itemId || null, jobName || null, quantityToBuild, priority || 'medium', status || 'planned', startDay, endDay);
             return this.getPlannerItemById(info.lastInsertRowid);
         }
     }
@@ -2200,21 +2229,23 @@ class ProductionDatabase {
     static async updatePlannerItem(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE planner_items SET quantity_to_build = $1, quantity_built = $2, hours_used = $3, priority = $4, status = $5
-                 WHERE id = $6 RETURNING *`,
+                `UPDATE planner_items SET quantity_to_build = $1, quantity_built = $2, hours_used = $3, priority = $4, status = $5, start_day = $6, end_day = $7
+                 WHERE id = $8 RETURNING *`,
                 [
                     data.quantity_to_build,
                     data.quantity_built !== undefined ? data.quantity_built : null,
                     data.hours_used !== undefined ? data.hours_used : null,
                     data.priority,
                     data.status,
+                    data.start_day !== undefined ? data.start_day : null,
+                    data.end_day !== undefined ? data.end_day : null,
                     id
                 ]
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE planner_items SET quantity_to_build = ?, quantity_built = ?, hours_used = ?, priority = ?, status = ?
+                `UPDATE planner_items SET quantity_to_build = ?, quantity_built = ?, hours_used = ?, priority = ?, status = ?, start_day = ?, end_day = ?
                  WHERE id = ?`
             ).run(
                 data.quantity_to_build,
@@ -2222,6 +2253,8 @@ class ProductionDatabase {
                 data.hours_used !== undefined ? data.hours_used : null,
                 data.priority,
                 data.status,
+                data.start_day !== undefined ? data.start_day : null,
+                data.end_day !== undefined ? data.end_day : null,
                 id
             );
             return this.getPlannerItemById(id);

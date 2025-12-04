@@ -59,6 +59,99 @@
             font-weight: bold;
             color: #667eea;
         }
+        .planner-days-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .planner-day-column {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            min-height: 400px;
+        }
+        .planner-day-column.saturday {
+            background: #e3f2fd;
+            border-color: #90caf9;
+        }
+        .planner-day-header {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dee2e6;
+            text-align: center;
+        }
+        .planner-day-column.saturday .planner-day-header {
+            border-bottom-color: #90caf9;
+            color: #1976d2;
+        }
+        .planner-item-card {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: move;
+            position: relative;
+        }
+        .planner-item-card.multi-day-start {
+            border-left: 4px solid #28a745;
+        }
+        .planner-item-card.multi-day-middle {
+            border-left: 4px solid #ffc107;
+            background: #fff9e6;
+        }
+        .planner-item-card.multi-day-end {
+            border-right: 4px solid #28a745;
+        }
+        .planner-item-card.single-day {
+            border-left: 4px solid #667eea;
+        }
+        .planner-item-card.job {
+            border-color: #9c27b0;
+            border-left: 4px solid #9c27b0;
+        }
+        .planner-item-card.component {
+            border-color: #2196f3;
+            border-left: 4px solid #2196f3;
+        }
+        .planner-item-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .planner-item-details {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        .planner-item-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .planner-item-actions button {
+            font-size: 11px;
+            padding: 4px 8px;
+        }
+        .day-hours-summary {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #dee2e6;
+        }
+        .unassigned-items {
+            background: #fff3cd;
+            border: 2px dashed #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
@@ -356,47 +449,122 @@
                         ` : ''}
                         
                         <h3>Production Schedule</h3>
-                        ${items.length === 0 ? '<p>No built items scheduled for this week</p>' : `
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>Built Item</th>
-                                        <th>Planned Qty</th>
-                                        <th>Built Qty</th>
-                                        <th>Hours/Unit</th>
-                                        <th>Hours Used</th>
-                                        <th>Priority</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${items.map(item => {
+                        
+                        ${items.length === 0 ? '<p>No items scheduled for this week</p>' : `
+                            <div class="planner-days-grid">
+                                ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((dayName, dayIndex) => {
+                                    const dayItems = items.filter(item => {
+                                        const startDay = item.start_day !== null && item.start_day !== undefined ? parseInt(item.start_day) : null;
+                                        const endDay = item.end_day !== null && item.end_day !== undefined ? parseInt(item.end_day) : null;
+                                        
+                                        // If no day assignment, don't show in any column (will show in unassigned)
+                                        if (startDay === null && endDay === null) return false;
+                                        
+                                        // Show item if it spans this day
+                                        return dayIndex >= startDay && dayIndex <= (endDay !== null ? endDay : startDay);
+                                    });
+                                    
+                                    const dayHours = dayItems.reduce((total, item) => {
+                                        const hoursPerUnit = parseFloat(item.labour_hours || 0);
+                                        const qty = parseFloat(item.quantity_to_build || 0);
+                                        if (item.item_type === 'job') {
+                                            return total + qty; // For jobs, quantity_to_build is hours
+                                        }
+                                        // Distribute hours across days for multi-day items
+                                        const startDay = item.start_day !== null ? parseInt(item.start_day) : 0;
+                                        const endDay = item.end_day !== null ? parseInt(item.end_day) : startDay;
+                                        const daySpan = (endDay - startDay) + 1;
+                                        return total + (hoursPerUnit * qty / daySpan);
+                                    }, 0);
+                                    
+                                    return `
+                                        <div class="planner-day-column ${dayIndex === 5 ? 'saturday' : ''}">
+                                            <div class="planner-day-header">
+                                                ${dayName}
+                                                <div class="day-hours-summary">${dayHours.toFixed(1)} hrs</div>
+                                            </div>
+                                            ${dayItems.length === 0 ? '<p style="color: #6c757d; font-size: 12px; text-align: center; margin-top: 20px;">No items</p>' : ''}
+                                            ${dayItems.map(item => {
+                                                const hoursPerUnit = parseFloat(item.labour_hours || 0);
+                                                const qtyPlanned = parseFloat(item.quantity_to_build || 0);
+                                                const qtyBuilt = parseFloat(item.quantity_built || 0);
+                                                const hoursUsed = parseFloat(item.hours_used || 0);
+                                                const startDay = item.start_day !== null ? parseInt(item.start_day) : null;
+                                                const endDay = item.end_day !== null ? parseInt(item.end_day) : null;
+                                                const isMultiDay = startDay !== null && endDay !== null && startDay !== endDay;
+                                                const isStart = dayIndex === startDay;
+                                                const isEnd = dayIndex === endDay;
+                                                const isMiddle = isMultiDay && !isStart && !isEnd;
+                                                
+                                                let cardClass = 'planner-item-card';
+                                                if (item.item_type === 'job') cardClass += ' job';
+                                                else if (item.item_type === 'component') cardClass += ' component';
+                                                
+                                                if (isMultiDay) {
+                                                    if (isStart) cardClass += ' multi-day-start';
+                                                    else if (isEnd) cardClass += ' multi-day-end';
+                                                    else if (isMiddle) cardClass += ' multi-day-middle';
+                                                } else {
+                                                    cardClass += ' single-day';
+                                                }
+                                                
+                                                return `
+                                                    <div class="${cardClass}" data-item-id="${item.id}">
+                                                        <div class="planner-item-name">
+                                                            ${item.item_name || 'Unknown'}
+                                                            <span class="badge badge-info" style="font-size: 10px; margin-left: 5px;">
+                                                                ${item.item_type === 'component' ? 'C' : item.item_type === 'job' ? 'J' : 'BI'}
+                                                            </span>
+                                                        </div>
+                                                        ${item.item_type !== 'job' ? `
+                                                            <div class="planner-item-details">Qty: ${qtyPlanned.toFixed(1)}</div>
+                                                            <div class="planner-item-details">Built: ${qtyBuilt.toFixed(1)}</div>
+                                                        ` : ''}
+                                                        <div class="planner-item-details">Hours: ${hoursPerUnit.toFixed(1)}${item.item_type === 'job' ? '' : '/unit'}</div>
+                                                        <div class="planner-item-details">
+                                                            Priority: <span class="badge badge-${item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'info'}" style="font-size: 10px;">${item.priority}</span>
+                                                            Status: <span class="badge badge-info" style="font-size: 10px;">${item.status}</span>
+                                                        </div>
+                                                        ${isMultiDay ? `
+                                                            <div class="planner-item-details" style="font-size: 10px; color: #28a745; font-weight: bold;">
+                                                                ${isStart ? '→' : isEnd ? '←' : '↔'} ${dayIndex === startDay ? 'Start' : dayIndex === endDay ? 'End' : 'Day ' + (dayIndex - startDay + 1)}
+                                                            </div>
+                                                        ` : ''}
+                                                        <div class="planner-item-actions">
+                                                            <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                                            ${qtyBuilt > 0 && item.item_type !== 'job' ? `
+                                                                <button onclick="addToStock('${item.item_type || 'built_item'}', ${item.item_id_for_movement || item.item_id || item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add to stock">Stock</button>
+                                                            ` : ''}
+                                                            <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                            
+                            ${items.filter(item => item.start_day === null && item.end_day === null).length > 0 ? `
+                                <div class="unassigned-items">
+                                    <h4>Unassigned Items</h4>
+                                    <p style="font-size: 12px; color: #856404; margin-bottom: 10px;">These items need to be assigned to specific days. Click Edit to assign them.</p>
+                                    ${items.filter(item => item.start_day === null && item.end_day === null).map(item => {
                                         const hoursPerUnit = parseFloat(item.labour_hours || 0);
                                         const qtyPlanned = parseFloat(item.quantity_to_build || 0);
-                                        const qtyBuilt = parseFloat(item.quantity_built || 0);
-                                        const hoursUsed = parseFloat(item.hours_used || 0);
                                         return `
-                                            <tr>
-                                                <td><strong>${item.item_name || item.panel_name || 'Unknown'}</strong> <span class="badge badge-info">${item.item_type === 'component' ? 'Component' : item.item_type === 'job' ? 'Job' : 'Built Item'}</span></td>
-                                                <td>${item.item_type === 'job' ? 'N/A' : qtyPlanned.toFixed(2)}</td>
-                                                <td>${item.item_type === 'job' ? 'N/A' : qtyBuilt.toFixed(2)}</td>
-                                                <td>${hoursPerUnit.toFixed(2)}</td>
-                                                <td>${hoursUsed.toFixed(2)}</td>
-                                                <td><span class="badge badge-${item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'info'}">${item.priority}</span></td>
-                                                <td><span class="badge badge-info">${item.status}</span></td>
-                                                <td>
-                                                    <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                                    ${qtyBuilt > 0 && item.item_type !== 'job' ? `
-                                                        <button onclick="addToStock('${item.item_type || 'built_item'}', ${item.item_id_for_movement || item.item_id || item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add built quantity to stock">Add to Stock</button>
-                                                    ` : ''}
+                                            <div class="planner-item-card" style="display: inline-block; margin: 5px; min-width: 200px;">
+                                                <div class="planner-item-name">${item.item_name || 'Unknown'}</div>
+                                                <div class="planner-item-details">Qty: ${qtyPlanned.toFixed(1)} | Hours: ${hoursPerUnit.toFixed(1)}</div>
+                                                <div class="planner-item-actions">
+                                                    <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Assign Days</button>
                                                     <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
-                                                </td>
-                                            </tr>
+                                                </div>
+                                            </div>
                                         `;
                                     }).join('')}
-                                </tbody>
-                            </table>
+                                </div>
+                            ` : ''}
                         `}
                         
                         <div style="margin-top: 30px;">
@@ -617,6 +785,31 @@
                                 <option value="completed" ${item.status === 'completed' ? 'selected' : ''}>Completed</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label class="form-label">Start Day</label>
+                            <select id="editStartDay" class="form-select">
+                                <option value="">Not assigned</option>
+                                <option value="0" ${item.start_day === 0 ? 'selected' : ''}>Monday</option>
+                                <option value="1" ${item.start_day === 1 ? 'selected' : ''}>Tuesday</option>
+                                <option value="2" ${item.start_day === 2 ? 'selected' : ''}>Wednesday</option>
+                                <option value="3" ${item.start_day === 3 ? 'selected' : ''}>Thursday</option>
+                                <option value="4" ${item.start_day === 4 ? 'selected' : ''}>Friday</option>
+                                <option value="5" ${item.start_day === 5 ? 'selected' : ''}>Saturday</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">End Day</label>
+                            <select id="editEndDay" class="form-select">
+                                <option value="">Not assigned</option>
+                                <option value="0" ${item.end_day === 0 ? 'selected' : ''}>Monday</option>
+                                <option value="1" ${item.end_day === 1 ? 'selected' : ''}>Tuesday</option>
+                                <option value="2" ${item.end_day === 2 ? 'selected' : ''}>Wednesday</option>
+                                <option value="3" ${item.end_day === 3 ? 'selected' : ''}>Thursday</option>
+                                <option value="4" ${item.end_day === 4 ? 'selected' : ''}>Friday</option>
+                                <option value="5" ${item.end_day === 5 ? 'selected' : ''}>Saturday</option>
+                            </select>
+                            <small style="color: #6c757d;">Leave empty or same as start day for single day. Set end day to span multiple days.</small>
+                        </div>
                         <div class="text-right">
                             <button type="button" onclick="this.closest('.modal').remove()" class="btn btn-secondary">Cancel</button>
                             <button type="submit" class="btn btn-primary">Save</button>
@@ -629,6 +822,13 @@
             document.getElementById('editItemForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 try {
+                    const startDay = document.getElementById('editStartDay').value;
+                    const endDay = document.getElementById('editEndDay').value;
+                    
+                    // If start day is set but end day is not, set end day to start day (single day)
+                    const finalStartDay = startDay !== '' ? parseInt(startDay) : null;
+                    const finalEndDay = endDay !== '' ? parseInt(endDay) : (finalStartDay !== null ? finalStartDay : null);
+                    
                     await apiCall(`/planner/items/${id}`, {
                         method: 'PUT',
                         body: JSON.stringify({
@@ -636,14 +836,16 @@
                             quantity_built: parseFloat(document.getElementById('editQtyBuilt').value),
                             hours_used: parseFloat(document.getElementById('editHoursUsed').value),
                             priority: document.getElementById('editPriority').value,
-                            status: document.getElementById('editStatus').value
+                            status: document.getElementById('editStatus').value,
+                            start_day: finalStartDay,
+                            end_day: finalEndDay
                         })
                     });
                     showAlert('Item updated');
                     modal.remove();
                     loadPlanner();
                 } catch (error) {
-                    showAlert('Error updating item', 'error');
+                    showAlert('Error updating item: ' + (error.message || 'Unknown error'), 'error');
                 }
             });
         }

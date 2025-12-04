@@ -1921,7 +1921,7 @@ router.get('/planner/:id/build-rate', requireProductionAuth, async (req, res) =>
 router.post('/planner/:id/items', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const plannerId = parseInt(req.params.id);
-        const { item_type, item_id, panel_id, job_name, quantity_to_build, priority, status } = req.body;
+        const { item_type, item_id, panel_id, job_name, quantity_to_build, priority, status, start_day, end_day } = req.body;
         
         // Support both old format (panel_id) and new format (item_type + item_id/job_name)
         let finalItemType, finalItemId, finalJobName;
@@ -1954,6 +1954,20 @@ router.post('/planner/:id/items', requireProductionAuth, requireManager, async (
             return res.status(400).json({ success: false, error: 'Quantity/hours is required' });
         }
         
+        // Validate day assignments (0-5, where 0=Monday, 5=Saturday)
+        let finalStartDay = start_day !== undefined && start_day !== null ? parseInt(start_day) : null;
+        let finalEndDay = end_day !== undefined && end_day !== null ? parseInt(end_day) : null;
+        
+        if (finalStartDay !== null && (finalStartDay < 0 || finalStartDay > 5)) {
+            return res.status(400).json({ success: false, error: 'start_day must be between 0 (Monday) and 5 (Saturday)' });
+        }
+        if (finalEndDay !== null && (finalEndDay < 0 || finalEndDay > 5)) {
+            return res.status(400).json({ success: false, error: 'end_day must be between 0 (Monday) and 5 (Saturday)' });
+        }
+        if (finalStartDay !== null && finalEndDay !== null && finalStartDay > finalEndDay) {
+            return res.status(400).json({ success: false, error: 'start_day cannot be greater than end_day' });
+        }
+        
         const item = await ProductionDatabase.addPlannerItem(
             plannerId,
             finalItemType,
@@ -1961,7 +1975,9 @@ router.post('/planner/:id/items', requireProductionAuth, requireManager, async (
             parseFloat(quantity_to_build),
             priority || 'medium',
             status || 'planned',
-            finalJobName
+            finalJobName,
+            finalStartDay,
+            finalEndDay
         );
         res.json({ success: true, item });
     } catch (error) {
@@ -1973,14 +1989,30 @@ router.post('/planner/:id/items', requireProductionAuth, requireManager, async (
 router.put('/planner/items/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
-        const { quantity_to_build, quantity_built, hours_used, priority, status } = req.body;
+        const { quantity_to_build, quantity_built, hours_used, priority, status, start_day, end_day } = req.body;
+        
+        // Validate day assignments if provided
+        let finalStartDay = start_day !== undefined && start_day !== null ? parseInt(start_day) : undefined;
+        let finalEndDay = end_day !== undefined && end_day !== null ? parseInt(end_day) : undefined;
+        
+        if (finalStartDay !== undefined && (finalStartDay < 0 || finalStartDay > 5)) {
+            return res.status(400).json({ success: false, error: 'start_day must be between 0 (Monday) and 5 (Saturday)' });
+        }
+        if (finalEndDay !== undefined && (finalEndDay < 0 || finalEndDay > 5)) {
+            return res.status(400).json({ success: false, error: 'end_day must be between 0 (Monday) and 5 (Saturday)' });
+        }
+        if (finalStartDay !== undefined && finalEndDay !== undefined && finalStartDay > finalEndDay) {
+            return res.status(400).json({ success: false, error: 'start_day cannot be greater than end_day' });
+        }
         
         const item = await ProductionDatabase.updatePlannerItem(itemId, {
             quantity_to_build: parseFloat(quantity_to_build),
             quantity_built: quantity_built !== undefined ? parseFloat(quantity_built) : undefined,
             hours_used: hours_used !== undefined ? parseFloat(hours_used) : undefined,
             priority,
-            status
+            status,
+            start_day: finalStartDay,
+            end_day: finalEndDay
         });
         res.json({ success: true, item });
     } catch (error) {
