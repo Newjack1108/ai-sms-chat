@@ -1832,7 +1832,15 @@ router.post('/planner', requireProductionAuth, requireManager, async (req, res) 
         res.json({ success: true, planner });
     } catch (error) {
         console.error('Create planner error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create planner' });
+        
+        // Check for duplicate week_start_date error
+        if (error.message && (error.message.includes('UNIQUE') || error.message.includes('duplicate') || error.message.includes('unique constraint'))) {
+            return res.status(409).json({ success: false, error: 'A planner already exists for this week. Please edit the existing planner instead.' });
+        }
+        
+        // Return more specific error message if available
+        const errorMessage = error.message || 'Failed to create planner';
+        res.status(500).json({ success: false, error: errorMessage });
     }
 });
 

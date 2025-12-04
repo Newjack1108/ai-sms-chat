@@ -1015,11 +1015,18 @@
         document.getElementById('plannerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const id = document.getElementById('plannerId').value;
+            const weekStart = document.getElementById('plannerWeekStart').value;
+            
+            if (!weekStart) {
+                showAlert('Week start date is required', 'error');
+                return;
+            }
+            
             const data = {
-                week_start_date: document.getElementById('plannerWeekStart').value,
-                staff_available: parseInt(document.getElementById('plannerStaff').value),
-                hours_available: parseFloat(document.getElementById('plannerHours').value),
-                notes: document.getElementById('plannerNotes').value
+                week_start_date: weekStart,
+                staff_available: parseInt(document.getElementById('plannerStaff').value) || 1,
+                hours_available: parseFloat(document.getElementById('plannerHours').value) || 40,
+                notes: document.getElementById('plannerNotes').value || ''
             };
             
             try {
@@ -1038,7 +1045,9 @@
                 hideModal('plannerModal');
                 loadPlanner();
             } catch (error) {
-                showAlert(error.message, 'error');
+                const errorMsg = error.message || 'Failed to save planner';
+                showAlert(errorMsg, 'error');
+                console.error('Planner save error:', error);
             }
         });
         
