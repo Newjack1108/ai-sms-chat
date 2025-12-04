@@ -325,15 +325,20 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
 router.post('/panels/:id/bom', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const { stock_item_id, quantity_required, unit } = req.body;
+        const { item_type, item_id, quantity_required, unit } = req.body;
         
-        if (!stock_item_id || !quantity_required || !unit) {
-            return res.status(400).json({ success: false, error: 'Stock item, quantity, and unit are required' });
+        if (!item_type || !item_id || !quantity_required || !unit) {
+            return res.status(400).json({ success: false, error: 'Item type, item ID, quantity, and unit are required' });
+        }
+        
+        if (!['raw_material', 'component'].includes(item_type)) {
+            return res.status(400).json({ success: false, error: 'Item type must be raw_material or component' });
         }
         
         const bomItem = await ProductionDatabase.addBOMItem(
             panelId,
-            parseInt(stock_item_id),
+            item_type,
+            parseInt(item_id),
             parseFloat(quantity_required),
             unit
         );
@@ -412,6 +417,166 @@ router.post('/panels/:id/movement', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Record panel movement error:', error);
         res.status(500).json({ success: false, error: 'Failed to record panel movement' });
+    }
+});
+
+// ============ COMPONENTS ROUTES ============
+
+router.get('/components', requireProductionAuth, async (req, res) => {
+    try {
+        const components = await ProductionDatabase.getAllComponents();
+        res.json({ success: true, components });
+    } catch (error) {
+        console.error('Get components error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get components' });
+    }
+});
+
+router.post('/components', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        if (!name) {
+            return res.status(400).json({ success: false, error: 'Name is required' });
+        }
+        
+        const component = await ProductionDatabase.createComponent({
+            name,
+            description,
+            component_type,
+            status,
+            built_quantity: parseFloat(built_quantity) || 0,
+            min_stock: parseFloat(min_stock) || 0,
+            labour_hours: parseFloat(labour_hours) || 0
+        });
+        res.json({ success: true, component });
+    } catch (error) {
+        console.error('Create component error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create component' });
+    }
+});
+
+router.put('/components/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        
+        const component = await ProductionDatabase.updateComponent(componentId, {
+            name,
+            description,
+            component_type,
+            status,
+            built_quantity: parseFloat(built_quantity) || 0,
+            min_stock: parseFloat(min_stock) || 0,
+            labour_hours: parseFloat(labour_hours) || 0
+        });
+        res.json({ success: true, component });
+    } catch (error) {
+        console.error('Update component error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update component' });
+    }
+});
+
+router.get('/components/:id/bom', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const bom = await ProductionDatabase.getComponentBOM(componentId);
+        res.json({ success: true, bom });
+    } catch (error) {
+        console.error('Get component BOM error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get component BOM' });
+    }
+});
+
+router.post('/components/:id/bom', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const { stock_item_id, quantity_required, unit } = req.body;
+        
+        if (!stock_item_id || !quantity_required || !unit) {
+            return res.status(400).json({ success: false, error: 'Stock item, quantity, and unit are required' });
+        }
+        
+        const bomItem = await ProductionDatabase.addComponentBOMItem(
+            componentId,
+            parseInt(stock_item_id),
+            parseFloat(quantity_required),
+            unit
+        );
+        res.json({ success: true, bomItem });
+    } catch (error) {
+        console.error('Add component BOM item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to add component BOM item' });
+    }
+});
+
+router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const bomId = parseInt(req.params.bomId);
+        await ProductionDatabase.deleteComponentBOMItem(bomId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete component BOM item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete component BOM item' });
+    }
+});
+
+router.get('/components/:id/cost', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const bomValue = await ProductionDatabase.calculateComponentBOMValue(componentId);
+        res.json({ success: true, bom_value: bomValue });
+    } catch (error) {
+        console.error('Calculate component BOM value error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate component BOM value' });
+    }
+});
+
+router.get('/components/:id/true-cost', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const trueCost = await ProductionDatabase.calculateComponentTrueCost(componentId);
+        res.json({ success: true, true_cost: trueCost });
+    } catch (error) {
+        console.error('Calculate component true cost error:', error);
+        res.status(500).json({ success: false, error: 'Failed to calculate component true cost' });
+    }
+});
+
+router.get('/components/:id/movements', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const movements = await ProductionDatabase.getComponentMovements(componentId);
+        res.json({ success: true, movements });
+    } catch (error) {
+        console.error('Get component movements error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get component movements' });
+    }
+});
+
+router.post('/components/:id/movement', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        const { movement_type, quantity, reference } = req.body;
+        
+        if (!movement_type || !quantity) {
+            return res.status(400).json({ success: false, error: 'Movement type and quantity are required' });
+        }
+        
+        if (!['build', 'use', 'adjustment'].includes(movement_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid movement type' });
+        }
+        
+        const movement = await ProductionDatabase.recordComponentMovement({
+            component_id: componentId,
+            movement_type,
+            quantity: parseFloat(quantity),
+            reference,
+            user_id: req.session.production_user.id
+        });
+        res.json({ success: true, movement });
+    } catch (error) {
+        console.error('Record component movement error:', error);
+        res.status(500).json({ success: false, error: 'Failed to record component movement' });
     }
 });
 
@@ -565,8 +730,8 @@ router.post('/products/:id/components', requireProductionAuth, requireAdmin, asy
             return res.status(400).json({ success: false, error: 'All component fields are required' });
         }
         
-        if (!['panel', 'raw_material'].includes(component_type)) {
-            return res.status(400).json({ success: false, error: 'Invalid component type' });
+        if (!['raw_material', 'component', 'built_item'].includes(component_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid component type. Must be raw_material, component, or built_item' });
         }
         
         const component = await ProductionDatabase.addProductComponent(

@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Management - Production System</title>
+    <title>Raw Materials Management - Production System</title>
     <link rel="stylesheet" href="common.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="navbar-logo">
             <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
-            <h1>Stock Management</h1>
+            <h1>Raw Materials Management</h1>
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
@@ -22,8 +22,8 @@
     <div class="container">
         <div class="card">
             <div class="card-header">
-                <h2>Stock Items</h2>
-                <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Stock Item</button>
+                <h2>Raw Materials</h2>
+                <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Raw Material</button>
             </div>
             <div id="stockList">
                 <div class="loading">Loading...</div>
@@ -35,7 +35,7 @@
     <div id="stockModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="stockModalTitle">Add Stock Item</h3>
+                <h3 id="stockModalTitle">Add Raw Material</h3>
                 <button class="modal-close" onclick="hideModal('stockModal')">&times;</button>
             </div>
             <form id="stockForm">
@@ -133,7 +133,7 @@
                 const stockList = document.getElementById('stockList');
                 
                 if (data.items.length === 0) {
-                    stockList.innerHTML = '<p>No stock items found</p>';
+                    stockList.innerHTML = '<p>No raw materials found</p>';
                     return;
                 }
                 
@@ -181,7 +181,7 @@
         }
         
         function showAddStockModal() {
-            document.getElementById('stockModalTitle').textContent = 'Add Stock Item';
+                document.getElementById('stockModalTitle').textContent = 'Add Raw Material';
             document.getElementById('stockForm').reset();
             document.getElementById('stockId').value = '';
             showModal('stockModal');
@@ -193,7 +193,7 @@
                 const item = data.items.find(i => i.id === id);
                 if (!item) return;
                 
-                document.getElementById('stockModalTitle').textContent = 'Edit Stock Item';
+                document.getElementById('stockModalTitle').textContent = 'Edit Raw Material';
                 document.getElementById('stockId').value = item.id;
                 document.getElementById('stockName').value = item.name;
                 document.getElementById('stockDescription').value = item.description || '';
@@ -226,14 +226,14 @@
                         method: 'PUT',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Stock item updated');
+                    showAlert('Raw material updated');
                 } else {
                     data.current_quantity = document.getElementById('stockCurrentQty').value;
                     await apiCall('/stock', {
                         method: 'POST',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Stock item created');
+                    showAlert('Raw material created');
                 }
                 hideModal('stockModal');
                 loadStock();
@@ -263,7 +263,7 @@
                     method: 'POST',
                     body: JSON.stringify(data)
                 });
-                showAlert('Stock movement recorded');
+                showAlert('Raw material movement recorded');
                 hideModal('movementModal');
                 loadStock();
             } catch (error) {

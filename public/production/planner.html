@@ -70,7 +70,7 @@
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
             <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
-            <a href="panels.html" class="btn btn-secondary btn-sm">Panels</a>
+            <a href="panels.html" class="btn btn-secondary btn-sm">Built Items</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
     </nav>
@@ -125,14 +125,14 @@
     <div id="addPanelModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Add Panel to Planner</h3>
+                <h3>Add Built Item to Planner</h3>
                 <button class="modal-close" onclick="hideModal('addPanelModal')">&times;</button>
             </div>
             <form id="addPanelForm">
                 <div class="form-group">
-                    <label class="form-label">Panel *</label>
+                    <label class="form-label">Built Item *</label>
                     <select id="panelSelect" class="form-select" required>
-                        <option value="">Select panel...</option>
+                        <option value="">Select built item...</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -159,7 +159,7 @@
     <div id="lowStockModal" class="modal">
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
-                <h3>Add Low Stock Panels</h3>
+                <h3>Add Low Stock Built Items</h3>
                 <button class="modal-close" onclick="hideModal('lowStockModal')">&times;</button>
             </div>
             <div id="lowStockList">
@@ -208,7 +208,7 @@
                 
                 // Populate panel select
                 const select = document.getElementById('panelSelect');
-                select.innerHTML = '<option value="">Select panel...</option>';
+                select.innerHTML = '<option value="">Select built item...</option>';
                 allPanels.forEach(panel => {
                     const option = document.createElement('option');
                     option.value = panel.id;
@@ -295,7 +295,7 @@
                             <h2>Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</h2>
                             <div>
                                 <button onclick="editPlanner(${planner.id})" class="btn btn-secondary btn-sm">Edit Capacity</button>
-                                <button onclick="showAddPanelModal()" class="btn btn-primary btn-sm">Add Panel</button>
+                                <button onclick="showAddPanelModal()" class="btn btn-primary btn-sm">Add Built Item</button>
                                 <button onclick="showLowStockModal()" class="btn btn-success btn-sm">Add Low Stock</button>
                             </div>
                         </div>
@@ -340,11 +340,11 @@
                         ` : ''}
                         
                         <h3>Production Schedule</h3>
-                        ${items.length === 0 ? '<p>No panels scheduled for this week</p>' : `
+                        ${items.length === 0 ? '<p>No built items scheduled for this week</p>' : `
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>Panel</th>
+                                        <th>Built Item</th>
                                         <th>Planned Qty</th>
                                         <th>Built Qty</th>
                                         <th>Hours/Unit</th>
@@ -372,7 +372,7 @@
                                                 <td>
                                                     <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
                                                     ${qtyBuilt > 0 ? `
-                                                        <button onclick="addToStock(${item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add built quantity to panel stock">Add to Stock</button>
+                                                        <button onclick="addToStock(${item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add built quantity to built item stock">Add to Stock</button>
                                                     ` : ''}
                                                     <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                 </td>
@@ -439,7 +439,7 @@
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" id="selectAllLowStock" onchange="toggleAllLowStock()"></th>
-                                    <th>Panel</th>
+                                    <th>Built Item</th>
                                     <th>Current</th>
                                     <th>Min Stock</th>
                                     <th>Shortfall</th>
@@ -721,7 +721,7 @@
                                     <table class="table">
                                         <thead>
                                             <tr>
-                                                <th>Panel</th>
+                                                <th>Built Item</th>
                                                 <th>Planned</th>
                                                 <th>Built</th>
                                                 <th>Hours Used</th>
@@ -1093,7 +1093,7 @@
                 // Remove the planner item after successfully adding to stock
                 await apiCall(`/planner/items/${plannerItemId}`, { method: 'DELETE' });
                 
-                showAlert(`Added ${quantity.toFixed(2)} units to panel stock, marked as completed, and deducted ${hoursToDeduct.toFixed(2)} hours from available hours`, 'success');
+                showAlert(`Added ${quantity.toFixed(2)} units to built item stock, marked as completed, and deducted ${hoursToDeduct.toFixed(2)} hours from available hours`, 'success');
                 // Reload planner to refresh data
                 loadPlanner();
             } catch (error) {

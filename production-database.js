@@ -93,16 +93,60 @@ function initializeSQLite() {
         )
     `);
     
-    // BOM items table
+    // Components table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            component_type TEXT,
+            status TEXT DEFAULT 'active',
+            cost_gbp REAL DEFAULT 0,
+            built_quantity REAL DEFAULT 0,
+            min_stock REAL DEFAULT 0,
+            labour_hours REAL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    
+    // Component BOM items table (components use raw materials)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS component_bom_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            component_id INTEGER NOT NULL,
+            stock_item_id INTEGER NOT NULL,
+            quantity_required REAL NOT NULL,
+            unit TEXT NOT NULL,
+            FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE,
+            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE
+        )
+    `);
+    
+    // Component movements table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS component_movements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            component_id INTEGER NOT NULL,
+            movement_type TEXT NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
+            quantity REAL NOT NULL,
+            reference TEXT,
+            user_id INTEGER,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (component_id) REFERENCES components(id),
+            FOREIGN KEY (user_id) REFERENCES production_users(id)
+        )
+    `);
+    
+    // BOM items table (built items use raw materials and components)
     db.exec(`
         CREATE TABLE IF NOT EXISTS bom_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             panel_id INTEGER NOT NULL,
-            stock_item_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL CHECK(item_type IN ('raw_material', 'component')),
+            item_id INTEGER NOT NULL,
             quantity_required REAL NOT NULL,
             unit TEXT NOT NULL,
-            FOREIGN KEY (panel_id) REFERENCES panels(id) ON DELETE CASCADE,
-            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE
+            FOREIGN KEY (panel_id) REFERENCES panels(id) ON DELETE CASCADE
         )
     `);
     
@@ -124,7 +168,7 @@ function initializeSQLite() {
         CREATE TABLE IF NOT EXISTS product_components (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             product_id INTEGER NOT NULL,
-            component_type TEXT NOT NULL CHECK(component_type IN ('panel', 'raw_material')),
+            component_type TEXT NOT NULL CHECK(component_type IN ('raw_material', 'component', 'built_item')),
             component_id INTEGER NOT NULL,
             quantity_required REAL NOT NULL,
             unit TEXT NOT NULL,
@@ -309,7 +353,10 @@ function initializeSQLite() {
     // Create indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
-        CREATE INDEX IF NOT EXISTS idx_bom_stock ON bom_items(stock_item_id);
+        CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id);
+        CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id);
+        CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id);
+        CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id);
         CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id);
         CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id);
         CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id);
@@ -557,12 +604,53 @@ async function initializePostgreSQL() {
             )
         `);
         
-        // BOM items
+        // Components
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS components (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                component_type VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'active',
+                cost_gbp DECIMAL(10,2) DEFAULT 0,
+                built_quantity DECIMAL(10,2) DEFAULT 0,
+                min_stock DECIMAL(10,2) DEFAULT 0,
+                labour_hours DECIMAL(10,2) DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Component BOM items (components use raw materials)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS component_bom_items (
+                id SERIAL PRIMARY KEY,
+                component_id INTEGER NOT NULL REFERENCES components(id) ON DELETE CASCADE,
+                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
+                quantity_required DECIMAL(10,2) NOT NULL,
+                unit VARCHAR(50) NOT NULL
+            )
+        `);
+        
+        // Component movements
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS component_movements (
+                id SERIAL PRIMARY KEY,
+                component_id INTEGER NOT NULL REFERENCES components(id),
+                movement_type VARCHAR(20) NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
+                quantity DECIMAL(10,2) NOT NULL,
+                reference TEXT,
+                user_id INTEGER REFERENCES production_users(id),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // BOM items (built items use raw materials and components)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS bom_items (
                 id SERIAL PRIMARY KEY,
                 panel_id INTEGER NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
-                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
+                item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('raw_material', 'component')),
+                item_id INTEGER NOT NULL,
                 quantity_required DECIMAL(10,2) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
@@ -586,7 +674,7 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS product_components (
                 id SERIAL PRIMARY KEY,
                 product_id INTEGER NOT NULL REFERENCES finished_products(id) ON DELETE CASCADE,
-                component_type VARCHAR(20) NOT NULL CHECK(component_type IN ('panel', 'raw_material')),
+                component_type VARCHAR(20) NOT NULL CHECK(component_type IN ('raw_material', 'component', 'built_item')),
                 component_id INTEGER NOT NULL,
                 quantity_required DECIMAL(10,2) NOT NULL,
                 unit VARCHAR(50) NOT NULL
@@ -752,7 +840,10 @@ async function initializePostgreSQL() {
         
         // Create indexes
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_stock ON bom_items(stock_item_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id)`);
@@ -1253,23 +1344,21 @@ class ProductionDatabase {
     
     // ============ BOM OPERATIONS ============
     
-    static async addBOMItem(panelId, stockItemId, quantityRequired, unit) {
+    static async addBOMItem(panelId, itemType, itemId, quantityRequired, unit) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO bom_items (panel_id, stock_item_id, quantity_required, unit)
-                 VALUES ($1, $2, $3, $4) RETURNING *`,
-                [panelId, stockItemId, quantityRequired, unit]
+                `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [panelId, itemType, itemId, quantityRequired, unit]
             );
-            // Recalculate panel cost after BOM change
             await this.updatePanelCost(panelId);
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO bom_items (panel_id, stock_item_id, quantity_required, unit)
-                 VALUES (?, ?, ?, ?)`
+                `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
+                 VALUES (?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(panelId, stockItemId, quantityRequired, unit);
-            // Recalculate panel cost after BOM change
+            const info = stmt.run(panelId, itemType, itemId, quantityRequired, unit);
             await this.updatePanelCost(panelId);
             return this.getBOMItemById(info.lastInsertRowid);
         }
@@ -1287,19 +1376,39 @@ class ProductionDatabase {
     static async getPanelBOM(panelId) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT bi.*, si.name as stock_item_name, si.unit as stock_item_unit
+                `SELECT bi.*, 
+                 CASE 
+                     WHEN bi.item_type = 'raw_material' THEN si.name
+                     WHEN bi.item_type = 'component' THEN c.name
+                 END as item_name,
+                 CASE 
+                     WHEN bi.item_type = 'raw_material' THEN si.unit
+                     WHEN bi.item_type = 'component' THEN 'units'
+                 END as item_unit
                  FROM bom_items bi
-                 JOIN stock_items si ON bi.stock_item_id = si.id
-                 WHERE bi.panel_id = $1 ORDER BY si.name`,
+                 LEFT JOIN stock_items si ON bi.item_type = 'raw_material' AND bi.item_id = si.id
+                 LEFT JOIN components c ON bi.item_type = 'component' AND bi.item_id = c.id
+                 WHERE bi.panel_id = $1 
+                 ORDER BY bi.item_type, item_name`,
                 [panelId]
             );
             return result.rows;
         } else {
             return db.prepare(
-                `SELECT bi.*, si.name as stock_item_name, si.unit as stock_item_unit
+                `SELECT bi.*, 
+                 CASE 
+                     WHEN bi.item_type = 'raw_material' THEN si.name
+                     WHEN bi.item_type = 'component' THEN c.name
+                 END as item_name,
+                 CASE 
+                     WHEN bi.item_type = 'raw_material' THEN si.unit
+                     WHEN bi.item_type = 'component' THEN 'units'
+                 END as item_unit
                  FROM bom_items bi
-                 JOIN stock_items si ON bi.stock_item_id = si.id
-                 WHERE bi.panel_id = ? ORDER BY si.name`
+                 LEFT JOIN stock_items si ON bi.item_type = 'raw_material' AND bi.item_id = si.id
+                 LEFT JOIN components c ON bi.item_type = 'component' AND bi.item_id = c.id
+                 WHERE bi.panel_id = ? 
+                 ORDER BY bi.item_type, item_name`
             ).all(panelId);
         }
     }
@@ -1321,16 +1430,22 @@ class ProductionDatabase {
         }
     }
     
-    // Calculate BOM value for a panel
+    // Calculate BOM value for a panel (built item)
     static async calculateBOMValue(panelId) {
         const bomItems = await this.getPanelBOM(panelId);
         let totalValue = 0;
         
         for (const bomItem of bomItems) {
-            const stockItem = await this.getStockItemById(bomItem.stock_item_id);
-            if (stockItem) {
-                const itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * parseFloat(bomItem.quantity_required || 0);
-                totalValue += itemCost;
+            const qty = parseFloat(bomItem.quantity_required || 0);
+            if (bomItem.item_type === 'raw_material') {
+                const stockItem = await this.getStockItemById(bomItem.item_id);
+                if (stockItem) {
+                    const itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * qty;
+                    totalValue += itemCost;
+                }
+            } else if (bomItem.item_type === 'component') {
+                const componentCost = await this.calculateComponentTrueCost(bomItem.item_id);
+                totalValue += componentCost * qty;
             }
         }
         
@@ -1350,7 +1465,7 @@ class ProductionDatabase {
         return bomValue + labourCost;
     }
     
-    // Calculate product cost from components (panels + raw materials)
+    // Calculate product cost from components (raw materials + components + built items)
     static async calculateProductCost(productId) {
         const components = await this.getProductComponents(productId);
         let totalCost = 0;
@@ -1358,17 +1473,19 @@ class ProductionDatabase {
         for (const comp of components) {
             const compQty = parseFloat(comp.quantity_required || 0);
             
-            if (comp.component_type === 'panel') {
-                // Get panel's true cost (BOM + labour)
-                const panelCost = await this.calculatePanelTrueCost(comp.component_id);
-                totalCost += panelCost * compQty;
-            } else if (comp.component_type === 'raw_material') {
-                // Get raw material cost
+            if (comp.component_type === 'raw_material') {
                 const stockItem = await this.getStockItemById(comp.component_id);
                 if (stockItem) {
                     const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
                     totalCost += materialCost;
                 }
+            } else if (comp.component_type === 'component') {
+                const componentCost = await this.calculateComponentTrueCost(comp.component_id);
+                totalCost += componentCost * compQty;
+            } else if (comp.component_type === 'built_item') {
+                // Built item (panel) true cost (BOM + labour)
+                const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
+                totalCost += builtItemCost * compQty;
             }
         }
         
@@ -1399,12 +1516,12 @@ class ProductionDatabase {
         return productCost;
     }
     
-    // Recalculate all products that use a specific panel (called when panel cost changes)
+    // Recalculate all products that use a specific built item (called when built item cost changes)
     static async recalculateProductsUsingPanel(panelId) {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT DISTINCT product_id FROM product_components 
-                 WHERE component_type = 'panel' AND component_id = $1`,
+                 WHERE component_type = 'built_item' AND component_id = $1`,
                 [panelId]
             );
             for (const row of result.rows) {
@@ -1413,7 +1530,7 @@ class ProductionDatabase {
         } else {
             const products = db.prepare(
                 `SELECT DISTINCT product_id FROM product_components 
-                 WHERE component_type = 'panel' AND component_id = ?`
+                 WHERE component_type = 'built_item' AND component_id = ?`
             ).all(panelId);
             for (const product of products) {
                 await this.updateProductCost(product.product_id);
@@ -1430,7 +1547,7 @@ class ProductionDatabase {
         }
     }
     
-    // Record panel movement
+    // Record panel movement (built item)
     static async recordPanelMovement(data) {
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -1443,6 +1560,8 @@ class ProductionDatabase {
             let newQuantity = parseFloat(panel.built_quantity) || 0;
             if (data.movement_type === 'build') {
                 newQuantity += parseFloat(data.quantity);
+                // Automatically deduct raw materials and components from stock
+                await this.deductMaterialsForBuiltItem(data.panel_id, parseFloat(data.quantity), data.user_id, data.reference);
             } else if (data.movement_type === 'use') {
                 newQuantity -= parseFloat(data.quantity);
             } else if (data.movement_type === 'adjustment') {
@@ -1461,6 +1580,7 @@ class ProductionDatabase {
             let newQuantity = parseFloat(panel.built_quantity) || 0;
             if (data.movement_type === 'build') {
                 newQuantity += parseFloat(data.quantity);
+                await this.deductMaterialsForBuiltItem(data.panel_id, parseFloat(data.quantity), data.user_id, data.reference);
             } else if (data.movement_type === 'use') {
                 newQuantity -= parseFloat(data.quantity);
             } else if (data.movement_type === 'adjustment') {
@@ -1468,6 +1588,33 @@ class ProductionDatabase {
             }
             this.updatePanelQuantity(data.panel_id, newQuantity);
             return db.prepare(`SELECT * FROM panel_movements WHERE id = (SELECT MAX(id) FROM panel_movements)`).get();
+        }
+    }
+    
+    // Deduct raw materials and components when building a built item
+    static async deductMaterialsForBuiltItem(panelId, quantity, userId, reference) {
+        const bomItems = await this.getPanelBOM(panelId);
+        for (const bomItem of bomItems) {
+            const quantityToDeduct = parseFloat(bomItem.quantity_required) * quantity;
+            if (bomItem.item_type === 'raw_material') {
+                await this.recordStockMovement({
+                    stock_item_id: bomItem.item_id,
+                    movement_type: 'out',
+                    quantity: quantityToDeduct,
+                    reference: `Built item build: ${reference || `Panel #${panelId}`}`,
+                    user_id: userId,
+                    cost_gbp: 0
+                });
+            } else if (bomItem.item_type === 'component') {
+                // Deduct from component stock
+                await this.recordComponentMovement({
+                    component_id: bomItem.item_id,
+                    movement_type: 'use',
+                    quantity: quantityToDeduct,
+                    reference: `Built item build: ${reference || `Panel #${panelId}`}`,
+                    user_id: userId
+                });
+            }
         }
     }
     
@@ -1522,6 +1669,317 @@ class ProductionDatabase {
         }
         
         return wipData;
+    }
+    
+    // ============ COMPONENTS OPERATIONS ============
+    
+    static async createComponent(data) {
+        const initialCost = data.cost_gbp || 0;
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [data.name, data.description, data.component_type, data.status || 'active', initialCost, 
+                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
+            );
+            const component = result.rows[0];
+            await this.updateComponentCost(component.id);
+            return await this.getComponentById(component.id);
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(data.name, data.description, data.component_type, data.status || 'active', initialCost,
+                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
+            const component = await this.getComponentById(info.lastInsertRowid);
+            await this.updateComponentCost(component.id);
+            return await this.getComponentById(component.id);
+        }
+    }
+    
+    static async getComponentById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM components WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM components WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getAllComponents() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM components ORDER BY name`);
+            return result.rows;
+        } else {
+            return db.prepare(`SELECT * FROM components ORDER BY name`).all();
+        }
+    }
+    
+    static async updateComponent(id, data) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE components SET name = $1, description = $2, component_type = $3, status = $4, 
+                 built_quantity = $5, min_stock = $6, labour_hours = $7
+                 WHERE id = $8`,
+                [data.name, data.description, data.component_type, data.status, 
+                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id]
+            );
+            await this.updateComponentCost(id);
+            return await this.getComponentById(id);
+        } else {
+            db.prepare(
+                `UPDATE components SET name = ?, description = ?, component_type = ?, status = ?,
+                 built_quantity = ?, min_stock = ?, labour_hours = ?
+                 WHERE id = ?`
+            ).run(data.name, data.description, data.component_type, data.status,
+                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id);
+            await this.updateComponentCost(id);
+            return this.getComponentById(id);
+        }
+    }
+    
+    static async deleteComponent(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM components WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM components WHERE id = ?`).run(id);
+        }
+    }
+    
+    // ============ COMPONENT BOM OPERATIONS ============
+    
+    static async addComponentBOMItem(componentId, stockItemId, quantityRequired, unit) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO component_bom_items (component_id, stock_item_id, quantity_required, unit)
+                 VALUES ($1, $2, $3, $4) RETURNING *`,
+                [componentId, stockItemId, quantityRequired, unit]
+            );
+            await this.updateComponentCost(componentId);
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO component_bom_items (component_id, stock_item_id, quantity_required, unit)
+                 VALUES (?, ?, ?, ?)`
+            );
+            const info = stmt.run(componentId, stockItemId, quantityRequired, unit);
+            await this.updateComponentCost(componentId);
+            return this.getComponentBOMItemById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getComponentBOMItemById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM component_bom_items WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM component_bom_items WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getComponentBOM(componentId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT cbi.*, si.name as stock_item_name, si.unit as stock_item_unit
+                 FROM component_bom_items cbi
+                 JOIN stock_items si ON cbi.stock_item_id = si.id
+                 WHERE cbi.component_id = $1 ORDER BY si.name`,
+                [componentId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT cbi.*, si.name as stock_item_name, si.unit as stock_item_unit
+                 FROM component_bom_items cbi
+                 JOIN stock_items si ON cbi.stock_item_id = si.id
+                 WHERE cbi.component_id = ? ORDER BY si.name`
+            ).all(componentId);
+        }
+    }
+    
+    static async deleteComponentBOMItem(bomId) {
+        const bomItem = await this.getComponentBOMItemById(bomId);
+        const componentId = bomItem ? bomItem.component_id : null;
+        
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM component_bom_items WHERE id = $1`, [bomId]);
+        } else {
+            db.prepare(`DELETE FROM component_bom_items WHERE id = ?`).run(bomId);
+        }
+        
+        if (componentId) {
+            await this.updateComponentCost(componentId);
+        }
+    }
+    
+    static async calculateComponentBOMValue(componentId) {
+        const bomItems = await this.getComponentBOM(componentId);
+        let totalValue = 0;
+        
+        for (const bomItem of bomItems) {
+            const stockItem = await this.getStockItemById(bomItem.stock_item_id);
+            if (stockItem) {
+                const itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * parseFloat(bomItem.quantity_required || 0);
+                totalValue += itemCost;
+            }
+        }
+        
+        return totalValue;
+    }
+    
+    static async calculateComponentTrueCost(componentId) {
+        const component = await this.getComponentById(componentId);
+        if (!component) return 0;
+        
+        const bomValue = await this.calculateComponentBOMValue(componentId);
+        const labourHours = parseFloat(component.labour_hours || 0);
+        const labourRate = await this.getSetting('labour_rate_per_hour');
+        const labourCost = labourHours * parseFloat(labourRate || 25);
+        
+        return bomValue + labourCost;
+    }
+    
+    static async updateComponentCost(componentId) {
+        const trueCost = await this.calculateComponentTrueCost(componentId);
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE components SET cost_gbp = $1 WHERE id = $2`, [trueCost, componentId]);
+        } else {
+            db.prepare(`UPDATE components SET cost_gbp = ? WHERE id = ?`).run(trueCost, componentId);
+        }
+        // Recalculate all built items and products that use this component
+        await this.recalculateBuiltItemsUsingComponent(componentId);
+        await this.recalculateProductsUsingComponent(componentId);
+        return trueCost;
+    }
+    
+    static async updateComponentQuantity(id, quantity) {
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE components SET built_quantity = $1 WHERE id = $2`, [quantity, id]);
+        } else {
+            db.prepare(`UPDATE components SET built_quantity = ? WHERE id = ?`).run(quantity, id);
+        }
+    }
+    
+    static async recordComponentMovement(data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO component_movements (component_id, movement_type, quantity, reference, user_id)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [data.component_id, data.movement_type, data.quantity, data.reference, data.user_id]
+            );
+            
+            // Update component quantity
+            const component = await this.getComponentById(data.component_id);
+            let newQuantity = parseFloat(component.built_quantity) || 0;
+            if (data.movement_type === 'build') {
+                newQuantity += parseFloat(data.quantity);
+                // Automatically deduct raw materials from stock
+                await this.deductRawMaterialsForComponent(data.component_id, parseFloat(data.quantity), data.user_id, data.reference);
+            } else if (data.movement_type === 'use') {
+                newQuantity -= parseFloat(data.quantity);
+            } else if (data.movement_type === 'adjustment') {
+                newQuantity = parseFloat(data.quantity);
+            }
+            await this.updateComponentQuantity(data.component_id, newQuantity);
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO component_movements (component_id, movement_type, quantity, reference, user_id)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            stmt.run(data.component_id, data.movement_type, data.quantity, data.reference, data.user_id);
+            
+            const component = this.getComponentById(data.component_id);
+            let newQuantity = parseFloat(component.built_quantity) || 0;
+            if (data.movement_type === 'build') {
+                newQuantity += parseFloat(data.quantity);
+                await this.deductRawMaterialsForComponent(data.component_id, parseFloat(data.quantity), data.user_id, data.reference);
+            } else if (data.movement_type === 'use') {
+                newQuantity -= parseFloat(data.quantity);
+            } else if (data.movement_type === 'adjustment') {
+                newQuantity = parseFloat(data.quantity);
+            }
+            this.updateComponentQuantity(data.component_id, newQuantity);
+            return db.prepare(`SELECT * FROM component_movements WHERE id = (SELECT MAX(id) FROM component_movements)`).get();
+        }
+    }
+    
+    static async getComponentMovements(componentId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT cm.*, u.username as user_name FROM component_movements cm
+                 LEFT JOIN production_users u ON cm.user_id = u.id
+                 WHERE cm.component_id = $1 ORDER BY cm.timestamp DESC`,
+                [componentId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT cm.*, u.username as user_name FROM component_movements cm
+                 LEFT JOIN production_users u ON cm.user_id = u.id
+                 WHERE cm.component_id = ? ORDER BY cm.timestamp DESC`
+            ).all(componentId);
+        }
+    }
+    
+    // Deduct raw materials when building a component
+    static async deductRawMaterialsForComponent(componentId, quantity, userId, reference) {
+        const bomItems = await this.getComponentBOM(componentId);
+        for (const bomItem of bomItems) {
+            const quantityToDeduct = parseFloat(bomItem.quantity_required) * quantity;
+            await this.recordStockMovement({
+                stock_item_id: bomItem.stock_item_id,
+                movement_type: 'out',
+                quantity: quantityToDeduct,
+                reference: `Component build: ${reference || `Component #${componentId}`}`,
+                user_id: userId,
+                cost_gbp: 0
+            });
+        }
+    }
+    
+    static async recalculateBuiltItemsUsingComponent(componentId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT panel_id FROM bom_items 
+                 WHERE item_type = 'component' AND item_id = $1`,
+                [componentId]
+            );
+            for (const row of result.rows) {
+                await this.updatePanelCost(row.panel_id);
+            }
+        } else {
+            const builtItems = db.prepare(
+                `SELECT DISTINCT panel_id FROM bom_items 
+                 WHERE item_type = 'component' AND item_id = ?`
+            ).all(componentId);
+            for (const builtItem of builtItems) {
+                await this.updatePanelCost(builtItem.panel_id);
+            }
+        }
+    }
+    
+    static async recalculateProductsUsingComponent(componentId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT product_id FROM product_components 
+                 WHERE component_type = 'component' AND component_id = $1`,
+                [componentId]
+            );
+            for (const row of result.rows) {
+                await this.updateProductCost(row.product_id);
+            }
+        } else {
+            const products = db.prepare(
+                `SELECT DISTINCT product_id FROM product_components 
+                 WHERE component_type = 'component' AND component_id = ?`
+            ).all(componentId);
+            for (const product of products) {
+                await this.updateProductCost(product.product_id);
+            }
+        }
     }
     
     // ============ PLANNER OPERATIONS ============
@@ -2021,12 +2479,14 @@ class ProductionDatabase {
             const result = await pool.query(
                 `SELECT pc.*,
                  CASE 
-                     WHEN pc.component_type = 'panel' THEN p.name
                      WHEN pc.component_type = 'raw_material' THEN si.name
+                     WHEN pc.component_type = 'component' THEN c.name
+                     WHEN pc.component_type = 'built_item' THEN p.name
                  END as component_name
                  FROM product_components pc
-                 LEFT JOIN panels p ON pc.component_type = 'panel' AND pc.component_id = p.id
                  LEFT JOIN stock_items si ON pc.component_type = 'raw_material' AND pc.component_id = si.id
+                 LEFT JOIN components c ON pc.component_type = 'component' AND pc.component_id = c.id
+                 LEFT JOIN panels p ON pc.component_type = 'built_item' AND pc.component_id = p.id
                  WHERE pc.product_id = $1 ORDER BY pc.component_type, component_name`,
                 [productId]
             );
@@ -2035,12 +2495,14 @@ class ProductionDatabase {
             return db.prepare(
                 `SELECT pc.*,
                  CASE 
-                     WHEN pc.component_type = 'panel' THEN p.name
                      WHEN pc.component_type = 'raw_material' THEN si.name
+                     WHEN pc.component_type = 'component' THEN c.name
+                     WHEN pc.component_type = 'built_item' THEN p.name
                  END as component_name
                  FROM product_components pc
-                 LEFT JOIN panels p ON pc.component_type = 'panel' AND pc.component_id = p.id
                  LEFT JOIN stock_items si ON pc.component_type = 'raw_material' AND pc.component_id = si.id
+                 LEFT JOIN components c ON pc.component_type = 'component' AND pc.component_id = c.id
+                 LEFT JOIN panels p ON pc.component_type = 'built_item' AND pc.component_id = p.id
                  WHERE pc.product_id = ? ORDER BY pc.component_type, component_name`
             ).all(productId);
         }

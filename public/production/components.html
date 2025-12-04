@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Built Items & BOM - Production System</title>
+    <title>Components & BOM - Production System</title>
     <link rel="stylesheet" href="common.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="navbar-logo">
             <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
-            <h1>Built Items & BOM Management</h1>
+            <h1>Components & BOM Management</h1>
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
@@ -22,55 +22,55 @@
     <div class="container">
         <div class="card">
             <div class="card-header">
-                <h2>Built Items</h2>
-                <button onclick="showAddPanelModal()" class="btn btn-primary admin-only">Add Built Item</button>
+                <h2>Components</h2>
+                <button onclick="showAddComponentModal()" class="btn btn-primary admin-only">Add Component</button>
             </div>
-            <div id="panelsList">
+            <div id="componentsList">
                 <div class="loading">Loading...</div>
             </div>
         </div>
     </div>
     
-    <!-- Panel Modal -->
-    <div id="panelModal" class="modal">
+    <!-- Component Modal -->
+    <div id="componentModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="panelModalTitle">Add Built Item</h3>
-                <button class="modal-close" onclick="hideModal('panelModal')">&times;</button>
+                <h3 id="componentModalTitle">Add Component</h3>
+                <button class="modal-close" onclick="hideModal('componentModal')">&times;</button>
             </div>
-            <form id="panelForm">
-                <input type="hidden" id="panelId">
+            <form id="componentForm">
+                <input type="hidden" id="componentId">
                 <div class="form-group">
                     <label class="form-label">Name *</label>
-                    <input type="text" id="panelName" class="form-input" required>
+                    <input type="text" id="componentName" class="form-input" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Description</label>
-                    <textarea id="panelDescription" class="form-textarea"></textarea>
+                    <textarea id="componentDescription" class="form-textarea"></textarea>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Panel Type</label>
-                    <input type="text" id="panelType" class="form-input">
+                    <label class="form-label">Component Type</label>
+                    <input type="text" id="componentType" class="form-input">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cost (GBP)</label>
-                    <input type="number" step="0.01" id="panelCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
+                    <input type="number" step="0.01" id="componentCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
                     <small style="color: #6c757d;">Calculated automatically from BOM + Labour</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Built Quantity</label>
-                    <input type="number" step="0.01" id="panelBuiltQty" class="form-input" value="0">
+                    <input type="number" step="0.01" id="componentBuiltQty" class="form-input" value="0">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Minimum Stock</label>
-                    <input type="number" step="0.01" id="panelMinStock" class="form-input" value="0">
+                    <input type="number" step="0.01" id="componentMinStock" class="form-input" value="0">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Labour Hours</label>
-                    <input type="number" step="0.01" id="panelLabourHours" class="form-input" value="0">
+                    <input type="number" step="0.01" id="componentLabourHours" class="form-input" value="0">
                 </div>
                 <div class="text-right">
-                    <button type="button" onclick="hideModal('panelModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="button" onclick="hideModal('componentModal')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
             </form>
@@ -81,7 +81,7 @@
     <div id="bomModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="bomModalTitle">Built Item BOM</h3>
+                <h3 id="bomModalTitle">Component BOM</h3>
                 <button class="modal-close" onclick="hideModal('bomModal')">&times;</button>
             </div>
             <div id="bomContent">
@@ -94,7 +94,6 @@
     <script>
         let currentUser = null;
         let stockItems = [];
-        let components = [];
         
         async function init() {
             // Redirect staff users
@@ -103,8 +102,8 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
-            await Promise.all([loadStockItems(), loadComponents()]);
-            loadPanels();
+            await loadStockItems();
+            loadComponents();
         }
         
         async function loadStockItems() {
@@ -119,23 +118,14 @@
         async function loadComponents() {
             try {
                 const data = await apiCall('/components');
-                components = data.components;
-            } catch (error) {
-                console.error('Error loading components:', error);
-            }
-        }
-        
-        async function loadPanels() {
-            try {
-                const data = await apiCall('/panels');
-                const panelsList = document.getElementById('panelsList');
+                const componentsList = document.getElementById('componentsList');
                 
-                if (data.panels.length === 0) {
-                    panelsList.innerHTML = '<p>No panels found</p>';
+                if (data.components.length === 0) {
+                    componentsList.innerHTML = '<p>No components found</p>';
                     return;
                 }
                 
-                panelsList.innerHTML = `
+                componentsList.innerHTML = `
                     <table class="table">
                         <thead>
                             <tr>
@@ -148,21 +138,21 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.panels.map(panel => {
-                                const builtQty = parseFloat(panel.built_quantity || 0);
-                                const minStock = parseFloat(panel.min_stock || 0);
+                            ${data.components.map(component => {
+                                const builtQty = parseFloat(component.built_quantity || 0);
+                                const minStock = parseFloat(component.min_stock || 0);
                                 const isLow = builtQty <= minStock && minStock > 0;
                                 return `
                                 <tr>
-                                    <td><strong>${panel.name}</strong></td>
-                                    <td>${panel.panel_type || '-'}</td>
+                                    <td><strong>${component.name}</strong></td>
+                                    <td>${component.component_type || '-'}</td>
                                     <td>${builtQty.toFixed(2)} ${isLow ? '<span class="badge badge-danger">Low</span>' : ''}</td>
                                     <td>${minStock.toFixed(2)}</td>
-                                    <td><span class="badge badge-info">${panel.status}</span></td>
+                                    <td><span class="badge badge-info">${component.status}</span></td>
                                     <td>
-                                        <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
-                                        <button onclick="viewPanelDetails(${panel.id})" class="btn btn-success btn-sm">Details</button>
-                                        ${currentUser.role === 'admin' ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        <button onclick="viewBOM(${component.id})" class="btn btn-primary btn-sm">View BOM</button>
+                                        <button onclick="viewComponentDetails(${component.id})" class="btn btn-success btn-sm">Details</button>
+                                        ${currentUser.role === 'admin' ? `<button onclick="editComponent(${component.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -171,49 +161,49 @@
                     </table>
                 `;
             } catch (error) {
-                document.getElementById('panelsList').innerHTML = '<p>Error loading panels</p>';
+                document.getElementById('componentsList').innerHTML = '<p>Error loading components</p>';
             }
         }
         
-        function showAddPanelModal() {
-            document.getElementById('panelModalTitle').textContent = 'Add Panel';
-            document.getElementById('panelForm').reset();
-            document.getElementById('panelId').value = '';
-            showModal('panelModal');
+        function showAddComponentModal() {
+            document.getElementById('componentModalTitle').textContent = 'Add Component';
+            document.getElementById('componentForm').reset();
+            document.getElementById('componentId').value = '';
+            showModal('componentModal');
         }
         
-        async function editPanel(id) {
+        async function editComponent(id) {
             try {
-                const data = await apiCall('/panels');
-                const panel = data.panels.find(p => p.id === id);
-                if (!panel) return;
+                const data = await apiCall('/components');
+                const component = data.components.find(c => c.id === id);
+                if (!component) return;
                 
-                document.getElementById('panelModalTitle').textContent = 'Edit Panel';
-                document.getElementById('panelId').value = panel.id;
-                document.getElementById('panelName').value = panel.name;
-                document.getElementById('panelDescription').value = panel.description || '';
-                document.getElementById('panelType').value = panel.panel_type || '';
+                document.getElementById('componentModalTitle').textContent = 'Edit Component';
+                document.getElementById('componentId').value = component.id;
+                document.getElementById('componentName').value = component.name;
+                document.getElementById('componentDescription').value = component.description || '';
+                document.getElementById('componentType').value = component.component_type || '';
                 // Load calculated cost
-                const trueCostData = await apiCall(`/panels/${panel.id}/true-cost`);
-                document.getElementById('panelCost').value = trueCostData.true_cost.toFixed(2);
-                document.getElementById('panelBuiltQty').value = panel.built_quantity || 0;
-                document.getElementById('panelMinStock').value = panel.min_stock || 0;
-                document.getElementById('panelLabourHours').value = panel.labour_hours || 0;
-                showModal('panelModal');
+                const trueCostData = await apiCall(`/components/${component.id}/true-cost`);
+                document.getElementById('componentCost').value = trueCostData.true_cost.toFixed(2);
+                document.getElementById('componentBuiltQty').value = component.built_quantity || 0;
+                document.getElementById('componentMinStock').value = component.min_stock || 0;
+                document.getElementById('componentLabourHours').value = component.labour_hours || 0;
+                showModal('componentModal');
             } catch (error) {
-                showAlert('Error loading panel', 'error');
+                showAlert('Error loading component', 'error');
             }
         }
         
-        async function viewPanelDetails(id) {
+        async function viewComponentDetails(id) {
             try {
-                const panelData = await apiCall('/panels');
-                const panel = panelData.panels.find(p => p.id === id);
-                if (!panel) return;
+                const componentData = await apiCall('/components');
+                const component = componentData.components.find(c => c.id === id);
+                if (!component) return;
                 
-                const bomValueData = await apiCall(`/panels/${id}/bom-value`);
-                const trueCostData = await apiCall(`/panels/${id}/true-cost`);
-                const movementsData = await apiCall(`/panels/${id}/movements`);
+                const bomValueData = await apiCall(`/components/${id}/cost`);
+                const trueCostData = await apiCall(`/components/${id}/true-cost`);
+                const movementsData = await apiCall(`/components/${id}/movements`);
                 const labourRateData = await apiCall('/settings/labour_rate_per_hour');
                 
                 const modal = document.createElement('div');
@@ -221,27 +211,27 @@
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 800px;">
                         <div class="modal-header">
-                            <h3>Panel Details: ${panel.name}</h3>
+                            <h3>Component Details: ${component.name}</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
                             <div class="grid grid-2" style="margin-bottom: 20px;">
                                 <div>
                                     <p><strong>BOM Value:</strong> ${formatCurrency(bomValueData.bom_value)}</p>
-                                    <p><strong>Labour Hours:</strong> ${parseFloat(panel.labour_hours || 0).toFixed(2)}</p>
+                                    <p><strong>Labour Hours:</strong> ${parseFloat(component.labour_hours || 0).toFixed(2)}</p>
                                     <p><strong>Labour Rate:</strong> ${formatCurrency(labourRateData.value || 25)}/hr</p>
-                                    <p><strong>Labour Cost:</strong> ${formatCurrency(parseFloat(panel.labour_hours || 0) * parseFloat(labourRateData.value || 25))}</p>
+                                    <p><strong>Labour Cost:</strong> ${formatCurrency(parseFloat(component.labour_hours || 0) * parseFloat(labourRateData.value || 25))}</p>
                                 </div>
                                 <div>
                                     <p><strong>True Cost:</strong> ${formatCurrency(trueCostData.true_cost)}</p>
-                                    <p><strong>Built Quantity:</strong> ${parseFloat(panel.built_quantity || 0).toFixed(2)}</p>
-                                    <p><strong>Min Stock:</strong> ${parseFloat(panel.min_stock || 0).toFixed(2)}</p>
-                                    <p><strong>WIP Value:</strong> ${formatCurrency(trueCostData.true_cost * parseFloat(panel.built_quantity || 0))}</p>
+                                    <p><strong>Built Quantity:</strong> ${parseFloat(component.built_quantity || 0).toFixed(2)}</p>
+                                    <p><strong>Min Stock:</strong> ${parseFloat(component.min_stock || 0).toFixed(2)}</p>
+                                    <p><strong>WIP Value:</strong> ${formatCurrency(trueCostData.true_cost * parseFloat(component.built_quantity || 0))}</p>
                                 </div>
                             </div>
                             
-                            <h4>Panel Movements</h4>
-                            <button onclick="showPanelMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>
+                            <h4>Component Movements</h4>
+                            <button onclick="showComponentMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>
                             <table class="table">
                                 <thead>
                                     <tr>
@@ -269,23 +259,23 @@
                 `;
                 document.body.appendChild(modal);
             } catch (error) {
-                showAlert('Error loading panel details', 'error');
+                showAlert('Error loading component details', 'error');
             }
         }
         
-        function showPanelMovementModal(panelId) {
+        function showComponentMovementModal(componentId) {
             const modal = document.createElement('div');
             modal.className = 'modal show';
             modal.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>Record Panel Movement</h3>
+                        <h3>Record Component Movement</h3>
                         <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                     </div>
-                    <form id="panelMovementForm">
+                    <form id="componentMovementForm">
                         <div class="form-group">
                             <label class="form-label">Movement Type *</label>
-                            <select id="panelMovementType" class="form-select" required>
+                            <select id="componentMovementType" class="form-select" required>
                                 <option value="build">Build</option>
                                 <option value="use">Use</option>
                                 <option value="adjustment">Adjustment</option>
@@ -293,11 +283,11 @@
                         </div>
                         <div class="form-group">
                             <label class="form-label">Quantity *</label>
-                            <input type="number" step="0.01" id="panelMovementQty" class="form-input" required>
+                            <input type="number" step="0.01" id="componentMovementQty" class="form-input" required>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Reference</label>
-                            <input type="text" id="panelMovementRef" class="form-input" placeholder="e.g., Order #123">
+                            <input type="text" id="componentMovementRef" class="form-input" placeholder="e.g., Order #123">
                         </div>
                         <div class="text-right">
                             <button type="button" onclick="this.closest('.modal').remove()" class="btn btn-secondary">Cancel</button>
@@ -308,57 +298,55 @@
             `;
             document.body.appendChild(modal);
             
-            document.getElementById('panelMovementForm').addEventListener('submit', async (e) => {
+            document.getElementById('componentMovementForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 try {
-                    await apiCall(`/panels/${panelId}/movement`, {
+                    await apiCall(`/components/${componentId}/movement`, {
                         method: 'POST',
                         body: JSON.stringify({
-                            movement_type: document.getElementById('panelMovementType').value,
-                            quantity: document.getElementById('panelMovementQty').value,
-                            reference: document.getElementById('panelMovementRef').value
+                            movement_type: document.getElementById('componentMovementType').value,
+                            quantity: document.getElementById('componentMovementQty').value,
+                            reference: document.getElementById('componentMovementRef').value
                         })
                     });
-                    showAlert('Panel movement recorded');
+                    showAlert('Component movement recorded');
                     modal.remove();
-                    loadPanels();
+                    loadComponents();
                 } catch (error) {
                     showAlert(error.message, 'error');
                 }
             });
         }
         
-        async function viewBOM(panelId) {
+        async function viewBOM(componentId) {
             try {
-                const bomData = await apiCall(`/panels/${panelId}/bom`);
+                const bomData = await apiCall(`/components/${componentId}/bom`);
                 
-                document.getElementById('bomModalTitle').textContent = 'Built Item BOM';
+                document.getElementById('bomModalTitle').textContent = 'Component BOM';
                 document.getElementById('bomContent').innerHTML = `
                     <div style="margin-bottom: 20px;">
                         ${currentUser.role === 'admin' ? `
-                            <button onclick="showAddBOMItem(${panelId})" class="btn btn-primary">Add BOM Item</button>
+                            <button onclick="showAddBOMItem(${componentId})" class="btn btn-primary">Add BOM Item</button>
                         ` : ''}
                     </div>
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Item Type</th>
-                                <th>Item Name</th>
+                                <th>Raw Material</th>
                                 <th>Quantity Required</th>
                                 <th>Unit</th>
                                 ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? '<tr><td colspan="5">No BOM items</td></tr>' : bomData.bom.map(item => `
+                            ${bomData.bom.length === 0 ? '<tr><td colspan="4">No BOM items</td></tr>' : bomData.bom.map(item => `
                                 <tr>
-                                    <td>${item.item_type === 'raw_material' ? 'Raw Material' : 'Component'}</td>
-                                    <td>${item.item_name || '-'}</td>
+                                    <td>${item.stock_item_name}</td>
                                     <td>${item.quantity_required}</td>
-                                    <td>${item.item_unit || item.unit}</td>
+                                    <td>${item.stock_item_unit || item.unit}</td>
                                     ${currentUser.role === 'admin' ? `
                                         <td>
-                                            <button onclick="deleteBOMItem(${item.id}, ${panelId})" class="btn btn-danger btn-sm">Delete</button>
+                                            <button onclick="deleteBOMItem(${item.id}, ${componentId})" class="btn btn-danger btn-sm">Delete</button>
                                         </td>
                                     ` : ''}
                                 </tr>
@@ -372,24 +360,17 @@
             }
         }
         
-        function showAddBOMItem(panelId) {
+        function showAddBOMItem(componentId) {
             const bomContent = document.getElementById('bomContent');
             bomContent.innerHTML = `
                 <h4>Add BOM Item</h4>
                 <form id="bomForm">
-                    <input type="hidden" id="bomPanelId" value="${panelId}">
+                    <input type="hidden" id="bomComponentId" value="${componentId}">
                     <div class="form-group">
-                        <label class="form-label">Item Type *</label>
-                        <select id="bomItemType" class="form-select" required onchange="updateBOMItemSelect()">
-                            <option value="">Select item type</option>
-                            <option value="raw_material">Raw Material</option>
-                            <option value="component">Component</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" id="bomItemLabel">Item *</label>
-                        <select id="bomItemId" class="form-select" required>
-                            <option value="">Select item type first</option>
+                        <label class="form-label">Raw Material *</label>
+                        <select id="bomStockItem" class="form-select" required>
+                            <option value="">Select raw material</option>
+                            ${stockItems.map(item => `<option value="${item.id}">${item.name} (${item.unit})</option>`).join('')}
                         </select>
                     </div>
                     <div class="form-group">
@@ -401,92 +382,71 @@
                         <input type="text" id="bomUnit" class="form-input" required>
                     </div>
                     <div class="text-right">
-                        <button type="button" onclick="viewBOM(${panelId})" class="btn btn-secondary">Cancel</button>
+                        <button type="button" onclick="viewBOM(${componentId})" class="btn btn-secondary">Cancel</button>
                         <button type="submit" class="btn btn-primary">Add</button>
                     </div>
                 </form>
             `;
             
-            window.updateBOMItemSelect = function() {
-                const itemType = document.getElementById('bomItemType').value;
-                const itemSelect = document.getElementById('bomItemId');
-                const label = document.getElementById('bomItemLabel');
-                
-                itemSelect.innerHTML = '<option value="">Select item</option>';
-                
-                if (itemType === 'raw_material') {
-                    label.textContent = 'Raw Material *';
-                    stockItems.forEach(item => {
-                        itemSelect.innerHTML += `<option value="${item.id}">${item.name} (${item.unit})</option>`;
-                    });
-                } else if (itemType === 'component') {
-                    label.textContent = 'Component *';
-                    components.forEach(comp => {
-                        itemSelect.innerHTML += `<option value="${comp.id}">${comp.name}</option>`;
-                    });
-                }
-            };
-            
             document.getElementById('bomForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 try {
-                    await apiCall(`/panels/${panelId}/bom`, {
+                    await apiCall(`/components/${componentId}/bom`, {
                         method: 'POST',
                         body: JSON.stringify({
-                            item_type: document.getElementById('bomItemType').value,
-                            item_id: document.getElementById('bomItemId').value,
+                            stock_item_id: document.getElementById('bomStockItem').value,
                             quantity_required: document.getElementById('bomQty').value,
                             unit: document.getElementById('bomUnit').value
                         })
                     });
                     showAlert('BOM item added');
-                    viewBOM(panelId);
+                    viewBOM(componentId);
                 } catch (error) {
                     showAlert(error.message, 'error');
                 }
             });
         }
         
-        async function deleteBOMItem(bomId, panelId) {
+        async function deleteBOMItem(bomId, componentId) {
             if (!confirm('Delete this BOM item?')) return;
             try {
-                await apiCall(`/panels/${panelId}/bom/${bomId}`, { method: 'DELETE' });
+                await apiCall(`/components/${componentId}/bom/${bomId}`, { method: 'DELETE' });
                 showAlert('BOM item deleted');
-                viewBOM(panelId);
+                viewBOM(componentId);
             } catch (error) {
                 showAlert(error.message, 'error');
             }
         }
         
-        document.getElementById('panelForm').addEventListener('submit', async (e) => {
+        document.getElementById('componentForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const id = document.getElementById('panelId').value;
+            const id = document.getElementById('componentId').value;
             const data = {
-                name: document.getElementById('panelName').value,
-                description: document.getElementById('panelDescription').value,
-                panel_type: document.getElementById('panelType').value,
-                built_quantity: document.getElementById('panelBuiltQty').value,
-                min_stock: document.getElementById('panelMinStock').value,
-                labour_hours: document.getElementById('panelLabourHours').value,
+                name: document.getElementById('componentName').value,
+                description: document.getElementById('componentDescription').value,
+                component_type: document.getElementById('componentType').value,
+                built_quantity: document.getElementById('componentBuiltQty').value,
+                min_stock: document.getElementById('componentMinStock').value,
+                labour_hours: document.getElementById('componentLabourHours').value,
                 status: 'active'
             };
             
             try {
                 if (id) {
-                    await apiCall(`/panels/${id}`, {
+                    await apiCall(`/components/${id}`, {
                         method: 'PUT',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Panel updated');
+                    showAlert('Component updated');
                 } else {
-                    await apiCall('/panels', {
+                    await apiCall('/components', {
                         method: 'POST',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Panel created');
+                    showAlert('Component created');
                 }
-                hideModal('panelModal');
-                loadPanels();
+                hideModal('componentModal');
+                loadComponents();
             } catch (error) {
                 showAlert(error.message, 'error');
             }

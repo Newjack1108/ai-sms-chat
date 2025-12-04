@@ -55,7 +55,7 @@
                 <div class="form-group">
                     <label class="form-label">Cost (GBP)</label>
                     <input type="number" step="0.01" id="productCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
-                    <small style="color: #6c757d;">Calculated automatically from Panels + Materials</small>
+                    <small style="color: #6c757d;">Calculated automatically from Raw Materials + Components + Built Items</small>
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary">Cancel</button>
@@ -83,6 +83,7 @@
         let currentUser = null;
         let panels = [];
         let stockItems = [];
+        let components = [];
         let currentProductId = null;
         
         async function init() {
@@ -92,7 +93,7 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
-            await Promise.all([loadPanels(), loadStockItems()]);
+            await Promise.all([loadPanels(), loadStockItems(), loadComponents()]);
             loadProducts();
         }
         
@@ -111,6 +112,15 @@
                 stockItems = data.items;
             } catch (error) {
                 console.error('Error loading stock items:', error);
+            }
+        }
+        
+        async function loadComponents() {
+            try {
+                const data = await apiCall('/components');
+                components = data.components;
+            } catch (error) {
+                console.error('Error loading components:', error);
             }
         }
         
@@ -219,7 +229,7 @@
                         <tbody>
                             ${componentsData.components.length === 0 ? '<tr><td colspan="5">No components</td></tr>' : componentsData.components.map(comp => `
                                 <tr>
-                                    <td><span class="badge badge-info">${comp.component_type}</span></td>
+                                    <td><span class="badge badge-info">${comp.component_type === 'raw_material' ? 'Raw Material' : comp.component_type === 'component' ? 'Component' : 'Built Item'}</span></td>
                                     <td>${comp.component_name || 'Unknown'}</td>
                                     <td>${comp.quantity_required}</td>
                                     <td>${comp.unit}</td>
@@ -248,8 +258,9 @@
                         <label class="form-label">Component Type *</label>
                         <select id="compType" class="form-select" required onchange="updateComponentOptions()">
                             <option value="">Select type</option>
-                            <option value="panel">Panel</option>
                             <option value="raw_material">Raw Material</option>
+                            <option value="component">Component</option>
+                            <option value="built_item">Built Item</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -298,13 +309,17 @@
             const select = document.getElementById('compId');
             select.innerHTML = '<option value="">Select component</option>';
             
-            if (type === 'panel') {
-                panels.forEach(panel => {
-                    select.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
-                });
-            } else if (type === 'raw_material') {
+            if (type === 'raw_material') {
                 stockItems.forEach(item => {
                     select.innerHTML += `<option value="${item.id}">${item.name} (${item.unit})</option>`;
+                });
+            } else if (type === 'component') {
+                components.forEach(comp => {
+                    select.innerHTML += `<option value="${comp.id}">${comp.name}</option>`;
+                });
+            } else if (type === 'built_item') {
+                panels.forEach(panel => {
+                    select.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
                 });
             }
         }
