@@ -1497,6 +1497,16 @@ class ProductionDatabase {
     }
     
     static async deletePanel(id) {
+        // Ensure schema is up to date before deletion
+        if (isPostgreSQL) {
+            try {
+                await this.ensureBOMItemsSchema();
+            } catch (error) {
+                console.error('Error ensuring schema before panel deletion:', error);
+                // Continue - schema might already be correct
+            }
+        }
+        
         // Check for dependencies before deletion
         const dependencies = [];
         
@@ -1539,8 +1549,21 @@ class ProductionDatabase {
             await pool.query(`DELETE FROM product_components WHERE component_type = 'built_item' AND component_id = $1`, [id]);
             
             // BOM items will be deleted automatically via ON DELETE CASCADE
-            // Now delete the panel
-            await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
+            // But first ensure schema is migrated in case CASCADE triggers schema checks
+            try {
+                // Now delete the panel
+                await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
+            } catch (error) {
+                // If deletion fails due to missing column, try to migrate and retry
+                if (error.message && (error.message.includes('item_type') || error.message.includes('column')) && error.message.includes('does not exist')) {
+                    console.log('Schema error during panel deletion, ensuring schema is migrated...');
+                    await this.ensureBOMItemsSchema();
+                    // Retry deletion after migration
+                    await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
+                } else {
+                    throw error;
+                }
+            }
         } else {
             // SQLite version
             const movementsStmt = db.prepare(`SELECT COUNT(*) as count FROM panel_movements WHERE panel_id = ?`);
