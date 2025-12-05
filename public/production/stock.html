@@ -168,7 +168,7 @@
                                         <td>
                                             <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
                                             ${currentUser.role === 'admin' ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                            ${currentUser.role === 'admin' ? `<button onclick="deleteStock(${item.id}, ${JSON.stringify(item.name)})" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                            ${currentUser.role === 'admin' ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                         </td>
                                     </tr>
                                 `;
@@ -272,7 +272,9 @@
             }
         });
         
-        async function deleteStock(id, name) {
+        async function deleteStock(id, event) {
+            const button = event?.target || document.querySelector(`button[data-stock-id="${id}"]`);
+            const name = button?.getAttribute('data-stock-name') || 'this raw material';
             if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return;
             try {
                 await apiCall(`/stock/${id}`, { method: 'DELETE' });

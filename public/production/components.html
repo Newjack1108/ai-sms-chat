@@ -153,7 +153,7 @@
                                         <button onclick="viewBOM(${component.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewComponentDetails(${component.id})" class="btn btn-success btn-sm">Details</button>
                                         ${currentUser.role === 'admin' ? `<button onclick="editComponent(${component.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                        ${currentUser.role === 'admin' ? `<button onclick="deleteComponent(${component.id}, ${JSON.stringify(component.name)})" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                        ${currentUser.role === 'admin' ? `<button onclick="deleteComponent(${component.id}, event)" data-component-id="${component.id}" data-component-name="${(component.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -419,7 +419,9 @@
             }
         }
         
-        async function deleteComponent(id, name) {
+        async function deleteComponent(id, event) {
+            const button = event?.target || (typeof event !== 'undefined' && event !== null ? event : null) || document.querySelector(`button[data-component-id="${id}"]`);
+            const name = button?.getAttribute('data-component-name') || 'this component';
             if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return;
             try {
                 await apiCall(`/components/${id}`, { method: 'DELETE' });

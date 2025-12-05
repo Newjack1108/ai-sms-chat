@@ -163,7 +163,7 @@
                                         <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewPanelDetails(${panel.id})" class="btn btn-success btn-sm">Details</button>
                                         ${currentUser.role === 'admin' ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                        ${currentUser.role === 'admin' ? `<button onclick="deletePanel(${panel.id}, ${JSON.stringify(panel.name)})" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                        ${currentUser.role === 'admin' ? `<button onclick="deletePanel(${panel.id}, event)" data-panel-id="${panel.id}" data-panel-name="${(panel.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -459,7 +459,9 @@
             }
         }
         
-        async function deletePanel(id, name) {
+        async function deletePanel(id, event) {
+            const button = event?.target || document.querySelector(`button[data-panel-id="${id}"]`);
+            const name = button?.getAttribute('data-panel-name') || 'this built item';
             if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return;
             try {
                 await apiCall(`/panels/${id}`, { method: 'DELETE' });
