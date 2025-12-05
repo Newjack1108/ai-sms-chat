@@ -1650,9 +1650,11 @@ app.post('/api/leads', async (req, res) => {
                             const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
                             
                             if (extractedAnswer) {
-                                existingLead.answers[questionKey] = extractedAnswer;
+                                // Normalize answer to lowercase for consistent storage and comparison
+                                const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
+                                existingLead.answers[questionKey] = normalizedAnswer;
                                 newAnswersFound++;
-                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${normalizedAnswer}"`);
                             }
                         }
                         
@@ -1785,7 +1787,9 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                     const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
                     
                     if (extractedAnswer) {
-                        newLead.answers[questionKey] = extractedAnswer;
+                        // Normalize answer to lowercase for consistent storage and comparison
+                        const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
+                        newLead.answers[questionKey] = normalizedAnswer;
                         newAnswersFound++;
                         console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
                     }
@@ -2158,9 +2162,11 @@ app.post('/api/leads/reactivate', async (req, res) => {
                             const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
                             
                             if (extractedAnswer) {
-                                lead.answers[questionKey] = extractedAnswer;
+                                // Normalize answer to lowercase for consistent storage and comparison
+                                const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
+                                lead.answers[questionKey] = normalizedAnswer;
                                 newAnswersFound++;
-                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${normalizedAnswer}"`);
                             }
                         }
                         
@@ -2331,9 +2337,11 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                         const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
                         
                         if (extractedAnswer) {
-                            lead.answers[questionKey] = extractedAnswer;
+                            // Normalize answer to lowercase for consistent storage and comparison
+                            const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
+                            lead.answers[questionKey] = normalizedAnswer;
                             newAnswersFound++;
-                            console.log(`   ✅ Extracted answer for Q${i + 1}: "${extractedAnswer}"`);
+                            console.log(`   ✅ Extracted answer for Q${i + 1}: "${normalizedAnswer}"`);
                         }
                     }
                     
@@ -3267,9 +3275,11 @@ async function processAIResponse(lead, userMessage) {
                 const extractedAnswer = extractAnswerForQuestion(userMessage, possibleAnswers, i + 1);
                 
                 if (extractedAnswer) {
-                    lead.answers[questionKey] = extractedAnswer;
+                    // Normalize answer to lowercase for consistent storage and comparison
+                    const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
+                    lead.answers[questionKey] = normalizedAnswer;
                     newAnswersFound++;
-                    console.log(`   ✅ Found answer for Q${i + 1}: "${extractedAnswer}"`);
+                    console.log(`   ✅ Found answer for Q${i + 1}: "${normalizedAnswer}"`);
                 } else {
                     console.log(`   ❓ No match found for Q${i + 1} in this message`);
                 }
@@ -3904,7 +3914,8 @@ async function updateLeadProgress(lead, userMessage) {
             // Store the answer
             const questionKey = `question_${answeredCount + 1}`;
             lead.answers = lead.answers || {};
-            lead.answers[questionKey] = userMessage;
+            // Normalize answer to lowercase for consistent storage and comparison
+            lead.answers[questionKey] = typeof userMessage === 'string' ? userMessage.toLowerCase().trim() : userMessage;
             
             // Update progress
             const newAnsweredCount = Object.keys(lead.answers).length;
