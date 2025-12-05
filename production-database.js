@@ -3043,10 +3043,21 @@ class ProductionDatabase {
             const builtQty = parseFloat(panel.built_quantity || 0);
             const minStock = parseFloat(panel.min_stock || 0);
             
-            if (minStock > 0 && builtQty < minStock) {
-                const shortfall = minStock - builtQty;
-                // Suggest building enough to reach minimum + 20% buffer
-                const suggestedQuantity = Math.ceil(shortfall * 1.2);
+            // Include items that are at or below minimum stock, or items with zero stock
+            if ((minStock > 0 && builtQty <= minStock) || (minStock === 0 && builtQty === 0)) {
+                let shortfall = 0;
+                let suggestedQuantity = 0;
+                
+                if (minStock > 0) {
+                    // Item has a minimum stock set - calculate shortfall and suggest quantity
+                    shortfall = minStock - builtQty;
+                    // Suggest building enough to reach minimum + 20% buffer
+                    suggestedQuantity = Math.ceil(shortfall * 1.2);
+                } else {
+                    // No minimum stock set but item has zero stock - suggest building at least 1
+                    shortfall = 0;
+                    suggestedQuantity = 1;
+                }
                 
                 lowStockPanels.push({
                     ...panel,
@@ -3070,10 +3081,21 @@ class ProductionDatabase {
             const builtQty = parseFloat(component.built_quantity || 0);
             const minStock = parseFloat(component.min_stock || 0);
             
-            if (minStock > 0 && builtQty < minStock) {
-                const shortfall = minStock - builtQty;
-                // Suggest building enough to reach minimum + 20% buffer
-                const suggestedQuantity = Math.ceil(shortfall * 1.2);
+            // Include items that are at or below minimum stock, or items with zero stock
+            if ((minStock > 0 && builtQty <= minStock) || (minStock === 0 && builtQty === 0)) {
+                let shortfall = 0;
+                let suggestedQuantity = 0;
+                
+                if (minStock > 0) {
+                    // Item has a minimum stock set - calculate shortfall and suggest quantity
+                    shortfall = minStock - builtQty;
+                    // Suggest building enough to reach minimum + 20% buffer
+                    suggestedQuantity = Math.ceil(shortfall * 1.2);
+                } else {
+                    // No minimum stock set but item has zero stock - suggest building at least 1
+                    shortfall = 0;
+                    suggestedQuantity = 1;
+                }
                 
                 lowStockComponents.push({
                     ...component,
