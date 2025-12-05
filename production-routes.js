@@ -296,7 +296,28 @@ router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => 
         res.json({ success: true, panel });
     } catch (error) {
         console.error('Create panel error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create panel' });
+        console.error('Error stack:', error.stack);
+        console.error('Request body:', req.body);
+        
+        // Provide more detailed error messages
+        let errorMessage = 'Failed to create built item';
+        if (error.message) {
+            if (error.message.includes('FOREIGN KEY') || error.message.includes('foreign key constraint')) {
+                errorMessage = 'Database constraint error. Please check all fields are valid.';
+            } else if (error.message.includes('UNIQUE') || error.message.includes('duplicate')) {
+                errorMessage = 'A built item with this name may already exist.';
+            } else if (error.message.includes('NOT NULL') || error.message.includes('null value')) {
+                errorMessage = 'Missing required field. Please check all required fields are filled.';
+            } else {
+                errorMessage = error.message;
+            }
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            error: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 

@@ -1371,8 +1371,13 @@ class ProductionDatabase {
                  data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
             );
             const panel = result.rows[0];
-            // Recalculate cost after creation (will update if BOM exists)
-            await this.updatePanelCost(panel.id);
+            // Recalculate cost after creation - wrap in try-catch so cost update failures don't prevent panel creation
+            try {
+                await this.updatePanelCost(panel.id);
+            } catch (error) {
+                console.error(`Error updating panel cost after creation:`, error);
+                // Continue - panel was created successfully, cost can be recalculated later
+            }
             return await this.getPanelById(panel.id);
         } else {
             const stmt = db.prepare(
@@ -1382,8 +1387,13 @@ class ProductionDatabase {
             const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', initialCost,
                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
             const panel = await this.getPanelById(info.lastInsertRowid);
-            // Recalculate cost after creation
-            await this.updatePanelCost(panel.id);
+            // Recalculate cost after creation - wrap in try-catch so cost update failures don't prevent panel creation
+            try {
+                await this.updatePanelCost(panel.id);
+            } catch (error) {
+                console.error(`Error updating panel cost after creation:`, error);
+                // Continue - panel was created successfully, cost can be recalculated later
+            }
             return await this.getPanelById(panel.id);
         }
     }
@@ -1677,7 +1687,13 @@ class ProductionDatabase {
             db.prepare(`UPDATE panels SET cost_gbp = ? WHERE id = ?`).run(trueCost, panelId);
         }
         // Recalculate all products that use this panel
-        await this.recalculateProductsUsingPanel(panelId);
+        // Wrap in try-catch so recalculation failures don't block the main operation
+        try {
+            await this.recalculateProductsUsingPanel(panelId);
+        } catch (error) {
+            console.error(`Error recalculating products for panel ${panelId}:`, error);
+            // Continue - don't throw, just log
+        }
         return trueCost;
     }
     
