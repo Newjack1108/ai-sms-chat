@@ -1597,13 +1597,38 @@ class ProductionDatabase {
     
     static async addBOMItem(panelId, itemType, itemId, quantityRequired, unit) {
         if (isPostgreSQL) {
-            const result = await pool.query(
-                `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [panelId, itemType, itemId, quantityRequired, unit]
-            );
-            await this.updatePanelCost(panelId);
-            return result.rows[0];
+            // Ensure schema is migrated before inserting
+            try {
+                await this.ensureBOMItemsSchema();
+            } catch (error) {
+                console.error('Error ensuring bom_items schema before insert:', error);
+                // Continue - schema might already be correct, but this will help if it's not
+            }
+            
+            try {
+                const result = await pool.query(
+                    `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
+                     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                    [panelId, itemType, itemId, quantityRequired, unit]
+                );
+                await this.updatePanelCost(panelId);
+                return result.rows[0];
+            } catch (error) {
+                // If insert fails due to missing columns, try migration again
+                if (error.message && (error.message.includes('item_type') || error.message.includes('item_id')) && error.message.includes('does not exist')) {
+                    console.log('BOM insert failed due to schema issue, attempting migration...');
+                    await this.ensureBOMItemsSchema();
+                    // Retry insert
+                    const result = await pool.query(
+                        `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
+                         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                        [panelId, itemType, itemId, quantityRequired, unit]
+                    );
+                    await this.updatePanelCost(panelId);
+                    return result.rows[0];
+                }
+                throw error;
+            }
         } else {
             const stmt = db.prepare(
                 `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)

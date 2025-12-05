@@ -425,7 +425,21 @@ router.post('/panels/:id/bom', requireProductionAuth, requireAdmin, async (req, 
         res.json({ success: true, bomItem });
     } catch (error) {
         console.error('Add BOM item error:', error);
-        res.status(500).json({ success: false, error: 'Failed to add BOM item' });
+        console.error('Error stack:', error.stack);
+        console.error('Request body:', req.body);
+        
+        let errorMessage = 'Failed to add BOM item';
+        if (error.message && error.message.includes('does not exist')) {
+            errorMessage = 'Database schema needs migration. Please contact support or restart the server.';
+        } else if (error.message && error.message.includes('FOREIGN KEY')) {
+            errorMessage = 'Invalid item ID. Please ensure the selected item exists.';
+        } else if (error.message && error.message.includes('duplicate')) {
+            errorMessage = 'This item is already in the BOM.';
+        } else if (error.message) {
+            errorMessage = `Failed to add BOM item: ${error.message}`;
+        }
+        
+        res.status(500).json({ success: false, error: errorMessage, detail: error.message });
     }
 });
 
