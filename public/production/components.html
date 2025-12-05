@@ -340,7 +340,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? '<tr><td colspan="4">No BOM items</td></tr>' : bomData.bom.map(item => `
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '4' : '3'}">No BOM items</td></tr>` : bomData.bom.map(item => `
                                 <tr>
                                     <td>${item.stock_item_name}</td>
                                     <td>${item.quantity_required}</td>
@@ -428,7 +428,15 @@
                 showAlert('Component deleted');
                 loadComponents();
             } catch (error) {
-                showAlert(error.message || 'Failed to delete component', 'error');
+                console.error('Delete component error:', error);
+                let errorMessage = error.message || 'Failed to delete component';
+                
+                // Provide more helpful error messages
+                if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+                    errorMessage = 'Cannot delete component. It may be in use by:\n- BOM items in built items\n- Production orders\n- Planner items\n\nPlease remove all references first.';
+                }
+                
+                showAlert(errorMessage, 'error');
             }
         }
         

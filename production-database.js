@@ -1432,9 +1432,76 @@ class ProductionDatabase {
     }
     
     static async deletePanel(id) {
+        // Check for dependencies before deletion
+        const dependencies = [];
+        
         if (isPostgreSQL) {
+            // Check for panel movements
+            const movementsResult = await pool.query(
+                `SELECT COUNT(*)::int as count FROM panel_movements WHERE panel_id = $1`,
+                [id]
+            );
+            if (movementsResult.rows[0]?.count > 0) {
+                dependencies.push('movements');
+            }
+            
+            // Check for planner items
+            const plannerResult = await pool.query(
+                `SELECT COUNT(*)::int as count FROM planner_items WHERE item_type = 'built_item' AND item_id = $1`,
+                [id]
+            );
+            if (plannerResult.rows[0]?.count > 0) {
+                dependencies.push('planner items');
+            }
+            
+            // Check for product components
+            const productResult = await pool.query(
+                `SELECT COUNT(*)::int as count FROM product_components WHERE component_type = 'built_item' AND component_id = $1`,
+                [id]
+            );
+            if (productResult.rows[0]?.count > 0) {
+                dependencies.push('product configurations');
+            }
+            
+            // Delete dependencies first to avoid foreign key constraint violations
+            // Delete panel movements
+            await pool.query(`DELETE FROM panel_movements WHERE panel_id = $1`, [id]);
+            
+            // Delete planner items that reference this panel
+            await pool.query(`DELETE FROM planner_items WHERE item_type = 'built_item' AND item_id = $1`, [id]);
+            
+            // Delete product components that reference this panel
+            await pool.query(`DELETE FROM product_components WHERE component_type = 'built_item' AND component_id = $1`, [id]);
+            
+            // BOM items will be deleted automatically via ON DELETE CASCADE
+            // Now delete the panel
             await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
         } else {
+            // SQLite version
+            const movementsStmt = db.prepare(`SELECT COUNT(*) as count FROM panel_movements WHERE panel_id = ?`);
+            const movements = movementsStmt.get(id);
+            if (movements && movements.count > 0) {
+                dependencies.push('movements');
+            }
+            
+            const plannerStmt = db.prepare(`SELECT COUNT(*) as count FROM planner_items WHERE item_type = 'built_item' AND item_id = ?`);
+            const planner = plannerStmt.get(id);
+            if (planner && planner.count > 0) {
+                dependencies.push('planner items');
+            }
+            
+            const productStmt = db.prepare(`SELECT COUNT(*) as count FROM product_components WHERE component_type = 'built_item' AND component_id = ?`);
+            const product = productStmt.get(id);
+            if (product && product.count > 0) {
+                dependencies.push('product configurations');
+            }
+            
+            // Delete dependencies first to avoid foreign key constraint violations
+            db.prepare(`DELETE FROM panel_movements WHERE panel_id = ?`).run(id);
+            db.prepare(`DELETE FROM planner_items WHERE item_type = 'built_item' AND item_id = ?`).run(id);
+            db.prepare(`DELETE FROM product_components WHERE component_type = 'built_item' AND component_id = ?`).run(id);
+            
+            // Delete the panel (BOM items will be deleted automatically via CASCADE)
             db.prepare(`DELETE FROM panels WHERE id = ?`).run(id);
         }
     }

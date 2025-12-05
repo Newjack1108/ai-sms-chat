@@ -329,7 +329,25 @@ router.delete('/panels/:id', requireProductionAuth, requireAdmin, async (req, re
         res.json({ success: true });
     } catch (error) {
         console.error('Delete panel error:', error);
-        res.status(500).json({ success: false, error: 'Failed to delete panel' });
+        console.error('Error stack:', error.stack);
+        
+        // Provide more detailed error messages
+        let errorMessage = 'Failed to delete built item';
+        if (error.message) {
+            if (error.message.includes('FOREIGN KEY') || error.message.includes('foreign key constraint')) {
+                errorMessage = 'Cannot delete built item because it is still referenced by other records (movements, planner items, or products). Please remove all references first.';
+            } else if (error.message.includes('constraint') || error.message.includes('violates')) {
+                errorMessage = 'Cannot delete built item due to database constraints. It may be in use by other parts of the system.';
+            } else {
+                errorMessage = error.message;
+            }
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            error: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 

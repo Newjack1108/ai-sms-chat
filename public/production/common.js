@@ -60,7 +60,17 @@ async function apiCall(endpoint, options = {}) {
                 window.location.href = '/production/login.html';
                 return null;
             }
-            throw new Error(data?.error || `Request failed with status ${response.status}`);
+            
+            // Extract error message - check multiple possible fields
+            let errorMessage = data?.error || data?.message || data?.detail;
+            if (!errorMessage && response.status === 500) {
+                errorMessage = 'Internal server error occurred';
+            }
+            if (!errorMessage) {
+                errorMessage = `Request failed with status ${response.status}: ${response.statusText}`;
+            }
+            
+            throw new Error(errorMessage);
         }
         
         return data;

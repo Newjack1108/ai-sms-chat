@@ -49,7 +49,7 @@
                     <textarea id="panelDescription" class="form-textarea"></textarea>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Panel Type</label>
+                    <label class="form-label">Built Item Type</label>
                     <input type="text" id="panelType" class="form-input">
                 </div>
                 <div class="form-group">
@@ -131,7 +131,7 @@
                 const panelsList = document.getElementById('panelsList');
                 
                 if (data.panels.length === 0) {
-                    panelsList.innerHTML = '<p>No panels found</p>';
+                    panelsList.innerHTML = '<p>No built items found</p>';
                     return;
                 }
                 
@@ -172,12 +172,12 @@
                     </table>
                 `;
             } catch (error) {
-                document.getElementById('panelsList').innerHTML = '<p>Error loading panels</p>';
+                document.getElementById('panelsList').innerHTML = '<p>Error loading built items</p>';
             }
         }
         
         function showAddPanelModal() {
-            document.getElementById('panelModalTitle').textContent = 'Add Panel';
+            document.getElementById('panelModalTitle').textContent = 'Add Built Item';
             document.getElementById('panelForm').reset();
             document.getElementById('panelId').value = '';
             showModal('panelModal');
@@ -189,7 +189,7 @@
                 const panel = data.panels.find(p => p.id === id);
                 if (!panel) return;
                 
-                document.getElementById('panelModalTitle').textContent = 'Edit Panel';
+                document.getElementById('panelModalTitle').textContent = 'Edit Built Item';
                 document.getElementById('panelId').value = panel.id;
                 document.getElementById('panelName').value = panel.name;
                 document.getElementById('panelDescription').value = panel.description || '';
@@ -202,7 +202,7 @@
                 document.getElementById('panelLabourHours').value = panel.labour_hours || 0;
                 showModal('panelModal');
             } catch (error) {
-                showAlert('Error loading panel', 'error');
+                showAlert('Error loading built item', 'error');
             }
         }
         
@@ -222,7 +222,7 @@
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 800px;">
                         <div class="modal-header">
-                            <h3>Panel Details: ${panel.name}</h3>
+                            <h3>Built Item Details: ${panel.name}</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
@@ -241,7 +241,7 @@
                                 </div>
                             </div>
                             
-                            <h4>Panel Movements</h4>
+                            <h4>Built Item Movements</h4>
                             <button onclick="showPanelMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>
                             <table class="table">
                                 <thead>
@@ -270,7 +270,7 @@
                 `;
                 document.body.appendChild(modal);
             } catch (error) {
-                showAlert('Error loading panel details', 'error');
+                showAlert('Error loading built item details', 'error');
             }
         }
         
@@ -280,7 +280,7 @@
             modal.innerHTML = `
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>Record Panel Movement</h3>
+                        <h3>Record Built Item Movement</h3>
                         <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                     </div>
                     <form id="panelMovementForm">
@@ -320,7 +320,7 @@
                             reference: document.getElementById('panelMovementRef').value
                         })
                     });
-                    showAlert('Panel movement recorded');
+                    showAlert('Built item movement recorded');
                     modal.remove();
                     loadPanels();
                 } catch (error) {
@@ -351,7 +351,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? '<tr><td colspan="5">No BOM items</td></tr>' : bomData.bom.map(item => `
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '5' : '4'}">No BOM items</td></tr>` : bomData.bom.map(item => `
                                 <tr>
                                     <td>${item.item_type === 'raw_material' ? 'Raw Material' : 'Component'}</td>
                                     <td>${item.item_name || '-'}</td>
@@ -468,7 +468,15 @@
                 showAlert('Built item deleted');
                 loadPanels();
             } catch (error) {
-                showAlert(error.message || 'Failed to delete built item', 'error');
+                console.error('Delete panel error:', error);
+                let errorMessage = error.message || 'Failed to delete built item';
+                
+                // Provide more helpful error messages
+                if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+                    errorMessage = 'Cannot delete built item. It may be in use by:\n- BOM items\n- Production orders\n- Planner items\n- Product configurations\n\nPlease remove all references first.';
+                }
+                
+                showAlert(errorMessage, 'error');
             }
         }
         
@@ -491,13 +499,13 @@
                         method: 'PUT',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Panel updated');
+                    showAlert('Built item updated');
                 } else {
                     await apiCall('/panels', {
                         method: 'POST',
                         body: JSON.stringify(data)
                     });
-                    showAlert('Panel created');
+                    showAlert('Built item created');
                 }
                 hideModal('panelModal');
                 loadPanels();
