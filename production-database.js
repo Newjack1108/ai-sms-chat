@@ -1921,7 +1921,13 @@ class ProductionDatabase {
                  VALUES ($1, $2, $3, $4) RETURNING *`,
                 [componentId, stockItemId, quantityRequired, unit]
             );
-            await this.updateComponentCost(componentId);
+            // Update cost - wrap in try-catch so cost update failures don't prevent BOM item addition
+            try {
+                await this.updateComponentCost(componentId);
+            } catch (error) {
+                console.error(`Error updating component cost after adding BOM item:`, error);
+                // Continue - BOM item was added successfully, cost can be recalculated later
+            }
             return result.rows[0];
         } else {
             const stmt = db.prepare(
@@ -1929,7 +1935,13 @@ class ProductionDatabase {
                  VALUES (?, ?, ?, ?)`
             );
             const info = stmt.run(componentId, stockItemId, quantityRequired, unit);
-            await this.updateComponentCost(componentId);
+            // Update cost - wrap in try-catch so cost update failures don't prevent BOM item addition
+            try {
+                await this.updateComponentCost(componentId);
+            } catch (error) {
+                console.error(`Error updating component cost after adding BOM item:`, error);
+                // Continue - BOM item was added successfully, cost can be recalculated later
+            }
             return this.getComponentBOMItemById(info.lastInsertRowid);
         }
     }
@@ -2013,8 +2025,19 @@ class ProductionDatabase {
             db.prepare(`UPDATE components SET cost_gbp = ? WHERE id = ?`).run(trueCost, componentId);
         }
         // Recalculate all built items and products that use this component
-        await this.recalculateBuiltItemsUsingComponent(componentId);
-        await this.recalculateProductsUsingComponent(componentId);
+        // Wrap in try-catch so recalculation failures don't block the main operation
+        try {
+            await this.recalculateBuiltItemsUsingComponent(componentId);
+        } catch (error) {
+            console.error(`Error recalculating built items for component ${componentId}:`, error);
+            // Continue - don't throw, just log
+        }
+        try {
+            await this.recalculateProductsUsingComponent(componentId);
+        } catch (error) {
+            console.error(`Error recalculating products for component ${componentId}:`, error);
+            // Continue - don't throw, just log
+        }
         return trueCost;
     }
     

@@ -556,7 +556,29 @@ router.post('/components/:id/bom', requireProductionAuth, requireAdmin, async (r
         res.json({ success: true, bomItem });
     } catch (error) {
         console.error('Add component BOM item error:', error);
-        res.status(500).json({ success: false, error: 'Failed to add component BOM item' });
+        console.error('Error stack:', error.stack);
+        console.error('Request body:', req.body);
+        console.error('Component ID:', req.params.id);
+        
+        // Provide more detailed error messages
+        let errorMessage = 'Failed to add component BOM item';
+        if (error.message) {
+            if (error.message.includes('FOREIGN KEY') || error.message.includes('foreign key constraint')) {
+                errorMessage = 'Cannot add BOM item. The raw material or component may not exist.';
+            } else if (error.message.includes('UNIQUE') || error.message.includes('duplicate')) {
+                errorMessage = 'This BOM item already exists for this component.';
+            } else if (error.message.includes('NOT NULL') || error.message.includes('null value')) {
+                errorMessage = 'Missing required field. Please check all fields are filled.';
+            } else {
+                errorMessage = error.message;
+            }
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            error: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
