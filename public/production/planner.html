@@ -921,6 +921,10 @@
                 // Calculate status and priority breakdowns
                 const statusCounts = { planned: 0, in_progress: 0, completed: 0 };
                 const priorityCounts = { high: 0, medium: 0, low: 0 };
+                const builtItemCount = items.filter(item => item.item_type === 'built_item' || !item.item_type).length;
+                const componentCount = items.filter(item => item.item_type === 'component').length;
+                const jobCount = items.filter(item => item.item_type === 'job').length;
+                
                 items.forEach(item => {
                     if (item.status) statusCounts[item.status] = (statusCounts[item.status] || 0) + 1;
                     if (item.priority) priorityCounts[item.priority] = (priorityCounts[item.priority] || 0) + 1;
@@ -952,29 +956,37 @@
                                 <div class="planner-summary">
                                     <div class="summary-card">
                                         <h4>Hours Available</h4>
-                                        <p>${efficiency.efficiency.hours_available.toFixed(1)}</p>
+                                        <p>${formatHours(efficiency.efficiency.hours_available)}</p>
                                     </div>
                                     <div class="summary-card">
                                         <h4>Hours Planned</h4>
-                                        <p>${efficiency.efficiency.hours_planned.toFixed(1)}</p>
+                                        <p>${formatHours(efficiency.efficiency.hours_planned)}</p>
                                     </div>
                                     <div class="summary-card">
                                         <h4>Hours Used</h4>
-                                        <p>${efficiency.efficiency.hours_used.toFixed(1)}</p>
+                                        <p>${formatHours(efficiency.efficiency.hours_used)}</p>
                                     </div>
                                     <div class="summary-card">
                                         <h4>Hours Spare</h4>
                                         <p style="color: ${buildRate.build_rate.hours_excess > 0 ? '#28a745' : '#dc3545'}">
-                                            ${buildRate.build_rate.hours_excess.toFixed(1)}
+                                            ${formatHours(buildRate.build_rate.hours_excess)}
                                         </p>
                                     </div>
                                     <div class="summary-card">
-                                        <h4>Panels Planned</h4>
+                                        <h4>Built Items Planned</h4>
                                         <p>${efficiency.efficiency.panels_planned.toFixed(1)}</p>
                                     </div>
                                     <div class="summary-card">
-                                        <h4>Panels Built</h4>
+                                        <h4>Built Items Built</h4>
                                         <p>${efficiency.efficiency.panels_built.toFixed(1)}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Components Planned</h4>
+                                        <p>${componentCount}</p>
+                                    </div>
+                                    <div class="summary-card">
+                                        <h4>Components Built</h4>
+                                        <p>${items.filter(item => item.item_type === 'component' && item.status === 'completed').length}</p>
                                     </div>
                                     <div class="summary-card">
                                         <h4>Completion Rate</h4>
@@ -996,8 +1008,8 @@
                                                 <div style="font-size: 20px; font-weight: bold;">Build Rate: ${buildRate.build_rate.build_rate_percent.toFixed(1)}%</div>
                                                 <div style="font-size: 12px; font-weight: normal; margin-top: 8px;">
                                                     ${buildRate.build_rate.hours_shortfall > 0 
-                                                        ? `${buildRate.build_rate.hours_shortfall.toFixed(1)} hours short` 
-                                                        : `${buildRate.build_rate.hours_excess.toFixed(1)} hours spare`}
+                                                        ? `${formatHours(buildRate.build_rate.hours_shortfall)} short` 
+                                                        : `${formatHours(buildRate.build_rate.hours_excess)} spare`}
                                                 </div>
                                             </div>
                                         </div>
@@ -1008,7 +1020,7 @@
                                                 <div style="font-size: 20px; font-weight: bold;">Efficiency: ${efficiency.efficiency.overall_efficiency.toFixed(1)}%</div>
                                                 <div style="font-size: 12px; font-weight: normal; margin-top: 8px;">
                                                     Hours: ${efficiency.efficiency.hours_efficiency.toFixed(1)}% | 
-                                                    Panels: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%
+                                                    Built Items: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%
                                                 </div>
                                             </div>
                                         </div>
@@ -1018,7 +1030,15 @@
                             
                             <div style="margin-bottom: 30px;">
                                 <h5 style="color: #667eea; margin-bottom: 15px; border-bottom: 2px solid #667eea; padding-bottom: 5px;">Breakdowns</h5>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
+                                    <div>
+                                        <h6 style="margin-bottom: 10px; color: #495057;">Item Type Breakdown</h6>
+                                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                                            <div style="margin-bottom: 8px;"><strong>Built Items:</strong> ${builtItemCount}</div>
+                                            <div style="margin-bottom: 8px;"><strong>Components:</strong> ${componentCount}</div>
+                                            <div><strong>Jobs:</strong> ${jobCount}</div>
+                                        </div>
+                                    </div>
                                     <div>
                                         <h6 style="margin-bottom: 10px; color: #495057;">Status Breakdown</h6>
                                         <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
@@ -1053,7 +1073,8 @@
                                     <table class="table">
                                         <thead>
                                             <tr>
-                                                <th>Built Item</th>
+                                                <th>Item Name</th>
+                                                <th>Type</th>
                                                 <th>Planned</th>
                                                 <th>Built</th>
                                                 <th>Hours Used</th>
@@ -1072,12 +1093,24 @@
                                                 const itemEfficiency = expectedHours > 0 ? (expectedHours / hoursUsed) * 100 : 0;
                                                 const itemIndicator = itemEfficiency >= 95 ? 'green' : (itemEfficiency >= 80 ? 'yellow' : 'red');
                                                 
+                                                // Determine item type label
+                                                let itemTypeLabel = 'Built Item';
+                                                if (item.item_type === 'component') {
+                                                    itemTypeLabel = 'Component';
+                                                } else if (item.item_type === 'job') {
+                                                    itemTypeLabel = 'Job';
+                                                }
+                                                
+                                                // Get item name
+                                                const itemName = item.item_name || item.panel_name || item.job_name || 'Unknown';
+                                                
                                                 return `
                                                     <tr>
-                                                        <td><strong>${item.item_name || item.panel_name || 'Unknown'}</strong> <span class="badge badge-info">${item.item_type === 'component' ? 'Component' : 'Built Item'}</span></td>
+                                                        <td><strong>${itemName}</strong></td>
+                                                        <td><span class="badge badge-info">${itemTypeLabel}</span></td>
                                                         <td>${qtyPlanned.toFixed(2)}</td>
                                                         <td>${qtyBuilt.toFixed(2)}</td>
-                                                        <td>${hoursUsed.toFixed(2)}</td>
+                                                        <td>${formatHours(hoursUsed)}</td>
                                                         <td><span class="badge badge-${item.priority === 'high' ? 'danger' : item.priority === 'medium' ? 'warning' : 'info'}">${item.priority || 'N/A'}</span></td>
                                                         <td><span class="badge badge-info">${item.status || 'N/A'}</span></td>
                                                         <td>
@@ -1123,6 +1156,11 @@
                     if (item.priority) priorityCounts[item.priority] = (priorityCounts[item.priority] || 0) + 1;
                 });
                 
+                // Calculate item counts by type
+                const builtItemCount = items.filter(item => item.item_type === 'built_item' || !item.item_type).length;
+                const componentCount = items.filter(item => item.item_type === 'component').length;
+                const jobCount = items.filter(item => item.item_type === 'job').length;
+                
                 const completionRate = efficiency.efficiency.panels_planned > 0 
                     ? (efficiency.efficiency.panels_built / efficiency.efficiency.panels_planned) * 100 
                     : 0;
@@ -1153,12 +1191,14 @@
                 doc.setFontSize(10);
                 doc.setFont(undefined, 'normal');
                 const metrics = [
-                    ['Hours Available', efficiency.efficiency.hours_available.toFixed(1)],
-                    ['Hours Planned', efficiency.efficiency.hours_planned.toFixed(1)],
-                    ['Hours Used', efficiency.efficiency.hours_used.toFixed(1)],
-                    ['Hours Spare', buildRate.build_rate.hours_excess.toFixed(1)],
-                    ['Panels Planned', efficiency.efficiency.panels_planned.toFixed(1)],
-                    ['Panels Built', efficiency.efficiency.panels_built.toFixed(1)],
+                    ['Hours Available', formatHours(efficiency.efficiency.hours_available)],
+                    ['Hours Planned', formatHours(efficiency.efficiency.hours_planned)],
+                    ['Hours Used', formatHours(efficiency.efficiency.hours_used)],
+                    ['Hours Spare', formatHours(buildRate.build_rate.hours_excess)],
+                    ['Built Items Planned', efficiency.efficiency.panels_planned.toFixed(1)],
+                    ['Built Items Built', efficiency.efficiency.panels_built.toFixed(1)],
+                    ['Components Planned', componentCount.toString()],
+                    ['Components Built', items.filter(item => item.item_type === 'component' && item.status === 'completed').length.toString()],
                     ['Completion Rate', completionRate.toFixed(1) + '%'],
                     ['Staff Available', (planner.staff_available || 1).toString()]
                 ];
@@ -1172,7 +1212,7 @@
                     doc.setFont(undefined, 'bold');
                     doc.text(metric[0] + ':', xPos, yPos);
                     doc.setFont(undefined, 'normal');
-                    doc.text(metric[1], xPos + 50, yPos);
+                    doc.text(metric[1], xPos + 55, yPos);
                     if (index % 2 === 0) {
                         xPos = 105;
                     }
@@ -1189,13 +1229,13 @@
                 doc.setFont(undefined, 'normal');
                 doc.text(`Build Rate: ${buildRate.build_rate.build_rate_percent.toFixed(1)}%`, 14, yPos);
                 doc.text(buildRate.build_rate.hours_shortfall > 0 
-                    ? `Hours Short: ${buildRate.build_rate.hours_shortfall.toFixed(1)}` 
-                    : `Hours Spare: ${buildRate.build_rate.hours_excess.toFixed(1)}`, 14, yPos + 5);
+                    ? `Hours Short: ${formatHours(buildRate.build_rate.hours_shortfall)}` 
+                    : `Hours Spare: ${formatHours(buildRate.build_rate.hours_excess)}`, 14, yPos + 5);
                 yPos += 10;
                 
                 doc.text(`Overall Efficiency: ${efficiency.efficiency.overall_efficiency.toFixed(1)}%`, 14, yPos);
                 doc.text(`Hours Efficiency: ${efficiency.efficiency.hours_efficiency.toFixed(1)}%`, 14, yPos + 5);
-                doc.text(`Panels Efficiency: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%`, 14, yPos + 10);
+                doc.text(`Built Items Efficiency: ${efficiency.efficiency.panels_efficiency.toFixed(1)}%`, 14, yPos + 10);
                 yPos += 18;
                 
                 // Breakdowns
@@ -1206,6 +1246,12 @@
                 
                 doc.setFontSize(10);
                 doc.setFont(undefined, 'normal');
+                doc.text('Item Type Breakdown:', 14, yPos);
+                doc.text(`  Built Items: ${builtItemCount}`, 20, yPos + 5);
+                doc.text(`  Components: ${componentCount}`, 20, yPos + 10);
+                doc.text(`  Jobs: ${jobCount}`, 20, yPos + 15);
+                yPos += 25;
+                
                 doc.text('Status Breakdown:', 14, yPos);
                 doc.text(`  Planned: ${statusCounts.planned || 0} items`, 20, yPos + 5);
                 doc.text(`  In Progress: ${statusCounts.in_progress || 0} items`, 20, yPos + 10);
@@ -1247,11 +1293,23 @@
                         const expectedHours = hoursPerUnit * qtyBuilt;
                         const itemEfficiency = expectedHours > 0 ? (expectedHours / hoursUsed) * 100 : 0;
                         
+                        // Determine item type label
+                        let itemTypeLabel = 'Built Item';
+                        if (item.item_type === 'component') {
+                            itemTypeLabel = 'Component';
+                        } else if (item.item_type === 'job') {
+                            itemTypeLabel = 'Job';
+                        }
+                        
+                        // Get item name - use item_name if available, otherwise panel_name, otherwise job_name
+                        const itemName = item.item_name || item.panel_name || item.job_name || 'N/A';
+                        
                         return [
-                            item.panel_name || 'N/A',
+                            itemName,
+                            itemTypeLabel,
                             qtyPlanned.toFixed(2),
                             qtyBuilt.toFixed(2),
-                            hoursUsed.toFixed(2),
+                            formatHours(hoursUsed),
                             item.priority || 'N/A',
                             item.status || 'N/A',
                             itemEfficiency.toFixed(1) + '%'
@@ -1260,12 +1318,15 @@
                     
                     doc.autoTable({
                         startY: yPos,
-                        head: [['Panel', 'Planned', 'Built', 'Hours Used', 'Priority', 'Status', 'Efficiency']],
+                        head: [['Item Name', 'Type', 'Planned', 'Built', 'Hours Used', 'Priority', 'Status', 'Efficiency']],
                         body: tableData,
                         theme: 'striped',
                         headStyles: { fillColor: [102, 126, 234], textColor: 255, fontStyle: 'bold' },
                         styles: { fontSize: 9 },
-                        margin: { left: 14, right: 14 }
+                        margin: { left: 14, right: 14 },
+                        columnStyles: {
+                            4: { cellWidth: 35 } // Hours Used column wider for hours/mins format
+                        }
                     });
                 }
                 
@@ -1462,6 +1523,24 @@
         
         function formatDate(date) {
             return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+        
+        // Format hours as hours and minutes (e.g., "5hrs 30mins")
+        function formatHours(hours) {
+            if (!hours || isNaN(hours) || hours === 0) {
+                return '0hrs 0mins';
+            }
+            const hoursFloat = parseFloat(hours);
+            const wholeHours = Math.floor(hoursFloat);
+            const minutes = Math.round((hoursFloat - wholeHours) * 60);
+            
+            if (wholeHours === 0) {
+                return `${minutes}mins`;
+            } else if (minutes === 0) {
+                return `${wholeHours}hrs`;
+            } else {
+                return `${wholeHours}hrs ${minutes}mins`;
+            }
         }
         
         function escapeHtml(text) {
