@@ -910,6 +910,15 @@ async function initializePostgreSQL() {
                                 CHECK (item_type IN ('raw_material', 'component'));
                         END IF;
                     END IF;
+                    
+                    -- Make stock_item_id nullable if it exists (so inserts using new schema don't fail)
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='bom_items' 
+                        AND column_name='stock_item_id' AND is_nullable = 'NO'
+                    ) THEN
+                        ALTER TABLE bom_items ALTER COLUMN stock_item_id DROP NOT NULL;
+                    END IF;
                 END $$;
             `);
         } catch (error) {
@@ -1614,9 +1623,13 @@ class ProductionDatabase {
                 await this.updatePanelCost(panelId);
                 return result.rows[0];
             } catch (error) {
-                // If insert fails due to missing columns, try migration again
-                if (error.message && (error.message.includes('item_type') || error.message.includes('item_id')) && error.message.includes('does not exist')) {
+                // If insert fails due to schema issues, try migration again
+                if (error.message && (
+                    (error.message.includes('item_type') || error.message.includes('item_id')) && error.message.includes('does not exist')
+                    || error.message.includes('stock_item_id') && error.message.includes('violates not-null constraint')
+                )) {
                     console.log('BOM insert failed due to schema issue, attempting migration...');
+                    console.log('Error message:', error.message);
                     await this.ensureBOMItemsSchema();
                     // Retry insert
                     const result = await pool.query(
@@ -1656,6 +1669,7 @@ class ProductionDatabase {
             await pool.query(`
                 DO $$ 
                 BEGIN 
+                    -- Add new columns if they don't exist
                     IF EXISTS (
                         SELECT 1 FROM information_schema.tables 
                         WHERE table_schema = 'public' AND table_name='bom_items'
@@ -1663,19 +1677,27 @@ class ProductionDatabase {
                         SELECT 1 FROM information_schema.columns 
                         WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_type'
                     ) THEN
+                        -- Add new columns
                         ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20);
                         ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_id INTEGER;
-                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        
+                        -- Migrate existing data from stock_item_id if it exists
                         IF EXISTS (
                             SELECT 1 FROM information_schema.columns 
                             WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='stock_item_id'
                         ) THEN
-                            UPDATE bom_items SET item_id = stock_item_id WHERE item_id IS NULL;
+                            UPDATE bom_items SET item_type = 'raw_material', item_id = stock_item_id WHERE item_id IS NULL;
                         END IF;
-                        UPDATE bom_items SET item_id = 0 WHERE item_id IS NULL;
+                        
+                        -- Handle any remaining NULLs
                         UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        UPDATE bom_items SET item_id = COALESCE(item_id, 0) WHERE item_id IS NULL;
+                        
+                        -- Make new columns NOT NULL
                         ALTER TABLE bom_items ALTER COLUMN item_type SET NOT NULL;
                         ALTER TABLE bom_items ALTER COLUMN item_id SET NOT NULL;
+                        
+                        -- Add CHECK constraint
                         IF NOT EXISTS (
                             SELECT 1 FROM information_schema.table_constraints 
                             WHERE table_schema = 'public' AND table_name='bom_items' 
@@ -1684,6 +1706,15 @@ class ProductionDatabase {
                             ALTER TABLE bom_items ADD CONSTRAINT bom_items_item_type_check 
                                 CHECK (item_type IN ('raw_material', 'component'));
                         END IF;
+                    END IF;
+                    
+                    -- Make stock_item_id nullable if it exists (so inserts using new schema don't fail)
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='bom_items' 
+                        AND column_name='stock_item_id' AND is_nullable = 'NO'
+                    ) THEN
+                        ALTER TABLE bom_items ALTER COLUMN stock_item_id DROP NOT NULL;
                     END IF;
                 END $$;
             `);
