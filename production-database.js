@@ -1085,6 +1085,61 @@ async function initializePostgreSQL() {
             END $$;
         `);
         
+        // Migrate bom_items table to add item_type and item_id columns if they don't exist
+        try {
+            await pool.query(`
+                DO $$ 
+                BEGIN 
+                    -- Check if bom_items table exists and if item_type column is missing
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'public' AND table_name='bom_items'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_type'
+                    ) THEN
+                        -- Add item_type and item_id columns as nullable first
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20);
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_id INTEGER;
+                        
+                        -- Set default values for existing rows (assume raw_material)
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        
+                        -- Set item_id based on existing structure if possible
+                        -- Check for stock_item_id or similar column and migrate
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='stock_item_id'
+                        ) THEN
+                            UPDATE bom_items SET item_id = stock_item_id WHERE item_id IS NULL;
+                        END IF;
+                        
+                        -- If there are still NULL values, we need to handle them
+                        -- For safety, set a default item_id if NULL (but this shouldn't happen)
+                        UPDATE bom_items SET item_id = 0 WHERE item_id IS NULL;
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        
+                        -- Now make columns NOT NULL
+                        ALTER TABLE bom_items ALTER COLUMN item_type SET NOT NULL;
+                        ALTER TABLE bom_items ALTER COLUMN item_id SET NOT NULL;
+                        
+                        -- Add CHECK constraint if it doesn't exist
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints 
+                            WHERE table_schema = 'public' AND table_name='bom_items' 
+                            AND constraint_name='bom_items_item_type_check'
+                        ) THEN
+                            ALTER TABLE bom_items ADD CONSTRAINT bom_items_item_type_check 
+                                CHECK (item_type IN ('raw_material', 'component'));
+                        END IF;
+                    END IF;
+                END $$;
+            `);
+        } catch (error) {
+            console.error('Error migrating bom_items table:', error);
+            // Continue - the table might already be in the correct state
+        }
+        
         // Create weekly_timesheets table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS weekly_timesheets (
