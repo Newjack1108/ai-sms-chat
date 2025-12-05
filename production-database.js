@@ -861,9 +861,74 @@ async function initializePostgreSQL() {
             )
         `);
         
-        // Create indexes
+        // Migrate bom_items table to add item_type and item_id columns if they don't exist
+        // This MUST run before creating indexes on those columns
+        try {
+            await pool.query(`
+                DO $$ 
+                BEGIN 
+                    -- Check if bom_items table exists and if item_type column is missing
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'public' AND table_name='bom_items'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_type'
+                    ) THEN
+                        -- Add item_type and item_id columns as nullable first
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20);
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_id INTEGER;
+                        
+                        -- Set default values for existing rows (assume raw_material)
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        
+                        -- Set item_id based on existing structure if possible
+                        -- Check for stock_item_id or similar column and migrate
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='stock_item_id'
+                        ) THEN
+                            UPDATE bom_items SET item_id = stock_item_id WHERE item_id IS NULL;
+                        END IF;
+                        
+                        -- If there are still NULL values, we need to handle them
+                        -- For safety, set a default item_id if NULL (but this shouldn't happen)
+                        UPDATE bom_items SET item_id = 0 WHERE item_id IS NULL;
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        
+                        -- Now make columns NOT NULL
+                        ALTER TABLE bom_items ALTER COLUMN item_type SET NOT NULL;
+                        ALTER TABLE bom_items ALTER COLUMN item_id SET NOT NULL;
+                        
+                        -- Add CHECK constraint if it doesn't exist
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints 
+                            WHERE table_schema = 'public' AND table_name='bom_items' 
+                            AND constraint_name='bom_items_item_type_check'
+                        ) THEN
+                            ALTER TABLE bom_items ADD CONSTRAINT bom_items_item_type_check 
+                                CHECK (item_type IN ('raw_material', 'component'));
+                        END IF;
+                    END IF;
+                END $$;
+            `);
+        } catch (error) {
+            console.error('Error migrating bom_items table:', error);
+            // Continue - the table might already be in the correct state
+        }
+        
+        // Create indexes - only create item_id index if column exists
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id)`);
+        
+        // Check if item_id column exists before creating index
+        const itemIdColumnCheck = await pool.query(`
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_id'
+        `);
+        if (itemIdColumnCheck.rows.length > 0) {
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id)`);
+        }
+        
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id)`);
@@ -971,13 +1036,23 @@ async function initializePostgreSQL() {
                     ALTER TABLE planner_items ADD COLUMN hours_used DECIMAL(10,2) DEFAULT 0;
                 END IF;
                 
+                -- FIRST: Make panel_id nullable if it exists (needed for components and jobs)
+                -- This MUST happen before adding new columns to allow inserts without panel_id
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_schema = 'public' AND table_name='planner_items' 
+                    AND column_name='panel_id' AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE planner_items ALTER COLUMN panel_id DROP NOT NULL;
+                END IF;
+                
                 -- Migrate to new structure: panel_id -> item_type + item_id
                 IF EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='panel_id'
+                    WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='panel_id'
                 ) AND NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='item_type'
+                    WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='item_type'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN item_type VARCHAR(20);
                     ALTER TABLE planner_items ADD COLUMN item_id INTEGER;
@@ -985,31 +1060,10 @@ async function initializePostgreSQL() {
                     ALTER TABLE planner_items ALTER COLUMN item_type SET NOT NULL;
                 END IF;
                 
-                -- Make panel_id nullable if it exists (needed for components and jobs)
-                -- This allows components and jobs to be added without a panel_id
-                IF EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='panel_id'
-                ) THEN
-                    -- Check if column is NOT NULL by checking is_nullable
-                    DO $$
-                    DECLARE
-                        is_nullable_val TEXT;
-                    BEGIN
-                        SELECT is_nullable INTO is_nullable_val
-                        FROM information_schema.columns
-                        WHERE table_name = 'planner_items' AND column_name = 'panel_id';
-                        
-                        IF is_nullable_val = 'NO' THEN
-                            ALTER TABLE planner_items ALTER COLUMN panel_id DROP NOT NULL;
-                        END IF;
-                    END $$;
-                END IF;
-                
                 -- Add job_name column for job items
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='job_name'
+                    WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='job_name'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN job_name VARCHAR(255);
                 END IF;
@@ -1017,14 +1071,14 @@ async function initializePostgreSQL() {
                 -- Add start_day and end_day columns for day assignments
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='start_day'
+                    WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='start_day'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN start_day INTEGER;
                 END IF;
                 
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='planner_items' AND column_name='end_day'
+                    WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='end_day'
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN end_day INTEGER;
                 END IF;
@@ -1084,61 +1138,6 @@ async function initializePostgreSQL() {
                 END IF;
             END $$;
         `);
-        
-        // Migrate bom_items table to add item_type and item_id columns if they don't exist
-        try {
-            await pool.query(`
-                DO $$ 
-                BEGIN 
-                    -- Check if bom_items table exists and if item_type column is missing
-                    IF EXISTS (
-                        SELECT 1 FROM information_schema.tables 
-                        WHERE table_schema = 'public' AND table_name='bom_items'
-                    ) AND NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_type'
-                    ) THEN
-                        -- Add item_type and item_id columns as nullable first
-                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20);
-                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_id INTEGER;
-                        
-                        -- Set default values for existing rows (assume raw_material)
-                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
-                        
-                        -- Set item_id based on existing structure if possible
-                        -- Check for stock_item_id or similar column and migrate
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns 
-                            WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='stock_item_id'
-                        ) THEN
-                            UPDATE bom_items SET item_id = stock_item_id WHERE item_id IS NULL;
-                        END IF;
-                        
-                        -- If there are still NULL values, we need to handle them
-                        -- For safety, set a default item_id if NULL (but this shouldn't happen)
-                        UPDATE bom_items SET item_id = 0 WHERE item_id IS NULL;
-                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
-                        
-                        -- Now make columns NOT NULL
-                        ALTER TABLE bom_items ALTER COLUMN item_type SET NOT NULL;
-                        ALTER TABLE bom_items ALTER COLUMN item_id SET NOT NULL;
-                        
-                        -- Add CHECK constraint if it doesn't exist
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.table_constraints 
-                            WHERE table_schema = 'public' AND table_name='bom_items' 
-                            AND constraint_name='bom_items_item_type_check'
-                        ) THEN
-                            ALTER TABLE bom_items ADD CONSTRAINT bom_items_item_type_check 
-                                CHECK (item_type IN ('raw_material', 'component'));
-                        END IF;
-                    END IF;
-                END $$;
-            `);
-        } catch (error) {
-            console.error('Error migrating bom_items table:', error);
-            // Continue - the table might already be in the correct state
-        }
         
         // Create weekly_timesheets table
         await pool.query(`
@@ -1665,6 +1664,73 @@ class ProductionDatabase {
             `);
         } catch (error) {
             console.error('Error ensuring bom_items schema:', error);
+            throw error;
+        }
+    }
+
+    static async ensurePlannerItemsSchema() {
+        if (!isPostgreSQL) return;
+        
+        try {
+            await pool.query(`
+                DO $$ 
+                BEGIN 
+                    -- Make panel_id nullable if it exists and is NOT NULL
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='planner_items' 
+                        AND column_name='panel_id' AND is_nullable = 'NO'
+                    ) THEN
+                        ALTER TABLE planner_items ALTER COLUMN panel_id DROP NOT NULL;
+                    END IF;
+                    
+                    -- Add item_type and item_id if they don't exist
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'public' AND table_name='planner_items'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='item_type'
+                    ) THEN
+                        ALTER TABLE planner_items ADD COLUMN item_type VARCHAR(20);
+                        ALTER TABLE planner_items ADD COLUMN item_id INTEGER;
+                        -- Migrate existing data
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='panel_id'
+                        ) THEN
+                            UPDATE planner_items SET item_type = 'built_item', item_id = panel_id WHERE panel_id IS NOT NULL AND item_type IS NULL;
+                        END IF;
+                        -- Set default for any remaining NULLs
+                        UPDATE planner_items SET item_type = 'built_item' WHERE item_type IS NULL;
+                        ALTER TABLE planner_items ALTER COLUMN item_type SET NOT NULL;
+                    END IF;
+                    
+                    -- Add job_name, start_day, end_day if they don't exist
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='job_name'
+                    ) THEN
+                        ALTER TABLE planner_items ADD COLUMN job_name VARCHAR(255);
+                    END IF;
+                    
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='start_day'
+                    ) THEN
+                        ALTER TABLE planner_items ADD COLUMN start_day INTEGER;
+                    END IF;
+                    
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='planner_items' AND column_name='end_day'
+                    ) THEN
+                        ALTER TABLE planner_items ADD COLUMN end_day INTEGER;
+                    END IF;
+                END $$;
+            `);
+        } catch (error) {
+            console.error('Error ensuring planner_items schema:', error);
             throw error;
         }
     }
@@ -2460,57 +2526,90 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             // Check which columns exist
             const columnCheck = await pool.query(`
-                SELECT column_name 
+                SELECT column_name, is_nullable
                 FROM information_schema.columns 
-                WHERE table_name = 'planner_items' 
+                WHERE table_schema = 'public' AND table_name = 'planner_items' 
                 AND column_name IN ('item_type', 'item_id', 'job_name', 'start_day', 'end_day', 'panel_id')
             `);
             const existingColumns = columnCheck.rows.map(r => r.column_name);
-            const hasItemType = existingColumns.includes('item_type');
-            const hasItemId = existingColumns.includes('item_id');
+            const columnInfo = {};
+            columnCheck.rows.forEach(row => {
+                columnInfo[row.column_name] = { exists: true, nullable: row.is_nullable === 'YES' };
+            });
+            
+            let hasItemType = existingColumns.includes('item_type');
+            let hasItemId = existingColumns.includes('item_id');
             const hasJobName = existingColumns.includes('job_name');
             const hasStartDay = existingColumns.includes('start_day');
             const hasEndDay = existingColumns.includes('end_day');
             const hasPanelId = existingColumns.includes('panel_id');
+            const panelIdNullable = hasPanelId && columnInfo['panel_id']?.nullable;
+            
+            // If old schema (panel_id exists but item_type doesn't), ensure migration runs
+            if (hasPanelId && !hasItemType) {
+                try {
+                    // Run migration to add item_type/item_id and make panel_id nullable
+                    await this.ensurePlannerItemsSchema();
+                    // Re-check columns after migration
+                    const newColumnCheck = await pool.query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name = 'planner_items' 
+                        AND column_name IN ('item_type', 'item_id', 'panel_id')
+                    `);
+                    const newColumns = newColumnCheck.rows.map(r => r.column_name);
+                    if (newColumns.includes('item_type')) {
+                        // Migration succeeded, use new schema
+                        hasItemType = true;
+                        if (newColumns.includes('item_id')) {
+                            hasItemId = true;
+                        }
+                    }
+                } catch (migrationError) {
+                    console.error('Error migrating planner_items schema:', migrationError);
+                    // Continue with old schema handling - ensure panel_id is provided if required
+                    if (hasPanelId && !panelIdNullable && itemType === 'built_item' && itemId) {
+                        // Can still use panel_id for built_item
+                    } else if (hasPanelId && !panelIdNullable) {
+                        throw new Error('Database schema needs migration. Cannot add ' + itemType + ' items. Please contact support or restart the server.');
+                    }
+                }
+            }
             
             // Build INSERT statement based on available columns
             let columns = ['planner_id', 'quantity_to_build', 'priority', 'status'];
             let values = [plannerId, quantityToBuild, priority || 'medium', status || 'planned'];
-            let paramIndex = 5;
             
-            if (hasItemType) {
+            if (hasItemType && itemType) {
                 columns.push('item_type');
                 values.push(itemType);
-                paramIndex++;
             }
             
             if (hasItemId) {
                 columns.push('item_id');
                 values.push(itemId || null);
-                paramIndex++;
             } else if (hasPanelId && itemType === 'built_item' && itemId) {
-                // Fallback to panel_id for old schema
+                // Fallback to panel_id for old schema (if panel_id is nullable or we can provide it)
                 columns.push('panel_id');
                 values.push(itemId);
-                paramIndex++;
+            } else if (hasPanelId && !panelIdNullable && itemType === 'job') {
+                // For jobs in old schema, we can't use panel_id - this is an error condition
+                throw new Error('Cannot add job items: database schema needs migration. Please contact support.');
             }
             
             if (hasJobName) {
                 columns.push('job_name');
                 values.push(jobName || null);
-                paramIndex++;
             }
             
             if (hasStartDay) {
                 columns.push('start_day');
                 values.push(startDay);
-                paramIndex++;
             }
             
             if (hasEndDay) {
                 columns.push('end_day');
                 values.push(endDay);
-                paramIndex++;
             }
             
             const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
