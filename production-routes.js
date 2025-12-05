@@ -358,7 +358,26 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
         res.json({ success: true, bom });
     } catch (error) {
         console.error('Get panel BOM error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get panel BOM' });
+        console.error('Error stack:', error.stack);
+        console.error('Panel ID:', req.params.id);
+        
+        // Provide more detailed error messages
+        let errorMessage = 'Failed to get panel BOM';
+        if (error.message) {
+            if (error.message.includes('relation') || error.message.includes('table')) {
+                errorMessage = 'Database table error. Please contact support.';
+            } else if (error.message.includes('syntax') || error.message.includes('SQL')) {
+                errorMessage = 'Database query error. Please contact support.';
+            } else {
+                errorMessage = error.message;
+            }
+        }
+        
+        res.status(500).json({ 
+            success: false, 
+            error: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 

@@ -1541,38 +1541,50 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT bi.*, 
-                 CASE 
-                     WHEN bi.item_type = 'raw_material' THEN si.name
-                     WHEN bi.item_type = 'component' THEN c.name
-                 END as item_name,
-                 CASE 
-                     WHEN bi.item_type = 'raw_material' THEN si.unit
-                     WHEN bi.item_type = 'component' THEN 'units'
-                 END as item_unit
+                 COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
+                     CASE WHEN bi.item_type = 'component' THEN c.name END,
+                     'Unknown Item'
+                 ) as item_name,
+                 COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.unit END,
+                     CASE WHEN bi.item_type = 'component' THEN 'units' END,
+                     bi.unit
+                 ) as item_unit
                  FROM bom_items bi
                  LEFT JOIN stock_items si ON bi.item_type = 'raw_material' AND bi.item_id = si.id
                  LEFT JOIN components c ON bi.item_type = 'component' AND bi.item_id = c.id
                  WHERE bi.panel_id = $1 
-                 ORDER BY bi.item_type, item_name`,
+                 ORDER BY bi.item_type, COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
+                     CASE WHEN bi.item_type = 'component' THEN c.name END,
+                     'Unknown Item'
+                 )`,
                 [panelId]
             );
             return result.rows;
         } else {
             return db.prepare(
                 `SELECT bi.*, 
-                 CASE 
-                     WHEN bi.item_type = 'raw_material' THEN si.name
-                     WHEN bi.item_type = 'component' THEN c.name
-                 END as item_name,
-                 CASE 
-                     WHEN bi.item_type = 'raw_material' THEN si.unit
-                     WHEN bi.item_type = 'component' THEN 'units'
-                 END as item_unit
+                 COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
+                     CASE WHEN bi.item_type = 'component' THEN c.name END,
+                     'Unknown Item'
+                 ) as item_name,
+                 COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.unit END,
+                     CASE WHEN bi.item_type = 'component' THEN 'units' END,
+                     bi.unit
+                 ) as item_unit
                  FROM bom_items bi
                  LEFT JOIN stock_items si ON bi.item_type = 'raw_material' AND bi.item_id = si.id
                  LEFT JOIN components c ON bi.item_type = 'component' AND bi.item_id = c.id
                  WHERE bi.panel_id = ? 
-                 ORDER BY bi.item_type, item_name`
+                 ORDER BY bi.item_type, COALESCE(
+                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
+                     CASE WHEN bi.item_type = 'component' THEN c.name END,
+                     'Unknown Item'
+                 )`
             ).all(panelId);
         }
     }
