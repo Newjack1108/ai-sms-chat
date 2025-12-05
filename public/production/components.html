@@ -153,6 +153,7 @@
                                         <button onclick="viewBOM(${component.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewComponentDetails(${component.id})" class="btn btn-success btn-sm">Details</button>
                                         ${currentUser.role === 'admin' ? `<button onclick="editComponent(${component.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        ${currentUser.role === 'admin' ? `<button onclick="deleteComponent(${component.id}, ${JSON.stringify(component.name)})" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -415,6 +416,17 @@
                 viewBOM(componentId);
             } catch (error) {
                 showAlert(error.message, 'error');
+            }
+        }
+        
+        async function deleteComponent(id, name) {
+            if (!confirm(`Are you sure you want to delete "${name}"? This action cannot be undone.`)) return;
+            try {
+                await apiCall(`/components/${id}`, { method: 'DELETE' });
+                showAlert('Component deleted');
+                loadComponents();
+            } catch (error) {
+                showAlert(error.message || 'Failed to delete component', 'error');
             }
         }
         

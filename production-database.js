@@ -985,6 +985,27 @@ async function initializePostgreSQL() {
                     ALTER TABLE planner_items ALTER COLUMN item_type SET NOT NULL;
                 END IF;
                 
+                -- Make panel_id nullable if it exists (needed for components and jobs)
+                -- This allows components and jobs to be added without a panel_id
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='planner_items' AND column_name='panel_id'
+                ) THEN
+                    -- Check if column is NOT NULL by checking is_nullable
+                    DO $$
+                    DECLARE
+                        is_nullable_val TEXT;
+                    BEGIN
+                        SELECT is_nullable INTO is_nullable_val
+                        FROM information_schema.columns
+                        WHERE table_name = 'planner_items' AND column_name = 'panel_id';
+                        
+                        IF is_nullable_val = 'NO' THEN
+                            ALTER TABLE planner_items ALTER COLUMN panel_id DROP NOT NULL;
+                        END IF;
+                    END $$;
+                END IF;
+                
                 -- Add job_name column for job items
                 IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns 
@@ -1262,6 +1283,14 @@ class ProductionDatabase {
         }
     }
     
+    static async deleteStockItem(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM stock_items WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM stock_items WHERE id = ?`).run(id);
+        }
+    }
+    
     static async updateStockQuantity(id, quantity) {
         if (isPostgreSQL) {
             await pool.query(`UPDATE stock_items SET current_quantity = $1 WHERE id = $2`, [quantity, id]);
@@ -1399,6 +1428,14 @@ class ProductionDatabase {
             // Recalculate cost automatically
             await this.updatePanelCost(id);
             return this.getPanelById(id);
+        }
+    }
+    
+    static async deletePanel(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM panels WHERE id = ?`).run(id);
         }
     }
     
@@ -2217,9 +2254,22 @@ class ProductionDatabase {
             if (hasItemId) {
                 columns.push('item_id');
                 values.push(itemId || null);
-            } else if (hasPanelId && itemType === 'built_item' && itemId) {
-                columns.push('panel_id');
-                values.push(itemId);
+            } else if (hasPanelId) {
+                // For old schema
+                if (itemType === 'built_item' && itemId) {
+                    columns.push('panel_id');
+                    values.push(itemId);
+                } else {
+                    // For components/jobs, check if panel_id column allows NULL
+                    // In SQLite, we can check the column definition
+                    const panelIdCol = plannerColumns.find(col => col.name === 'panel_id');
+                    const allowsNull = !panelIdCol || panelIdCol.notnull === 0;
+                    if (allowsNull) {
+                        columns.push('panel_id');
+                        values.push(null);
+                    }
+                    // If NOT NULL, skip it - migration should handle it
+                }
             }
             
             if (hasJobName) {

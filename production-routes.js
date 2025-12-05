@@ -214,6 +214,17 @@ router.put('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) =
     }
 });
 
+router.delete('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id);
+        await ProductionDatabase.deleteStockItem(itemId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete stock item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete stock item' });
+    }
+});
+
 router.get('/stock/:id/movements', requireProductionAuth, async (req, res) => {
     try {
         const stockItemId = parseInt(req.params.id);
@@ -308,6 +319,17 @@ router.put('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) 
     } catch (error) {
         console.error('Update panel error:', error);
         res.status(500).json({ success: false, error: 'Failed to update panel' });
+    }
+});
+
+router.delete('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        await ProductionDatabase.deletePanel(panelId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete panel error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete panel' });
     }
 });
 
@@ -473,6 +495,17 @@ router.put('/components/:id', requireProductionAuth, requireAdmin, async (req, r
     } catch (error) {
         console.error('Update component error:', error);
         res.status(500).json({ success: false, error: 'Failed to update component' });
+    }
+});
+
+router.delete('/components/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id);
+        await ProductionDatabase.deleteComponent(componentId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete component error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete component' });
     }
 });
 

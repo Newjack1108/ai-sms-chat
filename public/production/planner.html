@@ -221,7 +221,7 @@
                 <h3>Add Item to Planner</h3>
                 <button class="modal-close" onclick="hideModal('addPanelModal')">&times;</button>
             </div>
-            <form id="addPanelForm">
+            <form id="addPanelForm" novalidate>
                 <div class="form-group">
                     <label class="form-label">Item Type *</label>
                     <select id="itemTypeSelect" class="form-select" required onchange="updateItemSelect()">
@@ -688,7 +688,7 @@
             }
         }
         
-        function showAddPanelModal() {
+        async function showAddPanelModal() {
             document.getElementById('addPanelForm').reset();
             document.getElementById('itemTypeSelect').value = '';
             document.getElementById('panelSelect').innerHTML = '<option value="">Select item type first...</option>';
@@ -699,6 +699,15 @@
             document.getElementById('quantityHelp').textContent = 'Quantity of items to build';
             document.getElementById('panelSelect').required = true;
             document.getElementById('jobNameInput').required = false;
+            
+            // Reload data if empty
+            if (allComponents.length === 0) {
+                await loadAllComponents();
+            }
+            if (allPanels.length === 0) {
+                await loadAllPanels();
+            }
+            
             showModal('addPanelModal');
         }
         
@@ -1389,9 +1398,16 @@
                     return;
                 }
                 
+                const quantityInput = document.getElementById('panelQuantity');
+                const quantity = parseFloat(quantityInput.value);
+                if (!quantity || quantity <= 0) {
+                    showAlert('Please enter a valid quantity greater than 0', 'error');
+                    return;
+                }
+                
                 let requestBody = {
                     item_type: itemType,
-                    quantity_to_build: parseFloat(document.getElementById('panelQuantity').value),
+                    quantity_to_build: quantity,
                     priority: document.getElementById('panelPriority').value
                 };
                 
@@ -1403,23 +1419,44 @@
                     }
                     requestBody.job_name = jobName;
                 } else {
-                    const itemId = parseInt(document.getElementById('panelSelect').value);
-                    if (!itemId) {
-                        showAlert('Please select an item', 'error');
+                    const panelSelect = document.getElementById('panelSelect');
+                    const itemId = parseInt(panelSelect.value);
+                    if (!itemId || isNaN(itemId)) {
+                        const itemTypeName = itemType === 'component' ? 'component' : 'built item';
+                        showAlert(`Please select a ${itemTypeName}`, 'error');
                         return;
                     }
                     requestBody.item_id = itemId;
+                    
+                    // Verify the selected item exists in our loaded data
+                    if (itemType === 'component') {
+                        const component = allComponents.find(c => c.id === itemId);
+                        if (!component) {
+                            showAlert('Selected component not found. Please refresh and try again.', 'error');
+                            return;
+                        }
+                    } else if (itemType === 'built_item') {
+                        const panel = allPanels.find(p => p.id === itemId);
+                        if (!panel) {
+                            showAlert('Selected built item not found. Please refresh and try again.', 'error');
+                            return;
+                        }
+                    }
                 }
                 
-                await apiCall(`/planner/${currentPlannerId}/items`, {
+                console.log('Submitting planner item:', requestBody);
+                const result = await apiCall(`/planner/${currentPlannerId}/items`, {
                     method: 'POST',
                     body: JSON.stringify(requestBody)
                 });
+                console.log('Planner item added successfully:', result);
                 showAlert('Item added to planner');
                 hideModal('addPanelModal');
                 loadPlanner();
             } catch (error) {
-                showAlert(error.message, 'error');
+                console.error('Error adding planner item:', error);
+                const errorMessage = error.message || 'Failed to add item to planner. Please check the console for details.';
+                showAlert(errorMessage, 'error');
             }
         });
         
