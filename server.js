@@ -1630,12 +1630,14 @@ app.post('/api/leads', async (req, res) => {
                         existingLead.answers = existingLead.answers || {};
                         let newAnswersFound = 0;
                         
-                        // Try to extract answers for ALL unanswered questions from the message
+                        // AGGRESSIVELY extract answers for ALL unanswered questions from the FIRST message
+                        console.log(`🔍 AGGRESSIVE EXTRACTION: Scanning first message for ALL possible answers...`);
                         for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
                             const questionKey = `question_${i + 1}`;
                             
                             // Skip if already answered
                             if (existingLead.answers[questionKey]) {
+                                console.log(`   ⏭️ Q${i + 1} already answered, skipping`);
                                 continue;
                             }
                             
@@ -1643,10 +1645,11 @@ app.post('/api/leads', async (req, res) => {
                             const possibleAnswers = typeof question === 'object' ? question.possibleAnswers : '';
                             
                             if (!possibleAnswers) {
+                                console.log(`   ⚠️ Q${i + 1} has no possible answers defined, skipping`);
                                 continue;
                             }
                             
-                            // Extract answer for this question
+                            // Extract answer for this question - be more lenient for first message
                             const extractedAnswer = extractAnswerForQuestion(initialMessage, possibleAnswers, i + 1);
                             
                             if (extractedAnswer) {
@@ -1654,13 +1657,16 @@ app.post('/api/leads', async (req, res) => {
                                 const normalizedAnswer = typeof extractedAnswer === 'string' ? extractedAnswer.toLowerCase().trim() : extractedAnswer;
                                 existingLead.answers[questionKey] = normalizedAnswer;
                                 newAnswersFound++;
-                                console.log(`   ✅ Extracted answer for Q${i + 1}: "${normalizedAnswer}"`);
+                                console.log(`   ✅ Extracted answer for Q${i + 1} from first message: "${normalizedAnswer}"`);
+                            } else {
+                                console.log(`   ❓ Could not extract answer for Q${i + 1} from first message`);
                             }
                         }
                         
                         // Update progress if any new answers were found
                         if (newAnswersFound > 0) {
-                            const newAnsweredCount = Object.keys(existingLead.answers).length;
+                            // Count only actual answers, not tracking fields
+                            const newAnsweredCount = Object.keys(existingLead.answers).filter(k => !k.startsWith('_')).length;
                             existingLead.progress = Math.round((newAnsweredCount / 4) * 100);
                             existingLead.status = existingLead.progress === 100 ? 'qualified' : 'active';
                             
@@ -1763,7 +1769,8 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             try {
                 // Initialize answers object
                 newLead.answers = newLead.answers || {};
-                const answeredCountBefore = Object.keys(newLead.answers).length;
+                // Count only actual answers, not tracking fields
+                const answeredCountBefore = Object.keys(newLead.answers).filter(k => !k.startsWith('_')).length;
                 let newAnswersFound = 0;
                 
                 // Try to extract answers for ALL unanswered questions from the message
@@ -1797,7 +1804,8 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                 
                 // Update progress if any new answers were found
                 if (newAnswersFound > 0) {
-                    const newAnsweredCount = Object.keys(newLead.answers).length;
+                    // Count only actual answers, not tracking fields
+                    const newAnsweredCount = Object.keys(newLead.answers).filter(k => !k.startsWith('_')).length;
                     newLead.progress = Math.round((newAnsweredCount / 4) * 100);
                     newLead.status = newLead.progress === 100 ? 'qualified' : 'active';
                     
@@ -2172,7 +2180,8 @@ app.post('/api/leads/reactivate', async (req, res) => {
                         
                         // Update progress if any new answers were found
                         if (newAnswersFound > 0) {
-                            const newAnsweredCount = Object.keys(lead.answers).length;
+                            // Count only actual answers, not tracking fields
+                            const newAnsweredCount = Object.keys(lead.answers).filter(k => !k.startsWith('_')).length;
                             lead.progress = Math.round((newAnsweredCount / 4) * 100);
                             lead.status = lead.progress === 100 ? 'qualified' : 'active';
                             
@@ -2347,7 +2356,8 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                     
                     // Update progress if any new answers were found
                     if (newAnswersFound > 0) {
-                        const newAnsweredCount = Object.keys(lead.answers).length;
+                        // Count only actual answers, not tracking fields
+                        const newAnsweredCount = Object.keys(lead.answers).filter(k => !k.startsWith('_')).length;
                         lead.progress = Math.round((newAnsweredCount / 4) * 100);
                         lead.status = lead.progress === 100 ? 'qualified' : 'active';
                         
@@ -2583,7 +2593,7 @@ app.get('/api/database/status', (req, res) => {
                 status: lead.status,
                 progress: lead.progress,
                 qualified: lead.qualified,
-                answeredQuestions: Object.keys(lead.answers || {}).length,
+                answeredQuestions: Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length,
                 createdAt: lead.createdAt
             })),
             timestamp: new Date().toISOString()
@@ -2676,15 +2686,65 @@ async function sendAIIntroduction(lead, isReturning = false) {
         }
         
         // Check if lead already has some answers (e.g., from initialMessage)
-        const answeredCount = Object.keys(lead.answers || {}).length;
+        // Count only actual answers, not tracking fields
+        const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
         const hasAnswers = answeredCount > 0;
         
         // Find the first unanswered question (or Q1 if none answered yet)
         const nextQuestion = findFirstUnansweredQuestion(lead);
+        if (!nextQuestion) {
+            console.log(`   ⚠️ No question to ask - all questions answered or all have been asked`);
+            // If all questions answered, send qualification message
+            const qualificationMsg = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+            await sendSMS(lead.phone, qualificationMsg);
+            await LeadDatabase.createMessage(lead.id, 'assistant', qualificationMsg);
+            return;
+        }
+        
         const questionText = nextQuestion;
         
+        // Find which question number this is
+        let questionNumber = -1;
+        for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+            const q = CUSTOM_QUESTIONS[i];
+            const qText = typeof q === 'object' ? q.question : q;
+            if (qText === questionText) {
+                questionNumber = i + 1;
+                break;
+            }
+        }
+        
         console.log(`   📊 Lead has ${answeredCount} answers already`);
-        console.log(`   ❓ Next question to ask: ${questionText}`);
+        console.log(`   ❓ Next question to ask: Q${questionNumber} - "${questionText}"`);
+        
+        // CRITICAL: Mark this question as asked BEFORE sending
+        if (!lead.answers) {
+            lead.answers = {};
+        }
+        if (!lead.answers._questions_asked) {
+            lead.answers._questions_asked = {};
+        }
+        lead.answers._questions_asked[`question_${questionNumber}`] = true;
+        
+        // Save the "asked" flag to database immediately
+        await LeadDatabase.updateLead(lead.id, {
+            name: lead.name,
+            email: lead.email,
+            status: lead.status,
+            progress: lead.progress,
+            qualified: lead.qualified,
+            ai_paused: lead.ai_paused,
+            post_qualification_response_sent: lead.post_qualification_response_sent,
+            answers: lead.answers,
+            qualifiedDate: lead.qualifiedDate,
+            returning_customer: lead.returning_customer || false,
+            times_qualified: lead.times_qualified || 0,
+            first_qualified_date: lead.first_qualified_date,
+            last_qualified_date: lead.last_qualified_date
+        });
+        
+        console.log(`   ✅ Marked Q${questionNumber} as asked in introduction - will NEVER ask this question again`);
         
         let introMessage;
         
@@ -3117,7 +3177,35 @@ async function processAIResponse(lead, userMessage) {
                 
                 // Send acknowledgment + next question
                 const nextQuestion = findFirstUnansweredQuestion(lead);
+                if (!nextQuestion) {
+                    // All questions asked or answered - send qualification message
+                    const qualificationMsg = `Thank you! I have all the information I need to help you, I will pass this on to a member of our team who will be in touch. 
+If you have any questions in the meantime our office hours are Monday to Friday, 8am – 5pm, and Saturday, 10am – 3pm. 🐴✨Tel:01606 272788`;
+                    await sendSMS(lead.phone, qualificationMsg);
+                    await LeadDatabase.createMessage(lead.id, 'assistant', qualificationMsg);
+                    return;
+                }
+                
                 const nextQuestionText = typeof nextQuestion === 'object' ? nextQuestion.question : nextQuestion;
+                
+                // Find which question number this is and mark it as asked
+                let questionNumber = -1;
+                for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                    const q = CUSTOM_QUESTIONS[i];
+                    const qText = typeof q === 'object' ? q.question : q;
+                    if (qText === nextQuestionText) {
+                        questionNumber = i + 1;
+                        break;
+                    }
+                }
+                
+                // Mark as asked
+                if (!lead.answers._questions_asked) {
+                    lead.answers._questions_asked = {};
+                }
+                lead.answers._questions_asked[`question_${questionNumber}`] = true;
+                console.log(`   ✅ Marked Q${questionNumber} as asked in re-engagement - will NEVER ask again`);
+                
                 const reengageMsg = `Great! Thanks for confirming. Let me help you get that quote sorted. ${nextQuestionText}`;
                 
                 try {
@@ -3248,15 +3336,22 @@ async function processAIResponse(lead, userMessage) {
         // FIRST: Extract answers from user message BEFORE generating AI response
         console.log(`🔍 Extracting answers from message (multi-answer extraction enabled)...`);
         lead.answers = lead.answers || {};
-        const answeredCountBefore = Object.keys(lead.answers).length;
+        // Count only actual answers, not tracking fields
+        const answeredCountBefore = Object.keys(lead.answers).filter(k => !k.startsWith('_')).length;
         
         console.log(`📊 Current state: ${answeredCountBefore} questions already answered`);
         console.log(`📋 Existing answers:`, JSON.stringify(lead.answers, null, 2));
         
-        // NEW: Try to extract answers for ALL unanswered questions from the message
+        // AGGRESSIVELY extract answers for ALL unanswered questions from EVERY message
+        // This ensures we collect what we can from the first message and all subsequent messages
         if (answeredCountBefore < CUSTOM_QUESTIONS.length && userMessage.trim().length > 0) {
-            console.log(`🔍 Scanning message for multiple answers...`);
+            console.log(`🔍 AGGRESSIVE EXTRACTION: Scanning message for ALL possible answers...`);
             let newAnswersFound = 0;
+            
+            // Initialize questions_asked if needed
+            if (!lead.answers._questions_asked) {
+                lead.answers._questions_asked = {};
+            }
             
             // Check each unanswered question
             for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
@@ -3287,7 +3382,8 @@ async function processAIResponse(lead, userMessage) {
             
             // Update progress if any new answers were found
             if (newAnswersFound > 0) {
-                const newAnsweredCount = Object.keys(lead.answers).length;
+                // Count only actual answers, not tracking fields
+                const newAnsweredCount = Object.keys(lead.answers).filter(k => !k.startsWith('_')).length;
                 lead.progress = Math.round((newAnsweredCount / 4) * 100);
                 lead.status = lead.progress === 100 ? 'qualified' : 'active';
                 
@@ -3316,7 +3412,8 @@ async function processAIResponse(lead, userMessage) {
         }
         
         // Check if all questions are answered NOW (after storing answer)
-        const answeredCount = Object.keys(lead.answers || {}).length;
+        // Count only actual answers, not tracking fields
+        const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
         console.log(`📊 Current progress: ${answeredCount}/4 questions answered`);
         console.log(`📋 Current answers:`, lead.answers);
         
@@ -3403,15 +3500,52 @@ If you have any questions in the meantime our office hours are Monday to Friday,
         console.log(`   - Current answers object:`, JSON.stringify(lead.answers, null, 2));
         
         // Generate AI response using Assistant
-        const answersJustExtracted = Object.keys(lead.answers).length - answeredCountBefore;
+        // Count only actual answers, not tracking fields
+        const actualAnswersBefore = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
+        const answersJustExtracted = actualAnswersBefore - answeredCountBefore;
         const aiResponse = await generateAIResponseWithAssistant(lead, userMessage, answersJustExtracted);
         
         if (aiResponse) {
             console.log(`📤 Sending AI response: "${aiResponse}"`);
+            
+            // CRITICAL: Before sending, check if this response contains a question and mark it as asked
+            // Find which question is being asked in the response
+            for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+                const q = CUSTOM_QUESTIONS[i];
+                const qText = typeof q === 'object' ? q.question : q;
+                const questionKey = `question_${i + 1}`;
+                
+                // If this question text appears in the response and hasn't been asked yet, mark it as asked
+                if (aiResponse.includes(qText) && (!lead.answers._questions_asked || !lead.answers._questions_asked[questionKey])) {
+                    if (!lead.answers._questions_asked) {
+                        lead.answers._questions_asked = {};
+                    }
+                    lead.answers._questions_asked[questionKey] = true;
+                    console.log(`   ✅ Marked Q${i + 1} as asked in AI response - will NEVER ask again`);
+                }
+            }
+            
             await sendSMS(lead.phone, aiResponse);
             
             // Store AI response in database
             LeadDatabase.createMessage(lead.id, 'assistant', aiResponse);
+            
+            // Save the "asked" flags to database
+            await LeadDatabase.updateLead(lead.id, {
+                name: lead.name,
+                email: lead.email,
+                status: lead.status,
+                progress: lead.progress,
+                qualified: lead.qualified,
+                ai_paused: lead.ai_paused,
+                post_qualification_response_sent: lead.post_qualification_response_sent,
+                answers: lead.answers,
+                qualifiedDate: lead.qualifiedDate,
+                returning_customer: lead.returning_customer || false,
+                times_qualified: lead.times_qualified || 0,
+                first_qualified_date: lead.first_qualified_date,
+                last_qualified_date: lead.last_qualified_date
+            });
             
             console.log(`✅ AI response sent to ${lead.name} (${lead.phone}): "${aiResponse}"`);
         } else {
@@ -3441,7 +3575,8 @@ async function generateAIResponseWithAssistant(lead, userMessage, answersExtract
         console.log(`📜 Loaded ${recentMessages.length} recent messages for AI context`);
         
         // Build context about what information we need
-        const answeredCount = Object.keys(lead.answers || {}).length;
+        // Count only actual answers, not tracking fields
+        const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
         const unansweredQuestions = [];
         const gatheredInfo = [];
         
@@ -3468,15 +3603,33 @@ async function generateAIResponseWithAssistant(lead, userMessage, answersExtract
             return `${i + 1}. ${questionText}\n   Possible answers: ${possibleAnswers}`;
         }).join('\n\n');
         
-        // Find the FIRST unanswered question (not just based on count)
+        // Find the FIRST unanswered AND unasked question (CRITICAL: Never ask same question twice)
         let nextQuestionIndex = -1;
         let nextQuestion = null;
         
+        // Initialize questions_asked tracking if it doesn't exist
+        if (!lead.answers) {
+            lead.answers = {};
+        }
+        if (!lead.answers._questions_asked) {
+            lead.answers._questions_asked = {};
+        }
+        
         for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
             const questionKey = `question_${i + 1}`;
-            if (!lead.answers || !lead.answers[questionKey]) {
+            const askedKey = `question_${i + 1}`;
+            
+            // CRITICAL: Skip if question has already been asked (even if not answered)
+            if (lead.answers._questions_asked && lead.answers._questions_asked[askedKey]) {
+                console.log(`   🚫 Q${i + 1} already asked - SKIPPING (will never ask again)`);
+                continue;
+            }
+            
+            // If not answered, this is the next question to ask
+            if (!lead.answers[questionKey]) {
                 nextQuestionIndex = i + 1;
                 nextQuestion = CUSTOM_QUESTIONS[i];
+                console.log(`   ✅ Q${i + 1} is unanswered and unasked - SELECTING`);
                 break;
             }
         }
@@ -3604,7 +3757,8 @@ INSTRUCTIONS:
 // Fallback response when Assistant is not available
 async function generateFallbackResponse(lead, userMessage) {
     console.log(`🔄 Using fallback response system`);
-    const answeredCount = Object.keys(lead.answers || {}).length;
+    // Count only actual answers, not tracking fields
+    const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
     
     console.log(`📊 Lead progress: ${answeredCount}/${CUSTOM_QUESTIONS.length} questions answered`);
     console.log(`📝 Custom questions:`, CUSTOM_QUESTIONS);
@@ -3613,10 +3767,44 @@ async function generateFallbackResponse(lead, userMessage) {
     // Note: Answer storage happens in processAIResponse() before this function is called
     // Do NOT store answers here to avoid duplicate storage
     
-    if (answeredCount < CUSTOM_QUESTIONS.length) {
-        const q = CUSTOM_QUESTIONS[answeredCount];
-        const nextQuestion = typeof q === 'object' ? q.question : q;
-        console.log(`❓ Asking question ${answeredCount + 1}: ${nextQuestion}`);
+    // Find first unanswered AND unasked question
+    if (!lead.answers) {
+        lead.answers = {};
+    }
+    if (!lead.answers._questions_asked) {
+        lead.answers._questions_asked = {};
+    }
+    
+    let nextQuestionIndex = -1;
+    let nextQuestion = null;
+    
+    for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+        const questionKey = `question_${i + 1}`;
+        const askedKey = `question_${i + 1}`;
+        
+        // CRITICAL: Skip if question has already been asked
+        if (lead.answers._questions_asked && lead.answers._questions_asked[askedKey]) {
+            continue;
+        }
+        
+        // If not answered, this is the next question to ask
+        if (!lead.answers[questionKey]) {
+            nextQuestionIndex = i + 1;
+            nextQuestion = CUSTOM_QUESTIONS[i];
+            break;
+        }
+    }
+    
+    if (nextQuestion && nextQuestionIndex > 0) {
+        const questionText = typeof nextQuestion === 'object' ? nextQuestion.question : nextQuestion;
+        console.log(`❓ Asking question ${nextQuestionIndex}: ${questionText}`);
+        
+        // CRITICAL: Mark this question as asked
+        if (!lead.answers._questions_asked) {
+            lead.answers._questions_asked = {};
+        }
+        lead.answers._questions_asked[`question_${nextQuestionIndex}`] = true;
+        console.log(`   ✅ Marked Q${nextQuestionIndex} as asked - will NEVER ask again`);
         
         // Ask the next question with acknowledgment
         const acknowledgments = [
@@ -3628,7 +3816,7 @@ async function generateFallbackResponse(lead, userMessage) {
         ];
         const randomAck = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
         
-        const response = `${randomAck}${nextQuestion}`;
+        const response = `${randomAck}${questionText}`;
         console.log(`📤 Fallback response: ${response}`);
         return response;
     }
@@ -3895,7 +4083,8 @@ Accept the first answer given - don't wait for more details.`;
         }
         
         // Update progress
-        const answeredCount = Object.keys(lead.answers || {}).length;
+        // Count only actual answers, not tracking fields
+        const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
         lead.progress = Math.round((answeredCount / 4) * 100);
         lead.status = lead.progress === 100 ? 'qualified' : 'active';
         console.log(`📈 Lead progress updated: ${answeredCount}/4 questions answered (${lead.progress}%)`);
@@ -3908,7 +4097,8 @@ Accept the first answer given - don't wait for more details.`;
 // Update lead progress based on user response (legacy fallback)
 async function updateLeadProgress(lead, userMessage) {
     try {
-        const answeredCount = Object.keys(lead.answers || {}).length;
+        // Count only actual answers, not tracking fields
+        const answeredCount = Object.keys(lead.answers || {}).filter(k => !k.startsWith('_')).length;
         
         if (answeredCount < CUSTOM_QUESTIONS.length && userMessage.length > 5) {
             // Store the answer
@@ -3954,14 +4144,35 @@ async function sendSMS(to, message) {
 
 // Helper: Find first unanswered question for a lead
 function findFirstUnansweredQuestion(lead) {
+    // Initialize questions_asked tracking if it doesn't exist
+    if (!lead.answers) {
+        lead.answers = {};
+    }
+    if (!lead.answers._questions_asked) {
+        lead.answers._questions_asked = {};
+    }
+    
     for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
         const questionKey = `question_${i + 1}`;
-        if (!lead.answers || !lead.answers[questionKey]) {
+        const askedKey = `question_${i + 1}`;
+        
+        // CRITICAL: Never ask a question that has already been asked, even if not answered
+        if (lead.answers._questions_asked && lead.answers._questions_asked[askedKey]) {
+            console.log(`   🚫 Q${i + 1} already asked - SKIPPING (will never ask again)`);
+            continue;
+        }
+        
+        // If not answered, this is the next question to ask
+        if (!lead.answers[questionKey]) {
             const q = CUSTOM_QUESTIONS[i];
+            console.log(`   ✅ Q${i + 1} is unanswered and has not been asked yet - SELECTING`);
             return typeof q === 'object' ? q.question : q;
         }
     }
-    return CUSTOM_QUESTIONS[0].question; // Fallback to first question
+    
+    // All questions answered or all asked - return null to indicate no more questions
+    console.log(`   ⚠️ All questions have been asked or answered - no more questions available`);
+    return null;
 }
 
 // Send 1 hour reminder
