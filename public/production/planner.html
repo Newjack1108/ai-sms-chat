@@ -781,12 +781,27 @@
             
             try {
                 for (const checkbox of selected) {
+                    const itemType = checkbox.dataset.itemType || 'built_item';
+                    const itemId = parseInt(checkbox.dataset.itemId);
+                    const suggestedQty = parseFloat(checkbox.dataset.suggested);
+                    
+                    // Validate required fields
+                    if (!itemId || isNaN(itemId)) {
+                        showAlert('Invalid item ID. Please try again.', 'error');
+                        continue;
+                    }
+                    
+                    if (!suggestedQty || isNaN(suggestedQty) || suggestedQty <= 0) {
+                        showAlert('Invalid quantity. Please check the suggested quantity.', 'error');
+                        continue;
+                    }
+                    
                     await apiCall(`/planner/${currentPlannerId}/items`, {
                         method: 'POST',
                         body: JSON.stringify({
-                            item_type: checkbox.dataset.itemType || 'built_item',
-                            item_id: parseInt(checkbox.dataset.itemId),
-                            quantity_to_build: parseFloat(checkbox.dataset.suggested),
+                            item_type: itemType,
+                            item_id: itemId,
+                            quantity_to_build: suggestedQty,
                             priority: 'high'
                         })
                     });
@@ -795,7 +810,8 @@
                 hideModal('lowStockModal');
                 loadPlanner();
             } catch (error) {
-                showAlert('Error adding items', 'error');
+                console.error('Error adding items:', error);
+                showAlert('Error adding items: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         

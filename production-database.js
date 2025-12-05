@@ -3051,8 +3051,9 @@ class ProductionDatabase {
                 if (minStock > 0) {
                     // Item has a minimum stock set - calculate shortfall and suggest quantity
                     shortfall = minStock - builtQty;
-                    // Suggest building enough to reach minimum + 20% buffer
-                    suggestedQuantity = Math.ceil(shortfall * 1.2);
+                    // Suggest building enough to reach minimum + 20% buffer, but at least 1
+                    const baseQuantity = Math.ceil(shortfall * 1.2);
+                    suggestedQuantity = Math.max(1, baseQuantity);
                 } else {
                     // No minimum stock set but item has zero stock - suggest building at least 1
                     shortfall = 0;
@@ -3089,8 +3090,9 @@ class ProductionDatabase {
                 if (minStock > 0) {
                     // Item has a minimum stock set - calculate shortfall and suggest quantity
                     shortfall = minStock - builtQty;
-                    // Suggest building enough to reach minimum + 20% buffer
-                    suggestedQuantity = Math.ceil(shortfall * 1.2);
+                    // Suggest building enough to reach minimum + 20% buffer, but at least 1
+                    const baseQuantity = Math.ceil(shortfall * 1.2);
+                    suggestedQuantity = Math.max(1, baseQuantity);
                 } else {
                     // No minimum stock set but item has zero stock - suggest building at least 1
                     shortfall = 0;
