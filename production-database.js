@@ -1602,39 +1602,127 @@ class ProductionDatabase {
         }
     }
     
+    static async ensureBOMItemsSchema() {
+        if (!isPostgreSQL) return;
+        
+        try {
+            await pool.query(`
+                DO $$ 
+                BEGIN 
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'public' AND table_name='bom_items'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_type'
+                    ) THEN
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_type VARCHAR(20);
+                        ALTER TABLE bom_items ADD COLUMN IF NOT EXISTS item_id INTEGER;
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns 
+                            WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='stock_item_id'
+                        ) THEN
+                            UPDATE bom_items SET item_id = stock_item_id WHERE item_id IS NULL;
+                        END IF;
+                        UPDATE bom_items SET item_id = 0 WHERE item_id IS NULL;
+                        UPDATE bom_items SET item_type = 'raw_material' WHERE item_type IS NULL;
+                        ALTER TABLE bom_items ALTER COLUMN item_type SET NOT NULL;
+                        ALTER TABLE bom_items ALTER COLUMN item_id SET NOT NULL;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints 
+                            WHERE table_schema = 'public' AND table_name='bom_items' 
+                            AND constraint_name='bom_items_item_type_check'
+                        ) THEN
+                            ALTER TABLE bom_items ADD CONSTRAINT bom_items_item_type_check 
+                                CHECK (item_type IN ('raw_material', 'component'));
+                        END IF;
+                    END IF;
+                END $$;
+            `);
+        } catch (error) {
+            console.error('Error ensuring bom_items schema:', error);
+            throw error;
+        }
+    }
+
     static async getPanelBOM(panelId) {
         if (isPostgreSQL) {
-            // Use a simpler query structure to avoid alias issues
-            const result = await pool.query(
-                `SELECT 
-                    bom_items.id,
-                    bom_items.panel_id,
-                    bom_items.item_type,
-                    bom_items.item_id,
-                    bom_items.quantity_required,
-                    bom_items.unit,
-                    COALESCE(
-                        CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
-                        CASE WHEN bom_items.item_type = 'component' THEN components.name END,
-                        'Unknown Item'
-                    ) as item_name,
-                    COALESCE(
-                        CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.unit END,
-                        CASE WHEN bom_items.item_type = 'component' THEN 'units' END,
-                        bom_items.unit
-                    ) as item_unit
-                 FROM bom_items
-                 LEFT JOIN stock_items ON bom_items.item_type = 'raw_material' AND bom_items.item_id = stock_items.id
-                 LEFT JOIN components ON bom_items.item_type = 'component' AND bom_items.item_id = components.id
-                 WHERE bom_items.panel_id = $1 
-                 ORDER BY bom_items.item_type, COALESCE(
-                     CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
-                     CASE WHEN bom_items.item_type = 'component' THEN components.name END,
-                     'Unknown Item'
-                 )`,
-                [panelId]
-            );
-            return result.rows;
+            try {
+                const result = await pool.query(
+                    `SELECT 
+                        bom_items.id,
+                        bom_items.panel_id,
+                        bom_items.item_type,
+                        bom_items.item_id,
+                        bom_items.quantity_required,
+                        bom_items.unit,
+                        COALESCE(
+                            CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                            CASE WHEN bom_items.item_type = 'component' THEN components.name END,
+                            'Unknown Item'
+                        ) as item_name,
+                        COALESCE(
+                            CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.unit END,
+                            CASE WHEN bom_items.item_type = 'component' THEN 'units' END,
+                            bom_items.unit
+                        ) as item_unit
+                     FROM bom_items
+                     LEFT JOIN stock_items ON bom_items.item_type = 'raw_material' AND bom_items.item_id = stock_items.id
+                     LEFT JOIN components ON bom_items.item_type = 'component' AND bom_items.item_id = components.id
+                     WHERE bom_items.panel_id = $1 
+                     ORDER BY bom_items.item_type, COALESCE(
+                         CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                         CASE WHEN bom_items.item_type = 'component' THEN components.name END,
+                         'Unknown Item'
+                     )`,
+                    [panelId]
+                );
+                return result.rows;
+            } catch (error) {
+                // If column doesn't exist, try to run migration and retry
+                if (error.message && (error.message.includes('item_type') || error.message.includes('column')) && error.message.includes('does not exist')) {
+                    console.log('item_type column missing, attempting migration...');
+                    try {
+                        await this.ensureBOMItemsSchema();
+                        // Retry the query after migration
+                        const result = await pool.query(
+                            `SELECT 
+                                bom_items.id,
+                                bom_items.panel_id,
+                                bom_items.item_type,
+                                bom_items.item_id,
+                                bom_items.quantity_required,
+                                bom_items.unit,
+                                COALESCE(
+                                    CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                                    CASE WHEN bom_items.item_type = 'component' THEN components.name END,
+                                    'Unknown Item'
+                                ) as item_name,
+                                COALESCE(
+                                    CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.unit END,
+                                    CASE WHEN bom_items.item_type = 'component' THEN 'units' END,
+                                    bom_items.unit
+                                ) as item_unit
+                             FROM bom_items
+                             LEFT JOIN stock_items ON bom_items.item_type = 'raw_material' AND bom_items.item_id = stock_items.id
+                             LEFT JOIN components ON bom_items.item_type = 'component' AND bom_items.item_id = components.id
+                             WHERE bom_items.panel_id = $1 
+                             ORDER BY bom_items.item_type, COALESCE(
+                                 CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                                 CASE WHEN bom_items.item_type = 'component' THEN components.name END,
+                                 'Unknown Item'
+                             )`,
+                            [panelId]
+                        );
+                        return result.rows;
+                    } catch (migrationError) {
+                        console.error('Migration failed:', migrationError);
+                        throw new Error('Database schema is out of date. The item_type column is missing from bom_items table. Please contact support.');
+                    }
+                }
+                throw error;
+            }
         } else {
             return db.prepare(
                 `SELECT bi.*, 
