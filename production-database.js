@@ -1549,25 +1549,32 @@ class ProductionDatabase {
     
     static async getPanelBOM(panelId) {
         if (isPostgreSQL) {
+            // Use a simpler query structure to avoid alias issues
             const result = await pool.query(
-                `SELECT bi.*, 
-                 COALESCE(
-                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
-                     CASE WHEN bi.item_type = 'component' THEN c.name END,
-                     'Unknown Item'
-                 ) as item_name,
-                 COALESCE(
-                     CASE WHEN bi.item_type = 'raw_material' THEN si.unit END,
-                     CASE WHEN bi.item_type = 'component' THEN 'units' END,
-                     bi.unit
-                 ) as item_unit
-                 FROM bom_items bi
-                 LEFT JOIN stock_items si ON bi.item_type = 'raw_material' AND bi.item_id = si.id
-                 LEFT JOIN components c ON bi.item_type = 'component' AND bi.item_id = c.id
-                 WHERE bi.panel_id = $1 
-                 ORDER BY bi.item_type, COALESCE(
-                     CASE WHEN bi.item_type = 'raw_material' THEN si.name END,
-                     CASE WHEN bi.item_type = 'component' THEN c.name END,
+                `SELECT 
+                    bom_items.id,
+                    bom_items.panel_id,
+                    bom_items.item_type,
+                    bom_items.item_id,
+                    bom_items.quantity_required,
+                    bom_items.unit,
+                    COALESCE(
+                        CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                        CASE WHEN bom_items.item_type = 'component' THEN components.name END,
+                        'Unknown Item'
+                    ) as item_name,
+                    COALESCE(
+                        CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.unit END,
+                        CASE WHEN bom_items.item_type = 'component' THEN 'units' END,
+                        bom_items.unit
+                    ) as item_unit
+                 FROM bom_items
+                 LEFT JOIN stock_items ON bom_items.item_type = 'raw_material' AND bom_items.item_id = stock_items.id
+                 LEFT JOIN components ON bom_items.item_type = 'component' AND bom_items.item_id = components.id
+                 WHERE bom_items.panel_id = $1 
+                 ORDER BY bom_items.item_type, COALESCE(
+                     CASE WHEN bom_items.item_type = 'raw_material' THEN stock_items.name END,
+                     CASE WHEN bom_items.item_type = 'component' THEN components.name END,
                      'Unknown Item'
                  )`,
                 [panelId]
