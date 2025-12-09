@@ -25,6 +25,15 @@
                 <h2>Raw Materials</h2>
                 <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Raw Material</button>
             </div>
+            <div style="padding: 15px 20px; background: #f8f9fa; border-bottom: 1px solid #ddd;">
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <label for="categoryFilter" style="font-weight: 600; color: #2c3e50;">Filter by Category:</label>
+                    <select id="categoryFilter" class="form-select" style="width: auto; min-width: 200px;" onchange="loadStock()">
+                        <option value="">All Categories</option>
+                    </select>
+                    <span id="filterStatus" style="color: #666; font-size: 14px;"></span>
+                </div>
+            </div>
             <div id="stockList">
                 <div class="loading">Loading...</div>
             </div>
@@ -43,6 +52,10 @@
                 <div class="form-group">
                     <label class="form-label">Name *</label>
                     <input type="text" id="stockName" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <input type="text" id="stockCategory" class="form-input" placeholder="e.g., Timber, Hardware, Fasteners, Insulation">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Description</label>
@@ -132,9 +145,46 @@
             try {
                 const data = await apiCall('/stock');
                 const stockList = document.getElementById('stockList');
+                const categoryFilter = document.getElementById('categoryFilter');
+                const filterStatus = document.getElementById('filterStatus');
                 
-                if (data.items.length === 0) {
-                    stockList.innerHTML = '<p>No raw materials found</p>';
+                // Get all unique categories from items
+                const categories = [...new Set(data.items.map(item => item.category).filter(c => c && c.trim()))].sort();
+                
+                // Populate category filter dropdown if not already populated
+                if (categoryFilter && (categoryFilter.options.length === 1 || categoryFilter.options[0].value === '')) {
+                    const currentFilter = categoryFilter.value;
+                    categoryFilter.innerHTML = '<option value="">All Categories</option>';
+                    categories.forEach(cat => {
+                        const option = document.createElement('option');
+                        option.value = cat;
+                        option.textContent = cat;
+                        categoryFilter.appendChild(option);
+                    });
+                    // Restore filter if it was set
+                    if (currentFilter) {
+                        categoryFilter.value = currentFilter;
+                    }
+                }
+                
+                // Filter items by selected category
+                const selectedCategory = categoryFilter?.value || '';
+                let filteredItems = data.items;
+                if (selectedCategory) {
+                    filteredItems = data.items.filter(item => item.category === selectedCategory);
+                }
+                
+                // Update filter status
+                if (filterStatus) {
+                    if (selectedCategory) {
+                        filterStatus.textContent = `Showing ${filteredItems.length} item(s) in category "${selectedCategory}"`;
+                    } else {
+                        filterStatus.textContent = `Showing ${filteredItems.length} item(s)${categories.length > 0 ? ` across ${categories.length} categor${categories.length === 1 ? 'y' : 'ies'}` : ''}`;
+                    }
+                }
+                
+                if (filteredItems.length === 0) {
+                    stockList.innerHTML = `<p>No raw materials found${selectedCategory ? ` in category "${selectedCategory}"` : ''}</p>`;
                     return;
                 }
                 
@@ -143,6 +193,7 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Category</th>
                                 <th>Current Qty</th>
                                 <th>Min Qty</th>
                                 <th>Unit</th>
@@ -153,17 +204,18 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.items.map(item => {
+                            ${filteredItems.map(item => {
                                 const currentQty = parseFloat(item.current_quantity) || 0;
                                 const minQty = parseFloat(item.min_quantity) || 0;
                                 const isLow = currentQty <= minQty;
                                 return `
                                     <tr>
-                                        <td><strong>${item.name}</strong></td>
+                                        <td><strong>${escapeHtml(item.name)}</strong></td>
+                                        <td>${item.category ? `<span class="badge badge-info">${escapeHtml(item.category)}</span>` : '<span style="color: #999;">-</span>'}</td>
                                         <td>${currentQty.toFixed(2)}</td>
                                         <td>${minQty.toFixed(2)}</td>
-                                        <td>${item.unit}</td>
-                                        <td>${item.location || '-'}</td>
+                                        <td>${escapeHtml(item.unit)}</td>
+                                        <td>${escapeHtml(item.location || '-')}</td>
                                         <td>${formatCurrency(item.cost_per_unit_gbp)}</td>
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                         <td>
@@ -198,6 +250,7 @@
                 document.getElementById('stockModalTitle').textContent = 'Edit Raw Material';
                 document.getElementById('stockId').value = item.id;
                 document.getElementById('stockName').value = item.name;
+                document.getElementById('stockCategory').value = item.category || '';
                 document.getElementById('stockDescription').value = item.description || '';
                 document.getElementById('stockUnit').value = item.unit;
                 document.getElementById('stockCurrentQty').value = item.current_quantity;
@@ -216,6 +269,7 @@
             const costValue = document.getElementById('stockCost').value;
             const data = {
                 name: document.getElementById('stockName').value,
+                category: document.getElementById('stockCategory').value.trim() || null,
                 description: document.getElementById('stockDescription').value,
                 unit: document.getElementById('stockUnit').value,
                 min_quantity: document.getElementById('stockMinQty').value,
