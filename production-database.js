@@ -3962,22 +3962,26 @@ class ProductionDatabase {
     // This is used for "add missing times" to avoid false positives from entries on other days
     static async checkDuplicateTimesForDate(userId, clockInTime, clockOutTime, dateStr, excludeEntryId = null) {
         if (isPostgreSQL) {
+            // First, ensure we're only looking at entries on the target date
+            // Convert dateStr to a proper date for comparison
+            // dateStr should be in format 'YYYY-MM-DD'
             let query = `
                 SELECT te.* 
                 FROM timesheet_entries te
                 WHERE te.user_id = $1 
                 AND te.clock_out_time IS NOT NULL
                 AND (
-                    -- Entry starts on the same date
-                    DATE(te.clock_in_time) = $4
+                    -- Primary check: Entry starts on the same date (most common case)
+                    DATE(te.clock_in_time AT TIME ZONE 'UTC') = $4::date
                     OR
-                    -- Overnight entry that ends on this date (spans into the date)
-                    DATE(te.clock_out_time) = $4
+                    -- Overnight entry that ends on this date (entry started previous day, ended on target date)
+                    DATE(te.clock_out_time AT TIME ZONE 'UTC') = $4::date
                     OR
-                    -- Overnight entry that spans across this entire date
-                    (DATE(te.clock_in_time) < $4 AND DATE(te.clock_out_time) > $4)
+                    -- Overnight entry that spans across this entire date (rare but possible)
+                    (DATE(te.clock_in_time AT TIME ZONE 'UTC') < $4::date AND DATE(te.clock_out_time AT TIME ZONE 'UTC') > $4::date)
                 )
                 AND (
+                    -- Now check for actual time overlaps (only after date filter)
                     -- Exact duplicate times
                     (te.clock_in_time = $2 AND te.clock_out_time = $3)
                     OR
@@ -3994,6 +3998,7 @@ class ProductionDatabase {
                     (te.clock_in_time <= $2 AND te.clock_out_time >= $3)
                 )
             `;
+            // Use dateStr as a date parameter - PostgreSQL will handle conversion
             const params = [userId, clockInTime, clockOutTime, dateStr];
             
             if (excludeEntryId) {
@@ -4010,14 +4015,14 @@ class ProductionDatabase {
                 WHERE te.user_id = ? 
                 AND te.clock_out_time IS NOT NULL
                 AND (
-                    -- Entry starts on the same date
-                    DATE(te.clock_in_time) = ?
+                    -- Entry starts on the same date (compare dates only, ignore time)
+                    DATE(te.clock_in_time) = DATE(?)
                     OR
                     -- Overnight entry that ends on this date (spans into the date)
-                    DATE(te.clock_out_time) = ?
+                    DATE(te.clock_out_time) = DATE(?)
                     OR
                     -- Overnight entry that spans across this entire date
-                    (DATE(te.clock_in_time) < ? AND DATE(te.clock_out_time) > ?)
+                    (DATE(te.clock_in_time) < DATE(?) AND DATE(te.clock_out_time) > DATE(?))
                 )
                 AND (
                     -- Exact duplicate times

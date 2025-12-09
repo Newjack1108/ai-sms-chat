@@ -1539,6 +1539,23 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         // 1. Entries that start on the same date
         // 2. Overnight entries that might span into this date
         const duplicates = await ProductionDatabase.checkDuplicateTimesForDate(userId, clock_in_time, clock_out_time, dateStr);
+        
+        // Log for debugging
+        if (duplicates && duplicates.length > 0) {
+            console.log('Found duplicate/overlapping entries:', {
+                userId,
+                targetDate: dateStr,
+                clockInTime,
+                clockOutTime,
+                duplicates: duplicates.map(d => ({
+                    id: d.id,
+                    clock_in_time: d.clock_in_time,
+                    clock_out_time: d.clock_out_time,
+                    date: d.clock_in_time ? new Date(d.clock_in_time).toISOString().split('T')[0] : null
+                }))
+            });
+        }
+        
         if (duplicates && duplicates.length > 0) {
             return res.status(400).json({ 
                 success: false, 
