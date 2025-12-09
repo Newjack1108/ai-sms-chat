@@ -709,10 +709,33 @@
         async function loadClockStatus() {
             try {
                 const data = await apiCall('/clock/status');
-                currentStatus = data.status;
-                updateUI();
+                // Only update status if we get a valid response
+                if (data && typeof data.status !== 'undefined') {
+                    const previousStatus = currentStatus ? currentStatus.id : null;
+                    currentStatus = data.status;
+                    const newStatus = currentStatus ? currentStatus.id : null;
+                    
+                    // Log status changes for debugging
+                    if (previousStatus !== newStatus) {
+                        console.log('Clock status changed:', {
+                            previous: previousStatus,
+                            current: newStatus,
+                            clockedIn: !!currentStatus
+                        });
+                    }
+                    
+                    updateUI();
+                } else {
+                    console.error('Invalid clock status response:', data);
+                    // Don't update UI on invalid response - keep current status
+                }
             } catch (error) {
-                showAlert('Error loading clock status', 'error');
+                console.error('Error loading clock status:', error);
+                // Don't clear currentStatus on error - might be temporary network issue
+                // Only show error if we don't have a cached status
+                if (!currentStatus) {
+                    showAlert('Error loading clock status: ' + (error.message || 'Unknown error'), 'error');
+                }
             }
         }
         
@@ -781,11 +804,14 @@
                     })
                 });
                 showAlert('Clocked in successfully');
+                // Force reload clock status after successful clock-in
                 await loadClockStatus();
+                // Also reload weekly timesheet to show updated data
+                await loadWeeklyTimesheet(currentWeekStart || getCurrentWeekStart());
             } catch (error) {
                 const errorMsg = error.message || 'Failed to clock in';
                 showAlert(errorMsg, 'error');
-                // Reload clock status to show current state
+                // Reload clock status to show current state (might have been clocked in despite error)
                 await loadClockStatus();
             } finally {
                 clockInBtn.disabled = false;
@@ -1158,29 +1184,25 @@
                                 <div class="day-activities">
                                     <div class="activities-header">
                                         <strong>Daily Activities</strong>
-                                        ${isToday ? `
-                                            <button class="btn btn-primary btn-sm" onclick="showAddActivityForm('${dateStr}')" style="margin-left: 10px;">
-                                                + Add Activity
-                                            </button>
-                                        ` : ''}
+                                        <button class="btn btn-primary btn-sm" onclick="showAddActivityForm('${dateStr}')" style="margin-left: 10px;">
+                                            + Add Activity
+                                        </button>
                                     </div>
                                     <div id="activities-${dateStr}" class="activities-list">
                                         ${renderActivities(entry ? entry.daily_notes : null, dateStr, isToday)}
                                     </div>
-                                    ${isToday ? `
-                                        <div id="add-activity-form-${dateStr}" class="add-activity-form" style="display: none; margin-top: 10px;">
-                                            <textarea 
-                                                id="activity-input-${dateStr}" 
-                                                placeholder="What are you doing now? (e.g., 'Installing panels on site A', 'Break time', 'Meeting with client')"
-                                                rows="2"
-                                                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 8px;"
-                                            ></textarea>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button class="btn btn-success btn-sm" onclick="addActivity('${dateStr}')">Save</button>
-                                                <button class="btn btn-secondary btn-sm" onclick="hideAddActivityForm('${dateStr}')">Cancel</button>
-                                            </div>
+                                    <div id="add-activity-form-${dateStr}" class="add-activity-form" style="display: none; margin-top: 10px;">
+                                        <textarea 
+                                            id="activity-input-${dateStr}" 
+                                            placeholder="What are you doing now? (e.g., 'Installing panels on site A', 'Break time', 'Meeting with client')"
+                                            rows="2"
+                                            style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; margin-bottom: 8px;"
+                                        ></textarea>
+                                        <div style="display: flex; gap: 8px;">
+                                            <button class="btn btn-success btn-sm" onclick="addActivity('${dateStr}')">Save</button>
+                                            <button class="btn btn-secondary btn-sm" onclick="hideAddActivityForm('${dateStr}')">Cancel</button>
                                         </div>
-                                    ` : ''}
+                                    </div>
                                 </div>
                                 <div class="overnight-checkbox">
                                     <input 
