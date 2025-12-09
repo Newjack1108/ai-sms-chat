@@ -716,7 +716,8 @@
                     const newStatus = currentStatus ? currentStatus.id : null;
                     
                     // Log status changes for debugging
-                    if (previousStatus !== newStatus) {
+                    const statusChanged = previousStatus !== newStatus;
+                    if (statusChanged) {
                         console.log('Clock status changed:', {
                             previous: previousStatus,
                             current: newStatus,
@@ -725,6 +726,13 @@
                     }
                     
                     updateUI();
+                    
+                    // Reload weekly timesheet when status changes (e.g., clock in/out) to refresh activities
+                    if (statusChanged && currentWeekStart) {
+                        loadWeeklyTimesheet(currentWeekStart).catch(err => {
+                            console.error('Error reloading weekly timesheet after status update:', err);
+                        });
+                    }
                 } else {
                     console.error('Invalid clock status response:', data);
                     // Don't update UI on invalid response - keep current status
@@ -1365,15 +1373,12 @@
                     body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
                 });
                 
-                // Refresh the activities display
-                if (activitiesEl) {
-                    const isToday = dateStr === new Date().toISOString().split('T')[0];
-                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, isToday);
-                }
-                
                 // Clear and hide form
                 input.value = '';
                 hideAddActivityForm(dateStr);
+                
+                // Reload the weekly timesheet to ensure activities are displayed correctly
+                await loadWeeklyTimesheet(currentWeekStart);
                 
                 showAlert('Activity added', 'success');
             } catch (error) {
@@ -1420,12 +1425,8 @@
                     body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
                 });
                 
-                // Refresh the activities display
-                const activitiesEl = document.getElementById(`activities-${dateStr}`);
-                if (activitiesEl) {
-                    const isToday = dateStr === new Date().toISOString().split('T')[0];
-                    activitiesEl.innerHTML = renderActivities(JSON.stringify(activities), dateStr, isToday);
-                }
+                // Reload the weekly timesheet to ensure activities are displayed correctly
+                await loadWeeklyTimesheet(currentWeekStart);
                 
                 showAlert('Activity deleted', 'success');
             } catch (error) {
