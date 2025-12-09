@@ -179,7 +179,7 @@
                 
                 // Always refresh category filter dropdown with current categories
                 if (categoryFilter) {
-                    const currentFilter = categoryFilter.value || ';
+                    const currentFilter = categoryFilter.value || '';
                     categoryFilter.innerHTML = '<option value="">All Categories</option>';
                     categories.forEach(cat => {
                         const option = document.createElement('option');
