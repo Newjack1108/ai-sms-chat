@@ -88,6 +88,22 @@
                 <div class="loading">Select a week to view payroll summary</div>
             </div>
         </div>
+        
+        <!-- System Maintenance -->
+        <div class="card">
+            <div class="card-header">
+                <h2>System Maintenance</h2>
+            </div>
+            <div style="padding: 20px;">
+                <p style="margin-bottom: 15px; color: #666;">
+                    Cleanup old timesheet entries that were never clocked out. This fixes entries created before the auto-clock-out feature was added.
+                </p>
+                <button onclick="cleanupOldEntries()" class="btn btn-warning" id="cleanupBtn">
+                    Cleanup Old Unclosed Entries
+                </button>
+                <div id="cleanupResult" style="margin-top: 15px;"></div>
+            </div>
+        </div>
     </div>
     
     <!-- Add/Edit Job Modal -->
@@ -897,6 +913,53 @@
         }
         
         // Payroll functions
+        async function cleanupOldEntries() {
+            const btn = document.getElementById('cleanupBtn');
+            const resultDiv = document.getElementById('cleanupResult');
+            
+            if (!confirm('This will automatically clock out all old entries that were never clocked out. This is a one-time cleanup. Continue?')) {
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = 'Cleaning up...';
+            resultDiv.innerHTML = '<p style="color: #666;">Processing cleanup...</p>';
+            
+            try {
+                const data = await apiCall('/clock/cleanup-old-entries', {
+                    method: 'GET'
+                });
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+                            <strong>Cleanup Complete!</strong><br>
+                            ${data.count} entries were updated<br>
+                            ${data.errors > 0 ? `<span style="color: #856404;">${data.errors} errors occurred</span>` : 'No errors'}
+                        </div>
+                    `;
+                    showAlert(data.message || 'Cleanup completed successfully', 'success');
+                } else {
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;">
+                            <strong>Error:</strong> ${data.error || 'Unknown error'}
+                        </div>
+                    `;
+                    showAlert(data.error || 'Cleanup failed', 'error');
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;">
+                        <strong>Error:</strong> ${error.message || 'Failed to cleanup old entries'}
+                    </div>
+                `;
+                showAlert('Failed to cleanup old entries: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Cleanup Old Unclosed Entries';
+            }
+        }
+        
         function getCurrentWeekStart() {
             const today = new Date();
             const dayOfWeek = today.getDay();
