@@ -1527,7 +1527,12 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         }
         
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
-        await ProductionDatabase.autoClockOutOldEntries(userId);
+        try {
+            await ProductionDatabase.autoClockOutOldEntries(userId);
+        } catch (error) {
+            console.error('Error auto-clocking-out old entries:', error);
+            // Continue anyway - don't block the request
+        }
         
         // Check if user already has a completed entry for this date
         const dateStr = entryDate.toISOString().split('T')[0];

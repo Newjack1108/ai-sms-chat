@@ -3609,29 +3609,49 @@ class ProductionDatabase {
             // 1. Don't have a clock_out_time
             // 2. Clock-in date is before today (at least one day old)
             // 3. Optionally filter by user_id if provided
-            let query = `
-                UPDATE timesheet_entries 
-                SET clock_out_time = (
-                    -- Set clock-out to midnight of the clock-in date
-                    DATE(clock_in_time) + INTERVAL '1 day' - INTERVAL '1 second'
-                ),
-                updated_at = CURRENT_TIMESTAMP
+            // First, find the entries that need to be auto-clocked-out
+            let selectQuery = `
+                SELECT * FROM timesheet_entries
                 WHERE clock_out_time IS NULL
                 AND DATE(clock_in_time) < CURRENT_DATE
             `;
-            const params = [];
+            const selectParams = [];
             
             if (userId) {
-                query += ` AND user_id = $1`;
-                params.push(userId);
+                selectQuery += ` AND user_id = $1`;
+                selectParams.push(userId);
             }
             
-            query += ` RETURNING *`;
+            const entriesToUpdate = await pool.query(selectQuery, selectParams);
             
-            const result = await pool.query(query, params);
+            if (entriesToUpdate.rows.length === 0) {
+                return [];
+            }
+            
+            // Update each entry separately to set clock-out to midnight of clock-in date
+            const updatedEntries = [];
+            for (const entry of entriesToUpdate.rows) {
+                const clockInDate = new Date(entry.clock_in_time);
+                // Set to end of the clock-in date (23:59:59.999)
+                const midnight = new Date(clockInDate);
+                midnight.setHours(23, 59, 59, 999);
+                const clockOutTime = midnight.toISOString();
+                
+                const updateResult = await pool.query(
+                    `UPDATE timesheet_entries 
+                     SET clock_out_time = $1, updated_at = $1
+                     WHERE id = $2
+                     RETURNING *`,
+                    [clockOutTime, entry.id]
+                );
+                
+                if (updateResult.rows.length > 0) {
+                    updatedEntries.push(updateResult.rows[0]);
+                }
+            }
             
             // For each auto-clocked-out entry, we need to recalculate hours
-            for (const entry of result.rows) {
+            for (const entry of updatedEntries) {
                 try {
                     // Get clock-in date
                     const clockInDate = new Date(entry.clock_in_time);
@@ -3674,7 +3694,7 @@ class ProductionDatabase {
                 }
             }
             
-            return result.rows;
+            return updatedEntries;
         } else {
             // SQLite version
             const entries = db.prepare(`
