@@ -158,6 +158,16 @@ function formatDateTime(dateString) {
     });
 }
 
+// Escape HTML to prevent XSS attacks
+function escapeHtml(text) {
+    if (text == null || text === undefined) {
+        return '';
+    }
+    const div = document.createElement('div');
+    div.textContent = String(text);
+    return div.innerHTML;
+}
+
 // Show alert
 function showAlert(message, type = 'success') {
     const alertDiv = document.createElement('div');
