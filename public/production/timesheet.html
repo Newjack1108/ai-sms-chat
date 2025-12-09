@@ -944,6 +944,15 @@
                 return '<p style="color: #999; font-size: 13px; padding: 10px; text-align: center;">No activities recorded yet</p>';
             }
             
+            // Sort activities by timestamp (oldest first)
+            activities.sort((a, b) => {
+                const timeA = new Date(a.timestamp || 0).getTime();
+                const timeB = new Date(b.timestamp || 0).getTime();
+                return timeA - timeB;
+            });
+            
+            console.log(`Rendering ${activities.length} activities for date ${dateStr}:`, activities);
+            
             return activities.map((activity, index) => {
                 const time = new Date(activity.timestamp);
                 const timeStr = formatDateTime(time);
@@ -1353,42 +1362,68 @@
                 return;
             }
             
+            // Normalize date format to YYYY-MM-DD
+            const normalizedDate = new Date(dateStr).toISOString().split('T')[0];
+            
             try {
-                // Get current activities
-                const activitiesEl = document.getElementById(`activities-${dateStr}`);
                 let activities = [];
                 
                 // Try to get existing activities from the daily entry
                 const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
-                if (weeklyData.success && weeklyData.weeklyTimesheet && weeklyData.dailyEntries) {
-                    const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
+                console.log('Fetched weekly data for activities:', weeklyData);
+                
+                if (weeklyData.success && weeklyData.dailyEntries) {
+                    // Try to find entry with exact match first
+                    let dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === normalizedDate);
+                    
+                    // If not found, try to find with any date format match
+                    if (!dayEntry) {
+                        dayEntry = weeklyData.dailyEntries.find(e => {
+                            const entryDate = new Date(e.entry_date).toISOString().split('T')[0];
+                            return entryDate === normalizedDate;
+                        });
+                    }
+                    
+                    console.log('Found dayEntry for', normalizedDate, ':', dayEntry);
+                    
                     if (dayEntry && dayEntry.daily_notes) {
                         try {
                             const parsed = JSON.parse(dayEntry.daily_notes);
                             if (Array.isArray(parsed)) {
                                 activities = parsed;
+                                console.log('Parsed existing activities array:', activities);
                             } else if (typeof parsed === 'string' && parsed.trim()) {
+                                // Legacy: single text note, convert to array
                                 activities = [{ timestamp: new Date().toISOString(), note: parsed }];
+                                console.log('Converted legacy single note to array');
                             }
                         } catch (e) {
+                            console.log('Failed to parse as JSON, treating as legacy note:', e);
                             if (dayEntry.daily_notes.trim()) {
                                 activities = [{ timestamp: new Date().toISOString(), note: dayEntry.daily_notes }];
                             }
                         }
+                    } else {
+                        console.log('No existing daily_notes found for this date');
                     }
                 }
                 
-                // Add new activity
-                activities.push({
+                // Add new activity to the array
+                const newActivity = {
                     timestamp: new Date().toISOString(),
                     note: input.value.trim()
-                });
+                };
+                activities.push(newActivity);
                 
-                // Save as JSON
-                console.log('Saving activities for date:', dateStr, 'Activities:', activities);
-                const saveResponse = await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
+                console.log('Total activities to save:', activities.length, activities);
+                
+                // Save as JSON string
+                const dailyNotesJson = JSON.stringify(activities);
+                console.log('Saving activities for date:', normalizedDate, 'JSON:', dailyNotesJson);
+                
+                const saveResponse = await apiCall(`/clock/weekly/${currentWeekStart}/day/${normalizedDate}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
+                    body: JSON.stringify({ daily_notes: dailyNotesJson })
                 });
                 console.log('Save response:', saveResponse);
                 
@@ -1398,29 +1433,8 @@
                 
                 // Reload the weekly timesheet to ensure activities are displayed correctly
                 // Add a small delay to ensure backend has processed the update
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 200));
                 await loadWeeklyTimesheet(currentWeekStart);
-                
-                // Double-check: If activities still don't show, try fetching the daily entry directly
-                setTimeout(async () => {
-                    const activitiesEl = document.getElementById(`activities-${dateStr}`);
-                    if (activitiesEl && activitiesEl.textContent.includes('No activities recorded yet')) {
-                        console.log('Activities not showing after reload, fetching daily entry directly...');
-                        try {
-                            const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
-                            if (weeklyData.success && weeklyData.dailyEntries) {
-                                const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
-                                console.log('Direct fetch - dayEntry:', dayEntry);
-                                if (dayEntry && dayEntry.daily_notes) {
-                                    const isToday = dateStr === new Date().toISOString().split('T')[0];
-                                    activitiesEl.innerHTML = renderActivities(dayEntry.daily_notes, dateStr, isToday);
-                                }
-                            }
-                        } catch (err) {
-                            console.error('Error fetching daily entry directly:', err);
-                        }
-                    }
-                }, 500);
                 
                 showAlert('Activity added', 'success');
             } catch (error) {
@@ -1437,18 +1451,35 @@
                 return;
             }
             
+            // Normalize date format to YYYY-MM-DD
+            const normalizedDate = new Date(dateStr).toISOString().split('T')[0];
+            
             try {
                 // Get current activities
                 const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
                 let activities = [];
                 
-                if (weeklyData.success && weeklyData.weeklyTimesheet && weeklyData.dailyEntries) {
-                    const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
+                if (weeklyData.success && weeklyData.dailyEntries) {
+                    // Try to find entry with exact match first
+                    let dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === normalizedDate);
+                    
+                    // If not found, try to find with any date format match
+                    if (!dayEntry) {
+                        dayEntry = weeklyData.dailyEntries.find(e => {
+                            const entryDate = new Date(e.entry_date).toISOString().split('T')[0];
+                            return entryDate === normalizedDate;
+                        });
+                    }
+                    
                     if (dayEntry && dayEntry.daily_notes) {
                         try {
                             const parsed = JSON.parse(dayEntry.daily_notes);
                             if (Array.isArray(parsed)) {
                                 activities = parsed;
+                            } else {
+                                // Not an array, can't delete individual items
+                                showAlert('Cannot delete from legacy format', 'error');
+                                return;
                             }
                         } catch (e) {
                             // Not JSON, can't delete individual items
@@ -1458,16 +1489,32 @@
                     }
                 }
                 
+                // Sort activities to ensure we're deleting the correct one
+                activities.sort((a, b) => {
+                    const timeA = new Date(a.timestamp || 0).getTime();
+                    const timeB = new Date(b.timestamp || 0).getTime();
+                    return timeA - timeB;
+                });
+                
+                console.log(`Deleting activity at index ${index} from ${activities.length} activities`);
+                
                 // Remove activity at index
-                activities.splice(index, 1);
+                if (index >= 0 && index < activities.length) {
+                    activities.splice(index, 1);
+                } else {
+                    showAlert('Invalid activity index', 'error');
+                    return;
+                }
                 
                 // Save updated activities
-                await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
+                const dailyNotesJson = JSON.stringify(activities);
+                await apiCall(`/clock/weekly/${currentWeekStart}/day/${normalizedDate}`, {
                     method: 'PUT',
-                    body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
+                    body: JSON.stringify({ daily_notes: dailyNotesJson })
                 });
                 
                 // Reload the weekly timesheet to ensure activities are displayed correctly
+                await new Promise(resolve => setTimeout(resolve, 100));
                 await loadWeeklyTimesheet(currentWeekStart);
                 
                 showAlert('Activity deleted', 'success');
