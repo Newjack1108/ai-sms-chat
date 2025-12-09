@@ -78,8 +78,11 @@
         <div class="card">
             <div class="card-header">
                 <h2>Payroll Processing</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <input type="date" id="payrollWeekSelect" class="form-input" style="width: auto;">
+                    <select id="payrollStaffSelect" class="form-select" style="width: auto; min-width: 200px;">
+                        <option value="">All Staff</option>
+                    </select>
                     <button onclick="loadPayrollSummary()" class="btn btn-primary">Load Week</button>
                     <button onclick="exportPayroll()" class="btn btn-success" id="exportBtn" style="display: none;">Export CSV</button>
                 </div>
@@ -298,6 +301,14 @@
                 weekSelect.value = getCurrentWeekStart();
                 // Load payroll summary for current week
                 await loadPayrollSummary();
+            }
+            
+            // Add event listener for staff dropdown change
+            const staffSelect = document.getElementById('payrollStaffSelect');
+            if (staffSelect) {
+                staffSelect.addEventListener('change', () => {
+                    loadPayrollSummary();
+                });
             }
             
             // Auto-refresh active clock ins every 30 seconds
@@ -991,6 +1002,7 @@
         
         async function loadPayrollSummary() {
             const weekStart = document.getElementById('payrollWeekSelect').value || getCurrentWeekStart();
+            const selectedStaffId = document.getElementById('payrollStaffSelect')?.value || '';
             
             if (!weekStart) {
                 showAlert('Please select a week', 'error');
@@ -999,12 +1011,35 @@
             
             try {
                 const data = await apiCall(`/clock/payroll/${weekStart}`);
-                const summary = data.summary || [];
+                let summary = data.summary || [];
                 const summaryEl = document.getElementById('payrollSummary');
                 const exportBtn = document.getElementById('exportBtn');
+                const staffSelect = document.getElementById('payrollStaffSelect');
+                
+                // Populate staff dropdown if not already populated
+                if (staffSelect && (staffSelect.options.length === 1 || !staffSelect.options[0].value)) {
+                    staffSelect.innerHTML = '<option value="">All Staff</option>';
+                    summary.forEach(row => {
+                        if (row.user_id && row.username) {
+                            const option = document.createElement('option');
+                            option.value = row.user_id;
+                            option.textContent = row.username;
+                            staffSelect.appendChild(option);
+                        }
+                    });
+                    // Restore selected value if it was set
+                    if (selectedStaffId) {
+                        staffSelect.value = selectedStaffId;
+                    }
+                }
+                
+                // Filter by selected staff if a staff member is selected
+                if (selectedStaffId) {
+                    summary = summary.filter(row => row.user_id == selectedStaffId);
+                }
                 
                 if (summary.length === 0) {
-                    summaryEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #666;">No timesheet data for this week</p>';
+                    summaryEl.innerHTML = '<p style="text-align: center; padding: 20px; color: #666;">No timesheet data for this week' + (selectedStaffId ? ' for selected staff member' : '') + '</p>';
                     exportBtn.style.display = 'none';
                     return;
                 }
@@ -1065,9 +1100,10 @@
                                 </tr>
                             `;
                             }).join('')}
+                            ${summary.length > 1 || !selectedStaffId ? `
                             <tr style="background: #f8f9fa; font-weight: 700;">
                                 <td></td>
-                                <td><strong>TOTALS</strong></td>
+                                <td><strong>TOTALS${selectedStaffId ? ' (Selected Staff)' : ''}</strong></td>
                                 <td>${formatHours(totalRegular)}</td>
                                 <td>${formatHours(totalOvertime)}</td>
                                 <td>${formatHours(totalWeekend)}</td>
@@ -1075,6 +1111,7 @@
                                 <td><strong>${formatHours(totalHours)}</strong></td>
                                 <td>-</td>
                             </tr>
+                            ` : ''}
                         </tbody>
                     </table>
                     <style>

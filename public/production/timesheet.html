@@ -1169,9 +1169,11 @@
                                         ${dayEntries.map((te, idx) => {
                                             const clockIn = te.clock_in_time ? formatDateTime(new Date(te.clock_in_time)) : '-';
                                             const clockOut = te.clock_out_time ? formatDateTime(new Date(te.clock_out_time)) : '<span style="color: #999;">Not clocked out</span>';
+                                            const jobName = te.job_name || 'No job/site';
                                             return `
                                                 <div style="margin-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; padding-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; border-bottom: ${idx < dayEntries.length - 1 ? '1px solid #ddd' : 'none'};">
                                                     ${dayEntries.length > 1 ? `<strong style="color: #666;">Entry ${idx + 1}:</strong><br>` : ''}
+                                                    <strong>Job/Site:</strong> ${escapeHtml(jobName)}<br>
                                                     <strong>Clock In:</strong> ${clockIn}<br>
                                                     <strong>Clock Out:</strong> ${clockOut}
                                                 </div>
