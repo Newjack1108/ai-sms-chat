@@ -1322,6 +1322,9 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             });
         }
         
+        // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
+        await ProductionDatabase.autoClockOutOldEntries(userId);
+        
         // Check if user is already clocked in (has an active entry)
         const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
         if (currentStatus) {
@@ -1522,6 +1525,9 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
                 error: 'Missing times can only be added for dates up to 10 days back. Please contact a manager for older entries.' 
             });
         }
+        
+        // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
+        await ProductionDatabase.autoClockOutOldEntries(userId);
         
         // Check if user already has a completed entry for this date
         const dateStr = entryDate.toISOString().split('T')[0];

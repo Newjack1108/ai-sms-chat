@@ -3597,6 +3597,140 @@ class ProductionDatabase {
         }
     }
     
+    // Auto-clock-out entries that weren't clocked out at midnight of the clock-in date
+    // This prevents entries from spanning multiple days and causing overlap issues
+    static async autoClockOutOldEntries(userId = null) {
+        const now = new Date();
+        const today = new Date(now);
+        today.setHours(0, 0, 0, 0);
+        
+        if (isPostgreSQL) {
+            // Find entries that:
+            // 1. Don't have a clock_out_time
+            // 2. Clock-in date is before today (at least one day old)
+            // 3. Optionally filter by user_id if provided
+            let query = `
+                UPDATE timesheet_entries 
+                SET clock_out_time = (
+                    -- Set clock-out to midnight of the clock-in date
+                    DATE(clock_in_time) + INTERVAL '1 day' - INTERVAL '1 second'
+                ),
+                updated_at = CURRENT_TIMESTAMP
+                WHERE clock_out_time IS NULL
+                AND DATE(clock_in_time) < CURRENT_DATE
+            `;
+            const params = [];
+            
+            if (userId) {
+                query += ` AND user_id = $1`;
+                params.push(userId);
+            }
+            
+            query += ` RETURNING *`;
+            
+            const result = await pool.query(query, params);
+            
+            // For each auto-clocked-out entry, we need to recalculate hours
+            for (const entry of result.rows) {
+                try {
+                    // Get clock-in date
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    
+                    // Find Monday of that week
+                    const dayOfWeek = clockInDate.getDay();
+                    const monday = new Date(clockInDate);
+                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                    monday.setHours(0, 0, 0, 0);
+                    const weekStartDate = monday.toISOString().split('T')[0];
+                    
+                    // Get or create weekly timesheet
+                    const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                    
+                    // Get or create daily entry
+                    const dailyEntry = await this.getOrCreateDailyEntry(
+                        weeklyTimesheet.id,
+                        clockInDateStr,
+                        entry.id
+                    );
+                    
+                    // Check if overnight away for this day
+                    const overnightAway = dailyEntry.overnight_away || false;
+                    
+                    // Aggregate hours from ALL entries for this day
+                    const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                    
+                    // Update daily entry with aggregated hours
+                    await this.updateDailyEntry(dailyEntry.id, {
+                        timesheet_entry_id: entry.id,
+                        regular_hours: aggregatedHours.regular_hours,
+                        overtime_hours: aggregatedHours.overtime_hours,
+                        weekend_hours: aggregatedHours.weekend_hours,
+                        overnight_hours: aggregatedHours.overnight_hours,
+                        total_hours: aggregatedHours.total_hours
+                    });
+                } catch (error) {
+                    console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                }
+            }
+            
+            return result.rows;
+        } else {
+            // SQLite version
+            const entries = db.prepare(`
+                SELECT * FROM timesheet_entries
+                WHERE clock_out_time IS NULL
+                AND DATE(clock_in_time) < DATE('now')
+                ${userId ? 'AND user_id = ?' : ''}
+            `).all(userId ? [userId] : []);
+            
+            const updatedEntries = [];
+            
+            for (const entry of entries) {
+                const clockInDate = new Date(entry.clock_in_time);
+                const midnight = new Date(clockInDate);
+                midnight.setHours(23, 59, 59, 999);
+                const clockOutTime = midnight.toISOString();
+                
+                db.prepare(`
+                    UPDATE timesheet_entries 
+                    SET clock_out_time = ?, updated_at = ?
+                    WHERE id = ?
+                `).run(clockOutTime, clockOutTime, entry.id);
+                
+                // Recalculate hours (similar to PostgreSQL version)
+                try {
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    const dayOfWeek = clockInDate.getDay();
+                    const monday = new Date(clockInDate);
+                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                    monday.setHours(0, 0, 0, 0);
+                    const weekStartDate = monday.toISOString().split('T')[0];
+                    
+                    const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                    const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                    const overnightAway = dailyEntry.overnight_away || false;
+                    const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                    
+                    await this.updateDailyEntry(dailyEntry.id, {
+                        timesheet_entry_id: entry.id,
+                        regular_hours: aggregatedHours.regular_hours,
+                        overtime_hours: aggregatedHours.overtime_hours,
+                        weekend_hours: aggregatedHours.weekend_hours,
+                        overnight_hours: aggregatedHours.overnight_hours,
+                        total_hours: aggregatedHours.total_hours
+                    });
+                } catch (error) {
+                    console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                }
+                
+                updatedEntries.push({ ...entry, clock_out_time: clockOutTime });
+            }
+            
+            return updatedEntries;
+        }
+    }
+    
     static async clockOut(userId, latitude, longitude) {
         const clockOutTime = new Date().toISOString();
         let updatedEntry;
@@ -3972,13 +4106,13 @@ class ProductionDatabase {
                 AND te.clock_out_time IS NOT NULL
                 AND (
                     -- Primary check: Entry starts on the same date (most common case)
-                    DATE(te.clock_in_time AT TIME ZONE 'UTC') = $4::date
+                    DATE(te.clock_in_time)::text = $4
                     OR
                     -- Overnight entry that ends on this date (entry started previous day, ended on target date)
-                    DATE(te.clock_out_time AT TIME ZONE 'UTC') = $4::date
+                    DATE(te.clock_out_time)::text = $4
                     OR
                     -- Overnight entry that spans across this entire date (rare but possible)
-                    (DATE(te.clock_in_time AT TIME ZONE 'UTC') < $4::date AND DATE(te.clock_out_time AT TIME ZONE 'UTC') > $4::date)
+                    (DATE(te.clock_in_time)::text < $4 AND DATE(te.clock_out_time)::text > $4)
                 )
                 AND (
                     -- Now check for actual time overlaps (only after date filter)
