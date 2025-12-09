@@ -1593,13 +1593,19 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Create missing times error:', error);
         console.error('Error stack:', error.stack);
-        console.error('Request details:', {
-            userId,
-            job_id,
-            clock_in_time,
-            clock_out_time,
-            reason: reason ? 'provided' : 'missing'
-        });
+        
+        // Safely access variables that might not be defined if error occurred early
+        try {
+            console.error('Request details:', {
+                userId: req.session?.production_user?.id || 'unknown',
+                job_id: req.body?.job_id || 'unknown',
+                clock_in_time: req.body?.clock_in_time || 'unknown',
+                clock_out_time: req.body?.clock_out_time || 'unknown',
+                reason: req.body?.reason ? 'provided' : 'missing'
+            });
+        } catch (logError) {
+            console.error('Error logging request details:', logError);
+        }
         
         // Provide more detailed error message
         let errorMessage = 'Failed to create missing times entry';
