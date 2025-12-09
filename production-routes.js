@@ -1531,6 +1531,9 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
+        // Get date string for the entry date
+        const dateStr = entryDate.toISOString().split('T')[0];
+        
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
         // Only do this for entries that might conflict with the target date
         // Run this asynchronously without blocking - if it fails or times out, the duplicate check will still work
@@ -1540,7 +1543,6 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         });
         
         // Check if user already has a completed entry for this date
-        const dateStr = entryDate.toISOString().split('T')[0];
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, dateStr);
         
         if (completedEntriesCount >= 1) {
