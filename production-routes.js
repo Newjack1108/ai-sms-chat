@@ -1532,20 +1532,18 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         }
         
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
+        // Only do this for entries that might conflict with the target date
         try {
-            // Clock out entries from all previous days (not just the user, but all users to prevent issues)
-            await ProductionDatabase.autoClockOutOldEntries(userId);
-            
-            // Also check for entries that might overlap with the target date but haven't been clocked out
-            // This handles cases where an entry from a previous day might span into the target date
+            // Only clock out entries that might overlap with the target date
+            // This is more efficient than processing all old entries
             await ProductionDatabase.autoClockOutEntriesForDate(userId, dateStr);
         } catch (error) {
-            console.error('Error auto-clocking-out old entries:', error);
+            console.error('Error auto-clocking-out entries for date:', error);
             console.error('Error details:', {
                 message: error.message,
                 stack: error.stack,
                 userId,
-                dateStr: entryDate.toISOString().split('T')[0]
+                dateStr
             });
             // Continue anyway - don't block the request
         }

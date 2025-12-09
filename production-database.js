@@ -3758,11 +3758,14 @@ class ProductionDatabase {
             // 1. Don't have a clock_out_time
             // 2. Start before or on the target date
             // 3. Are for this user
+            // Limit to prevent processing too many entries
             const entries = await pool.query(
                 `SELECT * FROM timesheet_entries
                  WHERE user_id = $1
                  AND clock_out_time IS NULL
-                 AND DATE(clock_in_time) <= $2::date`,
+                 AND DATE(clock_in_time) <= $2::date
+                 ORDER BY clock_in_time DESC
+                 LIMIT 10`,
                 [userId, targetDateStr]
             );
             
@@ -3771,50 +3774,57 @@ class ProductionDatabase {
             }
             
             const updatedEntries = [];
+            // Process entries in batch to avoid timeout
             for (const entry of entries.rows) {
-                const clockInDate = new Date(entry.clock_in_time);
-                const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                
-                // Set clock-out to end of the clock-in date (23:59:59.999)
-                const midnight = new Date(clockInDate);
-                midnight.setHours(23, 59, 59, 999);
-                const clockOutTime = midnight.toISOString();
-                
-                const updateResult = await pool.query(
-                    `UPDATE timesheet_entries 
-                     SET clock_out_time = $1, updated_at = $1
-                     WHERE id = $2
-                     RETURNING *`,
-                    [clockOutTime, entry.id]
-                );
-                
-                if (updateResult.rows.length > 0) {
-                    updatedEntries.push(updateResult.rows[0]);
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
                     
-                    // Recalculate hours for this entry
-                    try {
-                        const dayOfWeek = clockInDate.getDay();
-                        const monday = new Date(clockInDate);
-                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                        monday.setHours(0, 0, 0, 0);
-                        const weekStartDate = monday.toISOString().split('T')[0];
+                    // Set clock-out to end of the clock-in date (23:59:59.999)
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    const updateResult = await pool.query(
+                        `UPDATE timesheet_entries 
+                         SET clock_out_time = $1, updated_at = $1
+                         WHERE id = $2
+                         RETURNING *`,
+                        [clockOutTime, entry.id]
+                    );
+                    
+                    if (updateResult.rows.length > 0) {
+                        updatedEntries.push(updateResult.rows[0]);
                         
-                        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
-                        const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
-                        const overnightAway = dailyEntry.overnight_away || false;
-                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
-                        
-                        await this.updateDailyEntry(dailyEntry.id, {
-                            timesheet_entry_id: entry.id,
-                            regular_hours: aggregatedHours.regular_hours,
-                            overtime_hours: aggregatedHours.overtime_hours,
-                            weekend_hours: aggregatedHours.weekend_hours,
-                            overnight_hours: aggregatedHours.overnight_hours,
-                            total_hours: aggregatedHours.total_hours
-                        });
-                    } catch (error) {
-                        console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                        // Recalculate hours for this entry (skip if it fails - don't block)
+                        try {
+                            const dayOfWeek = clockInDate.getDay();
+                            const monday = new Date(clockInDate);
+                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                            monday.setHours(0, 0, 0, 0);
+                            const weekStartDate = monday.toISOString().split('T')[0];
+                            
+                            const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                            const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                            const overnightAway = dailyEntry.overnight_away || false;
+                            const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                            
+                            await this.updateDailyEntry(dailyEntry.id, {
+                                timesheet_entry_id: entry.id,
+                                regular_hours: aggregatedHours.regular_hours,
+                                overtime_hours: aggregatedHours.overtime_hours,
+                                weekend_hours: aggregatedHours.weekend_hours,
+                                overnight_hours: aggregatedHours.overnight_hours,
+                                total_hours: aggregatedHours.total_hours
+                            });
+                        } catch (error) {
+                            console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                            // Continue - don't fail the whole operation
+                        }
                     }
+                } catch (error) {
+                    console.error(`Error auto-clocking-out entry ${entry.id}:`, error);
+                    // Continue with next entry
                 }
             }
             
