@@ -3958,6 +3958,104 @@ class ProductionDatabase {
         }
     }
     
+    // Check for duplicate or overlapping timesheet entries for a specific date
+    // This is used for "add missing times" to avoid false positives from entries on other days
+    static async checkDuplicateTimesForDate(userId, clockInTime, clockOutTime, dateStr, excludeEntryId = null) {
+        if (isPostgreSQL) {
+            let query = `
+                SELECT te.* 
+                FROM timesheet_entries te
+                WHERE te.user_id = $1 
+                AND te.clock_out_time IS NOT NULL
+                AND (
+                    -- Entry starts on the same date
+                    DATE(te.clock_in_time) = $4
+                    OR
+                    -- Overnight entry that ends on this date (spans into the date)
+                    DATE(te.clock_out_time) = $4
+                    OR
+                    -- Overnight entry that spans across this entire date
+                    (DATE(te.clock_in_time) < $4 AND DATE(te.clock_out_time) > $4)
+                )
+                AND (
+                    -- Exact duplicate times
+                    (te.clock_in_time = $2 AND te.clock_out_time = $3)
+                    OR
+                    -- Overlapping: new entry starts during existing entry
+                    (te.clock_in_time <= $2 AND te.clock_out_time > $2)
+                    OR
+                    -- Overlapping: new entry ends during existing entry
+                    (te.clock_in_time < $3 AND te.clock_out_time >= $3)
+                    OR
+                    -- Overlapping: new entry completely contains existing entry
+                    (te.clock_in_time >= $2 AND te.clock_out_time <= $3)
+                    OR
+                    -- Overlapping: existing entry completely contains new entry
+                    (te.clock_in_time <= $2 AND te.clock_out_time >= $3)
+                )
+            `;
+            const params = [userId, clockInTime, clockOutTime, dateStr];
+            
+            if (excludeEntryId) {
+                query += ` AND te.id != $5`;
+                params.push(excludeEntryId);
+            }
+            
+            const result = await pool.query(query, params);
+            return result.rows;
+        } else {
+            let query = `
+                SELECT te.* 
+                FROM timesheet_entries te
+                WHERE te.user_id = ? 
+                AND te.clock_out_time IS NOT NULL
+                AND (
+                    -- Entry starts on the same date
+                    DATE(te.clock_in_time) = ?
+                    OR
+                    -- Overnight entry that ends on this date (spans into the date)
+                    DATE(te.clock_out_time) = ?
+                    OR
+                    -- Overnight entry that spans across this entire date
+                    (DATE(te.clock_in_time) < ? AND DATE(te.clock_out_time) > ?)
+                )
+                AND (
+                    -- Exact duplicate times
+                    (te.clock_in_time = ? AND te.clock_out_time = ?)
+                    OR
+                    -- Overlapping: new entry starts during existing entry
+                    (te.clock_in_time <= ? AND te.clock_out_time > ?)
+                    OR
+                    -- Overlapping: new entry ends during existing entry
+                    (te.clock_in_time < ? AND te.clock_out_time >= ?)
+                    OR
+                    -- Overlapping: new entry completely contains existing entry
+                    (te.clock_in_time >= ? AND te.clock_out_time <= ?)
+                    OR
+                    -- Overlapping: existing entry completely contains new entry
+                    (te.clock_in_time <= ? AND te.clock_out_time >= ?)
+                )
+            `;
+            
+            const params = [
+                userId,
+                dateStr, dateStr, dateStr, dateStr,  // date checks (4 params)
+                clockInTime, clockOutTime,  // exact duplicate (2 params)
+                clockInTime, clockInTime,   // starts during (2 params)
+                clockOutTime, clockOutTime, // ends during (2 params)
+                clockInTime, clockOutTime, // contains (2 params)
+                clockInTime, clockOutTime   // contained by (2 params)
+            ];
+            
+            if (excludeEntryId) {
+                query += ` AND te.id != ?`;
+                params.push(excludeEntryId);
+            }
+            
+            return db.prepare(query).all(...params);
+        }
+    }
+    
     // Timesheet notices operations
     static async createTimesheetNotice(title, message, priority, expiresAt, createdBy) {
         if (isPostgreSQL) {

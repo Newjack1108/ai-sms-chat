@@ -1534,8 +1534,11 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Check for duplicate or overlapping times
-        const duplicates = await ProductionDatabase.checkDuplicateTimes(userId, clock_in_time, clock_out_time);
+        // Check for duplicate or overlapping times - but only on the same date or overnight entries
+        // For "add missing times", we want to check:
+        // 1. Entries that start on the same date
+        // 2. Overnight entries that might span into this date
+        const duplicates = await ProductionDatabase.checkDuplicateTimesForDate(userId, clock_in_time, clock_out_time, dateStr);
         if (duplicates && duplicates.length > 0) {
             return res.status(400).json({ 
                 success: false, 
