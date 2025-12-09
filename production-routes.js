@@ -173,7 +173,7 @@ router.get('/stock', requireProductionAuth, async (req, res) => {
 
 router.post('/stock', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
-        const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp } = req.body;
+        const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category } = req.body;
         if (!name || !unit) {
             return res.status(400).json({ success: false, error: 'Name and unit are required' });
         }
@@ -185,6 +185,7 @@ router.post('/stock', requireProductionAuth, requireAdmin, async (req, res) => {
             current_quantity: parseFloat(current_quantity) || 0,
             min_quantity: parseFloat(min_quantity) || 0,
             location,
+            category: category && category.trim() ? category.trim() : null,
             cost_per_unit_gbp: parseFloat(cost_per_unit_gbp) || 0
         });
         res.json({ success: true, item });
@@ -197,7 +198,7 @@ router.post('/stock', requireProductionAuth, requireAdmin, async (req, res) => {
 router.put('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
-        const { name, description, unit, min_quantity, location, cost_per_unit_gbp } = req.body;
+        const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category } = req.body;
         
         const item = await ProductionDatabase.updateStockItem(itemId, {
             name,
@@ -205,6 +206,7 @@ router.put('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) =
             unit,
             min_quantity: parseFloat(min_quantity) || 0,
             location,
+            category: category && category.trim() ? category.trim() : null,
             cost_per_unit_gbp: parseFloat(cost_per_unit_gbp) || 0
         });
         res.json({ success: true, item });

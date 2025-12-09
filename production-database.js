@@ -65,539 +65,10 @@ function initializeSQLite() {
     // Stock items table
     db.exec(`
         CREATE TABLE IF NOT EXISTS stock_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            unit TEXT NOT NULL,
-            current_quantity REAL DEFAULT 0,
-            min_quantity REAL DEFAULT 0,
-            location TEXT,
-            cost_per_unit_gbp REAL DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Panels table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS panels (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            panel_type TEXT,
-            status TEXT DEFAULT 'active',
-            cost_gbp REAL DEFAULT 0,
-            built_quantity REAL DEFAULT 0,
-            min_stock REAL DEFAULT 0,
-            labour_hours REAL DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Components table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS components (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            component_type TEXT,
-            status TEXT DEFAULT 'active',
-            cost_gbp REAL DEFAULT 0,
-            built_quantity REAL DEFAULT 0,
-            min_stock REAL DEFAULT 0,
-            labour_hours REAL DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Component BOM items table (components use raw materials)
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS component_bom_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            component_id INTEGER NOT NULL,
-            stock_item_id INTEGER NOT NULL,
-            quantity_required REAL NOT NULL,
-            unit TEXT NOT NULL,
-            FOREIGN KEY (component_id) REFERENCES components(id) ON DELETE CASCADE,
-            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE
-        )
-    `);
-    
-    // Component movements table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS component_movements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            component_id INTEGER NOT NULL,
-            movement_type TEXT NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
-            quantity REAL NOT NULL,
-            reference TEXT,
-            user_id INTEGER,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (component_id) REFERENCES components(id),
-            FOREIGN KEY (user_id) REFERENCES production_users(id)
-        )
-    `);
-    
-    // BOM items table (built items use raw materials and components)
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS bom_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            panel_id INTEGER NOT NULL,
-            item_type TEXT NOT NULL CHECK(item_type IN ('raw_material', 'component')),
-            item_id INTEGER NOT NULL,
-            quantity_required REAL NOT NULL,
-            unit TEXT NOT NULL,
-            FOREIGN KEY (panel_id) REFERENCES panels(id) ON DELETE CASCADE
-        )
-    `);
-    
-    // Finished products table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS finished_products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            product_type TEXT,
-            status TEXT DEFAULT 'active',
-            cost_gbp REAL DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Product components table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS product_components (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL,
-            component_type TEXT NOT NULL CHECK(component_type IN ('raw_material', 'component', 'built_item')),
-            component_id INTEGER NOT NULL,
-            quantity_required REAL NOT NULL,
-            unit TEXT NOT NULL,
-            FOREIGN KEY (product_id) REFERENCES finished_products(id) ON DELETE CASCADE
-        )
-    `);
-    
-    // Product orders table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS product_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL,
-            quantity INTEGER NOT NULL,
-            order_date TEXT,
-            status TEXT DEFAULT 'pending',
-            created_by INTEGER,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (product_id) REFERENCES finished_products(id),
-            FOREIGN KEY (created_by) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Stock movements table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS stock_movements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_item_id INTEGER NOT NULL,
-            movement_type TEXT NOT NULL CHECK(movement_type IN ('in', 'out', 'adjustment')),
-            quantity REAL NOT NULL,
-            reference TEXT,
-            user_id INTEGER,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            cost_gbp REAL DEFAULT 0,
-            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id),
-            FOREIGN KEY (user_id) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Stock check reminders table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS stock_check_reminders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_item_id INTEGER NOT NULL,
-            check_frequency_days INTEGER NOT NULL,
-            last_checked_date TEXT,
-            next_check_date TEXT,
-            is_active INTEGER DEFAULT 1,
-            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE
-        )
-    `);
-    
-    // Tasks table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            assigned_to_user_id INTEGER,
-            created_by_user_id INTEGER,
-            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'in_progress', 'completed', 'cancelled')),
-            due_date TEXT,
-            completed_at TEXT,
-            completed_by_user_id INTEGER,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (assigned_to_user_id) REFERENCES production_users(id),
-            FOREIGN KEY (created_by_user_id) REFERENCES production_users(id),
-            FOREIGN KEY (completed_by_user_id) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Task comments table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS task_comments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            comment TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-            FOREIGN KEY (user_id) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Panel movements table (track when panels are built/used)
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS panel_movements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            panel_id INTEGER NOT NULL,
-            movement_type TEXT NOT NULL CHECK(movement_type IN ('build', 'use', 'adjustment')),
-            quantity REAL NOT NULL,
-            reference TEXT,
-            user_id INTEGER,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (panel_id) REFERENCES panels(id),
-            FOREIGN KEY (user_id) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Production settings table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS production_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Weekly planner table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS weekly_planner (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            week_start_date TEXT NOT NULL UNIQUE,
-            staff_available INTEGER DEFAULT 1,
-            hours_available REAL DEFAULT 40,
-            notes TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Planner items table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS planner_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            planner_id INTEGER NOT NULL,
-            item_type TEXT NOT NULL CHECK(item_type IN ('component', 'built_item', 'job')),
-            item_id INTEGER,
-            job_name TEXT,
-            quantity_to_build REAL NOT NULL,
-            quantity_built REAL DEFAULT 0,
-            hours_used REAL DEFAULT 0,
-            priority TEXT DEFAULT 'medium' CHECK(priority IN ('high', 'medium', 'low')),
-            status TEXT DEFAULT 'planned' CHECK(status IN ('planned', 'in_progress', 'completed')),
-            start_day INTEGER CHECK(start_day >= 0 AND start_day <= 5),
-            end_day INTEGER CHECK(end_day >= 0 AND end_day <= 5),
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (planner_id) REFERENCES weekly_planner(id) ON DELETE CASCADE
-        )
-    `);
-    
-    // Jobs/Sites table for timesheet
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS jobs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-    
-    // Timesheet entries table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS timesheet_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            job_id INTEGER NOT NULL,
-            clock_in_time TEXT NOT NULL,
-            clock_out_time TEXT,
-            clock_in_latitude REAL,
-            clock_in_longitude REAL,
-            clock_out_latitude REAL,
-            clock_out_longitude REAL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES production_users(id),
-            FOREIGN KEY (job_id) REFERENCES jobs(id)
-        )
-    `);
-    
-    // Timesheet notices table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS timesheet_notices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            priority TEXT DEFAULT 'normal' CHECK(priority IN ('low', 'normal', 'high', 'urgent')),
-            status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
-            created_by INTEGER,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            expires_at TEXT,
-            FOREIGN KEY (created_by) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Create indexes
-    db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
-        CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id);
-        CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id);
-        CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id);
-        CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id);
-        CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id);
-        CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id);
-        CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id);
-        CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id);
-        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-        CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
-        CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id);
-        CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id);
-        CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date);
-        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id);
-        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id);
-        CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time);
-        CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status);
-    `);
-    
-    // Migrate existing panels table to add new columns
-    try {
-        const columns = db.prepare("PRAGMA table_info(panels)").all();
-        const columnNames = columns.map(col => col.name);
-        
-        if (!columnNames.includes('built_quantity')) {
-            db.exec('ALTER TABLE panels ADD COLUMN built_quantity REAL DEFAULT 0');
-            console.log('✅ Added built_quantity column to panels');
-        }
-        if (!columnNames.includes('min_stock')) {
-            db.exec('ALTER TABLE panels ADD COLUMN min_stock REAL DEFAULT 0');
-            console.log('✅ Added min_stock column to panels');
-        }
-        if (!columnNames.includes('labour_hours')) {
-            db.exec('ALTER TABLE panels ADD COLUMN labour_hours REAL DEFAULT 0');
-            console.log('✅ Added labour_hours column to panels');
-        }
-    } catch (error) {
-        console.log('⚠️ Migration check skipped:', error.message);
-    }
-    
-    // Migrate existing planner_items table to add new columns
-    try {
-        const plannerColumns = db.prepare("PRAGMA table_info(planner_items)").all();
-        const plannerColumnNames = plannerColumns.map(col => col.name);
-        
-        if (!plannerColumnNames.includes('quantity_built')) {
-            db.exec('ALTER TABLE planner_items ADD COLUMN quantity_built REAL DEFAULT 0');
-            console.log('✅ Added quantity_built column to planner_items');
-        }
-        if (!plannerColumnNames.includes('hours_used')) {
-            db.exec('ALTER TABLE planner_items ADD COLUMN hours_used REAL DEFAULT 0');
-            console.log('✅ Added hours_used column to planner_items');
-        }
-        
-        // Add job_name column for job items
-        if (!plannerColumnNames.includes('job_name')) {
-            db.exec('ALTER TABLE planner_items ADD COLUMN job_name TEXT');
-            console.log('✅ Added job_name column to planner_items');
-        }
-        
-        // Add start_day and end_day columns for day assignments
-        if (!plannerColumnNames.includes('start_day')) {
-            db.exec('ALTER TABLE planner_items ADD COLUMN start_day INTEGER');
-            console.log('✅ Added start_day column to planner_items');
-        }
-        if (!plannerColumnNames.includes('end_day')) {
-            db.exec('ALTER TABLE planner_items ADD COLUMN end_day INTEGER');
-            console.log('✅ Added end_day column to planner_items');
-        }
-    } catch (error) {
-        console.log('⚠️ Planner items migration check skipped:', error.message);
-    }
-    
-    // Insert default labour rate if not exists
-    const settingCheck = db.prepare('SELECT COUNT(*) as count FROM production_settings WHERE key = ?').get('labour_rate_per_hour');
-    if (settingCheck.count === 0) {
-        db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run('labour_rate_per_hour', '25.00');
-    }
-    
-    // Migrate production_users role constraint to include 'staff'
-    // SQLite doesn't support ALTER TABLE for CHECK constraints, so we need to recreate the table
-    try {
-        // Check if table exists and has old constraint
-        const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
-        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'staff'")) {
-            console.log('🔄 Migrating production_users table to support staff role...');
-            
-            // Create new table with updated constraint
-            db.exec(`
-                CREATE TABLE IF NOT EXISTS production_users_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            `);
-            
-            // Copy data
-            db.exec('INSERT INTO production_users_new SELECT * FROM production_users');
-            
-            // Drop old table
-            db.exec('DROP TABLE production_users');
-            
-            // Rename new table
-            db.exec('ALTER TABLE production_users_new RENAME TO production_users');
-            
-            console.log('✅ Migrated production_users table to support staff role');
-        }
-    } catch (error) {
-        console.log('⚠️ Role constraint migration check skipped:', error.message);
-    }
-    
-    // Migrate timesheet_entries to add hour calculation columns
-    try {
-        const columns = db.prepare("PRAGMA table_info(timesheet_entries)").all();
-        const columnNames = columns.map(col => col.name);
-        
-        if (!columnNames.includes('regular_hours')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN regular_hours REAL DEFAULT 0');
-            console.log('✅ Added regular_hours column to timesheet_entries');
-        }
-        if (!columnNames.includes('overtime_hours')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN overtime_hours REAL DEFAULT 0');
-            console.log('✅ Added overtime_hours column to timesheet_entries');
-        }
-        if (!columnNames.includes('weekend_hours')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN weekend_hours REAL DEFAULT 0');
-            console.log('✅ Added weekend_hours column to timesheet_entries');
-        }
-        if (!columnNames.includes('overnight_hours')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN overnight_hours REAL DEFAULT 0');
-            console.log('✅ Added overnight_hours column to timesheet_entries');
-        }
-        if (!columnNames.includes('total_hours')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN total_hours REAL DEFAULT 0');
-            console.log('✅ Added total_hours column to timesheet_entries');
-        }
-        if (!columnNames.includes('calculated_at')) {
-            db.exec('ALTER TABLE timesheet_entries ADD COLUMN calculated_at TEXT');
-            console.log('✅ Added calculated_at column to timesheet_entries');
-        }
-    } catch (error) {
-        console.log('⚠️ Timesheet entries migration check skipped:', error.message);
-    }
-    
-    // Create weekly_timesheets table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS weekly_timesheets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            week_start_date TEXT NOT NULL,
-            week_end_date TEXT NOT NULL,
-            status TEXT DEFAULT 'draft' CHECK(status IN ('draft', 'submitted', 'approved')),
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES production_users(id),
-            UNIQUE(user_id, week_start_date)
-        )
-    `);
-    
-    // Create timesheet_daily_entries table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS timesheet_daily_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            weekly_timesheet_id INTEGER NOT NULL,
-            entry_date TEXT NOT NULL,
-            timesheet_entry_id INTEGER,
-            daily_notes TEXT,
-            overnight_away INTEGER DEFAULT 0,
-            regular_hours REAL DEFAULT 0,
-            overtime_hours REAL DEFAULT 0,
-            weekend_hours REAL DEFAULT 0,
-            overnight_hours REAL DEFAULT 0,
-            total_hours REAL DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (weekly_timesheet_id) REFERENCES weekly_timesheets(id),
-            FOREIGN KEY (timesheet_entry_id) REFERENCES timesheet_entries(id),
-            UNIQUE(weekly_timesheet_id, entry_date)
-        )
-    `);
-    
-    // Create timesheet_amendments table
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS timesheet_amendments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timesheet_entry_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            original_clock_in_time TEXT NOT NULL,
-            original_clock_out_time TEXT,
-            amended_clock_in_time TEXT NOT NULL,
-            amended_clock_out_time TEXT,
-            reason TEXT NOT NULL,
-            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
-            reviewed_by INTEGER,
-            reviewed_at TEXT,
-            review_notes TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (timesheet_entry_id) REFERENCES timesheet_entries(id),
-            FOREIGN KEY (user_id) REFERENCES production_users(id),
-            FOREIGN KEY (reviewed_by) REFERENCES production_users(id)
-        )
-    `);
-    
-    // Create indexes for new tables
-    db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_user ON weekly_timesheets(user_id);
-        CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_week ON weekly_timesheets(week_start_date);
-        CREATE INDEX IF NOT EXISTS idx_daily_entries_weekly ON timesheet_daily_entries(weekly_timesheet_id);
-        CREATE INDEX IF NOT EXISTS idx_daily_entries_date ON timesheet_daily_entries(entry_date);
-        CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id);
-        CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id);
-        CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status);
-    `);
-    
-    console.log('✅ Production SQLite database initialized');
-}
-
-async function initializePostgreSQL() {
-    if (!isPostgreSQL) return;
-    
-    console.log('🗄️ Initializing Production PostgreSQL database...');
-    
-    try {
-        // Production users
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS production_users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(100) UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        
-        // Stock items
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS stock_items (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
+                category VARCHAR(255),
                 unit VARCHAR(50) NOT NULL,
                 current_quantity DECIMAL(10,2) DEFAULT 0,
                 min_quantity DECIMAL(10,2) DEFAULT 0,
@@ -1294,19 +765,19 @@ class ProductionDatabase {
     // ============ STOCK ITEMS OPERATIONS ============
     
     static async createStockItem(data) {
+        await this.ensureStockItemsSchema();
         if (isPostgreSQL) {
-            const result = await pool.query(
-                `INSERT INTO stock_items (name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-                [data.name, data.description, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0]
+                `INSERT INTO stock_items (name, description, category, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [data.name, data.description, data.category || null, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO stock_items (name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO stock_items (name, description, category, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0);
+            const info = stmt.run(data.name, data.description, data.category || null, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0);
             return this.getStockItemById(info.lastInsertRowid);
         }
     }
@@ -1330,18 +801,18 @@ class ProductionDatabase {
     }
     
     static async updateStockItem(id, data) {
-        if (isPostgreSQL) {
+        await this.ensureStockItemsSchema();
             const result = await pool.query(
-                `UPDATE stock_items SET name = $1, description = $2, unit = $3, min_quantity = $4, location = $5, cost_per_unit_gbp = $6
-                 WHERE id = $7 RETURNING *`,
-                [data.name, data.description, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id]
+                `UPDATE stock_items SET name = $1, description = $2, category = $3, unit = $4, min_quantity = $5, location = $6, cost_per_unit_gbp = $7
+                   WHERE id = $8 RETURNING *`,
+                [data.name, data.description, data.category || null, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id]
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE stock_items SET name = ?, description = ?, unit = ?, min_quantity = ?, location = ?, cost_per_unit_gbp = ?
+                `UPDATE stock_items SET name = ?, description = ?, category = ?, unit = ?, min_quantity = ?, location = ?, cost_per_unit_gbp = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id);
+            ).run(data.name, data.description, data.category || null, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id);
             return this.getStockItemById(id);
         }
     }
@@ -1509,6 +980,7 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             try {
                 await this.ensureBOMItemsSchema();
+        await this.ensureStockItemsSchema();
             } catch (error) {
                 console.error('Error ensuring schema before panel deletion:', error);
                 // Continue - schema might already be correct
@@ -1566,6 +1038,7 @@ class ProductionDatabase {
                 if (error.message && (error.message.includes('item_type') || error.message.includes('column')) && error.message.includes('does not exist')) {
                     console.log('Schema error during panel deletion, ensuring schema is migrated...');
                     await this.ensureBOMItemsSchema();
+        await this.ensureStockItemsSchema();
                     // Retry deletion after migration
                     await pool.query(`DELETE FROM panels WHERE id = $1`, [id]);
                 } else {
@@ -1609,6 +1082,7 @@ class ProductionDatabase {
             // Ensure schema is migrated before inserting
             try {
                 await this.ensureBOMItemsSchema();
+        await this.ensureStockItemsSchema();
             } catch (error) {
                 console.error('Error ensuring bom_items schema before insert:', error);
                 // Continue - schema might already be correct, but this will help if it's not
@@ -1631,6 +1105,7 @@ class ProductionDatabase {
                     console.log('BOM insert failed due to schema issue, attempting migration...');
                     console.log('Error message:', error.message);
                     await this.ensureBOMItemsSchema();
+        await this.ensureStockItemsSchema();
                     // Retry insert
                     const result = await pool.query(
                         `INSERT INTO bom_items (panel_id, item_type, item_id, quantity_required, unit)
@@ -1662,7 +1137,30 @@ class ProductionDatabase {
         }
     }
     
-    static async ensureBOMItemsSchema() {
+    
+    static async ensureStockItemsSchema() {
+        if (!isPostgreSQL) return;
+        
+        try {
+            await pool.query(`
+                DO $$
+                BEGIN
+                    -- Add category column if it doesn't exist
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name='stock_items'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name='stock_items' AND column_name='category'
+                    ) THEN
+                        ALTER TABLE stock_items ADD COLUMN category VARCHAR(255);
+                    END IF;
+                END $$;
+            `);
+        } catch (error) {
+            console.error('Error ensuring stock_items schema:', error);
+        }
+    }static async ensureBOMItemsSchema() {
         if (!isPostgreSQL) return;
         
         try {
@@ -1830,6 +1328,7 @@ class ProductionDatabase {
                     console.log('item_type column missing, attempting migration...');
                     try {
                         await this.ensureBOMItemsSchema();
+        await this.ensureStockItemsSchema();
                         // Retry the query after migration
                         const result = await pool.query(
                             `SELECT 
@@ -5048,7 +4547,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
                 [entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason]
             );
             return { entry: await this.getTimesheetEntryById(entryId), amendment: result.rows[0] };
@@ -5057,7 +4556,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason);
             return { 
@@ -5079,7 +4578,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
                 [entryId, userId, entry.clock_in_time, entry.clock_out_time, 
                  amendedClockIn, amendedClockOut, reason]
             );
@@ -5089,7 +4588,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, entry.clock_in_time, entry.clock_out_time,
                                  amendedClockIn, amendedClockOut, reason);
