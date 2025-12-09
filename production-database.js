@@ -68,6 +68,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             description TEXT,
+            category TEXT,
             unit TEXT NOT NULL,
             current_quantity REAL DEFAULT 0,
             min_quantity REAL DEFAULT 0,
@@ -598,6 +599,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
+                category VARCHAR(255),
                 unit VARCHAR(50) NOT NULL,
                 current_quantity DECIMAL(10,2) DEFAULT 0,
                 min_quantity DECIMAL(10,2) DEFAULT 0,
@@ -1294,19 +1296,21 @@ class ProductionDatabase {
     // ============ STOCK ITEMS OPERATIONS ============
     
     static async createStockItem(data) {
+        await this.ensureStockItemsSchema();
+        await this.ensureStockItemsSchema();
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO stock_items (name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-                [data.name, data.description, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0]
+                `INSERT INTO stock_items (name, description, category, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [data.name, data.description, data.category || null, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO stock_items (name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO stock_items (name, description, category, unit, current_quantity, min_quantity, location, cost_per_unit_gbp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0);
+            const info = stmt.run(data.name, data.description, data.category || null, data.unit, data.current_quantity || 0, data.min_quantity || 0, data.location, data.cost_per_unit_gbp || 0);
             return this.getStockItemById(info.lastInsertRowid);
         }
     }
@@ -1330,18 +1334,20 @@ class ProductionDatabase {
     }
     
     static async updateStockItem(id, data) {
+        await this.ensureStockItemsSchema();
+        await this.ensureStockItemsSchema();
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE stock_items SET name = $1, description = $2, unit = $3, min_quantity = $4, location = $5, cost_per_unit_gbp = $6
-                 WHERE id = $7 RETURNING *`,
-                [data.name, data.description, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id]
+                `UPDATE stock_items SET name = $1, description = $2, category = $3, unit = $4, min_quantity = $5, location = $6, cost_per_unit_gbp = $7
+                   WHERE id = $8 RETURNING *`,
+                [data.name, data.description, data.category || null, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id]
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE stock_items SET name = ?, description = ?, unit = ?, min_quantity = ?, location = ?, cost_per_unit_gbp = ?
+                `UPDATE stock_items SET name = ?, description = ?, category = ?, unit = ?, min_quantity = ?, location = ?, cost_per_unit_gbp = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id);
+            ).run(data.name, data.description, data.category || null, data.unit, data.min_quantity, data.location, data.cost_per_unit_gbp, id);
             return this.getStockItemById(id);
         }
     }
@@ -1661,6 +1667,184 @@ class ProductionDatabase {
             return db.prepare(`SELECT * FROM bom_items WHERE id = ?`).get(id) || null;
         }
     }
+    
+    static async ensureStockItemsSchema() {
+
+    
+        if (!isPostgreSQL) return;
+
+    
+        
+
+    
+        try {
+
+    
+            await pool.query(`
+
+    
+                DO $$
+
+    
+                BEGIN
+
+    
+                    IF EXISTS (
+
+    
+                        SELECT 1 FROM information_schema.tables
+
+    
+                        WHERE table_schema = 'public' AND table_name='stock_items'
+
+    
+                    ) AND NOT EXISTS (
+
+    
+                        SELECT 1 FROM information_schema.columns
+
+    
+                        WHERE table_schema = 'public' AND table_name='stock_items' AND column_name='category'
+
+    
+                    ) THEN
+
+    
+                        ALTER TABLE stock_items ADD COLUMN category VARCHAR(255);
+
+    
+                    END IF;
+
+    
+                END $$;
+
+    
+            `);
+
+    
+        } catch (error) {
+
+    
+            console.error('Error ensuring stock_items schema:', error);
+
+    
+        }
+
+    
+    }
+
+
+    
+    static async ensureStockItemsSchema() {
+
+
+
+    
+        if (!isPostgreSQL) return;
+
+
+
+    
+        
+
+
+
+    
+        try {
+
+
+
+    
+            await pool.query(`
+
+
+
+    
+                DO $$
+
+
+
+    
+                BEGIN
+
+
+
+    
+                    IF EXISTS (
+
+
+
+    
+                        SELECT 1 FROM information_schema.tables
+
+
+
+    
+                        WHERE table_schema = 'public' AND table_name='stock_items'
+
+
+
+    
+                    ) AND NOT EXISTS (
+
+
+
+    
+                        SELECT 1 FROM information_schema.columns
+
+
+
+    
+                        WHERE table_schema = 'public' AND table_name='stock_items' AND column_name='category'
+
+
+
+    
+                    ) THEN
+
+
+
+    
+                        ALTER TABLE stock_items ADD COLUMN category VARCHAR(255);
+
+
+
+    
+                    END IF;
+
+
+
+    
+                END $$;
+
+
+
+    
+            `);
+
+
+
+    
+        } catch (error) {
+
+
+
+    
+            console.error('Error ensuring stock_items schema:', error);
+
+
+
+    
+        }
+
+
+
+    
+    }
+
+
+
+
     
     static async ensureBOMItemsSchema() {
         if (!isPostgreSQL) return;
@@ -5048,7 +5232,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
                 [entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason]
             );
             return { entry: await this.getTimesheetEntryById(entryId), amendment: result.rows[0] };
@@ -5057,7 +5241,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason);
             return { 
@@ -5079,7 +5263,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
                 [entryId, userId, entry.clock_in_time, entry.clock_out_time, 
                  amendedClockIn, amendedClockOut, reason]
             );
@@ -5089,7 +5273,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, entry.clock_in_time, entry.clock_out_time,
                                  amendedClockIn, amendedClockOut, reason);
