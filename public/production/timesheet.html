@@ -1002,16 +1002,24 @@
                 
                 console.log('Weekly timesheet:', weeklyTimesheet);
                 console.log('Daily entries count:', dailyEntries.length);
+                console.log('Daily entries:', dailyEntries);
                 console.log('Timesheet entries count:', timesheetEntries.length);
                 
                 // Create a map of daily entries by date
                 const entriesMap = {};
                 const timesheetEntriesByDate = {}; // Group all timesheet entries by date
                 
-                // Map daily entries
+                // Map daily entries - normalize entry_date format to YYYY-MM-DD
                 dailyEntries.forEach(entry => {
-                    entriesMap[entry.entry_date] = entry;
-                    timesheetEntriesByDate[entry.entry_date] = [];
+                    // Normalize date format to ensure consistent matching
+                    const normalizedDate = entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : entry.entry_date;
+                    entriesMap[normalizedDate] = {
+                        ...entry,
+                        entry_date: normalizedDate
+                    };
+                    if (!timesheetEntriesByDate[normalizedDate]) {
+                        timesheetEntriesByDate[normalizedDate] = [];
+                    }
                 });
                 
                 // Group all timesheet entries by date
@@ -1024,7 +1032,7 @@
                     }
                     timesheetEntriesByDate[dateStr].push(te);
                     
-                    // Ensure daily entry exists for this date
+                    // Ensure daily entry exists for this date (merge with existing if present)
                     if (!entriesMap[dateStr]) {
                         entriesMap[dateStr] = {
                             entry_date: dateStr,
@@ -1064,6 +1072,15 @@
                     const isCurrentWeek = weekStart === getCurrentWeekStart();
                     const today = new Date();
                     const isToday = dateStr === today.toISOString().split('T')[0];
+                    
+                    // Debug: Log entry data for activities
+                    if (isCurrentWeek && entry) {
+                        console.log(`Date ${dateStr} entry:`, {
+                            entry_date: entry.entry_date,
+                            daily_notes: entry.daily_notes,
+                            has_daily_notes: !!entry.daily_notes
+                        });
+                    }
                     
                     // Get all timesheet entries for this date
                     const dayEntries = timesheetEntriesByDate[dateStr] || [];
@@ -1368,17 +1385,42 @@
                 });
                 
                 // Save as JSON
-                await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
+                console.log('Saving activities for date:', dateStr, 'Activities:', activities);
+                const saveResponse = await apiCall(`/clock/weekly/${currentWeekStart}/day/${dateStr}`, {
                     method: 'PUT',
                     body: JSON.stringify({ daily_notes: JSON.stringify(activities) })
                 });
+                console.log('Save response:', saveResponse);
                 
                 // Clear and hide form
                 input.value = '';
                 hideAddActivityForm(dateStr);
                 
                 // Reload the weekly timesheet to ensure activities are displayed correctly
+                // Add a small delay to ensure backend has processed the update
+                await new Promise(resolve => setTimeout(resolve, 100));
                 await loadWeeklyTimesheet(currentWeekStart);
+                
+                // Double-check: If activities still don't show, try fetching the daily entry directly
+                setTimeout(async () => {
+                    const activitiesEl = document.getElementById(`activities-${dateStr}`);
+                    if (activitiesEl && activitiesEl.textContent.includes('No activities recorded yet')) {
+                        console.log('Activities not showing after reload, fetching daily entry directly...');
+                        try {
+                            const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart}`);
+                            if (weeklyData.success && weeklyData.dailyEntries) {
+                                const dayEntry = weeklyData.dailyEntries.find(e => e.entry_date === dateStr);
+                                console.log('Direct fetch - dayEntry:', dayEntry);
+                                if (dayEntry && dayEntry.daily_notes) {
+                                    const isToday = dateStr === new Date().toISOString().split('T')[0];
+                                    activitiesEl.innerHTML = renderActivities(dayEntry.daily_notes, dateStr, isToday);
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Error fetching daily entry directly:', err);
+                        }
+                    }
+                }, 500);
                 
                 showAlert('Activity added', 'success');
             } catch (error) {
