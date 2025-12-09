@@ -1323,7 +1323,12 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
         }
         
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
-        await ProductionDatabase.autoClockOutOldEntries(userId);
+        try {
+            await ProductionDatabase.autoClockOutOldEntries(userId);
+        } catch (error) {
+            console.error('Error auto-clocking-out old entries:', error);
+            // Continue anyway - don't block the request
+        }
         
         // Check if user is already clocked in (has an active entry)
         const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
