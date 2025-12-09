@@ -177,22 +177,19 @@
                     .filter(c => c && typeof c === 'string' && c.trim())
                 )].sort();
                 
-                // Populate category filter dropdown if not already populated
+                // Always refresh category filter dropdown with current categories
                 if (categoryFilter) {
-                    const currentFilter = categoryFilter.value || '';
-                    // Check if dropdown needs to be populated (only has "All Categories" or is empty)
-                    if (categoryFilter.options.length <= 1) {
-                        categoryFilter.innerHTML = '<option value="">All Categories</option>';
-                        categories.forEach(cat => {
-                            const option = document.createElement('option');
-                            option.value = cat;
-                            option.textContent = cat;
-                            categoryFilter.appendChild(option);
-                        });
-                        // Restore filter if it was set
-                        if (currentFilter) {
-                            categoryFilter.value = currentFilter;
-                        }
+                    const currentFilter = categoryFilter.value || ';
+                    categoryFilter.innerHTML = '<option value="">All Categories</option>';
+                    categories.forEach(cat => {
+                        const option = document.createElement('option');
+                        option.value = cat;
+                        option.textContent = cat;
+                        categoryFilter.appendChild(option);
+                    });
+                    // Restore filter if it was set and still exists
+                    if (currentFilter && categories.includes(currentFilter)) {
+                        categoryFilter.value = currentFilter;
                     }
                 }
                 
