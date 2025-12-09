@@ -62,24 +62,24 @@ function initializeSQLite() {
         )
     `);
     
-    // Stock items table
+        // Stock items table
     db.exec(`
         CREATE TABLE IF NOT EXISTS stock_items (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                description TEXT,
-                category VARCHAR(255),
-                unit VARCHAR(50) NOT NULL,
-                current_quantity DECIMAL(10,2) DEFAULT 0,
-                min_quantity DECIMAL(10,2) DEFAULT 0,
-                location VARCHAR(255),
-                cost_per_unit_gbp DECIMAL(10,2) DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT,
+            unit TEXT NOT NULL,
+            current_quantity REAL DEFAULT 0,
+            min_quantity REAL DEFAULT 0,
+            location TEXT,
+            cost_per_unit_gbp REAL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
         
         // Panels
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS panels (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -95,7 +95,7 @@ function initializeSQLite() {
         `);
         
         // Components
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS components (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -111,7 +111,7 @@ function initializeSQLite() {
         `);
         
         // Component BOM items (components use raw materials)
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS component_bom_items (
                 id SERIAL PRIMARY KEY,
                 component_id INTEGER NOT NULL REFERENCES components(id) ON DELETE CASCADE,
@@ -122,7 +122,7 @@ function initializeSQLite() {
         `);
         
         // Component movements
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS component_movements (
                 id SERIAL PRIMARY KEY,
                 component_id INTEGER NOT NULL REFERENCES components(id),
@@ -135,7 +135,7 @@ function initializeSQLite() {
         `);
         
         // BOM items (built items use raw materials and components)
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS bom_items (
                 id SERIAL PRIMARY KEY,
                 panel_id INTEGER NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
@@ -147,7 +147,7 @@ function initializeSQLite() {
         `);
         
         // Finished products
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS finished_products (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -160,7 +160,7 @@ function initializeSQLite() {
         `);
         
         // Product components
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS product_components (
                 id SERIAL PRIMARY KEY,
                 product_id INTEGER NOT NULL REFERENCES finished_products(id) ON DELETE CASCADE,
@@ -172,7 +172,7 @@ function initializeSQLite() {
         `);
         
         // Product orders
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS product_orders (
                 id SERIAL PRIMARY KEY,
                 product_id INTEGER NOT NULL REFERENCES finished_products(id),
@@ -185,7 +185,7 @@ function initializeSQLite() {
         `);
         
         // Stock movements
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS stock_movements (
                 id SERIAL PRIMARY KEY,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
@@ -199,7 +199,7 @@ function initializeSQLite() {
         `);
         
         // Stock check reminders
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS stock_check_reminders (
                 id SERIAL PRIMARY KEY,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
@@ -211,7 +211,7 @@ function initializeSQLite() {
         `);
         
         // Tasks
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS tasks (
                 id SERIAL PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
@@ -227,7 +227,7 @@ function initializeSQLite() {
         `);
         
         // Task comments
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS task_comments (
                 id SERIAL PRIMARY KEY,
                 task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -238,7 +238,7 @@ function initializeSQLite() {
         `);
         
         // Panel movements table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS panel_movements (
                 id SERIAL PRIMARY KEY,
                 panel_id INTEGER NOT NULL REFERENCES panels(id),
@@ -251,7 +251,7 @@ function initializeSQLite() {
         `);
         
         // Production settings table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS production_settings (
                 key VARCHAR(255) PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -260,7 +260,7 @@ function initializeSQLite() {
         `);
         
         // Weekly planner table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS weekly_planner (
                 id SERIAL PRIMARY KEY,
                 week_start_date DATE NOT NULL UNIQUE,
@@ -272,7 +272,7 @@ function initializeSQLite() {
         `);
         
         // Planner items table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS planner_items (
                 id SERIAL PRIMARY KEY,
                 planner_id INTEGER NOT NULL REFERENCES weekly_planner(id) ON DELETE CASCADE,
@@ -291,7 +291,7 @@ function initializeSQLite() {
         `);
         
         // Jobs/Sites table for timesheet
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS jobs (
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
@@ -302,7 +302,7 @@ function initializeSQLite() {
         `);
         
         // Timesheet entries table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS timesheet_entries (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES production_users(id),
@@ -319,7 +319,7 @@ function initializeSQLite() {
         `);
         
         // Timesheet notices table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS timesheet_notices (
                 id SERIAL PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
@@ -335,7 +335,7 @@ function initializeSQLite() {
         // Migrate bom_items table to add item_type and item_id columns if they don't exist
         // This MUST run before creating indexes on those columns
         try {
-            await pool.query(`
+            db.exec(`
                 DO $$ 
                 BEGIN 
                     -- Check if bom_items table exists and if item_type column is missing
@@ -398,38 +398,38 @@ function initializeSQLite() {
         }
         
         // Create indexes - only create item_id index if column exists
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id)`);
         
         // Check if item_id column exists before creating index
-        const itemIdColumnCheck = await pool.query(`
+        const itemIdColumnCheck = db.exec(`
             SELECT 1 FROM information_schema.columns 
             WHERE table_schema = 'public' AND table_name='bom_items' AND column_name='item_id'
         `);
         if (itemIdColumnCheck.rows.length > 0) {
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id)`);
+            db.exec(`CREATE INDEX IF NOT EXISTS idx_bom_item ON bom_items(item_id)`);
         }
         
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_component_bom_component ON component_bom_items(component_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_component_bom_stock ON component_bom_items(stock_item_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_component_movements_component ON component_movements(component_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
         
         // Migrate production_users role constraint to include 'staff'
         try {
             // Check if constraint needs updating by trying to find existing constraint
-            const constraintCheck = await pool.query(`
+            const constraintCheck = db.exec(`
                 SELECT constraint_name 
                 FROM information_schema.table_constraints 
                 WHERE table_name = 'production_users' 
@@ -440,7 +440,7 @@ function initializeSQLite() {
                 // Try to drop and recreate constraint
                 for (const constraint of constraintCheck.rows) {
                     try {
-                        await pool.query(`ALTER TABLE production_users DROP CONSTRAINT IF EXISTS ${constraint.constraint_name}`);
+                        db.exec(`ALTER TABLE production_users DROP CONSTRAINT IF EXISTS ${constraint.constraint_name}`);
                     } catch (e) {
                         // Constraint might be named differently or already dropped
                         console.log('⚠️ Could not drop constraint:', constraint.constraint_name, e.message);
@@ -450,11 +450,11 @@ function initializeSQLite() {
             
             // Add new constraint with staff role (will fail silently if already exists with correct values)
             try {
-                await pool.query(`
+                db.exec(`
                     ALTER TABLE production_users 
                     DROP CONSTRAINT IF EXISTS production_users_role_check
                 `);
-                await pool.query(`
+                db.exec(`
                     ALTER TABLE production_users 
                     ADD CONSTRAINT production_users_role_check 
                     CHECK (role IN ('admin', 'manager', 'staff'))
@@ -472,7 +472,7 @@ function initializeSQLite() {
         }
         
         // Migrate existing panels table to add new columns
-        await pool.query(`
+        db.exec(`
             DO $$ 
             BEGIN 
                 IF NOT EXISTS (
@@ -499,7 +499,7 @@ function initializeSQLite() {
         `);
         
         // Migrate existing planner_items table to add new columns
-        await pool.query(`
+        db.exec(`
             DO $$ 
             BEGIN 
                 IF NOT EXISTS (
@@ -566,13 +566,13 @@ function initializeSQLite() {
         `);
         
         // Insert default labour rate if not exists
-        const settingCheck = await pool.query(`SELECT COUNT(*) as count FROM production_settings WHERE key = 'labour_rate_per_hour'`);
+        const settingCheck = db.exec(`SELECT COUNT(*) as count FROM production_settings WHERE key = 'labour_rate_per_hour'`);
         if (parseInt(settingCheck.rows[0].count) === 0) {
-            await pool.query(`INSERT INTO production_settings (key, value) VALUES ('labour_rate_per_hour', '25.00')`);
+            db.exec(`INSERT INTO production_settings (key, value) VALUES ('labour_rate_per_hour', '25.00')`);
         }
         
         // Migrate timesheet_entries to add hour calculation columns
-        await pool.query(`
+        db.exec(`
             DO $$ 
             BEGIN 
                 IF NOT EXISTS (
@@ -620,7 +620,7 @@ function initializeSQLite() {
         `);
         
         // Create weekly_timesheets table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS weekly_timesheets (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES production_users(id),
@@ -634,7 +634,7 @@ function initializeSQLite() {
         `);
         
         // Create timesheet_daily_entries table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS timesheet_daily_entries (
                 id SERIAL PRIMARY KEY,
                 weekly_timesheet_id INTEGER NOT NULL REFERENCES weekly_timesheets(id),
@@ -654,7 +654,7 @@ function initializeSQLite() {
         `);
         
         // Create timesheet_amendments table
-        await pool.query(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS timesheet_amendments (
                 id SERIAL PRIMARY KEY,
                 timesheet_entry_id INTEGER NOT NULL REFERENCES timesheet_entries(id),
@@ -673,13 +673,13 @@ function initializeSQLite() {
         `);
         
         // Create indexes for new tables
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_user ON weekly_timesheets(user_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_week ON weekly_timesheets(week_start_date)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_entries_weekly ON timesheet_daily_entries(weekly_timesheet_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_entries_date ON timesheet_daily_entries(entry_date)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_user ON weekly_timesheets(user_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_weekly_timesheets_week ON weekly_timesheets(week_start_date)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_entries_weekly ON timesheet_daily_entries(weekly_timesheet_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_entries_date ON timesheet_daily_entries(entry_date)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status)`);
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
