@@ -138,7 +138,11 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
-            loadStock();
+            
+            // Wait a bit for DOM to be fully ready
+            setTimeout(() => {
+                loadStock();
+            }, 100);
         }
         
         async function loadStock() {
@@ -148,27 +152,40 @@
                 const categoryFilter = document.getElementById('categoryFilter');
                 const filterStatus = document.getElementById('filterStatus');
                 
-                // Get all unique categories from items
-                const categories = [...new Set(data.items.map(item => item.category).filter(c => c && c.trim()))].sort();
+                // Ensure data.items exists and is an array
+                if (!data || !data.items || !Array.isArray(data.items)) {
+                    console.error('Invalid stock data received:', data);
+                    stockList.innerHTML = '<p>Error: Invalid data received from server</p>';
+                    return;
+                }
+                
+                // Get all unique categories from items (safely handle missing category property)
+                const categories = [...new Set(data.items
+                    .map(item => item.category)
+                    .filter(c => c && typeof c === 'string' && c.trim())
+                )].sort();
                 
                 // Populate category filter dropdown if not already populated
-                if (categoryFilter && (categoryFilter.options.length === 1 || categoryFilter.options[0].value === '')) {
-                    const currentFilter = categoryFilter.value;
-                    categoryFilter.innerHTML = '<option value="">All Categories</option>';
-                    categories.forEach(cat => {
-                        const option = document.createElement('option');
-                        option.value = cat;
-                        option.textContent = cat;
-                        categoryFilter.appendChild(option);
-                    });
-                    // Restore filter if it was set
-                    if (currentFilter) {
-                        categoryFilter.value = currentFilter;
+                if (categoryFilter) {
+                    const currentFilter = categoryFilter.value || '';
+                    // Check if dropdown needs to be populated (only has "All Categories" or is empty)
+                    if (categoryFilter.options.length <= 1) {
+                        categoryFilter.innerHTML = '<option value="">All Categories</option>';
+                        categories.forEach(cat => {
+                            const option = document.createElement('option');
+                            option.value = cat;
+                            option.textContent = cat;
+                            categoryFilter.appendChild(option);
+                        });
+                        // Restore filter if it was set
+                        if (currentFilter) {
+                            categoryFilter.value = currentFilter;
+                        }
                     }
                 }
                 
                 // Filter items by selected category
-                const selectedCategory = categoryFilter?.value || '';
+                const selectedCategory = (categoryFilter && categoryFilter.value) ? categoryFilter.value : '';
                 let filteredItems = data.items;
                 if (selectedCategory) {
                     filteredItems = data.items.filter(item => item.category === selectedCategory);
@@ -208,20 +225,21 @@
                                 const currentQty = parseFloat(item.current_quantity) || 0;
                                 const minQty = parseFloat(item.min_quantity) || 0;
                                 const isLow = currentQty <= minQty;
+                                const category = item.category ? escapeHtml(String(item.category)) : null;
                                 return `
                                     <tr>
-                                        <td><strong>${escapeHtml(item.name)}</strong></td>
-                                        <td>${item.category ? `<span class="badge badge-info">${escapeHtml(item.category)}</span>` : '<span style="color: #999;">-</span>'}</td>
+                                        <td><strong>${escapeHtml(item.name || '')}</strong></td>
+                                        <td>${category ? `<span class="badge badge-info">${category}</span>` : '<span style="color: #999;">-</span>'}</td>
                                         <td>${currentQty.toFixed(2)}</td>
                                         <td>${minQty.toFixed(2)}</td>
-                                        <td>${escapeHtml(item.unit)}</td>
+                                        <td>${escapeHtml(item.unit || '')}</td>
                                         <td>${escapeHtml(item.location || '-')}</td>
-                                        <td>${formatCurrency(item.cost_per_unit_gbp)}</td>
+                                        <td>${formatCurrency(item.cost_per_unit_gbp || 0)}</td>
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                         <td>
                                             <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
-                                            ${currentUser.role === 'admin' ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                            ${currentUser.role === 'admin' ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                            ${currentUser && currentUser.role === 'admin' ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                            ${currentUser && currentUser.role === 'admin' ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                         </td>
                                     </tr>
                                 `;
@@ -230,7 +248,10 @@
                     </table>
                 `;
             } catch (error) {
-                document.getElementById('stockList').innerHTML = '<p>Error loading stock</p>';
+                console.error('Error loading stock:', error);
+                const errorMsg = error && error.message ? error.message : 'Unknown error';
+                document.getElementById('stockList').innerHTML = `<p style="color: #e74c3c;">Error loading stock: ${escapeHtml(errorMsg)}</p>`;
+                showAlert('Error loading stock: ' + errorMsg, 'error');
             }
         }
         
