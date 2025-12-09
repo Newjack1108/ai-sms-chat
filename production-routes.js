@@ -1533,9 +1533,20 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
         try {
+            // Clock out entries from all previous days (not just the user, but all users to prevent issues)
             await ProductionDatabase.autoClockOutOldEntries(userId);
+            
+            // Also check for entries that might overlap with the target date but haven't been clocked out
+            // This handles cases where an entry from a previous day might span into the target date
+            await ProductionDatabase.autoClockOutEntriesForDate(userId, dateStr);
         } catch (error) {
             console.error('Error auto-clocking-out old entries:', error);
+            console.error('Error details:', {
+                message: error.message,
+                stack: error.stack,
+                userId,
+                dateStr: entryDate.toISOString().split('T')[0]
+            });
             // Continue anyway - don't block the request
         }
         
@@ -1590,7 +1601,28 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         res.json({ success: true, entry: result.entry, amendment: result.amendment });
     } catch (error) {
         console.error('Create missing times error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create missing times entry' });
+        console.error('Error stack:', error.stack);
+        console.error('Request details:', {
+            userId,
+            job_id,
+            clock_in_time,
+            clock_out_time,
+            reason: reason ? 'provided' : 'missing'
+        });
+        
+        // Provide more detailed error message
+        let errorMessage = 'Failed to create missing times entry';
+        if (error.message) {
+            if (error.message.includes('FOREIGN KEY') || error.message.includes('foreign key')) {
+                errorMessage = 'Invalid job ID. Please select a valid job/site.';
+            } else if (error.message.includes('UNIQUE') || error.message.includes('duplicate')) {
+                errorMessage = 'A duplicate entry already exists. Please use "Edit Times" to amend it.';
+            } else {
+                errorMessage = `Failed to create missing times entry: ${error.message}`;
+            }
+        }
+        
+        res.status(500).json({ success: false, error: errorMessage, detail: process.env.NODE_ENV === 'development' ? error.message : undefined });
     }
 });
 

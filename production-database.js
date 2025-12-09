@@ -3751,6 +3751,129 @@ class ProductionDatabase {
         }
     }
     
+    // Auto-clock-out entries for a specific date (handles entries that might span into the date)
+    static async autoClockOutEntriesForDate(userId, targetDateStr) {
+        if (isPostgreSQL) {
+            // Find entries that:
+            // 1. Don't have a clock_out_time
+            // 2. Start before or on the target date
+            // 3. Are for this user
+            const entries = await pool.query(
+                `SELECT * FROM timesheet_entries
+                 WHERE user_id = $1
+                 AND clock_out_time IS NULL
+                 AND DATE(clock_in_time) <= $2::date`,
+                [userId, targetDateStr]
+            );
+            
+            if (entries.rows.length === 0) {
+                return [];
+            }
+            
+            const updatedEntries = [];
+            for (const entry of entries.rows) {
+                const clockInDate = new Date(entry.clock_in_time);
+                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                
+                // Set clock-out to end of the clock-in date (23:59:59.999)
+                const midnight = new Date(clockInDate);
+                midnight.setHours(23, 59, 59, 999);
+                const clockOutTime = midnight.toISOString();
+                
+                const updateResult = await pool.query(
+                    `UPDATE timesheet_entries 
+                     SET clock_out_time = $1, updated_at = $1
+                     WHERE id = $2
+                     RETURNING *`,
+                    [clockOutTime, entry.id]
+                );
+                
+                if (updateResult.rows.length > 0) {
+                    updatedEntries.push(updateResult.rows[0]);
+                    
+                    // Recalculate hours for this entry
+                    try {
+                        const dayOfWeek = clockInDate.getDay();
+                        const monday = new Date(clockInDate);
+                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                        monday.setHours(0, 0, 0, 0);
+                        const weekStartDate = monday.toISOString().split('T')[0];
+                        
+                        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                        const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                        const overnightAway = dailyEntry.overnight_away || false;
+                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                        
+                        await this.updateDailyEntry(dailyEntry.id, {
+                            timesheet_entry_id: entry.id,
+                            regular_hours: aggregatedHours.regular_hours,
+                            overtime_hours: aggregatedHours.overtime_hours,
+                            weekend_hours: aggregatedHours.weekend_hours,
+                            overnight_hours: aggregatedHours.overnight_hours,
+                            total_hours: aggregatedHours.total_hours
+                        });
+                    } catch (error) {
+                        console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                    }
+                }
+            }
+            
+            return updatedEntries;
+        } else {
+            // SQLite version
+            const entries = db.prepare(`
+                SELECT * FROM timesheet_entries
+                WHERE user_id = ?
+                AND clock_out_time IS NULL
+                AND DATE(clock_in_time) <= DATE(?)
+            `).all(userId, targetDateStr);
+            
+            const updatedEntries = [];
+            for (const entry of entries) {
+                const clockInDate = new Date(entry.clock_in_time);
+                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                const midnight = new Date(clockInDate);
+                midnight.setHours(23, 59, 59, 999);
+                const clockOutTime = midnight.toISOString();
+                
+                db.prepare(`
+                    UPDATE timesheet_entries 
+                    SET clock_out_time = ?, updated_at = ?
+                    WHERE id = ?
+                `).run(clockOutTime, clockOutTime, entry.id);
+                
+                // Recalculate hours
+                try {
+                    const dayOfWeek = clockInDate.getDay();
+                    const monday = new Date(clockInDate);
+                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                    monday.setHours(0, 0, 0, 0);
+                    const weekStartDate = monday.toISOString().split('T')[0];
+                    
+                    const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                    const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                    const overnightAway = dailyEntry.overnight_away || false;
+                    const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                    
+                    await this.updateDailyEntry(dailyEntry.id, {
+                        timesheet_entry_id: entry.id,
+                        regular_hours: aggregatedHours.regular_hours,
+                        overtime_hours: aggregatedHours.overtime_hours,
+                        weekend_hours: aggregatedHours.weekend_hours,
+                        overnight_hours: aggregatedHours.overnight_hours,
+                        total_hours: aggregatedHours.total_hours
+                    });
+                } catch (error) {
+                    console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                }
+                
+                updatedEntries.push({ ...entry, clock_out_time: clockOutTime });
+            }
+            
+            return updatedEntries;
+        }
+    }
+    
     static async clockOut(userId, latitude, longitude) {
         const clockOutTime = new Date().toISOString();
         let updatedEntry;
