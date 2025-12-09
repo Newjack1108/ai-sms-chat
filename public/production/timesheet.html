@@ -1604,17 +1604,48 @@
                     })
                 });
                 
-                if (data.success) {
-                    showAlert('Missing times request submitted successfully. It will be reviewed by a manager.', 'success');
-                    closeAddMissingTimesModal();
-                    // Reload the weekly timesheet
-                    await loadWeeklyTimesheet();
-                } else {
-                    showAlert(data.error || 'Failed to submit missing times request', 'error');
-                }
+                // If we get here, the request was successful
+                showAlert('Missing times request submitted successfully. It will be reviewed by a manager.', 'success');
+                closeAddMissingTimesModal();
+                // Reload the weekly timesheet
+                await loadWeeklyTimesheet(currentWeekStart || getCurrentWeekStart());
             } catch (error) {
                 console.error('Add missing times error:', error);
-                showAlert('Failed to submit missing times request', 'error');
+                // Extract error message from the error object (apiCall throws with the backend error message)
+                const errorMsg = error.message || 'Failed to submit missing times request';
+                showAlert(errorMsg, 'error');
+                
+                // If error suggests editing existing entry, try to find and offer to open edit modal
+                if (errorMsg.includes('overlapping') || errorMsg.includes('duplicate') || errorMsg.includes('Edit Times')) {
+                    // Try to find the existing entry for this date
+                    try {
+                        const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart || getCurrentWeekStart()}`);
+                        if (weeklyData && weeklyData.success && weeklyData.timesheetEntries) {
+                            const entryDate = new Date(clockInISO).toISOString().split('T')[0];
+                            const existingEntry = weeklyData.timesheetEntries.find(te => {
+                                const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+                                return teDate === entryDate && te.clock_out_time;
+                            });
+                            
+                            if (existingEntry) {
+                                // Offer to edit the existing entry after a delay
+                                setTimeout(() => {
+                                    if (confirm('An entry already exists for this period. Would you like to edit it instead?')) {
+                                        closeAddMissingTimesModal();
+                                        showAmendmentModal(
+                                            existingEntry.id,
+                                            existingEntry.clock_in_time,
+                                            existingEntry.clock_out_time
+                                        );
+                                    }
+                                }, 1500);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Error finding existing entry:', e);
+                        // Ignore error - just show the main error message
+                    }
+                }
             }
         });
         
