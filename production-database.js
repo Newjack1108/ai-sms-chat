@@ -3597,32 +3597,16 @@ class ProductionDatabase {
         }
     }
     
-    // Auto-clock-out entries that weren't clocked out at midnight of the clock-in date
-    // This prevents entries from spanning multiple days and causing overlap issues
-    static async autoClockOutOldEntries(userId = null) {
-        const now = new Date();
-        const today = new Date(now);
-        today.setHours(0, 0, 0, 0);
-        
+    // Cleanup all old unclosed entries (one-time cleanup for historical data)
+    // This fixes entries that were created before the auto-clock-out feature was added
+    static async cleanupAllOldUnclosedEntries() {
         if (isPostgreSQL) {
-            // Find entries that:
-            // 1. Don't have a clock_out_time
-            // 2. Clock-in date is before today (at least one day old)
-            // 3. Optionally filter by user_id if provided
-            // First, find the entries that need to be auto-clocked-out
-            let selectQuery = `
-                SELECT * FROM timesheet_entries
-                WHERE clock_out_time IS NULL
-                AND DATE(clock_in_time) < CURRENT_DATE
-            `;
-            const selectParams = [];
-            
-            if (userId) {
-                selectQuery += ` AND user_id = $1`;
-                selectParams.push(userId);
-            }
-            
-            const entriesToUpdate = await pool.query(selectQuery, selectParams);
+            // Find ALL entries that don't have a clock_out_time (regardless of date)
+            const entriesToUpdate = await pool.query(
+                `SELECT * FROM timesheet_entries
+                 WHERE clock_out_time IS NULL
+                 ORDER BY clock_in_time ASC`
+            );
             
             if (entriesToUpdate.rows.length === 0) {
                 return [];
@@ -3748,6 +3732,109 @@ class ProductionDatabase {
             }
             
             return updatedEntries;
+        }
+    }
+    
+    // Cleanup all old unclosed entries (one-time cleanup for historical data)
+    // This fixes entries that were created before the auto-clock-out feature was added
+    static async cleanupAllOldUnclosedEntries() {
+        console.log('Starting cleanup of all old unclosed timesheet entries...');
+        
+        if (isPostgreSQL) {
+            // Find ALL entries that don't have a clock_out_time (regardless of date)
+            const entriesToUpdate = await pool.query(
+                `SELECT * FROM timesheet_entries
+                 WHERE clock_out_time IS NULL
+                 ORDER BY clock_in_time ASC`
+            );
+            
+            if (entriesToUpdate.rows.length === 0) {
+                console.log('No old unclosed entries to cleanup');
+                return { count: 0, entries: [], errors: 0 };
+            }
+            
+            console.log(`Found ${entriesToUpdate.rows.length} old unclosed entries to cleanup`);
+            
+            const updatedEntries = [];
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // Process in batches to avoid timeout
+            const batchSize = 50;
+            for (let i = 0; i < entriesToUpdate.rows.length; i += batchSize) {
+                const batch = entriesToUpdate.rows.slice(i, i + batchSize);
+                
+                for (const entry of batch) {
+                    try {
+                        const clockInDate = new Date(entry.clock_in_time);
+                        // Set to end of the clock-in date (23:59:59.999)
+                        const midnight = new Date(clockInDate);
+                        midnight.setHours(23, 59, 59, 999);
+                        const clockOutTime = midnight.toISOString();
+                        
+                        const updateResult = await pool.query(
+                            `UPDATE timesheet_entries 
+                             SET clock_out_time = $1, updated_at = $1
+                             WHERE id = $2
+                             RETURNING *`,
+                            [clockOutTime, entry.id]
+                        );
+                        
+                        if (updateResult.rows.length > 0) {
+                            updatedEntries.push(updateResult.rows[0]);
+                            successCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Error cleaning up entry ${entry.id}:`, error);
+                        errorCount++;
+                    }
+                }
+            }
+            
+            console.log(`Cleanup complete: ${successCount} entries updated, ${errorCount} errors`);
+            return { count: successCount, entries: updatedEntries, errors: errorCount };
+        } else {
+            // SQLite version
+            const entries = db.prepare(`
+                SELECT * FROM timesheet_entries
+                WHERE clock_out_time IS NULL
+                ORDER BY clock_in_time ASC
+            `).all();
+            
+            if (entries.length === 0) {
+                console.log('No old unclosed entries to cleanup');
+                return { count: 0, entries: [], errors: 0 };
+            }
+            
+            console.log(`Found ${entries.length} old unclosed entries to cleanup`);
+            
+            const updatedEntries = [];
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (const entry of entries) {
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    db.prepare(`
+                        UPDATE timesheet_entries 
+                        SET clock_out_time = ?, updated_at = ?
+                        WHERE id = ?
+                    `).run(clockOutTime, clockOutTime, entry.id);
+                    
+                    updatedEntries.push({ ...entry, clock_out_time: clockOutTime });
+                    successCount++;
+                } catch (error) {
+                    console.error(`Error cleaning up entry ${entry.id}:`, error);
+                    errorCount++;
+                }
+            }
+            
+            console.log(`Cleanup complete: ${successCount} entries updated, ${errorCount} errors`);
+            return { count: successCount, entries: updatedEntries, errors: errorCount };
         }
     }
     

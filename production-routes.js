@@ -1374,6 +1374,23 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
     }
 });
 
+// Admin route to cleanup all old unclosed entries (one-time cleanup)
+router.post('/clock/cleanup-old-entries', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        console.log('Admin cleanup of old unclosed entries requested');
+        const result = await ProductionDatabase.cleanupAllOldUnclosedEntries();
+        res.json({ 
+            success: true, 
+            message: `Cleanup complete: ${result.count} entries updated, ${result.errors} errors`,
+            count: result.count,
+            errors: result.errors
+        });
+    } catch (error) {
+        console.error('Cleanup old entries error:', error);
+        res.status(500).json({ success: false, error: 'Failed to cleanup old entries: ' + error.message });
+    }
+});
+
 // Weekly timesheet routes
 router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
     try {
