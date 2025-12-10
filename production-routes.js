@@ -891,6 +891,31 @@ router.post('/products/:id/components', requireProductionAuth, requireAdmin, asy
     }
 });
 
+router.put('/products/:id/components/:compId', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const compId = parseInt(req.params.compId);
+        let { quantity_required, unit } = req.body;
+        
+        unit = unit ? unit.trim() : '';
+        
+        if (!quantity_required || !unit) {
+            return res.status(400).json({ success: false, error: 'Quantity and unit are required' });
+        }
+        
+        const component = await ProductionDatabase.updateProductComponent(
+            compId,
+            parseFloat(quantity_required),
+            unit
+        );
+        res.json({ success: true, component });
+    } catch (error) {
+        console.error('Update product component error:', error);
+        console.error('Error stack:', error.stack);
+        const errorMessage = error.message || 'Failed to update product component';
+        res.status(500).json({ success: false, error: errorMessage });
+    }
+});
+
 router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);

@@ -3598,6 +3598,37 @@ class ProductionDatabase {
         }
     }
     
+    static async updateProductComponent(compId, quantityRequired, unit) {
+        // Get product ID before updating
+        const comp = await this.getProductComponentById(compId);
+        if (!comp) {
+            throw new Error('Product component not found');
+        }
+        const productId = comp.product_id;
+        
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE product_components SET quantity_required = $1, unit = $2 WHERE id = $3 RETURNING *`,
+                [quantityRequired, unit, compId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE product_components SET quantity_required = ?, unit = ? WHERE id = ?`
+            ).run(quantityRequired, unit, compId);
+        }
+        
+        // Recalculate product cost after component change
+        try {
+            const updatedCost = await this.updateProductCost(productId);
+            console.log(`Updated product ${productId} cost to £${updatedCost} after updating component`);
+        } catch (error) {
+            console.error(`Error updating product cost for product ${productId} after updating component:`, error);
+            // Continue - don't throw, component was updated successfully
+        }
+        
+        return await this.getProductComponentById(compId);
+    }
+    
     static async deleteProductComponent(compId) {
         // Get product ID before deleting
         const comp = await this.getProductComponentById(compId);
