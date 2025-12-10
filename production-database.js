@@ -2180,6 +2180,10 @@ class ProductionDatabase {
             const components = await this.getProductComponents(productId);
             let totalCost = 0;
             
+            if (!components || components.length === 0) {
+                return 0;
+            }
+            
             for (const comp of components) {
                 try {
                     const compQty = parseFloat(comp.quantity_required || 0);
@@ -2189,6 +2193,8 @@ class ProductionDatabase {
                         if (stockItem) {
                             const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
                             totalCost += materialCost;
+                        } else {
+                            console.warn(`Raw material ${comp.component_id} not found for product ${productId}`);
                         }
                     } else if (comp.component_type === 'component') {
                         const componentCost = await this.calculateComponentTrueCost(comp.component_id);
@@ -2197,16 +2203,18 @@ class ProductionDatabase {
                         // Built item (panel) true cost (BOM + labour)
                         const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
                         totalCost += builtItemCost * compQty;
+                    } else {
+                        console.warn(`Unknown component type: ${comp.component_type} for component ${comp.id} in product ${productId}`);
                     }
                 } catch (compError) {
-                    console.error(`Error calculating cost for component ${comp.id} (type: ${comp.component_type}):`, compError);
+                    console.error(`Error calculating cost for component ${comp.id} (type: ${comp.component_type}, component_id: ${comp.component_id}) in product ${productId}:`, compError);
                     // Continue with other components - don't fail the whole calculation
                 }
             }
-            
             return totalCost;
         } catch (error) {
             console.error(`Error calculating product cost for product ${productId}:`, error);
+            console.error('Error stack:', error.stack);
             // Return 0 on error to prevent blocking operations
             return 0;
         }
@@ -3536,9 +3544,11 @@ class ProductionDatabase {
         // Recalculate product cost after component change
         // Wrap in try-catch so cost calculation failures don't block the component addition
         try {
-            await this.updateProductCost(productId);
+            const updatedCost = await this.updateProductCost(productId);
+            console.log(`Updated product ${productId} cost to £${updatedCost} after adding component`);
         } catch (error) {
             console.error(`Error updating product cost for product ${productId} after adding component:`, error);
+            console.error('Cost update error stack:', error.stack);
             // Continue - don't throw, component was added successfully
         }
         
@@ -3601,7 +3611,14 @@ class ProductionDatabase {
         
         // Recalculate product cost after component change
         if (productId) {
-            await this.updateProductCost(productId);
+            try {
+                const updatedCost = await this.updateProductCost(productId);
+                console.log(`Updated product ${productId} cost to £${updatedCost} after deleting component`);
+            } catch (error) {
+                console.error(`Error updating product cost for product ${productId} after deleting component:`, error);
+                console.error('Cost update error stack:', error.stack);
+                // Continue - don't throw, component was deleted successfully
+            }
         }
     }
     

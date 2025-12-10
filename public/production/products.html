@@ -298,6 +298,8 @@
                     });
                     showAlert('Component added');
                     viewComponents(currentProductId);
+                    // Refresh products list to show updated cost
+                    loadProducts();
                 } catch (error) {
                     showAlert(error.message, 'error');
                 }
@@ -330,6 +332,8 @@
                 await apiCall(`/products/${currentProductId}/components/${compId}`, { method: 'DELETE' });
                 showAlert('Component deleted');
                 viewComponents(currentProductId);
+                // Refresh products list to show updated cost
+                loadProducts();
             } catch (error) {
                 showAlert(error.message, 'error');
             }
