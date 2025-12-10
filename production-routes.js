@@ -902,6 +902,18 @@ router.delete('/products/:id/components/:compId', requireProductionAuth, require
     }
 });
 
+router.post('/products/:id/duplicate', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        const duplicatedProduct = await ProductionDatabase.duplicateProduct(productId);
+        res.json({ success: true, product: duplicatedProduct });
+    } catch (error) {
+        console.error('Duplicate product error:', error);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: error.message || 'Failed to duplicate product' });
+    }
+});
+
 // ============ MATERIAL REQUIREMENTS ROUTES ============
 
 router.post('/requirements/calculate', requireProductionAuth, async (req, res) => {

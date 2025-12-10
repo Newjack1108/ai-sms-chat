@@ -3622,6 +3622,45 @@ class ProductionDatabase {
         }
     }
     
+    static async duplicateProduct(productId) {
+        // Get the original product
+        const originalProduct = await this.getProductById(productId);
+        if (!originalProduct) {
+            throw new Error('Product not found');
+        }
+        
+        // Create new product with "(Copy)" suffix
+        const newProductName = `${originalProduct.name} (Copy)`;
+        const newProduct = await this.createProduct({
+            name: newProductName,
+            description: originalProduct.description,
+            product_type: originalProduct.product_type,
+            status: originalProduct.status || 'active'
+        });
+        
+        // Get all components from the original product
+        const components = await this.getProductComponents(productId);
+        
+        // Duplicate all components
+        for (const comp of components) {
+            try {
+                await this.addProductComponent(
+                    newProduct.id,
+                    comp.component_type,
+                    comp.component_id,
+                    parseFloat(comp.quantity_required || 0),
+                    comp.unit
+                );
+            } catch (error) {
+                console.error(`Error duplicating component ${comp.id} (type: ${comp.component_type}):`, error);
+                // Continue with other components - don't fail the whole duplication
+            }
+        }
+        
+        // Return the new product with updated cost
+        return await this.getProductById(newProduct.id);
+    }
+    
     // ============ PRODUCT ORDERS OPERATIONS ============
     
     static async createProductOrder(data) {
