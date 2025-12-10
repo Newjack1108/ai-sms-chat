@@ -5851,19 +5851,76 @@ class ProductionDatabase {
                     
                     // Get BOM for this panel
                     const bomItems = await this.getPanelBOM(panelId);
-                    for (const bomItem of bomItems) {
-                        const stockItemId = bomItem.stock_item_id;
-                        const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
-                        
-                        if (!rawMaterialsRequired[stockItemId]) {
-                            rawMaterialsRequired[stockItemId] = {
-                                stock_item_id: stockItemId,
-                                name: bomItem.stock_item_name,
-                                unit: bomItem.unit,
-                                total_quantity: 0
-                            };
+                    if (bomItems && Array.isArray(bomItems)) {
+                        for (const bomItem of bomItems) {
+                            if (!bomItem) continue;
+                            
+                            // Only process raw_material items from panel BOM
+                            // Components in panel BOM are handled separately when we process components
+                            if (bomItem.item_type === 'raw_material') {
+                                const stockItemId = parseInt(bomItem.item_id);
+                                if (!stockItemId || isNaN(stockItemId)) {
+                                    console.error(`Invalid item_id in panel BOM for raw_material: ${bomItem.item_id}`);
+                                    continue;
+                                }
+                                
+                                const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
+                                
+                                if (!rawMaterialsRequired[stockItemId]) {
+                                    rawMaterialsRequired[stockItemId] = {
+                                        stock_item_id: stockItemId,
+                                        name: bomItem.item_name || 'Unknown',
+                                        unit: bomItem.item_unit || bomItem.unit || 'unit',
+                                        total_quantity: 0
+                                    };
+                                }
+                                rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                            } else if (bomItem.item_type === 'component') {
+                                // Component in panel BOM - add to componentsRequired and process its BOM
+                                const componentId = parseInt(bomItem.item_id);
+                                if (!componentId || isNaN(componentId)) {
+                                    console.error(`Invalid item_id in panel BOM for component: ${bomItem.item_id}`);
+                                    continue;
+                                }
+                                
+                                const componentQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
+                                if (!componentsRequired[componentId]) {
+                                    componentsRequired[componentId] = 0;
+                                }
+                                componentsRequired[componentId] += componentQty;
+                                
+                                // Process component's BOM to get raw materials
+                                try {
+                                    const componentBomItems = await this.getComponentBOM(componentId);
+                                    if (componentBomItems && Array.isArray(componentBomItems) && componentBomItems.length > 0) {
+                                        for (const componentBomItem of componentBomItems) {
+                                            if (!componentBomItem || !componentBomItem.stock_item_id) continue;
+                                            
+                                            const stockItemId = parseInt(componentBomItem.stock_item_id);
+                                            if (!stockItemId || isNaN(stockItemId)) {
+                                                console.error(`Invalid stock_item_id in component BOM: ${componentBomItem.stock_item_id}`);
+                                                continue;
+                                            }
+                                            
+                                            const materialQty = parseFloat(componentBomItem.quantity_required || 0) * componentQty;
+                                            
+                                            if (!rawMaterialsRequired[stockItemId]) {
+                                                rawMaterialsRequired[stockItemId] = {
+                                                    stock_item_id: stockItemId,
+                                                    name: componentBomItem.stock_item_name || 'Unknown',
+                                                    unit: componentBomItem.stock_item_unit || componentBomItem.unit || 'unit',
+                                                    total_quantity: 0
+                                                };
+                                            }
+                                            rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error(`Error processing BOM for component ${componentId} in panel BOM:`, error);
+                                    // Continue - component might not have a BOM
+                                }
+                            }
                         }
-                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
                     }
                 } else if (comp.component_type === 'component') {
                     const componentId = comp.component_id;
@@ -5873,31 +5930,61 @@ class ProductionDatabase {
                     componentsRequired[componentId] += totalQty;
                     
                     // Get BOM for this component
-                    const bomItems = await this.getComponentBOM(componentId);
-                    for (const bomItem of bomItems) {
-                        const stockItemId = bomItem.stock_item_id;
-                        const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
-                        
-                        if (!rawMaterialsRequired[stockItemId]) {
+                    try {
+                        const bomItems = await this.getComponentBOM(componentId);
+                        if (bomItems && Array.isArray(bomItems) && bomItems.length > 0) {
+                            for (const bomItem of bomItems) {
+                                if (!bomItem || !bomItem.stock_item_id) continue;
+                                
+                                const stockItemId = parseInt(bomItem.stock_item_id);
+                                if (!stockItemId || isNaN(stockItemId)) {
+                                    console.error(`Invalid stock_item_id in component BOM: ${bomItem.stock_item_id}`);
+                                    continue;
+                                }
+                                
+                                const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
+                                
+                                if (!rawMaterialsRequired[stockItemId]) {
+                                    rawMaterialsRequired[stockItemId] = {
+                                        stock_item_id: stockItemId,
+                                        name: bomItem.stock_item_name || 'Unknown',
+                                        unit: bomItem.stock_item_unit || bomItem.unit || 'unit',
+                                        total_quantity: 0
+                                    };
+                                }
+                                rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error getting BOM for component ${componentId}:`, error);
+                        console.error('Error stack:', error.stack);
+                        // Continue - component might not have a BOM or there was an error
+                    }
+                } else if (comp.component_type === 'raw_material') {
+                    const stockItemId = parseInt(comp.component_id);
+                    if (!stockItemId || isNaN(stockItemId)) {
+                        console.error(`Invalid stock_item_id for raw_material component: ${comp.component_id}`);
+                        continue;
+                    }
+                    
+                    if (!rawMaterialsRequired[stockItemId]) {
+                        try {
+                            const stockItem = await this.getStockItemById(stockItemId);
                             rawMaterialsRequired[stockItemId] = {
                                 stock_item_id: stockItemId,
-                                name: bomItem.stock_item_name,
-                                unit: bomItem.unit,
+                                name: stockItem ? stockItem.name : 'Unknown',
+                                unit: comp.unit || 'unit',
+                                total_quantity: 0
+                            };
+                        } catch (error) {
+                            console.error(`Error getting stock item ${stockItemId}:`, error);
+                            rawMaterialsRequired[stockItemId] = {
+                                stock_item_id: stockItemId,
+                                name: 'Unknown',
+                                unit: comp.unit || 'unit',
                                 total_quantity: 0
                             };
                         }
-                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
-                    }
-                } else if (comp.component_type === 'raw_material') {
-                    const stockItemId = comp.component_id;
-                    if (!rawMaterialsRequired[stockItemId]) {
-                        const stockItem = await this.getStockItemById(stockItemId);
-                        rawMaterialsRequired[stockItemId] = {
-                            stock_item_id: stockItemId,
-                            name: stockItem ? stockItem.name : 'Unknown',
-                            unit: comp.unit,
-                            total_quantity: 0
-                        };
                     }
                     rawMaterialsRequired[stockItemId].total_quantity += totalQty;
                     
@@ -5925,14 +6012,21 @@ class ProductionDatabase {
                 materials: []
             };
             
-            for (const bomItem of bomItems) {
-                const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
-                panelBreakdown.materials.push({
-                    stock_item_id: bomItem.stock_item_id,
-                    name: bomItem.stock_item_name,
-                    quantity: materialQty,
-                    unit: bomItem.unit
-                });
+            if (bomItems && Array.isArray(bomItems)) {
+                for (const bomItem of bomItems) {
+                    if (!bomItem) continue;
+                    
+                    // Only include raw_material items in breakdown
+                    if (bomItem.item_type === 'raw_material') {
+                        const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
+                        panelBreakdown.materials.push({
+                            stock_item_id: parseInt(bomItem.item_id),
+                            name: bomItem.item_name || 'Unknown',
+                            quantity: materialQty,
+                            unit: bomItem.item_unit || bomItem.unit || 'unit'
+                        });
+                    }
+                }
             }
             
             breakdown.by_panel.push(panelBreakdown);
@@ -5982,21 +6076,42 @@ class ProductionDatabase {
         const materialsArray = [];
         let totalCost = 0;
         for (const [stockItemId, data] of Object.entries(rawMaterialsRequired)) {
-            const stockItem = await this.getStockItemById(stockItemId);
-            const available = parseFloat(stockItem ? stockItem.current_quantity : 0);
-            const shortfall = Math.max(0, data.total_quantity - available);
-            const cost = parseFloat(stockItem ? stockItem.cost_per_unit_gbp : 0) * data.total_quantity;
-            totalCost += cost;
+            // Validate stockItemId before using it
+            const itemId = parseInt(stockItemId);
+            if (!itemId || isNaN(itemId)) {
+                console.error(`Invalid stock_item_id in rawMaterialsRequired: ${stockItemId}`);
+                continue;
+            }
             
-            materialsArray.push({
-                stock_item_id: parseInt(stockItemId),
-                name: data.name,
-                total_quantity: data.total_quantity,
-                unit: data.unit,
-                available: available,
-                shortfall: shortfall,
-                cost_gbp: cost
-            });
+            try {
+                const stockItem = await this.getStockItemById(itemId);
+                const available = parseFloat(stockItem ? stockItem.current_quantity : 0);
+                const shortfall = Math.max(0, data.total_quantity - available);
+                const cost = parseFloat(stockItem ? stockItem.cost_per_unit_gbp : 0) * data.total_quantity;
+                totalCost += cost;
+                
+                materialsArray.push({
+                    stock_item_id: itemId,
+                    name: data.name || 'Unknown',
+                    total_quantity: data.total_quantity,
+                    unit: data.unit || 'unit',
+                    available: available,
+                    shortfall: shortfall,
+                    cost_gbp: cost
+                });
+            } catch (error) {
+                console.error(`Error getting stock item ${itemId}:`, error);
+                // Continue with default values
+                materialsArray.push({
+                    stock_item_id: itemId,
+                    name: data.name || 'Unknown',
+                    total_quantity: data.total_quantity,
+                    unit: data.unit || 'unit',
+                    available: 0,
+                    shortfall: data.total_quantity,
+                    cost_gbp: 0
+                });
+            }
         }
         
         // Calculate labour requirements
