@@ -369,30 +369,106 @@
                 const requirements = result.requirements;
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
+                const totalMaterialCost = requirements.total_cost_gbp || 0;
+                const totalLabourCost = parseFloat(requirements.total_labour_cost_gbp || 0);
+                const combinedTotal = totalMaterialCost + totalLabourCost;
+                
                 modal.innerHTML = `
-                    <div class="modal-content" style="max-width: 800px;">
+                    <div class="modal-content modal-wide">
                         <div class="modal-header">
                             <h3>Quote Requirements</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
-                            <h4>Panels Required</h4>
+                            <div class="alert alert-info">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Material Cost:</strong> ${formatCurrency(totalMaterialCost)}
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Labour Cost:</strong> ${formatCurrency(totalLabourCost)}
+                                </div>
+                                <div style="border-top: 1px solid rgba(255,255,255,0.3); padding-top: 10px; font-size: 1.1em;">
+                                    <strong>Combined Total Cost:</strong> ${formatCurrency(combinedTotal)}
+                                </div>
+                            </div>
+                            
+                            <h4>Built Items Required</h4>
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>Panel</th>
-                                        <th>Quantity</th>
+                                        <th>Built Item</th>
+                                        <th>Total Quantity</th>
+                                        <th>In Stock</th>
+                                        <th>To Build</th>
+                                        <th>Labour Hours/Unit</th>
+                                        <th>Total Labour Hours</th>
+                                        <th>Labour Cost</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${requirements.panels_required.map(p => `
+                                    ${(!requirements.panels_required || requirements.panels_required.length === 0) ? '<tr><td colspan="7">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                        const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'built_item' && b.item_id === p.panel_id);
+                                        const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                        return `
                                         <tr>
-                                            <td>${p.panel_name}</td>
+                                            <td><strong>${p.panel_name}</strong></td>
                                             <td>${p.total_quantity.toFixed(2)}</td>
+                                            <td>${(p.available || 0).toFixed(2)}</td>
+                                            <td><span class="badge ${(p.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(p.to_build || 0).toFixed(2)}</span></td>
+                                            <td>${(p.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                            <td>${(p.total_labour_hours || 0).toFixed(2)}</td>
+                                            <td>${formatCurrency(labourCost)}</td>
                                         </tr>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                 </tbody>
                             </table>
+                            
+                            ${requirements.components_required && requirements.components_required.length > 0 ? `
+                            <h4>Components Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Total Quantity</th>
+                                        <th>In Stock</th>
+                                        <th>To Build</th>
+                                        <th>Labour Hours/Unit</th>
+                                        <th>Total Labour Hours</th>
+                                        <th>Labour Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.components_required.map(c => {
+                                        const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'component' && b.item_id === c.component_id);
+                                        const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                        return `
+                                        <tr>
+                                            <td><strong>${c.component_name}</strong></td>
+                                            <td>${c.total_quantity.toFixed(2)}</td>
+                                            <td>${(c.available || 0).toFixed(2)}</td>
+                                            <td><span class="badge ${(c.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(c.to_build || 0).toFixed(2)}</span></td>
+                                            <td>${(c.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                            <td>${(c.total_labour_hours || 0).toFixed(2)}</td>
+                                            <td>${formatCurrency(labourCost)}</td>
+                                        </tr>
+                                    `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            
+                            ${requirements.labour_requirements && requirements.labour_requirements.total_hours > 0 ? `
+                            <h4>Labour Requirements Summary</h4>
+                            <div class="alert alert-warning">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Labour Hours Required:</strong> ${requirements.labour_requirements.total_hours.toFixed(2)} hours
+                                </div>
+                                <div>
+                                    <strong>Total Labour Cost:</strong> ${formatCurrency(requirements.labour_requirements.total_cost_gbp)}
+                                </div>
+                            </div>
+                            ` : '<p style="color: #6c757d;">No labour required - all items are in stock.</p>'}
                             
                             <h4>Raw Materials Required</h4>
                             <table class="table">
@@ -469,30 +545,125 @@
                 
                 let totalCost = 0;
                 requirements.raw_materials_required.forEach(m => totalCost += parseFloat(m.cost_gbp || 0));
+                const totalLabourCost = parseFloat(requirements.total_labour_cost_gbp || 0);
+                const totalMaterialCost = requirements.total_cost_gbp || totalCost;
+                const combinedTotal = totalMaterialCost + totalLabourCost;
                 
                 resultDiv.innerHTML = `
                     <h3>Material Requirements Summary</h3>
                     <div class="alert alert-info">
-                        <strong>Total Estimated Cost:</strong> ${formatCurrency(requirements.total_cost_gbp || totalCost)}
+                        <div style="margin-bottom: 10px;">
+                            <strong>Total Material Cost:</strong> ${formatCurrency(totalMaterialCost)}
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <strong>Total Labour Cost:</strong> ${formatCurrency(totalLabourCost)}
+                        </div>
+                        <div style="border-top: 1px solid rgba(255,255,255,0.3); padding-top: 10px; font-size: 1.1em;">
+                            <strong>Combined Total Cost:</strong> ${formatCurrency(combinedTotal)}
+                        </div>
                     </div>
                     
-                    <h4>Panels Required</h4>
+                    <h4>Built Items Required</h4>
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Panel</th>
+                                <th>Built Item</th>
                                 <th>Total Quantity</th>
+                                <th>In Stock</th>
+                                <th>To Build</th>
+                                <th>Labour Hours/Unit</th>
+                                <th>Total Labour Hours</th>
+                                <th>Labour Cost</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="2">No panels required</td></tr>' : requirements.panels_required.map(p => `
+                            ${(!requirements.panels_required || requirements.panels_required.length === 0) ? '<tr><td colspan="7">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'built_item' && b.item_id === p.panel_id);
+                                const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                return `
                                 <tr>
-                                    <td>${p.panel_name}</td>
+                                    <td><strong>${p.panel_name}</strong></td>
                                     <td>${p.total_quantity.toFixed(2)}</td>
+                                    <td>${(p.available || 0).toFixed(2)}</td>
+                                    <td><span class="badge ${(p.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(p.to_build || 0).toFixed(2)}</span></td>
+                                    <td>${(p.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                    <td>${(p.total_labour_hours || 0).toFixed(2)}</td>
+                                    <td>${formatCurrency(labourCost)}</td>
+                                </tr>
+                            `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                    
+                    ${requirements.components_required && requirements.components_required.length > 0 ? `
+                    <h4>Components Required</h4>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Component</th>
+                                <th>Total Quantity</th>
+                                <th>In Stock</th>
+                                <th>To Build</th>
+                                <th>Labour Hours/Unit</th>
+                                <th>Total Labour Hours</th>
+                                <th>Labour Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${requirements.components_required.map(c => {
+                                const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'component' && b.item_id === c.component_id);
+                                const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                return `
+                                <tr>
+                                    <td><strong>${c.component_name}</strong></td>
+                                    <td>${c.total_quantity.toFixed(2)}</td>
+                                    <td>${(c.available || 0).toFixed(2)}</td>
+                                    <td><span class="badge ${(c.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(c.to_build || 0).toFixed(2)}</span></td>
+                                    <td>${(c.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                    <td>${(c.total_labour_hours || 0).toFixed(2)}</td>
+                                    <td>${formatCurrency(labourCost)}</td>
+                                </tr>
+                            `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                    ` : ''}
+                    
+                    ${requirements.labour_requirements && requirements.labour_requirements.total_hours > 0 ? `
+                    <h4>Labour Requirements Summary</h4>
+                    <div class="alert alert-warning">
+                        <div style="margin-bottom: 10px;">
+                            <strong>Total Labour Hours Required:</strong> ${requirements.labour_requirements.total_hours.toFixed(2)} hours
+                        </div>
+                        <div>
+                            <strong>Total Labour Cost:</strong> ${formatCurrency(requirements.labour_requirements.total_cost_gbp)}
+                        </div>
+                    </div>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Item Type</th>
+                                <th>Item Name</th>
+                                <th>Quantity to Build</th>
+                                <th>Labour Hours/Unit</th>
+                                <th>Total Labour Hours</th>
+                                <th>Labour Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${requirements.labour_requirements.breakdown.map(item => `
+                                <tr>
+                                    <td><span class="badge badge-info">${item.item_type === 'built_item' ? 'Built Item' : 'Component'}</span></td>
+                                    <td><strong>${item.item_name}</strong></td>
+                                    <td>${item.quantity_to_build.toFixed(2)}</td>
+                                    <td>${item.labour_hours_per_unit.toFixed(2)}</td>
+                                    <td>${item.total_labour_hours.toFixed(2)}</td>
+                                    <td>${formatCurrency(item.labour_cost_gbp)}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
                     </table>
+                    ` : '<p style="color: #6c757d;">No labour required - all items are in stock.</p>'}
                     
                     <h4>Raw Materials Required</h4>
                     <table class="table">
@@ -540,30 +711,106 @@
                 const requirements = result.requirements;
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
+                const totalMaterialCost = requirements.total_cost_gbp || 0;
+                const totalLabourCost = parseFloat(requirements.total_labour_cost_gbp || 0);
+                const combinedTotal = totalMaterialCost + totalLabourCost;
+                
                 modal.innerHTML = `
-                    <div class="modal-content" style="max-width: 800px;">
+                    <div class="modal-content modal-wide">
                         <div class="modal-header">
                             <h3>Order Requirements</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
-                            <h4>Panels Required</h4>
+                            <div class="alert alert-info">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Material Cost:</strong> ${formatCurrency(totalMaterialCost)}
+                                </div>
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Labour Cost:</strong> ${formatCurrency(totalLabourCost)}
+                                </div>
+                                <div style="border-top: 1px solid rgba(255,255,255,0.3); padding-top: 10px; font-size: 1.1em;">
+                                    <strong>Combined Total Cost:</strong> ${formatCurrency(combinedTotal)}
+                                </div>
+                            </div>
+                            
+                            <h4>Built Items Required</h4>
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>Panel</th>
-                                        <th>Quantity</th>
+                                        <th>Built Item</th>
+                                        <th>Total Quantity</th>
+                                        <th>In Stock</th>
+                                        <th>To Build</th>
+                                        <th>Labour Hours/Unit</th>
+                                        <th>Total Labour Hours</th>
+                                        <th>Labour Cost</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${requirements.panels_required.map(p => `
+                                    ${(!requirements.panels_required || requirements.panels_required.length === 0) ? '<tr><td colspan="7">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                        const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'built_item' && b.item_id === p.panel_id);
+                                        const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                        return `
                                         <tr>
-                                            <td>${p.panel_name}</td>
+                                            <td><strong>${p.panel_name}</strong></td>
                                             <td>${p.total_quantity.toFixed(2)}</td>
+                                            <td>${(p.available || 0).toFixed(2)}</td>
+                                            <td><span class="badge ${(p.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(p.to_build || 0).toFixed(2)}</span></td>
+                                            <td>${(p.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                            <td>${(p.total_labour_hours || 0).toFixed(2)}</td>
+                                            <td>${formatCurrency(labourCost)}</td>
                                         </tr>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                 </tbody>
                             </table>
+                            
+                            ${requirements.components_required && requirements.components_required.length > 0 ? `
+                            <h4>Components Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Total Quantity</th>
+                                        <th>In Stock</th>
+                                        <th>To Build</th>
+                                        <th>Labour Hours/Unit</th>
+                                        <th>Total Labour Hours</th>
+                                        <th>Labour Cost</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.components_required.map(c => {
+                                        const labourItem = requirements.labour_requirements?.breakdown?.find(b => b.item_type === 'component' && b.item_id === c.component_id);
+                                        const labourCost = labourItem ? labourItem.labour_cost_gbp : 0;
+                                        return `
+                                        <tr>
+                                            <td><strong>${c.component_name}</strong></td>
+                                            <td>${c.total_quantity.toFixed(2)}</td>
+                                            <td>${(c.available || 0).toFixed(2)}</td>
+                                            <td><span class="badge ${(c.to_build || 0) > 0 ? 'badge-danger' : 'badge-success'}">${(c.to_build || 0).toFixed(2)}</span></td>
+                                            <td>${(c.labour_hours_per_unit || 0).toFixed(2)}</td>
+                                            <td>${(c.total_labour_hours || 0).toFixed(2)}</td>
+                                            <td>${formatCurrency(labourCost)}</td>
+                                        </tr>
+                                    `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            
+                            ${requirements.labour_requirements && requirements.labour_requirements.total_hours > 0 ? `
+                            <h4>Labour Requirements Summary</h4>
+                            <div class="alert alert-warning">
+                                <div style="margin-bottom: 10px;">
+                                    <strong>Total Labour Hours Required:</strong> ${requirements.labour_requirements.total_hours.toFixed(2)} hours
+                                </div>
+                                <div>
+                                    <strong>Total Labour Cost:</strong> ${formatCurrency(requirements.labour_requirements.total_cost_gbp)}
+                                </div>
+                            </div>
+                            ` : '<p style="color: #6c757d;">No labour required - all items are in stock.</p>'}
                             
                             <h4>Raw Materials Required</h4>
                             <table class="table">

@@ -5813,6 +5813,7 @@ class ProductionDatabase {
     static async calculateMaterialRequirements(orders) {
         // orders: array of {product_id, quantity}
         const panelsRequired = {};
+        const componentsRequired = {};
         const rawMaterialsRequired = {};
         const breakdown = {
             by_product: [],
@@ -5835,7 +5836,7 @@ class ProductionDatabase {
             for (const comp of components) {
                 const totalQty = parseFloat(comp.quantity_required) * order.quantity;
                 
-                if (comp.component_type === 'panel') {
+                if (comp.component_type === 'panel' || comp.component_type === 'built_item') {
                     const panelId = comp.component_id;
                     if (!panelsRequired[panelId]) {
                         panelsRequired[panelId] = 0;
@@ -5850,6 +5851,29 @@ class ProductionDatabase {
                     
                     // Get BOM for this panel
                     const bomItems = await this.getPanelBOM(panelId);
+                    for (const bomItem of bomItems) {
+                        const stockItemId = bomItem.stock_item_id;
+                        const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
+                        
+                        if (!rawMaterialsRequired[stockItemId]) {
+                            rawMaterialsRequired[stockItemId] = {
+                                stock_item_id: stockItemId,
+                                name: bomItem.stock_item_name,
+                                unit: bomItem.unit,
+                                total_quantity: 0
+                            };
+                        }
+                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                    }
+                } else if (comp.component_type === 'component') {
+                    const componentId = comp.component_id;
+                    if (!componentsRequired[componentId]) {
+                        componentsRequired[componentId] = 0;
+                    }
+                    componentsRequired[componentId] += totalQty;
+                    
+                    // Get BOM for this component
+                    const bomItems = await this.getComponentBOM(componentId);
                     for (const bomItem of bomItems) {
                         const stockItemId = bomItem.stock_item_id;
                         const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
@@ -5914,14 +5938,43 @@ class ProductionDatabase {
             breakdown.by_panel.push(panelBreakdown);
         }
         
-        // Convert panelsRequired to array
+        // Convert panelsRequired to array with stock and labour info
         const panelsArray = [];
         for (const [panelId, totalQty] of Object.entries(panelsRequired)) {
             const panel = await this.getPanelById(panelId);
+            const available = parseFloat(panel ? panel.built_quantity || 0 : 0);
+            const shortfall = Math.max(0, totalQty - available);
+            const labourHoursPerUnit = parseFloat(panel ? panel.labour_hours || 0 : 0);
+            const totalLabourHours = labourHoursPerUnit * shortfall;
+            
             panelsArray.push({
                 panel_id: parseInt(panelId),
                 panel_name: panel ? panel.name : 'Unknown',
-                total_quantity: totalQty
+                total_quantity: totalQty,
+                available: available,
+                to_build: shortfall,
+                labour_hours_per_unit: labourHoursPerUnit,
+                total_labour_hours: totalLabourHours
+            });
+        }
+        
+        // Convert componentsRequired to array with stock and labour info
+        const componentsArray = [];
+        for (const [componentId, totalQty] of Object.entries(componentsRequired)) {
+            const component = await this.getComponentById(componentId);
+            const available = parseFloat(component ? component.built_quantity || 0 : 0);
+            const shortfall = Math.max(0, totalQty - available);
+            const labourHoursPerUnit = parseFloat(component ? component.labour_hours || 0 : 0);
+            const totalLabourHours = labourHoursPerUnit * shortfall;
+            
+            componentsArray.push({
+                component_id: parseInt(componentId),
+                component_name: component ? component.name : 'Unknown',
+                total_quantity: totalQty,
+                available: available,
+                to_build: shortfall,
+                labour_hours_per_unit: labourHoursPerUnit,
+                total_labour_hours: totalLabourHours
             });
         }
         
@@ -5946,11 +5999,62 @@ class ProductionDatabase {
             });
         }
         
+        // Calculate labour requirements
+        const labourRate = parseFloat(await this.getSetting('labour_rate_per_hour') || 25);
+        const labourBreakdown = [];
+        let totalLabourHours = 0;
+        let totalLabourCost = 0;
+        
+        // Add built items labour
+        for (const panel of panelsArray) {
+            if (panel.to_build > 0 && panel.labour_hours_per_unit > 0) {
+                const labourCost = panel.total_labour_hours * labourRate;
+                totalLabourHours += panel.total_labour_hours;
+                totalLabourCost += labourCost;
+                
+                labourBreakdown.push({
+                    item_type: 'built_item',
+                    item_id: panel.panel_id,
+                    item_name: panel.panel_name,
+                    quantity_to_build: panel.to_build,
+                    labour_hours_per_unit: panel.labour_hours_per_unit,
+                    total_labour_hours: panel.total_labour_hours,
+                    labour_cost_gbp: labourCost
+                });
+            }
+        }
+        
+        // Add components labour
+        for (const component of componentsArray) {
+            if (component.to_build > 0 && component.labour_hours_per_unit > 0) {
+                const labourCost = component.total_labour_hours * labourRate;
+                totalLabourHours += component.total_labour_hours;
+                totalLabourCost += labourCost;
+                
+                labourBreakdown.push({
+                    item_type: 'component',
+                    item_id: component.component_id,
+                    item_name: component.component_name,
+                    quantity_to_build: component.to_build,
+                    labour_hours_per_unit: component.labour_hours_per_unit,
+                    total_labour_hours: component.total_labour_hours,
+                    labour_cost_gbp: labourCost
+                });
+            }
+        }
+        
         return {
             panels_required: panelsArray,
+            components_required: componentsArray,
             raw_materials_required: materialsArray,
+            labour_requirements: {
+                total_hours: totalLabourHours,
+                total_cost_gbp: totalLabourCost,
+                breakdown: labourBreakdown
+            },
             breakdown: breakdown,
-            total_cost_gbp: totalCost
+            total_cost_gbp: totalCost,
+            total_labour_cost_gbp: totalLabourCost
         };
     }
     
