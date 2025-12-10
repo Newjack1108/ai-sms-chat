@@ -67,7 +67,7 @@
     
     <!-- Components Modal -->
     <div id="componentsModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
                 <h3 id="componentsModalTitle">Product Components</h3>
                 <button class="modal-close" onclick="hideModal('componentsModal')">&times;</button>
@@ -238,8 +238,10 @@
                                     <td>${comp.unit}</td>
                                     ${currentUser.role === 'admin' ? `
                                         <td>
-                                            <button onclick="editComponent(${comp.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                            <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
+                                            <div style="display: flex; gap: 8px;">
+                                                <button onclick="editComponent(${comp.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                                <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
+                                            </div>
                                         </td>
                                     ` : ''}
                                 </tr>

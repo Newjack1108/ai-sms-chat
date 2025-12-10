@@ -301,6 +301,10 @@ body.dashboard-page {
     overflow-y: auto;
 }
 
+.modal-content.modal-wide {
+    max-width: 900px;
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
