@@ -702,6 +702,44 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Update product_components constraint if it doesn't include 'built_item'
+        // This handles cases where the table was created with an older constraint
+        try {
+            // Find all CHECK constraints on component_type column
+            const constraintCheck = await pool.query(`
+                SELECT tc.constraint_name
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.constraint_column_usage ccu 
+                    ON tc.constraint_name = ccu.constraint_name
+                WHERE tc.table_name = 'product_components' 
+                AND tc.constraint_type = 'CHECK'
+                AND ccu.column_name = 'component_type'
+            `);
+            
+            if (constraintCheck.rows.length > 0) {
+                // Drop existing constraint(s) - PostgreSQL auto-names them
+                for (const row of constraintCheck.rows) {
+                    try {
+                        await pool.query(`ALTER TABLE product_components DROP CONSTRAINT IF EXISTS ${row.constraint_name}`);
+                    } catch (dropError) {
+                        // Constraint might not exist or have different name, continue
+                        console.log(`Note: Could not drop constraint ${row.constraint_name}:`, dropError.message);
+                    }
+                }
+                // Add new constraint with all three values
+                await pool.query(`
+                    ALTER TABLE product_components 
+                    ADD CONSTRAINT product_components_component_type_check 
+                    CHECK (component_type IN ('raw_material', 'component', 'built_item'))
+                `);
+                console.log('✅ Updated product_components constraint to include built_item');
+            }
+        } catch (error) {
+            // If constraint update fails, it might already have the correct constraint
+            // or the table might not exist yet (will be created on next run)
+            console.log('Note: Could not update product_components constraint (this is OK if table is new):', error.message);
+        }
+        
         // Product orders
         await pool.query(`
             CREATE TABLE IF NOT EXISTS product_orders (

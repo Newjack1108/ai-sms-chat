@@ -853,15 +853,26 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
 router.post('/products/:id/components', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { component_type, component_id, quantity_required, unit } = req.body;
+        let { component_type, component_id, quantity_required, unit } = req.body;
+        
+        // Trim and normalize component_type to ensure it matches database constraint
+        component_type = component_type ? component_type.trim().toLowerCase() : '';
+        unit = unit ? unit.trim() : '';
         
         if (!component_type || !component_id || !quantity_required || !unit) {
             return res.status(400).json({ success: false, error: 'All component fields are required' });
         }
         
-        if (!['raw_material', 'component', 'built_item'].includes(component_type)) {
-            return res.status(400).json({ success: false, error: 'Invalid component type. Must be raw_material, component, or built_item' });
+        // Validate component_type matches database constraint exactly
+        const validTypes = ['raw_material', 'component', 'built_item'];
+        if (!validTypes.includes(component_type)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: `Invalid component type "${component_type}". Must be one of: ${validTypes.join(', ')}` 
+            });
         }
+        
+        console.log('Adding product component:', { productId, component_type, component_id, quantity_required, unit });
         
         const component = await ProductionDatabase.addProductComponent(
             productId,
