@@ -2119,42 +2119,59 @@ class ProductionDatabase {
     
     // Calculate true cost (BOM + labour)
     static async calculatePanelTrueCost(panelId) {
-        const panel = await this.getPanelById(panelId);
-        if (!panel) return 0;
-        
-        const bomValue = await this.calculateBOMValue(panelId);
-        const labourHours = parseFloat(panel.labour_hours || 0);
-        const labourRate = await this.getSetting('labour_rate_per_hour');
-        const labourCost = labourHours * parseFloat(labourRate || 25);
-        
-        return bomValue + labourCost;
+        try {
+            const panel = await this.getPanelById(panelId);
+            if (!panel) return 0;
+            
+            const bomValue = await this.calculateBOMValue(panelId);
+            const labourHours = parseFloat(panel.labour_hours || 0);
+            const labourRate = await this.getSetting('labour_rate_per_hour');
+            const labourCost = labourHours * parseFloat(labourRate || 25);
+            
+            return bomValue + labourCost;
+        } catch (error) {
+            console.error(`Error calculating panel true cost for panel ${panelId}:`, error);
+            // Return 0 on error to prevent blocking operations
+            return 0;
+        }
     }
     
     // Calculate product cost from components (raw materials + components + built items)
     static async calculateProductCost(productId) {
-        const components = await this.getProductComponents(productId);
-        let totalCost = 0;
-        
-        for (const comp of components) {
-            const compQty = parseFloat(comp.quantity_required || 0);
+        try {
+            const components = await this.getProductComponents(productId);
+            let totalCost = 0;
             
-            if (comp.component_type === 'raw_material') {
-                const stockItem = await this.getStockItemById(comp.component_id);
-                if (stockItem) {
-                    const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
-                    totalCost += materialCost;
+            for (const comp of components) {
+                try {
+                    const compQty = parseFloat(comp.quantity_required || 0);
+                    
+                    if (comp.component_type === 'raw_material') {
+                        const stockItem = await this.getStockItemById(comp.component_id);
+                        if (stockItem) {
+                            const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
+                            totalCost += materialCost;
+                        }
+                    } else if (comp.component_type === 'component') {
+                        const componentCost = await this.calculateComponentTrueCost(comp.component_id);
+                        totalCost += componentCost * compQty;
+                    } else if (comp.component_type === 'built_item') {
+                        // Built item (panel) true cost (BOM + labour)
+                        const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
+                        totalCost += builtItemCost * compQty;
+                    }
+                } catch (compError) {
+                    console.error(`Error calculating cost for component ${comp.id} (type: ${comp.component_type}):`, compError);
+                    // Continue with other components - don't fail the whole calculation
                 }
-            } else if (comp.component_type === 'component') {
-                const componentCost = await this.calculateComponentTrueCost(comp.component_id);
-                totalCost += componentCost * compQty;
-            } else if (comp.component_type === 'built_item') {
-                // Built item (panel) true cost (BOM + labour)
-                const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
-                totalCost += builtItemCost * compQty;
             }
+            
+            return totalCost;
+        } catch (error) {
+            console.error(`Error calculating product cost for product ${productId}:`, error);
+            // Return 0 on error to prevent blocking operations
+            return 0;
         }
-        
-        return totalCost;
     }
     
     // Update panel cost automatically (called after BOM or labour changes)
@@ -3461,25 +3478,33 @@ class ProductionDatabase {
     // ============ PRODUCT COMPONENTS OPERATIONS ============
     
     static async addProductComponent(productId, componentType, componentId, quantityRequired, unit) {
+        let component;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_components (product_id, component_type, component_id, quantity_required, unit)
                  VALUES ($1, $2, $3, $4, $5) RETURNING *`,
                 [productId, componentType, componentId, quantityRequired, unit]
             );
-            // Recalculate product cost after component change
-            await this.updateProductCost(productId);
-            return result.rows[0];
+            component = result.rows[0];
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_components (product_id, component_type, component_id, quantity_required, unit)
                  VALUES (?, ?, ?, ?, ?)`
             );
             const info = stmt.run(productId, componentType, componentId, quantityRequired, unit);
-            // Recalculate product cost after component change
-            await this.updateProductCost(productId);
-            return this.getProductComponentById(info.lastInsertRowid);
+            component = await this.getProductComponentById(info.lastInsertRowid);
         }
+        
+        // Recalculate product cost after component change
+        // Wrap in try-catch so cost calculation failures don't block the component addition
+        try {
+            await this.updateProductCost(productId);
+        } catch (error) {
+            console.error(`Error updating product cost for product ${productId} after adding component:`, error);
+            // Continue - don't throw, component was added successfully
+        }
+        
+        return component;
     }
     
     static async getProductComponentById(id) {

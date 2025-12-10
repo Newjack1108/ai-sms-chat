@@ -873,7 +873,10 @@ router.post('/products/:id/components', requireProductionAuth, requireAdmin, asy
         res.json({ success: true, component });
     } catch (error) {
         console.error('Add product component error:', error);
-        res.status(500).json({ success: false, error: 'Failed to add product component' });
+        console.error('Error stack:', error.stack);
+        console.error('Request body:', req.body);
+        const errorMessage = error.message || 'Failed to add product component';
+        res.status(500).json({ success: false, error: errorMessage });
     }
 });
 
