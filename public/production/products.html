@@ -150,6 +150,7 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Description</th>
                                 <th>Type</th>
                                 <th>Status</th>
                                 <th>Cost (Auto)</th>
@@ -157,9 +158,14 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${productsWithCosts.map(product => `
+                            ${productsWithCosts.map(product => {
+                                const truncatedDesc = product.description 
+                                    ? product.description.split(' ').slice(0, 10).join(' ') + (product.description.split(' ').length > 10 ? '...' : '')
+                                    : '-';
+                                return `
                                 <tr>
                                     <td><strong>${product.name}</strong></td>
+                                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${product.description || ''}">${truncatedDesc}</td>
                                     <td>${product.product_type || '-'}</td>
                                     <td><span class="badge badge-info">${product.status}</span></td>
                                     <td>${formatCurrency(product.calculated_cost)}</td>
@@ -171,7 +177,8 @@
                                         ` : ''}
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </tbody>
                     </table>
                 `;
