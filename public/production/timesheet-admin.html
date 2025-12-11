@@ -93,6 +93,50 @@
             </div>
         </div>
         
+        <!-- Hours Calculation Logic -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Hours Calculation Logic</h2>
+            </div>
+            <div style="padding: 20px;">
+                <p style="margin-bottom: 15px; color: #666;">
+                    This section explains how hours are calculated for payroll processing.
+                </p>
+                
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 16px; color: #333;">Break Deduction</h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #555;">
+                        <li><strong>1 hour</strong> is automatically deducted for <strong>Monday-Thursday</strong> entries</li>
+                        <li><strong>45 minutes</strong> is automatically deducted for <strong>Friday</strong> entries</li>
+                        <li><strong>30 minutes</strong> is deducted for <strong>weekend</strong> entries (after 4 hours worked)</li>
+                        <li><strong>1 hour</strong> is deducted when <strong>working away overnight</strong> (normal break deduction)</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 16px; color: #333;">Hour Types</h3>
+                    <ul style="margin: 0; padding-left: 20px; color: #555;">
+                        <li><strong>Regular Hours:</strong> Net hours (after 1hr break) up to 8 hours per day (Monday-Thursday)</li>
+                        <li><strong>Regular Hours:</strong> Net hours (after 45min break) up to 6 hours (Friday only)</li>
+                        <li><strong>Overtime Hours:</strong> Net hours exceeding 8 hours (Mon-Thu) or 6 hours (Friday)</li>
+                        <li><strong>Weekend Hours:</strong> All hours on Saturday/Sunday (30min break deduction after 4hrs)</li>
+                        <li><strong>Overnight Hours:</strong> All hours when working away overnight (normal 1hr break deduction)</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #0066cc;">
+                    <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 16px; color: #333;">Examples</h3>
+                    <div style="color: #555; line-height: 1.8;">
+                        <p style="margin: 5px 0;"><strong>Monday 8:00-17:00:</strong> 9 hours - 1 hour break = 8 regular hours</p>
+                        <p style="margin: 5px 0;"><strong>Tuesday 8:00-18:00:</strong> 10 hours - 1 hour break = 8 regular + 1 overtime hour</p>
+                        <p style="margin: 5px 0;"><strong>Friday 8:00-15:00:</strong> 7 hours - 45min break = 6.25 hours (6 regular + 0.25 overtime)</p>
+                        <p style="margin: 5px 0;"><strong>Saturday 8:00-13:00:</strong> 5 hours - 30min break (after 4hrs) = 4.5 weekend hours</p>
+                        <p style="margin: 5px 0;"><strong>Working Away 8:00-20:00:</strong> 12 hours - 1 hour break = 11 overnight hours</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <!-- System Maintenance -->
         <div class="card">
             <div class="card-header">
