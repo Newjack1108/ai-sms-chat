@@ -40,10 +40,37 @@ function requireAdmin(req, res, next) {
     });
 }
 
-// Middleware to check if user is admin or manager
+// Middleware to check if user is office
+function requireOffice(req, res, next) {
+    if (req.session && req.session.production_user && req.session.production_user.role === 'office') {
+        return next();
+    }
+    
+    return res.status(403).json({
+        success: false,
+        error: 'Office privileges required'
+    });
+}
+
+// Middleware to check if user is admin or office
+function requireAdminOrOffice(req, res, next) {
+    if (req.session && req.session.production_user && 
+        (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
+        return next();
+    }
+    
+    return res.status(403).json({
+        success: false,
+        error: 'Admin or Office privileges required'
+    });
+}
+
+// Legacy middleware - kept for backward compatibility (maps manager to office)
 function requireManager(req, res, next) {
     if (req.session && req.session.production_user && 
-        (req.session.production_user.role === 'admin' || req.session.production_user.role === 'manager')) {
+        (req.session.production_user.role === 'admin' || 
+         req.session.production_user.role === 'office' || 
+         req.session.production_user.role === 'manager')) {
         return next();
     }
     
@@ -114,7 +141,9 @@ async function createDefaultAdmin() {
 module.exports = {
     requireProductionAuth,
     requireAdmin,
-    requireManager,
+    requireOffice,
+    requireAdminOrOffice,
+    requireManager, // Legacy - kept for backward compatibility
     loginProductionUser,
     hashPassword,
     createDefaultAdmin

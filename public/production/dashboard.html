@@ -20,17 +20,17 @@
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
-            <a href="stock.html" class="btn btn-secondary btn-sm manager-only">Raw Materials</a>
-            <a href="components.html" class="btn btn-secondary btn-sm manager-only">Components</a>
-            <a href="panels.html" class="btn btn-secondary btn-sm manager-only">Built Items</a>
-            <a href="wip.html" class="btn btn-secondary btn-sm manager-only">WIP</a>
-            <a href="planner.html" class="btn btn-secondary btn-sm manager-only">Planner</a>
-            <a href="products.html" class="btn btn-secondary btn-sm manager-only">Products</a>
-            <a href="production-orders.html" class="btn btn-secondary btn-sm manager-only">Works Orders</a>
-            <a href="tasks.html" class="btn btn-secondary btn-sm manager-only">Tasks</a>
-            <a href="reminders.html" class="btn btn-secondary btn-sm manager-only">Reminders</a>
+            <a href="stock.html" class="btn btn-secondary btn-sm admin-or-office">Raw Materials</a>
+            <a href="components.html" class="btn btn-secondary btn-sm admin-or-office">Components</a>
+            <a href="panels.html" class="btn btn-secondary btn-sm admin-or-office">Built Items</a>
+            <a href="wip.html" class="btn btn-secondary btn-sm admin-or-office">WIP</a>
+            <a href="planner.html" class="btn btn-secondary btn-sm admin-or-office">Planner</a>
+            <a href="products.html" class="btn btn-secondary btn-sm admin-or-office">Products</a>
+            <a href="production-orders.html" class="btn btn-secondary btn-sm admin-or-office">Works Orders</a>
+            <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
+            <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
             <a href="timesheet.html" class="btn btn-secondary btn-sm">Clock ON/OFF</a>
-            <a href="timesheet-admin.html" class="btn btn-secondary btn-sm admin-only">Clock ON/OFF Admin</a>
+            <a href="timesheet-admin.html" class="btn btn-secondary btn-sm admin-or-office">Clock ON/OFF Admin</a>
             <a href="users.html" class="btn btn-secondary btn-sm admin-only">Users</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
@@ -115,10 +115,14 @@
             const user = await checkAuth();
             if (!user) return;
             
-            // Redirect staff users to timesheet page
+            // Redirect staff users to timesheet page (staff can access timesheet, tasks, reminders)
             if (user.role === 'staff') {
-                window.location.href = 'timesheet.html';
-                return;
+                const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html'];
+                const currentPage = window.location.pathname.split('/').pop();
+                if (!allowedPages.includes(currentPage)) {
+                    window.location.href = 'timesheet.html';
+                    return;
+                }
             }
             
             await initNavbar();

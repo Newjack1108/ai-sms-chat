@@ -57,7 +57,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
@@ -436,13 +436,13 @@ function initializeSQLite() {
         db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run('labour_rate_per_hour', '25.00');
     }
     
-    // Migrate production_users role constraint to include 'staff'
+    // Migrate production_users role constraint to include 'office' role
     // SQLite doesn't support ALTER TABLE for CHECK constraints, so we need to recreate the table
     try {
         // Check if table exists and has old constraint
         const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
-        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'staff'")) {
-            console.log('🔄 Migrating production_users table to support staff role...');
+        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'office'")) {
+            console.log('🔄 Migrating production_users table to support office role...');
             
             // Create new table with updated constraint
             db.exec(`
@@ -450,13 +450,19 @@ function initializeSQLite() {
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             `);
             
-            // Copy data
-            db.exec('INSERT INTO production_users_new SELECT * FROM production_users');
+            // Copy data (migrate 'manager' role to 'office' if exists)
+            db.exec(`
+                INSERT INTO production_users_new (id, username, password_hash, role, created_at)
+                SELECT id, username, password_hash, 
+                       CASE WHEN role = 'manager' THEN 'office' ELSE role END,
+                       created_at
+                FROM production_users
+            `);
             
             // Drop old table
             db.exec('DROP TABLE production_users');
@@ -464,7 +470,7 @@ function initializeSQLite() {
             // Rename new table
             db.exec('ALTER TABLE production_users_new RENAME TO production_users');
             
-            console.log('✅ Migrated production_users table to support staff role');
+            console.log('✅ Migrated production_users table to support office role (manager -> office)');
         }
     } catch (error) {
         console.log('⚠️ Role constraint migration check skipped:', error.message);
@@ -596,7 +602,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'manager', 'staff')),
+                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -965,7 +971,7 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
         
-        // Migrate production_users role constraint to include 'staff'
+        // Migrate production_users role constraint to include 'office' role
         try {
             // Check if constraint needs updating by trying to find existing constraint
             const constraintCheck = await pool.query(`
@@ -987,7 +993,19 @@ async function initializePostgreSQL() {
                 }
             }
             
-            // Add new constraint with staff role (will fail silently if already exists with correct values)
+            // Migrate 'manager' role to 'office' if any exist
+            try {
+                await pool.query(`
+                    UPDATE production_users 
+                    SET role = 'office' 
+                    WHERE role = 'manager'
+                `);
+                console.log('✅ Migrated manager roles to office role');
+            } catch (e) {
+                console.log('⚠️ Manager to office migration:', e.message);
+            }
+            
+            // Add new constraint with office role (will fail silently if already exists with correct values)
             try {
                 await pool.query(`
                     ALTER TABLE production_users 
@@ -996,9 +1014,9 @@ async function initializePostgreSQL() {
                 await pool.query(`
                     ALTER TABLE production_users 
                     ADD CONSTRAINT production_users_role_check 
-                    CHECK (role IN ('admin', 'manager', 'staff'))
+                    CHECK (role IN ('admin', 'office', 'staff'))
                 `);
-                console.log('✅ Updated production_users role constraint to include staff');
+                console.log('✅ Updated production_users role constraint to include office role');
             } catch (e) {
                 // Constraint might already be correct or table doesn't exist yet
                 if (!e.message.includes('does not exist')) {

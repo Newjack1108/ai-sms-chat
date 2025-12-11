@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireManager, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManager, hashPassword } = require('./production-auth');
 
 // ============ AUTHENTICATION ROUTES ============
 
@@ -86,7 +86,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        if (!['admin', 'manager', 'staff'].includes(role)) {
+        if (!['admin', 'office', 'staff'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -119,7 +119,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
         const { username, role, password } = req.body;
         const userId = parseInt(req.params.id);
         
-        if (role && !['admin', 'manager', 'staff'].includes(role)) {
+        if (role && !['admin', 'office', 'staff'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -171,7 +171,7 @@ router.get('/stock', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/stock', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category } = req.body;
         if (!name || !unit) {
@@ -195,7 +195,7 @@ router.post('/stock', requireProductionAuth, requireAdmin, async (req, res) => {
     }
 });
 
-router.put('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category } = req.body;
@@ -216,7 +216,7 @@ router.put('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) =
     }
 });
 
-router.delete('/stock/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         await ProductionDatabase.deleteStockItem(itemId);
@@ -278,7 +278,7 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
         if (!name) {
@@ -323,7 +323,7 @@ router.post('/panels', requireProductionAuth, requireAdmin, async (req, res) => 
     }
 });
 
-router.put('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
@@ -345,7 +345,7 @@ router.put('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) 
     }
 });
 
-router.delete('/panels/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         await ProductionDatabase.deletePanel(panelId);
@@ -404,7 +404,7 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels/:id/bom', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/panels/:id/bom', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { item_type, item_id, quantity_required, unit } = req.body;
@@ -445,7 +445,7 @@ router.post('/panels/:id/bom', requireProductionAuth, requireAdmin, async (req, 
     }
 });
 
-router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteBOMItem(bomId);
@@ -528,7 +528,7 @@ router.get('/components', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/components', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
         if (!name) {
@@ -551,7 +551,7 @@ router.post('/components', requireProductionAuth, requireAdmin, async (req, res)
     }
 });
 
-router.put('/components/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
@@ -572,7 +572,7 @@ router.put('/components/:id', requireProductionAuth, requireAdmin, async (req, r
     }
 });
 
-router.delete('/components/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/components/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         await ProductionDatabase.deleteComponent(componentId);
@@ -594,7 +594,7 @@ router.get('/components/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components/:id/bom', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/components/:id/bom', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { stock_item_id, quantity_required, unit } = req.body;
@@ -638,7 +638,7 @@ router.post('/components/:id/bom', requireProductionAuth, requireAdmin, async (r
     }
 });
 
-router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteComponentBOMItem(bomId);
@@ -788,7 +788,7 @@ router.get('/products', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/products', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { name, description, product_type, status } = req.body;
         if (!name) {
@@ -809,7 +809,7 @@ router.post('/products', requireProductionAuth, requireAdmin, async (req, res) =
     }
 });
 
-router.put('/products/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { name, description, product_type, status } = req.body;
@@ -850,7 +850,7 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/products/:id/components', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/products/:id/components', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { component_type, component_id, quantity_required, unit } = req.body;
@@ -877,7 +877,7 @@ router.post('/products/:id/components', requireProductionAuth, requireAdmin, asy
     }
 });
 
-router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
         await ProductionDatabase.deleteProductComponent(compId);
@@ -1217,7 +1217,7 @@ router.post('/timesheet/clock-out', requireProductionAuth, async (req, res) => {
 });
 
 // Admin Views
-router.get('/timesheet/active', requireProductionAuth, requireManager, async (req, res) => {
+router.get('/timesheet/active', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const activeClockIns = await ProductionDatabase.getActiveClockIns();
         res.json({ success: true, clockIns: activeClockIns });
@@ -1243,7 +1243,7 @@ router.get('/timesheet/notices', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.get('/timesheet/notices/all', requireProductionAuth, requireManager, async (req, res) => {
+router.get('/timesheet/notices/all', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const notices = await ProductionDatabase.getAllTimesheetNotices();
         res.json({ success: true, notices });
@@ -1253,7 +1253,7 @@ router.get('/timesheet/notices/all', requireProductionAuth, requireManager, asyn
     }
 });
 
-router.post('/timesheet/notices', requireProductionAuth, requireManager, async (req, res) => {
+router.post('/timesheet/notices', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { title, message, priority, expires_at } = req.body;
         if (!title || !message) {
@@ -1268,7 +1268,7 @@ router.post('/timesheet/notices', requireProductionAuth, requireManager, async (
     }
 });
 
-router.put('/timesheet/notices/:id', requireProductionAuth, requireManager, async (req, res) => {
+router.put('/timesheet/notices/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const noticeId = parseInt(req.params.id);
         const { title, message, priority, status, expires_at } = req.body;
@@ -1287,7 +1287,7 @@ router.put('/timesheet/notices/:id', requireProductionAuth, requireManager, asyn
     }
 });
 
-router.delete('/timesheet/notices/:id', requireProductionAuth, requireManager, async (req, res) => {
+router.delete('/timesheet/notices/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const noticeId = parseInt(req.params.id);
         const notice = await ProductionDatabase.deleteTimesheetNotice(noticeId);
@@ -1845,7 +1845,7 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
 });
 
 // Admin-only: Directly amend staff timesheet entry (applies immediately, no approval needed)
-router.post('/clock/amendments/admin', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const adminId = req.session.production_user.id;
         const { entry_id, amended_clock_in_time, amended_clock_out_time, reason } = req.body;
@@ -1998,7 +1998,7 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
 });
 
 // Delete timesheet entry (admin only)
-router.delete('/clock/entries/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/clock/entries/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const entryId = parseInt(req.params.id);
         const entry = await ProductionDatabase.deleteTimesheetEntry(entryId);
@@ -2020,7 +2020,7 @@ router.delete('/clock/entries/:id', requireProductionAuth, requireAdmin, async (
 });
 
 // Payroll routes
-router.get('/clock/payroll/:weekStart', requireProductionAuth, requireManager, async (req, res) => {
+router.get('/clock/payroll/:weekStart', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
@@ -2031,7 +2031,7 @@ router.get('/clock/payroll/:weekStart', requireProductionAuth, requireManager, a
     }
 });
 
-router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireManager, async (req, res) => {
+router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const userId = parseInt(req.params.userId);
@@ -2043,7 +2043,7 @@ router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth
     }
 });
 
-router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireManager, async (req, res) => {
+router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
@@ -2140,7 +2140,7 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/reminders', requireProductionAuth, requireAdmin, async (req, res) => {
+router.post('/reminders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active } = req.body;
         if (!stock_item_id || !check_frequency_days) {
@@ -2161,7 +2161,7 @@ router.post('/reminders', requireProductionAuth, requireAdmin, async (req, res) 
     }
 });
 
-router.put('/reminders/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.put('/reminders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         const { check_frequency_days, is_active } = req.body;
@@ -2188,7 +2188,7 @@ router.post('/reminders/:id/check', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.delete('/reminders/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/reminders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         await ProductionDatabase.deleteReminder(reminderId);
@@ -2310,7 +2310,7 @@ router.put('/planner/:id', requireProductionAuth, requireManager, async (req, re
     }
 });
 
-router.delete('/planner/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/planner/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const plannerId = parseInt(req.params.id);
         await ProductionDatabase.deleteWeeklyPlanner(plannerId);
@@ -2495,7 +2495,7 @@ router.get('/tasks/my', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/tasks', requireProductionAuth, requireManager, async (req, res) => {
+router.post('/tasks', requireProductionAuth, async (req, res) => {
     try {
         const { title, description, assigned_to_user_id, due_date, status } = req.body;
         if (!title) {
@@ -2517,7 +2517,7 @@ router.post('/tasks', requireProductionAuth, requireManager, async (req, res) =>
     }
 });
 
-router.put('/tasks/:id', requireProductionAuth, requireManager, async (req, res) => {
+router.put('/tasks/:id', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const { title, description, assigned_to_user_id, status, due_date } = req.body;
@@ -2547,7 +2547,7 @@ router.post('/tasks/:id/complete', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.delete('/tasks/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+router.delete('/tasks/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         await ProductionDatabase.deleteTask(taskId);

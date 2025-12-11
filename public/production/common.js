@@ -209,8 +209,11 @@ document.addEventListener('click', (e) => {
 async function restrictStaffAccess() {
     const user = await checkAuth();
     if (user && user.role === 'staff') {
-        // Staff can only access timesheet page
-        if (!window.location.pathname.includes('timesheet.html') && !window.location.pathname.includes('login.html')) {
+        // Staff can access timesheet, tasks, and reminders pages
+        const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html', 'login.html'];
+        const currentPage = window.location.pathname.split('/').pop();
+        
+        if (!allowedPages.includes(currentPage) && !window.location.pathname.includes('login.html')) {
             window.location.href = '/production/timesheet.html';
             return true;
         }
@@ -228,15 +231,27 @@ async function initNavbar() {
         }
         
         // Hide admin-only menu items for non-admin users
-        if (user.role !== 'admin' && user.role !== 'manager') {
+        if (user.role !== 'admin') {
             const adminItems = document.querySelectorAll('.admin-only');
             adminItems.forEach(item => item.style.display = 'none');
         }
         
-        // Hide manager-only items for staff
+        // Hide admin-or-office items for staff
+        if (user.role === 'staff') {
+            const adminOrOfficeItems = document.querySelectorAll('.admin-or-office');
+            adminOrOfficeItems.forEach(item => item.style.display = 'none');
+        }
+        
+        // Hide manager-only items for staff (legacy support)
         if (user.role === 'staff') {
             const managerItems = document.querySelectorAll('.manager-only');
             managerItems.forEach(item => item.style.display = 'none');
+        }
+        
+        // Show office-only items only for office and admin
+        if (user.role !== 'admin' && user.role !== 'office') {
+            const officeOnlyItems = document.querySelectorAll('.office-only');
+            officeOnlyItems.forEach(item => item.style.display = 'none');
         }
     }
 }
