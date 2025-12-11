@@ -1515,7 +1515,7 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         const userId = req.session.production_user.id;
         const weekStartDate = req.params.weekStart;
         const entryDate = req.params.date;
-        const { daily_notes, overnight_away } = req.body;
+        const { daily_notes, overnight_away, day_type } = req.body;
         
         const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
         const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate);
@@ -1523,6 +1523,17 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         const updateData = {};
         if (daily_notes !== undefined) updateData.daily_notes = daily_notes;
         if (overnight_away !== undefined) updateData.overnight_away = overnight_away;
+        if (day_type !== undefined) {
+            // Validate day_type value
+            const validDayTypes = ['holiday_paid', 'holiday_unpaid', 'sick_paid', 'sick_unpaid', null];
+            if (day_type === '' || day_type === 'null') {
+                updateData.day_type = null;
+            } else if (validDayTypes.includes(day_type)) {
+                updateData.day_type = day_type;
+            } else {
+                return res.status(400).json({ success: false, error: 'Invalid day_type value' });
+            }
+        }
         
         const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
         
@@ -1566,6 +1577,39 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         res.json({ success: true, dailyEntry: updated });
     } catch (error) {
         console.error('Update daily entry error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update daily entry' });
+    }
+});
+
+// Admin endpoint to update day_type for any user
+router.put('/clock/weekly/:weekStart/day/:date/user/:targetUserId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const targetUserId = parseInt(req.params.targetUserId);
+        const weekStartDate = req.params.weekStart;
+        const entryDate = req.params.date;
+        const { day_type } = req.body;
+        
+        const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(targetUserId, weekStartDate);
+        const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate);
+        
+        const updateData = {};
+        if (day_type !== undefined) {
+            // Validate day_type value
+            const validDayTypes = ['holiday_paid', 'holiday_unpaid', 'sick_paid', 'sick_unpaid', null];
+            if (day_type === '' || day_type === 'null') {
+                updateData.day_type = null;
+            } else if (validDayTypes.includes(day_type)) {
+                updateData.day_type = day_type;
+            } else {
+                return res.status(400).json({ success: false, error: 'Invalid day_type value' });
+            }
+        }
+        
+        const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
+        
+        res.json({ success: true, dailyEntry: updated });
+    } catch (error) {
+        console.error('Admin update daily entry error:', error);
         res.status(500).json({ success: false, error: 'Failed to update daily entry' });
     }
 });

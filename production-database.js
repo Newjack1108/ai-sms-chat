@@ -517,6 +517,19 @@ function initializeSQLite() {
         console.log('⚠️ Timesheet entries migration check skipped:', error.message);
     }
     
+    // Migrate timesheet_daily_entries to add day_type column
+    try {
+        const dailyColumns = db.prepare("PRAGMA table_info(timesheet_daily_entries)").all();
+        const dailyColumnNames = dailyColumns.map(col => col.name);
+        
+        if (!dailyColumnNames.includes('day_type')) {
+            db.exec('ALTER TABLE timesheet_daily_entries ADD COLUMN day_type TEXT CHECK(day_type IN (\'holiday_paid\', \'holiday_unpaid\', \'sick_paid\', \'sick_unpaid\'))');
+            console.log('✅ Added day_type column to timesheet_daily_entries');
+        }
+    } catch (error) {
+        console.log('⚠️ Timesheet daily entries day_type migration check skipped:', error.message);
+    }
+    
     // Create weekly_timesheets table
     db.exec(`
         CREATE TABLE IF NOT EXISTS weekly_timesheets (
@@ -1223,6 +1236,20 @@ async function initializePostgreSQL() {
                 UNIQUE(weekly_timesheet_id, entry_date)
             )
         `);
+        
+        // Migrate timesheet_daily_entries to add day_type column
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_daily_entries' AND column_name='day_type'
+                ) THEN
+                    ALTER TABLE timesheet_daily_entries ADD COLUMN day_type VARCHAR(20) CHECK(day_type IN ('holiday_paid', 'holiday_unpaid', 'sick_paid', 'sick_unpaid'));
+                END IF;
+            END $$;
+        `);
+        console.log('✅ Checked/added day_type column to timesheet_daily_entries');
         
         // Create timesheet_amendments table
         await pool.query(`
@@ -5470,6 +5497,11 @@ class ProductionDatabase {
             values.push(data.total_hours);
             paramIndex++;
         }
+        if (data.day_type !== undefined) {
+            updates.push(isPostgreSQL ? `day_type = $${paramIndex}` : `day_type = ?`);
+            values.push(data.day_type || null);
+            paramIndex++;
+        }
         
         if (updates.length === 0) {
             return this.getDailyEntryById(id);
@@ -5958,7 +5990,7 @@ class ProductionDatabase {
                  FROM production_users u
                  INNER JOIN weekly_timesheets wt ON u.id = wt.user_id AND wt.week_start_date = $1::date
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
-                 WHERE (u.role = 'staff' OR u.role = 'manager' OR u.role = 'admin')
+                 WHERE (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username
                  ORDER BY u.username`,
@@ -5982,7 +6014,7 @@ class ProductionDatabase {
                  INNER JOIN production_users u ON wt.user_id = u.id
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date = ?
-                   AND (u.role = 'staff' OR u.role = 'manager' OR u.role = 'admin')
+                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username, wt.week_start_date
                  ORDER BY u.username`
@@ -6019,9 +6051,12 @@ class ProductionDatabase {
                     te.total_hours,
                     te.edited_by_admin_id,
                     te.edited_by_admin_at,
+                    tde.day_type,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN weekly_timesheets wt ON wt.user_id = te.user_id AND wt.week_start_date = $2::date
+                 LEFT JOIN timesheet_daily_entries tde ON tde.weekly_timesheet_id = wt.id AND DATE(te.clock_in_time) = tde.entry_date
                  WHERE te.user_id = $1 
                    AND te.clock_out_time IS NOT NULL
                    AND DATE(te.clock_in_time) >= $2::date
@@ -6030,7 +6065,7 @@ class ProductionDatabase {
                 [userId, weekStartDate, weekEndStr]
             );
             
-            // Get daily notes for the week
+            // Get daily notes and day_type for the week
             const weeklyTimesheet = await pool.query(
                 `SELECT id FROM weekly_timesheets 
                  WHERE user_id = $1 
@@ -6038,10 +6073,10 @@ class ProductionDatabase {
                 [userId, weekStartDate]
             );
             
-            let dailyNotesMap = {};
+            let dailyDataMap = {};
             if (weeklyTimesheet.rows.length > 0) {
-                const dailyNotesResult = await pool.query(
-                    `SELECT entry_date, daily_notes 
+                const dailyDataResult = await pool.query(
+                    `SELECT entry_date, daily_notes, day_type 
                      FROM timesheet_daily_entries 
                      WHERE weekly_timesheet_id = $1 
                      AND entry_date >= $2::date 
@@ -6049,17 +6084,22 @@ class ProductionDatabase {
                     [weeklyTimesheet.rows[0].id, weekStartDate, weekEndStr]
                 );
                 
-                dailyNotesResult.rows.forEach(row => {
-                    dailyNotesMap[row.entry_date] = row.daily_notes;
+                dailyDataResult.rows.forEach(row => {
+                    dailyDataMap[row.entry_date] = {
+                        daily_notes: row.daily_notes,
+                        day_type: row.day_type
+                    };
                 });
             }
             
-            // Merge daily notes into entries
+            // Merge daily notes and day_type into entries
             const entries = entriesResult.rows.map(entry => {
                 const entryDate = entry.entry_date;
+                const dailyData = dailyDataMap[entryDate] || {};
                 return {
                     ...entry,
-                    daily_notes: dailyNotesMap[entryDate] || null
+                    daily_notes: dailyData.daily_notes || entry.daily_notes || null,
+                    day_type: entry.day_type || dailyData.day_type || null
                 };
             });
             
@@ -6088,44 +6128,52 @@ class ProductionDatabase {
                     te.total_hours,
                     te.edited_by_admin_id,
                     te.edited_by_admin_at,
+                    tde.day_type,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
+                 LEFT JOIN weekly_timesheets wt ON wt.user_id = te.user_id AND wt.week_start_date = ?
+                 LEFT JOIN timesheet_daily_entries tde ON tde.weekly_timesheet_id = wt.id AND DATE(te.clock_in_time) = tde.entry_date
                  WHERE te.user_id = ? 
                    AND te.clock_out_time IS NOT NULL
                    AND DATE(te.clock_in_time) >= ?
                    AND DATE(te.clock_in_time) <= ?
                  ORDER BY DATE(te.clock_in_time), te.clock_in_time`
-            ).all(userId, weekStartDate, weekEndStr);
+            ).all(weekStartDate, userId, weekStartDate, weekEndStr);
             
-            // Get daily notes for the week
+            // Get daily notes and day_type for the week
             const weeklyTimesheet = db.prepare(
                 `SELECT id FROM weekly_timesheets 
                  WHERE user_id = ? 
                  AND week_start_date = ?`
             ).get(userId, weekStartDate);
             
-            let dailyNotesMap = {};
+            let dailyDataMap = {};
             if (weeklyTimesheet) {
-                const dailyNotesResult = db.prepare(
-                    `SELECT entry_date, daily_notes 
+                const dailyDataResult = db.prepare(
+                    `SELECT entry_date, daily_notes, day_type 
                      FROM timesheet_daily_entries 
                      WHERE weekly_timesheet_id = ? 
                      AND entry_date >= ? 
                      AND entry_date <= ?`
                 ).all(weeklyTimesheet.id, weekStartDate, weekEndStr);
                 
-                dailyNotesResult.forEach(row => {
-                    dailyNotesMap[row.entry_date] = row.daily_notes;
+                dailyDataResult.forEach(row => {
+                    dailyDataMap[row.entry_date] = {
+                        daily_notes: row.daily_notes,
+                        day_type: row.day_type
+                    };
                 });
             }
             
-            // Merge daily notes into entries
+            // Merge daily notes and day_type into entries
             const entries = entriesResult.map(entry => {
                 const entryDate = entry.entry_date;
+                const dailyData = dailyDataMap[entryDate] || {};
                 return {
                     ...entry,
-                    daily_notes: dailyNotesMap[entryDate] || null
+                    daily_notes: dailyData.daily_notes || entry.daily_notes || null,
+                    day_type: entry.day_type || dailyData.day_type || null
                 };
             });
             

@@ -1033,7 +1033,8 @@
                     const normalizedDate = entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : entry.entry_date;
                     entriesMap[normalizedDate] = {
                         ...entry,
-                        entry_date: normalizedDate
+                        entry_date: normalizedDate,
+                        day_type: entry.day_type || null
                     };
                     if (!timesheetEntriesByDate[normalizedDate]) {
                         timesheetEntriesByDate[normalizedDate] = [];
@@ -1264,6 +1265,29 @@
                                         onchange="saveOvernightAway('${dateStr}', this.checked)"
                                     >
                                     <label for="overnight-${dateStr}">Overnight away from home</label>
+                                </div>
+                                <div class="day-type-selector" style="margin-top: 10px;">
+                                    <label for="day-type-${dateStr}" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px;">Day Type:</label>
+                                    <select 
+                                        id="day-type-${dateStr}" 
+                                        class="form-select" 
+                                        style="width: 100%; padding: 6px; font-size: 13px;"
+                                        onchange="saveDayType('${dateStr}', this.value)"
+                                    >
+                                        <option value="">Normal Day</option>
+                                        <option value="holiday_paid" ${entry && entry.day_type === 'holiday_paid' ? 'selected' : ''}>Paid Holiday</option>
+                                        <option value="holiday_unpaid" ${entry && entry.day_type === 'holiday_unpaid' ? 'selected' : ''}>Unpaid Holiday</option>
+                                        <option value="sick_paid" ${entry && entry.day_type === 'sick_paid' ? 'selected' : ''}>Paid Sick Day</option>
+                                        <option value="sick_unpaid" ${entry && entry.day_type === 'sick_unpaid' ? 'selected' : ''}>Unpaid Sick Day</option>
+                                    </select>
+                                    ${entry && entry.day_type ? `
+                                        <div style="margin-top: 5px; font-size: 11px;">
+                                            ${entry.day_type === 'holiday_paid' ? '<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px;">✓ Paid Holiday</span>' : ''}
+                                            ${entry.day_type === 'holiday_unpaid' ? '<span style="background: #ffc107; color: #333; padding: 2px 6px; border-radius: 3px;">⚠ Unpaid Holiday</span>' : ''}
+                                            ${entry.day_type === 'sick_paid' ? '<span style="background: #007bff; color: white; padding: 2px 6px; border-radius: 3px;">✓ Paid Sick</span>' : ''}
+                                            ${entry.day_type === 'sick_unpaid' ? '<span style="background: #fd7e14; color: white; padding: 2px 6px; border-radius: 3px;">⚠ Unpaid Sick</span>' : ''}
+                                        </div>
+                                    ` : ''}
                                 </div>
                             ` : ''}
                         </div>
@@ -1596,6 +1620,58 @@
                     throw new Error(response?.error || 'Failed to save');
                 }
             } catch (error) {
+                console.error('Error saving overnight away:', error);
+                // Revert checkbox on error
+                checkbox.checked = !intendedState;
+                checkbox.disabled = false;
+                showAlert('Failed to save overnight away status: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function saveDayType(date, dayType) {
+            if (!currentWeekStart) return;
+            
+            const select = document.getElementById(`day-type-${date}`);
+            if (!select) {
+                console.error('Day type select not found for date:', date);
+                return;
+            }
+            
+            // Store the intended state
+            const intendedValue = dayType || null;
+            select.disabled = true;
+            
+            try {
+                const response = await apiCall(`/clock/weekly/${currentWeekStart}/day/${date}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ day_type: intendedValue })
+                });
+                
+                if (response && response.success) {
+                    // Ensure select reflects the saved state immediately
+                    select.value = intendedValue || '';
+                    select.disabled = false;
+                    
+                    // Reload to update display
+                    const savedValue = intendedValue;
+                    await loadWeeklyTimesheet(currentWeekStart);
+                    
+                    // After reload, ensure select is still in correct state
+                    setTimeout(() => {
+                        const reloadedSelect = document.getElementById(`day-type-${date}`);
+                        if (reloadedSelect && reloadedSelect.value !== (savedValue || '')) {
+                            reloadedSelect.value = savedValue || '';
+                        }
+                    }, 100);
+                } else {
+                    throw new Error(response?.error || 'Failed to save');
+                }
+            } catch (error) {
+                console.error('Error saving day type:', error);
+                select.disabled = false;
+                showAlert('Failed to save day type: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
                 console.error('Error saving overnight away:', error);
                 // Revert checkbox on error
                 checkbox.checked = !intendedState;
