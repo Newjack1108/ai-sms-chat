@@ -817,7 +817,16 @@
                 // Also reload weekly timesheet to show updated data
                 await loadWeeklyTimesheet(currentWeekStart || getCurrentWeekStart());
             } catch (error) {
-                const errorMsg = error.message || 'Failed to clock in';
+                let errorMsg = error.message || 'Failed to clock in';
+                
+                // Provide better error message for auto-clock-out scenarios
+                if (errorMsg.includes('already clocked in and out today') || errorMsg.includes('already clocked in')) {
+                    errorMsg = 'You appear to have an existing timesheet entry for today (possibly from an auto-clock-out at midnight). ' +
+                              'If you forgot to clock out yesterday, please use the "Edit Times" button on yesterday\'s entry to amend ' +
+                              'the clock-out time to the correct time. If you need to clock in for today, please contact a manager to ' +
+                              'resolve the existing entry first.';
+                }
+                
                 showAlert(errorMsg, 'error');
                 // Reload clock status to show current state (might have been clocked in despite error)
                 await loadClockStatus();
@@ -1608,16 +1617,54 @@
             document.getElementById('originalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
             document.getElementById('originalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
             
+            // Detect if this is likely an auto-clock-out entry (clock out at exactly midnight)
+            let isAutoClockOut = false;
+            if (clockOutTime) {
+                const clockOut = new Date(clockOutTime);
+                isAutoClockOut = clockOut.getHours() === 0 && clockOut.getMinutes() === 0 && clockOut.getSeconds() === 0;
+                
+                // Also check if clock out is on a different day than clock in (cross-day entry)
+                if (clockInTime) {
+                    const clockIn = new Date(clockInTime);
+                    const clockInDay = new Date(clockIn.getFullYear(), clockIn.getMonth(), clockIn.getDate());
+                    const clockOutDay = new Date(clockOut.getFullYear(), clockOut.getMonth(), clockOut.getDate());
+                    if (clockInDay.getTime() !== clockOutDay.getTime() && isAutoClockOut) {
+                        // This is definitely an auto-clock-out scenario
+                        // Set default clock out to end of the clock-in day (23:59) instead of midnight
+                        const endOfDay = new Date(clockIn);
+                        endOfDay.setHours(23, 59, 0, 0);
+                        const localDateTime = new Date(endOfDay.getTime() - endOfDay.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                        document.getElementById('amendedClockOut').value = localDateTime;
+                    } else {
+                        const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                        document.getElementById('amendedClockOut').value = localDateTime;
+                    }
+                } else {
+                    const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                    document.getElementById('amendedClockOut').value = localDateTime;
+                }
+            }
+            
             // Set default values to current times
             if (clockInTime) {
                 const clockIn = new Date(clockInTime);
                 const localDateTime = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
                 document.getElementById('amendedClockIn').value = localDateTime;
             }
-            if (clockOutTime) {
+            
+            // Show helpful message if this is an auto-clock-out entry
+            if (isAutoClockOut && clockInTime) {
+                const clockIn = new Date(clockInTime);
+                const clockInDay = new Date(clockIn.getFullYear(), clockIn.getMonth(), clockIn.getDate());
                 const clockOut = new Date(clockOutTime);
-                const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-                document.getElementById('amendedClockOut').value = localDateTime;
+                const clockOutDay = new Date(clockOut.getFullYear(), clockOut.getMonth(), clockOut.getDate());
+                if (clockInDay.getTime() !== clockOutDay.getTime()) {
+                    // Show a notice in the modal
+                    const reasonField = document.getElementById('amendmentReason');
+                    if (reasonField && !reasonField.value) {
+                        reasonField.placeholder = 'This entry was auto-clocked out at midnight. Please enter the actual finish time and reason for the amendment.';
+                    }
+                }
             }
             
             document.getElementById('amendmentModal').style.display = 'block';
@@ -1753,6 +1800,16 @@
             const clockInISO = new Date(amendedClockIn).toISOString();
             const clockOutISO = new Date(amendedClockOut).toISOString();
             
+            // Check if this looks like an auto-clock-out scenario (clock out at midnight)
+            const clockOutDate = new Date(clockOutISO);
+            const isMidnightClockOut = clockOutDate.getHours() === 0 && clockOutDate.getMinutes() === 0 && clockOutDate.getSeconds() === 0;
+            const clockInDate = new Date(clockInISO);
+            const clockOutDateOnly = new Date(clockOutDate);
+            clockOutDateOnly.setHours(0, 0, 0, 0);
+            const clockInDateOnly = new Date(clockInDate);
+            clockInDateOnly.setHours(0, 0, 0, 0);
+            const isCrossDay = clockInDateOnly.getTime() !== clockOutDateOnly.getTime();
+            
             try {
                 await apiCall('/clock/amendments', {
                     method: 'POST',
@@ -1767,7 +1824,21 @@
                 closeAmendmentModal();
                 await loadWeeklyTimesheet(currentWeekStart);
             } catch (error) {
-                showAlert(error.message || 'Failed to submit amendment request', 'error');
+                let errorMsg = error.message || 'Failed to submit amendment request';
+                
+                // Provide better error message for auto-clock-out scenarios
+                if (errorMsg.includes('duplicate') || errorMsg.includes('overlap')) {
+                    if (isMidnightClockOut || isCrossDay) {
+                        errorMsg = 'The amendment failed because the system detected an auto-clock-out entry at midnight. ' +
+                                  'This is a known issue. Please contact a manager to manually adjust the times, or try ' +
+                                  'amending the clock-out time to be on the same day as clock-in (before midnight).';
+                    } else {
+                        errorMsg = 'The amended times would create a duplicate or overlap with an existing timesheet entry. ' +
+                                  'Please ensure the times don\'t overlap with other entries for the same day.';
+                    }
+                }
+                
+                showAlert(errorMsg, 'error');
             }
         });
         
