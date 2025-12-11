@@ -4742,6 +4742,29 @@ class ProductionDatabase {
         }
     }
     
+    // Helper function to detect if an entry was auto-clocked-out
+    static isAutoClockedOutEntry(entry) {
+        if (!entry || !entry.clock_out_time) return false;
+        
+        const clockIn = new Date(entry.clock_in_time);
+        const clockOut = new Date(entry.clock_out_time);
+        
+        // Check if clock-out is at end of clock-in day (23:59:59.999)
+        const clockInDayEnd = new Date(clockIn);
+        clockInDayEnd.setHours(23, 59, 59, 999);
+        
+        // Check if clock-out is at midnight of next day (00:00:00)
+        const nextDay = new Date(clockIn);
+        nextDay.setDate(nextDay.getDate() + 1);
+        nextDay.setHours(0, 0, 0, 0);
+        
+        // Allow small margin for timestamp precision (within 1 second)
+        const endOfDayDiff = Math.abs(clockOut.getTime() - clockInDayEnd.getTime());
+        const midnightDiff = Math.abs(clockOut.getTime() - nextDay.getTime());
+        
+        return endOfDayDiff < 1000 || midnightDiff < 1000;
+    }
+    
     // Check for duplicate or overlapping timesheet entries
     static async checkDuplicateTimes(userId, clockInTime, clockOutTime, excludeEntryId = null) {
         if (isPostgreSQL) {
@@ -5565,7 +5588,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
                 [entryId, userId, entry.clock_in_time, entry.clock_out_time, 
                  amendedClockIn, amendedClockOut, reason]
             );
@@ -5575,7 +5598,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, entry.clock_in_time, entry.clock_out_time,
                                  amendedClockIn, amendedClockOut, reason);

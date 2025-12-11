@@ -1607,30 +1607,42 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             console.error('Error auto-clocking-out entries for date (non-blocking):', error);
         });
         
-        // Check if user already has a completed entry for this date
-        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, dateStr);
+        // Check if user already has entries for this date
+        const existingEntries = await ProductionDatabase.getTimesheetHistory(userId, dateStr, dateStr);
+        const entriesForDate = existingEntries.filter(te => {
+            const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+            return teDate === dateStr && te.clock_out_time; // Only completed entries
+        });
         
-        if (completedEntriesCount >= 1) {
+        // Check if there's a non-auto-clocked-out entry (should block)
+        const hasRegularEntry = entriesForDate.some(te => !ProductionDatabase.isAutoClockedOutEntry(te));
+        
+        if (hasRegularEntry) {
             return res.status(400).json({ 
                 success: false, 
                 error: 'You already have a clock in/out entry for this date. Only one entry per day is allowed. Please use "Edit Times" to amend it.' 
             });
         }
         
-        // Check for duplicate or overlapping times - but only on the same date or overnight entries
+        // If only auto-clocked-out entries exist, we'll allow adding missing times (it will replace them)
+        // But first check for duplicate or overlapping times with other entries (excluding auto-clocked-out)
         // For "add missing times", we want to check:
         // 1. Entries that start on the same date
         // 2. Overnight entries that might span into this date
+        // But exclude auto-clocked-out entries from duplicate check
         const duplicates = await ProductionDatabase.checkDuplicateTimesForDate(userId, clock_in_time, clock_out_time, dateStr);
         
+        // Filter out auto-clocked-out entries from duplicates
+        const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+        
         // Log for debugging
-        if (duplicates && duplicates.length > 0) {
-            console.log('Found duplicate/overlapping entries:', {
+        if (realDuplicates && realDuplicates.length > 0) {
+            console.log('Found duplicate/overlapping entries (excluding auto-clocked-out):', {
                 userId,
                 targetDate: dateStr,
                 clock_in_time: clock_in_time,
                 clock_out_time: clock_out_time,
-                duplicates: duplicates.map(d => ({
+                duplicates: realDuplicates.map(d => ({
                     id: d.id,
                     clock_in_time: d.clock_in_time,
                     clock_out_time: d.clock_out_time,
@@ -1639,11 +1651,28 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
-        if (duplicates && duplicates.length > 0) {
+        if (realDuplicates && realDuplicates.length > 0) {
             return res.status(400).json({ 
                 success: false, 
                 error: 'A timesheet entry with overlapping or duplicate times already exists for this period. Please use "Edit Times" to amend the existing entry.' 
             });
+        }
+        
+        // If there are auto-clocked-out entries for this date, delete them first (they'll be replaced)
+        if (entriesForDate.length > 0) {
+            const autoClockedOutEntries = entriesForDate.filter(te => ProductionDatabase.isAutoClockedOutEntry(te));
+            for (const oldEntry of autoClockedOutEntries) {
+                try {
+                    // Verify the entry belongs to the user before deleting
+                    if (oldEntry.user_id === userId) {
+                        await ProductionDatabase.deleteTimesheetEntry(oldEntry.id);
+                        console.log(`Deleted auto-clocked-out entry ${oldEntry.id} to be replaced with missing times entry`);
+                    }
+                } catch (error) {
+                    console.error(`Error deleting auto-clocked-out entry ${oldEntry.id}:`, error);
+                    // Continue anyway - the new entry will still be created
+                }
+            }
         }
         
         const result = await ProductionDatabase.createMissingTimesheetEntry(
@@ -1725,15 +1754,23 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             });
         }
         
+        // Check if this is an auto-clocked-out entry - if so, always allow amendment
+        const isAutoClockedOut = ProductionDatabase.isAutoClockedOutEntry(entry);
+        
         // Check for duplicate or overlapping times (excluding the current entry being amended)
-        if (amended_clock_out_time) {
+        // But skip duplicate check for auto-clocked-out entries (they should always be amendable)
+        if (amended_clock_out_time && !isAutoClockedOut) {
             const duplicates = await ProductionDatabase.checkDuplicateTimes(
                 userId, 
                 amended_clock_in_time, 
                 amended_clock_out_time, 
                 entry_id // Exclude the current entry
             );
-            if (duplicates && duplicates.length > 0) {
+            
+            // Filter out auto-clocked-out entries from duplicates (they can be replaced)
+            const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+            
+            if (realDuplicates && realDuplicates.length > 0) {
                 return res.status(400).json({ 
                     success: false, 
                     error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
