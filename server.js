@@ -4365,6 +4365,41 @@ async function startServer() {
         console.log(`   Second reminder: ${REMINDER_INTERVALS.second} minutes`);
         console.log(`   Final reminder: ${REMINDER_INTERVALS.final} minutes`);
         
+        // Start midnight auto-clock-out scheduler
+        function scheduleMidnightAutoClockOut() {
+            const now = new Date();
+            const midnight = new Date();
+            midnight.setHours(24, 0, 0, 0); // Next midnight
+            
+            const msUntilMidnight = midnight.getTime() - now.getTime();
+            
+            console.log(`🕛 Midnight auto-clock-out scheduled. Next run in ${Math.round(msUntilMidnight / 1000 / 60)} minutes`);
+            
+            setTimeout(async () => {
+                try {
+                    console.log('🕛 Running scheduled midnight auto-clock-out...');
+                    await ProductionDatabase.autoClockOutAllAtMidnight();
+                } catch (error) {
+                    console.error('❌ Error in midnight auto-clock-out:', error);
+                }
+                
+                // Schedule next run (24 hours from now)
+                setInterval(async () => {
+                    try {
+                        console.log('🕛 Running scheduled midnight auto-clock-out...');
+                        await ProductionDatabase.autoClockOutAllAtMidnight();
+                    } catch (error) {
+                        console.error('❌ Error in midnight auto-clock-out:', error);
+                    }
+                }, 24 * 60 * 60 * 1000); // 24 hours
+            }, msUntilMidnight);
+        }
+        
+        // Only start if ProductionDatabase is available
+        if (typeof ProductionDatabase !== 'undefined' && ProductionDatabase.autoClockOutAllAtMidnight) {
+            scheduleMidnightAutoClockOut();
+        }
+        
         // Start the server on 0.0.0.0 to accept external connections (required for Railway)
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Lead Qualification System v5.1.0 running on port ${PORT}`);

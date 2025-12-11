@@ -853,26 +853,15 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
 router.post('/products/:id/components', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        let { component_type, component_id, quantity_required, unit } = req.body;
-        
-        // Trim and normalize component_type to ensure it matches database constraint
-        component_type = component_type ? component_type.trim().toLowerCase() : '';
-        unit = unit ? unit.trim() : '';
+        const { component_type, component_id, quantity_required, unit } = req.body;
         
         if (!component_type || !component_id || !quantity_required || !unit) {
             return res.status(400).json({ success: false, error: 'All component fields are required' });
         }
         
-        // Validate component_type matches database constraint exactly
-        const validTypes = ['raw_material', 'component', 'built_item'];
-        if (!validTypes.includes(component_type)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: `Invalid component type "${component_type}". Must be one of: ${validTypes.join(', ')}` 
-            });
+        if (!['raw_material', 'component', 'built_item'].includes(component_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid component type. Must be raw_material, component, or built_item' });
         }
-        
-        console.log('Adding product component:', { productId, component_type, component_id, quantity_required, unit });
         
         const component = await ProductionDatabase.addProductComponent(
             productId,
@@ -884,35 +873,7 @@ router.post('/products/:id/components', requireProductionAuth, requireAdmin, asy
         res.json({ success: true, component });
     } catch (error) {
         console.error('Add product component error:', error);
-        console.error('Error stack:', error.stack);
-        console.error('Request body:', req.body);
-        const errorMessage = error.message || 'Failed to add product component';
-        res.status(500).json({ success: false, error: errorMessage });
-    }
-});
-
-router.put('/products/:id/components/:compId', requireProductionAuth, requireAdmin, async (req, res) => {
-    try {
-        const compId = parseInt(req.params.compId);
-        let { quantity_required, unit } = req.body;
-        
-        unit = unit ? unit.trim() : '';
-        
-        if (!quantity_required || !unit) {
-            return res.status(400).json({ success: false, error: 'Quantity and unit are required' });
-        }
-        
-        const component = await ProductionDatabase.updateProductComponent(
-            compId,
-            parseFloat(quantity_required),
-            unit
-        );
-        res.json({ success: true, component });
-    } catch (error) {
-        console.error('Update product component error:', error);
-        console.error('Error stack:', error.stack);
-        const errorMessage = error.message || 'Failed to update product component';
-        res.status(500).json({ success: false, error: errorMessage });
+        res.status(500).json({ success: false, error: 'Failed to add product component' });
     }
 });
 
@@ -924,18 +885,6 @@ router.delete('/products/:id/components/:compId', requireProductionAuth, require
     } catch (error) {
         console.error('Delete product component error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete product component' });
-    }
-});
-
-router.post('/products/:id/duplicate', requireProductionAuth, requireAdmin, async (req, res) => {
-    try {
-        const productId = parseInt(req.params.id);
-        const duplicatedProduct = await ProductionDatabase.duplicateProduct(productId);
-        res.json({ success: true, product: duplicatedProduct });
-    } catch (error) {
-        console.error('Duplicate product error:', error);
-        console.error('Error stack:', error.stack);
-        res.status(500).json({ success: false, error: error.message || 'Failed to duplicate product' });
     }
 });
 
@@ -1364,18 +1313,8 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
         }
         
-        // Check if user already has a completed entry for today
-        const today = new Date().toISOString().split('T')[0];
-        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
-        
-        if (completedEntriesCount >= 1) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed. If you need to clock in again, please contact an admin to delete the existing entry first.' 
-            });
-        }
-        
-        // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
+        // FIRST: Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
+        // This must happen before checking for duplicates to ensure old entries are closed
         try {
             await ProductionDatabase.autoClockOutOldEntries(userId);
         } catch (error) {
@@ -1383,12 +1322,51 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             // Continue anyway - don't block the request
         }
         
-        // Check if user is already clocked in (has an active entry)
+        // Check if user is already clocked in (has an active entry for today)
         const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
         if (currentStatus) {
+            // Check if this is an entry from a previous day that should have been auto-clocked-out
+            const clockInDate = new Date(currentStatus.clock_in_time);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const clockInDateOnly = new Date(clockInDate);
+            clockInDateOnly.setHours(0, 0, 0, 0);
+            
+            if (clockInDateOnly.getTime() < today.getTime()) {
+                // This is from a previous day - try to auto-clock-out again
+                try {
+                    await ProductionDatabase.autoClockOutOldEntries(userId);
+                    // Re-check status
+                    const newStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+                    if (newStatus) {
+                        return res.status(400).json({ 
+                            success: false, 
+                            error: 'You are already clocked in. Please clock out first.' 
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error auto-clocking-out old entry:', error);
+                    return res.status(400).json({ 
+                        success: false, 
+                        error: 'You have an open timesheet entry from a previous day. Please contact an admin to resolve this issue.' 
+                    });
+                }
+            } else {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'You are already clocked in. Please clock out first.' 
+                });
+            }
+        }
+        
+        // Check if user already has a completed entry for today (after auto-clock-out)
+        const today = new Date().toISOString().split('T')[0];
+        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
+        
+        if (completedEntriesCount >= 1) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'You are already clocked in. Please clock out first.' 
+                error: 'You have already clocked in and out today. Only one clock in/out per day is allowed. If you need to clock in again, please contact an admin to delete the existing entry first.' 
             });
         }
         
@@ -1650,8 +1628,8 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             console.log('Found duplicate/overlapping entries:', {
                 userId,
                 targetDate: dateStr,
-                clockInTime,
-                clockOutTime,
+                clock_in_time: clock_in_time,
+                clock_out_time: clock_out_time,
                 duplicates: duplicates.map(d => ({
                     id: d.id,
                     clock_in_time: d.clock_in_time,

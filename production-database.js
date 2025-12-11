@@ -702,44 +702,6 @@ async function initializePostgreSQL() {
             )
         `);
         
-        // Update product_components constraint if it doesn't include 'built_item'
-        // This handles cases where the table was created with an older constraint
-        try {
-            // Find all CHECK constraints on component_type column
-            const constraintCheck = await pool.query(`
-                SELECT tc.constraint_name
-                FROM information_schema.table_constraints tc
-                JOIN information_schema.constraint_column_usage ccu 
-                    ON tc.constraint_name = ccu.constraint_name
-                WHERE tc.table_name = 'product_components' 
-                AND tc.constraint_type = 'CHECK'
-                AND ccu.column_name = 'component_type'
-            `);
-            
-            if (constraintCheck.rows.length > 0) {
-                // Drop existing constraint(s) - PostgreSQL auto-names them
-                for (const row of constraintCheck.rows) {
-                    try {
-                        await pool.query(`ALTER TABLE product_components DROP CONSTRAINT IF EXISTS ${row.constraint_name}`);
-                    } catch (dropError) {
-                        // Constraint might not exist or have different name, continue
-                        console.log(`Note: Could not drop constraint ${row.constraint_name}:`, dropError.message);
-                    }
-                }
-                // Add new constraint with all three values
-                await pool.query(`
-                    ALTER TABLE product_components 
-                    ADD CONSTRAINT product_components_component_type_check 
-                    CHECK (component_type IN ('raw_material', 'component', 'built_item'))
-                `);
-                console.log('✅ Updated product_components constraint to include built_item');
-            }
-        } catch (error) {
-            // If constraint update fails, it might already have the correct constraint
-            // or the table might not exist yet (will be created on next run)
-            console.log('Note: Could not update product_components constraint (this is OK if table is new):', error.message);
-        }
-        
         // Product orders
         await pool.query(`
             CREATE TABLE IF NOT EXISTS product_orders (
@@ -2157,67 +2119,42 @@ class ProductionDatabase {
     
     // Calculate true cost (BOM + labour)
     static async calculatePanelTrueCost(panelId) {
-        try {
-            const panel = await this.getPanelById(panelId);
-            if (!panel) return 0;
-            
-            const bomValue = await this.calculateBOMValue(panelId);
-            const labourHours = parseFloat(panel.labour_hours || 0);
-            const labourRate = await this.getSetting('labour_rate_per_hour');
-            const labourCost = labourHours * parseFloat(labourRate || 25);
-            
-            return bomValue + labourCost;
-        } catch (error) {
-            console.error(`Error calculating panel true cost for panel ${panelId}:`, error);
-            // Return 0 on error to prevent blocking operations
-            return 0;
-        }
+        const panel = await this.getPanelById(panelId);
+        if (!panel) return 0;
+        
+        const bomValue = await this.calculateBOMValue(panelId);
+        const labourHours = parseFloat(panel.labour_hours || 0);
+        const labourRate = await this.getSetting('labour_rate_per_hour');
+        const labourCost = labourHours * parseFloat(labourRate || 25);
+        
+        return bomValue + labourCost;
     }
     
     // Calculate product cost from components (raw materials + components + built items)
     static async calculateProductCost(productId) {
-        try {
-            const components = await this.getProductComponents(productId);
-            let totalCost = 0;
+        const components = await this.getProductComponents(productId);
+        let totalCost = 0;
+        
+        for (const comp of components) {
+            const compQty = parseFloat(comp.quantity_required || 0);
             
-            if (!components || components.length === 0) {
-                return 0;
-            }
-            
-            for (const comp of components) {
-                try {
-                    const compQty = parseFloat(comp.quantity_required || 0);
-                    
-                    if (comp.component_type === 'raw_material') {
-                        const stockItem = await this.getStockItemById(comp.component_id);
-                        if (stockItem) {
-                            const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
-                            totalCost += materialCost;
-                        } else {
-                            console.warn(`Raw material ${comp.component_id} not found for product ${productId}`);
-                        }
-                    } else if (comp.component_type === 'component') {
-                        const componentCost = await this.calculateComponentTrueCost(comp.component_id);
-                        totalCost += componentCost * compQty;
-                    } else if (comp.component_type === 'built_item') {
-                        // Built item (panel) true cost (BOM + labour)
-                        const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
-                        totalCost += builtItemCost * compQty;
-                    } else {
-                        console.warn(`Unknown component type: ${comp.component_type} for component ${comp.id} in product ${productId}`);
-                    }
-                } catch (compError) {
-                    console.error(`Error calculating cost for component ${comp.id} (type: ${comp.component_type}, component_id: ${comp.component_id}) in product ${productId}:`, compError);
-                    // Continue with other components - don't fail the whole calculation
+            if (comp.component_type === 'raw_material') {
+                const stockItem = await this.getStockItemById(comp.component_id);
+                if (stockItem) {
+                    const materialCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * compQty;
+                    totalCost += materialCost;
                 }
+            } else if (comp.component_type === 'component') {
+                const componentCost = await this.calculateComponentTrueCost(comp.component_id);
+                totalCost += componentCost * compQty;
+            } else if (comp.component_type === 'built_item') {
+                // Built item (panel) true cost (BOM + labour)
+                const builtItemCost = await this.calculatePanelTrueCost(comp.component_id);
+                totalCost += builtItemCost * compQty;
             }
-            return totalCost;
-        } catch (error) {
-            console.error(`Error calculating product cost for product ${productId}:`, error);
-            console.error('Error stack:', error.stack);
-            // Return 0 on error to prevent blocking operations
-            return 0;
         }
+        
+        return totalCost;
     }
     
     // Update panel cost automatically (called after BOM or labour changes)
@@ -3524,35 +3461,25 @@ class ProductionDatabase {
     // ============ PRODUCT COMPONENTS OPERATIONS ============
     
     static async addProductComponent(productId, componentType, componentId, quantityRequired, unit) {
-        let component;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_components (product_id, component_type, component_id, quantity_required, unit)
                  VALUES ($1, $2, $3, $4, $5) RETURNING *`,
                 [productId, componentType, componentId, quantityRequired, unit]
             );
-            component = result.rows[0];
+            // Recalculate product cost after component change
+            await this.updateProductCost(productId);
+            return result.rows[0];
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_components (product_id, component_type, component_id, quantity_required, unit)
                  VALUES (?, ?, ?, ?, ?)`
             );
             const info = stmt.run(productId, componentType, componentId, quantityRequired, unit);
-            component = await this.getProductComponentById(info.lastInsertRowid);
+            // Recalculate product cost after component change
+            await this.updateProductCost(productId);
+            return this.getProductComponentById(info.lastInsertRowid);
         }
-        
-        // Recalculate product cost after component change
-        // Wrap in try-catch so cost calculation failures don't block the component addition
-        try {
-            const updatedCost = await this.updateProductCost(productId);
-            console.log(`Updated product ${productId} cost to £${updatedCost} after adding component`);
-        } catch (error) {
-            console.error(`Error updating product cost for product ${productId} after adding component:`, error);
-            console.error('Cost update error stack:', error.stack);
-            // Continue - don't throw, component was added successfully
-        }
-        
-        return component;
     }
     
     static async getProductComponentById(id) {
@@ -3598,37 +3525,6 @@ class ProductionDatabase {
         }
     }
     
-    static async updateProductComponent(compId, quantityRequired, unit) {
-        // Get product ID before updating
-        const comp = await this.getProductComponentById(compId);
-        if (!comp) {
-            throw new Error('Product component not found');
-        }
-        const productId = comp.product_id;
-        
-        if (isPostgreSQL) {
-            await pool.query(
-                `UPDATE product_components SET quantity_required = $1, unit = $2 WHERE id = $3 RETURNING *`,
-                [quantityRequired, unit, compId]
-            );
-        } else {
-            db.prepare(
-                `UPDATE product_components SET quantity_required = ?, unit = ? WHERE id = ?`
-            ).run(quantityRequired, unit, compId);
-        }
-        
-        // Recalculate product cost after component change
-        try {
-            const updatedCost = await this.updateProductCost(productId);
-            console.log(`Updated product ${productId} cost to £${updatedCost} after updating component`);
-        } catch (error) {
-            console.error(`Error updating product cost for product ${productId} after updating component:`, error);
-            // Continue - don't throw, component was updated successfully
-        }
-        
-        return await this.getProductComponentById(compId);
-    }
-    
     static async deleteProductComponent(compId) {
         // Get product ID before deleting
         const comp = await this.getProductComponentById(compId);
@@ -3642,54 +3538,8 @@ class ProductionDatabase {
         
         // Recalculate product cost after component change
         if (productId) {
-            try {
-                const updatedCost = await this.updateProductCost(productId);
-                console.log(`Updated product ${productId} cost to £${updatedCost} after deleting component`);
-            } catch (error) {
-                console.error(`Error updating product cost for product ${productId} after deleting component:`, error);
-                console.error('Cost update error stack:', error.stack);
-                // Continue - don't throw, component was deleted successfully
-            }
+            await this.updateProductCost(productId);
         }
-    }
-    
-    static async duplicateProduct(productId) {
-        // Get the original product
-        const originalProduct = await this.getProductById(productId);
-        if (!originalProduct) {
-            throw new Error('Product not found');
-        }
-        
-        // Create new product with "(Copy)" suffix
-        const newProductName = `${originalProduct.name} (Copy)`;
-        const newProduct = await this.createProduct({
-            name: newProductName,
-            description: originalProduct.description,
-            product_type: originalProduct.product_type,
-            status: originalProduct.status || 'active'
-        });
-        
-        // Get all components from the original product
-        const components = await this.getProductComponents(productId);
-        
-        // Duplicate all components
-        for (const comp of components) {
-            try {
-                await this.addProductComponent(
-                    newProduct.id,
-                    comp.component_type,
-                    comp.component_id,
-                    parseFloat(comp.quantity_required || 0),
-                    comp.unit
-                );
-            } catch (error) {
-                console.error(`Error duplicating component ${comp.id} (type: ${comp.component_type}):`, error);
-                // Continue with other components - don't fail the whole duplication
-            }
-        }
-        
-        // Return the new product with updated cost
-        return await this.getProductById(newProduct.id);
     }
     
     // ============ PRODUCT ORDERS OPERATIONS ============
@@ -4302,6 +4152,308 @@ class ProductionDatabase {
             }
             
             return updatedEntries;
+        }
+    }
+    
+    // Auto-clock-out old entries for a specific user (entries from previous days)
+    static async autoClockOutOldEntries(userId) {
+        if (isPostgreSQL) {
+            // Find entries that:
+            // 1. Don't have a clock_out_time
+            // 2. Are for this user
+            // 3. Started before today (clock_in_time is before today's date)
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toISOString().split('T')[0];
+            
+            const entries = await pool.query(
+                `SELECT * FROM timesheet_entries
+                 WHERE user_id = $1
+                 AND clock_out_time IS NULL
+                 AND DATE(clock_in_time) < $2::date
+                 ORDER BY clock_in_time DESC`,
+                [userId, todayStr]
+            );
+            
+            if (entries.rows.length === 0) {
+                return [];
+            }
+            
+            const updatedEntries = [];
+            for (const entry of entries.rows) {
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    
+                    // Set clock-out to end of the clock-in date (23:59:59.999)
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    const updateResult = await pool.query(
+                        `UPDATE timesheet_entries 
+                         SET clock_out_time = $1, updated_at = $1
+                         WHERE id = $2
+                         RETURNING *`,
+                        [clockOutTime, entry.id]
+                    );
+                    
+                    if (updateResult.rows.length > 0) {
+                        updatedEntries.push(updateResult.rows[0]);
+                        
+                        // Recalculate hours for this entry
+                        try {
+                            const dayOfWeek = clockInDate.getDay();
+                            const monday = new Date(clockInDate);
+                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                            monday.setHours(0, 0, 0, 0);
+                            const weekStartDate = monday.toISOString().split('T')[0];
+                            
+                            const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                            const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                            const overnightAway = dailyEntry.overnight_away || false;
+                            const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                            
+                            await this.updateDailyEntry(dailyEntry.id, {
+                                timesheet_entry_id: entry.id,
+                                regular_hours: aggregatedHours.regular_hours,
+                                overtime_hours: aggregatedHours.overtime_hours,
+                                weekend_hours: aggregatedHours.weekend_hours,
+                                overnight_hours: aggregatedHours.overnight_hours,
+                                total_hours: aggregatedHours.total_hours
+                            });
+                        } catch (error) {
+                            console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error auto-clocking-out entry ${entry.id}:`, error);
+                }
+            }
+            
+            return updatedEntries;
+        } else {
+            // SQLite version
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toISOString().split('T')[0];
+            
+            const entries = db.prepare(`
+                SELECT * FROM timesheet_entries
+                WHERE user_id = ?
+                AND clock_out_time IS NULL
+                AND DATE(clock_in_time) < DATE(?)
+                ORDER BY clock_in_time DESC
+            `).all(userId, todayStr);
+            
+            if (entries.length === 0) {
+                return [];
+            }
+            
+            const updatedEntries = [];
+            for (const entry of entries) {
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    db.prepare(`
+                        UPDATE timesheet_entries 
+                        SET clock_out_time = ?, updated_at = ?
+                        WHERE id = ?
+                    `).run(clockOutTime, clockOutTime, entry.id);
+                    
+                    // Recalculate hours
+                    try {
+                        const dayOfWeek = clockInDate.getDay();
+                        const monday = new Date(clockInDate);
+                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                        monday.setHours(0, 0, 0, 0);
+                        const weekStartDate = monday.toISOString().split('T')[0];
+                        
+                        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                        const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                        const overnightAway = dailyEntry.overnight_away || false;
+                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                        
+                        await this.updateDailyEntry(dailyEntry.id, {
+                            timesheet_entry_id: entry.id,
+                            regular_hours: aggregatedHours.regular_hours,
+                            overtime_hours: aggregatedHours.overtime_hours,
+                            weekend_hours: aggregatedHours.weekend_hours,
+                            overnight_hours: aggregatedHours.overnight_hours,
+                            total_hours: aggregatedHours.total_hours
+                        });
+                    } catch (error) {
+                        console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
+                    }
+                    
+                    updatedEntries.push({ ...entry, clock_out_time: clockOutTime });
+                } catch (error) {
+                    console.error(`Error auto-clocking-out entry ${entry.id}:`, error);
+                }
+            }
+            
+            return updatedEntries;
+        }
+    }
+    
+    // Auto-clock-out all entries at midnight (for all users)
+    // This should be called by a scheduled task at midnight
+    static async autoClockOutAllAtMidnight() {
+        console.log('🕛 Running midnight auto-clock-out for all users...');
+        
+        if (isPostgreSQL) {
+            // Find all entries that don't have a clock_out_time and started before today
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toISOString().split('T')[0];
+            
+            const entries = await pool.query(
+                `SELECT * FROM timesheet_entries
+                 WHERE clock_out_time IS NULL
+                 AND DATE(clock_in_time) < $1::date
+                 ORDER BY clock_in_time ASC`,
+                [todayStr]
+            );
+            
+            if (entries.rows.length === 0) {
+                console.log('   No entries to auto-clock-out at midnight');
+                return { count: 0, errors: 0 };
+            }
+            
+            console.log(`   Found ${entries.rows.length} entries to auto-clock-out`);
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (const entry of entries.rows) {
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    
+                    // Set clock-out to end of the clock-in date (23:59:59.999)
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    const updateResult = await pool.query(
+                        `UPDATE timesheet_entries 
+                         SET clock_out_time = $1, updated_at = $1
+                         WHERE id = $2
+                         RETURNING *`,
+                        [clockOutTime, entry.id]
+                    );
+                    
+                    if (updateResult.rows.length > 0) {
+                        successCount++;
+                        
+                        // Recalculate hours for this entry
+                        try {
+                            const dayOfWeek = clockInDate.getDay();
+                            const monday = new Date(clockInDate);
+                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                            monday.setHours(0, 0, 0, 0);
+                            const weekStartDate = monday.toISOString().split('T')[0];
+                            
+                            const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                            const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                            const overnightAway = dailyEntry.overnight_away || false;
+                            const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                            
+                            await this.updateDailyEntry(dailyEntry.id, {
+                                timesheet_entry_id: entry.id,
+                                regular_hours: aggregatedHours.regular_hours,
+                                overtime_hours: aggregatedHours.overtime_hours,
+                                weekend_hours: aggregatedHours.weekend_hours,
+                                overnight_hours: aggregatedHours.overnight_hours,
+                                total_hours: aggregatedHours.total_hours
+                            });
+                        } catch (error) {
+                            console.error(`   Error recalculating hours for entry ${entry.id}:`, error);
+                        }
+                    }
+                } catch (error) {
+                    console.error(`   Error auto-clocking-out entry ${entry.id}:`, error);
+                    errorCount++;
+                }
+            }
+            
+            console.log(`   ✅ Midnight auto-clock-out complete: ${successCount} entries updated, ${errorCount} errors`);
+            return { count: successCount, errors: errorCount };
+        } else {
+            // SQLite version
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayStr = today.toISOString().split('T')[0];
+            
+            const entries = db.prepare(`
+                SELECT * FROM timesheet_entries
+                WHERE clock_out_time IS NULL
+                AND DATE(clock_in_time) < DATE(?)
+                ORDER BY clock_in_time ASC
+            `).all(todayStr);
+            
+            if (entries.length === 0) {
+                console.log('   No entries to auto-clock-out at midnight');
+                return { count: 0, errors: 0 };
+            }
+            
+            console.log(`   Found ${entries.length} entries to auto-clock-out`);
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            for (const entry of entries) {
+                try {
+                    const clockInDate = new Date(entry.clock_in_time);
+                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    const midnight = new Date(clockInDate);
+                    midnight.setHours(23, 59, 59, 999);
+                    const clockOutTime = midnight.toISOString();
+                    
+                    db.prepare(`
+                        UPDATE timesheet_entries 
+                        SET clock_out_time = ?, updated_at = ?
+                        WHERE id = ?
+                    `).run(clockOutTime, clockOutTime, entry.id);
+                    
+                    // Recalculate hours
+                    try {
+                        const dayOfWeek = clockInDate.getDay();
+                        const monday = new Date(clockInDate);
+                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                        monday.setHours(0, 0, 0, 0);
+                        const weekStartDate = monday.toISOString().split('T')[0];
+                        
+                        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+                        const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
+                        const overnightAway = dailyEntry.overnight_away || false;
+                        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+                        
+                        await this.updateDailyEntry(dailyEntry.id, {
+                            timesheet_entry_id: entry.id,
+                            regular_hours: aggregatedHours.regular_hours,
+                            overtime_hours: aggregatedHours.overtime_hours,
+                            weekend_hours: aggregatedHours.weekend_hours,
+                            overnight_hours: aggregatedHours.overnight_hours,
+                            total_hours: aggregatedHours.total_hours
+                        });
+                    } catch (error) {
+                        console.error(`   Error recalculating hours for entry ${entry.id}:`, error);
+                    }
+                    
+                    successCount++;
+                } catch (error) {
+                    console.error(`   Error auto-clocking-out entry ${entry.id}:`, error);
+                    errorCount++;
+                }
+            }
+            
+            console.log(`   ✅ Midnight auto-clock-out complete: ${successCount} entries updated, ${errorCount} errors`);
+            return { count: successCount, errors: errorCount };
         }
     }
     
@@ -5382,7 +5534,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
                 [entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason]
             );
             return { entry: await this.getTimesheetEntryById(entryId), amendment: result.rows[0] };
@@ -5391,7 +5543,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_amendments 
                  (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
                   amended_clock_in_time, amended_clock_out_time, reason)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(entryId, userId, clockInTime, clockOutTime, clockInTime, clockOutTime, reason);
             return { 
@@ -5813,7 +5965,6 @@ class ProductionDatabase {
     static async calculateMaterialRequirements(orders) {
         // orders: array of {product_id, quantity}
         const panelsRequired = {};
-        const componentsRequired = {};
         const rawMaterialsRequired = {};
         const breakdown = {
             by_product: [],
@@ -5836,7 +5987,7 @@ class ProductionDatabase {
             for (const comp of components) {
                 const totalQty = parseFloat(comp.quantity_required) * order.quantity;
                 
-                if (comp.component_type === 'panel' || comp.component_type === 'built_item') {
+                if (comp.component_type === 'panel') {
                     const panelId = comp.component_id;
                     if (!panelsRequired[panelId]) {
                         panelsRequired[panelId] = 0;
@@ -5851,140 +6002,30 @@ class ProductionDatabase {
                     
                     // Get BOM for this panel
                     const bomItems = await this.getPanelBOM(panelId);
-                    if (bomItems && Array.isArray(bomItems)) {
-                        for (const bomItem of bomItems) {
-                            if (!bomItem) continue;
-                            
-                            // Only process raw_material items from panel BOM
-                            // Components in panel BOM are handled separately when we process components
-                            if (bomItem.item_type === 'raw_material') {
-                                const stockItemId = parseInt(bomItem.item_id);
-                                if (!stockItemId || isNaN(stockItemId)) {
-                                    console.error(`Invalid item_id in panel BOM for raw_material: ${bomItem.item_id}`);
-                                    continue;
-                                }
-                                
-                                const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
-                                
-                                if (!rawMaterialsRequired[stockItemId]) {
-                                    rawMaterialsRequired[stockItemId] = {
-                                        stock_item_id: stockItemId,
-                                        name: bomItem.item_name || 'Unknown',
-                                        unit: bomItem.item_unit || bomItem.unit || 'unit',
-                                        total_quantity: 0
-                                    };
-                                }
-                                rawMaterialsRequired[stockItemId].total_quantity += materialQty;
-                            } else if (bomItem.item_type === 'component') {
-                                // Component in panel BOM - add to componentsRequired and process its BOM
-                                const componentId = parseInt(bomItem.item_id);
-                                if (!componentId || isNaN(componentId)) {
-                                    console.error(`Invalid item_id in panel BOM for component: ${bomItem.item_id}`);
-                                    continue;
-                                }
-                                
-                                const componentQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
-                                if (!componentsRequired[componentId]) {
-                                    componentsRequired[componentId] = 0;
-                                }
-                                componentsRequired[componentId] += componentQty;
-                                
-                                // Process component's BOM to get raw materials
-                                try {
-                                    const componentBomItems = await this.getComponentBOM(componentId);
-                                    if (componentBomItems && Array.isArray(componentBomItems) && componentBomItems.length > 0) {
-                                        for (const componentBomItem of componentBomItems) {
-                                            if (!componentBomItem || !componentBomItem.stock_item_id) continue;
-                                            
-                                            const stockItemId = parseInt(componentBomItem.stock_item_id);
-                                            if (!stockItemId || isNaN(stockItemId)) {
-                                                console.error(`Invalid stock_item_id in component BOM: ${componentBomItem.stock_item_id}`);
-                                                continue;
-                                            }
-                                            
-                                            const materialQty = parseFloat(componentBomItem.quantity_required || 0) * componentQty;
-                                            
-                                            if (!rawMaterialsRequired[stockItemId]) {
-                                                rawMaterialsRequired[stockItemId] = {
-                                                    stock_item_id: stockItemId,
-                                                    name: componentBomItem.stock_item_name || 'Unknown',
-                                                    unit: componentBomItem.stock_item_unit || componentBomItem.unit || 'unit',
-                                                    total_quantity: 0
-                                                };
-                                            }
-                                            rawMaterialsRequired[stockItemId].total_quantity += materialQty;
-                                        }
-                                    }
-                                } catch (error) {
-                                    console.error(`Error processing BOM for component ${componentId} in panel BOM:`, error);
-                                    // Continue - component might not have a BOM
-                                }
-                            }
+                    for (const bomItem of bomItems) {
+                        const stockItemId = bomItem.stock_item_id;
+                        const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
+                        
+                        if (!rawMaterialsRequired[stockItemId]) {
+                            rawMaterialsRequired[stockItemId] = {
+                                stock_item_id: stockItemId,
+                                name: bomItem.stock_item_name,
+                                unit: bomItem.unit,
+                                total_quantity: 0
+                            };
                         }
-                    }
-                } else if (comp.component_type === 'component') {
-                    const componentId = comp.component_id;
-                    if (!componentsRequired[componentId]) {
-                        componentsRequired[componentId] = 0;
-                    }
-                    componentsRequired[componentId] += totalQty;
-                    
-                    // Get BOM for this component
-                    try {
-                        const bomItems = await this.getComponentBOM(componentId);
-                        if (bomItems && Array.isArray(bomItems) && bomItems.length > 0) {
-                            for (const bomItem of bomItems) {
-                                if (!bomItem || !bomItem.stock_item_id) continue;
-                                
-                                const stockItemId = parseInt(bomItem.stock_item_id);
-                                if (!stockItemId || isNaN(stockItemId)) {
-                                    console.error(`Invalid stock_item_id in component BOM: ${bomItem.stock_item_id}`);
-                                    continue;
-                                }
-                                
-                                const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
-                                
-                                if (!rawMaterialsRequired[stockItemId]) {
-                                    rawMaterialsRequired[stockItemId] = {
-                                        stock_item_id: stockItemId,
-                                        name: bomItem.stock_item_name || 'Unknown',
-                                        unit: bomItem.stock_item_unit || bomItem.unit || 'unit',
-                                        total_quantity: 0
-                                    };
-                                }
-                                rawMaterialsRequired[stockItemId].total_quantity += materialQty;
-                            }
-                        }
-                    } catch (error) {
-                        console.error(`Error getting BOM for component ${componentId}:`, error);
-                        console.error('Error stack:', error.stack);
-                        // Continue - component might not have a BOM or there was an error
+                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
                     }
                 } else if (comp.component_type === 'raw_material') {
-                    const stockItemId = parseInt(comp.component_id);
-                    if (!stockItemId || isNaN(stockItemId)) {
-                        console.error(`Invalid stock_item_id for raw_material component: ${comp.component_id}`);
-                        continue;
-                    }
-                    
+                    const stockItemId = comp.component_id;
                     if (!rawMaterialsRequired[stockItemId]) {
-                        try {
-                            const stockItem = await this.getStockItemById(stockItemId);
-                            rawMaterialsRequired[stockItemId] = {
-                                stock_item_id: stockItemId,
-                                name: stockItem ? stockItem.name : 'Unknown',
-                                unit: comp.unit || 'unit',
-                                total_quantity: 0
-                            };
-                        } catch (error) {
-                            console.error(`Error getting stock item ${stockItemId}:`, error);
-                            rawMaterialsRequired[stockItemId] = {
-                                stock_item_id: stockItemId,
-                                name: 'Unknown',
-                                unit: comp.unit || 'unit',
-                                total_quantity: 0
-                            };
-                        }
+                        const stockItem = await this.getStockItemById(stockItemId);
+                        rawMaterialsRequired[stockItemId] = {
+                            stock_item_id: stockItemId,
+                            name: stockItem ? stockItem.name : 'Unknown',
+                            unit: comp.unit,
+                            total_quantity: 0
+                        };
                     }
                     rawMaterialsRequired[stockItemId].total_quantity += totalQty;
                     
@@ -6012,63 +6053,27 @@ class ProductionDatabase {
                 materials: []
             };
             
-            if (bomItems && Array.isArray(bomItems)) {
-                for (const bomItem of bomItems) {
-                    if (!bomItem) continue;
-                    
-                    // Only include raw_material items in breakdown
-                    if (bomItem.item_type === 'raw_material') {
-                        const materialQty = parseFloat(bomItem.quantity_required || 0) * totalQty;
-                        panelBreakdown.materials.push({
-                            stock_item_id: parseInt(bomItem.item_id),
-                            name: bomItem.item_name || 'Unknown',
-                            quantity: materialQty,
-                            unit: bomItem.item_unit || bomItem.unit || 'unit'
-                        });
-                    }
-                }
+            for (const bomItem of bomItems) {
+                const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
+                panelBreakdown.materials.push({
+                    stock_item_id: bomItem.stock_item_id,
+                    name: bomItem.stock_item_name,
+                    quantity: materialQty,
+                    unit: bomItem.unit
+                });
             }
             
             breakdown.by_panel.push(panelBreakdown);
         }
         
-        // Convert panelsRequired to array with stock and labour info
+        // Convert panelsRequired to array
         const panelsArray = [];
         for (const [panelId, totalQty] of Object.entries(panelsRequired)) {
             const panel = await this.getPanelById(panelId);
-            const available = parseFloat(panel ? panel.built_quantity || 0 : 0);
-            const shortfall = Math.max(0, totalQty - available);
-            const labourHoursPerUnit = parseFloat(panel ? panel.labour_hours || 0 : 0);
-            const totalLabourHours = labourHoursPerUnit * shortfall;
-            
             panelsArray.push({
                 panel_id: parseInt(panelId),
                 panel_name: panel ? panel.name : 'Unknown',
-                total_quantity: totalQty,
-                available: available,
-                to_build: shortfall,
-                labour_hours_per_unit: labourHoursPerUnit,
-                total_labour_hours: totalLabourHours
-            });
-        }
-        
-        // Convert componentsRequired to array with stock and labour info
-        const componentsArray = [];
-        for (const [componentId, totalQty] of Object.entries(componentsRequired)) {
-            const component = await this.getComponentById(componentId);
-            const available = parseFloat(component ? component.built_quantity || 0 : 0);
-            const shortfall = Math.max(0, totalQty - available);
-            const labourHoursPerUnit = parseFloat(component ? component.labour_hours || 0 : 0);
-            const totalLabourHours = labourHoursPerUnit * shortfall;
-            
-            componentsArray.push({
-                component_id: parseInt(componentId),
-                component_name: component ? component.name : 'Unknown',
-                total_quantity: totalQty,
-                available: available,
-                to_build: shortfall,
-                labour_hours_per_unit: labourHoursPerUnit,
-                total_labour_hours: totalLabourHours
+                total_quantity: totalQty
             });
         }
         
@@ -6076,100 +6081,28 @@ class ProductionDatabase {
         const materialsArray = [];
         let totalCost = 0;
         for (const [stockItemId, data] of Object.entries(rawMaterialsRequired)) {
-            // Validate stockItemId before using it
-            const itemId = parseInt(stockItemId);
-            if (!itemId || isNaN(itemId)) {
-                console.error(`Invalid stock_item_id in rawMaterialsRequired: ${stockItemId}`);
-                continue;
-            }
+            const stockItem = await this.getStockItemById(stockItemId);
+            const available = parseFloat(stockItem ? stockItem.current_quantity : 0);
+            const shortfall = Math.max(0, data.total_quantity - available);
+            const cost = parseFloat(stockItem ? stockItem.cost_per_unit_gbp : 0) * data.total_quantity;
+            totalCost += cost;
             
-            try {
-                const stockItem = await this.getStockItemById(itemId);
-                const available = parseFloat(stockItem ? stockItem.current_quantity : 0);
-                const shortfall = Math.max(0, data.total_quantity - available);
-                const cost = parseFloat(stockItem ? stockItem.cost_per_unit_gbp : 0) * data.total_quantity;
-                totalCost += cost;
-                
-                materialsArray.push({
-                    stock_item_id: itemId,
-                    name: data.name || 'Unknown',
-                    total_quantity: data.total_quantity,
-                    unit: data.unit || 'unit',
-                    available: available,
-                    shortfall: shortfall,
-                    cost_gbp: cost
-                });
-            } catch (error) {
-                console.error(`Error getting stock item ${itemId}:`, error);
-                // Continue with default values
-                materialsArray.push({
-                    stock_item_id: itemId,
-                    name: data.name || 'Unknown',
-                    total_quantity: data.total_quantity,
-                    unit: data.unit || 'unit',
-                    available: 0,
-                    shortfall: data.total_quantity,
-                    cost_gbp: 0
-                });
-            }
-        }
-        
-        // Calculate labour requirements
-        const labourRate = parseFloat(await this.getSetting('labour_rate_per_hour') || 25);
-        const labourBreakdown = [];
-        let totalLabourHours = 0;
-        let totalLabourCost = 0;
-        
-        // Add built items labour
-        for (const panel of panelsArray) {
-            if (panel.to_build > 0 && panel.labour_hours_per_unit > 0) {
-                const labourCost = panel.total_labour_hours * labourRate;
-                totalLabourHours += panel.total_labour_hours;
-                totalLabourCost += labourCost;
-                
-                labourBreakdown.push({
-                    item_type: 'built_item',
-                    item_id: panel.panel_id,
-                    item_name: panel.panel_name,
-                    quantity_to_build: panel.to_build,
-                    labour_hours_per_unit: panel.labour_hours_per_unit,
-                    total_labour_hours: panel.total_labour_hours,
-                    labour_cost_gbp: labourCost
-                });
-            }
-        }
-        
-        // Add components labour
-        for (const component of componentsArray) {
-            if (component.to_build > 0 && component.labour_hours_per_unit > 0) {
-                const labourCost = component.total_labour_hours * labourRate;
-                totalLabourHours += component.total_labour_hours;
-                totalLabourCost += labourCost;
-                
-                labourBreakdown.push({
-                    item_type: 'component',
-                    item_id: component.component_id,
-                    item_name: component.component_name,
-                    quantity_to_build: component.to_build,
-                    labour_hours_per_unit: component.labour_hours_per_unit,
-                    total_labour_hours: component.total_labour_hours,
-                    labour_cost_gbp: labourCost
-                });
-            }
+            materialsArray.push({
+                stock_item_id: parseInt(stockItemId),
+                name: data.name,
+                total_quantity: data.total_quantity,
+                unit: data.unit,
+                available: available,
+                shortfall: shortfall,
+                cost_gbp: cost
+            });
         }
         
         return {
             panels_required: panelsArray,
-            components_required: componentsArray,
             raw_materials_required: materialsArray,
-            labour_requirements: {
-                total_hours: totalLabourHours,
-                total_cost_gbp: totalLabourCost,
-                breakdown: labourBreakdown
-            },
             breakdown: breakdown,
-            total_cost_gbp: totalCost,
-            total_labour_cost_gbp: totalLabourCost
+            total_cost_gbp: totalCost
         };
     }
     
