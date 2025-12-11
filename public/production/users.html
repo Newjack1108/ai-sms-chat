@@ -53,7 +53,7 @@
                     <label class="form-label">Role *</label>
                     <select id="userRole" class="form-select" required>
                         <option value="staff">Staff</option>
-                        <option value="manager">Manager</option>
+                        <option value="office">Office</option>
                         <option value="admin">Admin</option>
                     </select>
                 </div>
@@ -107,7 +107,7 @@
                             ${data.users.map(user => `
                                 <tr>
                                     <td><strong>${user.username}</strong></td>
-                                    <td><span class="badge badge-info">${user.role}</span></td>
+                                    <td><span class="badge badge-info">${user.role === 'manager' ? 'office' : user.role}</span></td>
                                     <td>${formatDate(user.created_at)}</td>
                                     <td>
                                         <button onclick="editUser(${user.id})" class="btn btn-secondary btn-sm">Edit</button>
@@ -143,7 +143,8 @@
                 document.getElementById('userModalTitle').textContent = 'Edit User';
                 document.getElementById('userId').value = user.id;
                 document.getElementById('userUsername').value = user.username;
-                document.getElementById('userRole').value = user.role;
+                // Map 'manager' to 'office' for backward compatibility
+                document.getElementById('userRole').value = user.role === 'manager' ? 'office' : user.role;
                 document.getElementById('userPassword').value = '';
                 document.getElementById('passwordRequired').style.display = 'none';
                 document.getElementById('userPassword').required = false;
