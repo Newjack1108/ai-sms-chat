@@ -5797,26 +5797,46 @@ class ProductionDatabase {
             throw new Error('Timesheet entry not found');
         }
         
+        console.log(`Admin amending timesheet entry ${entryId}:`, {
+            original: { clock_in: entry.clock_in_time, clock_out: entry.clock_out_time },
+            amended: { clock_in: amendedClockIn, clock_out: amendedClockOut },
+            adminId
+        });
+        
         const now = new Date().toISOString();
         
         // Update the timesheet entry directly with admin edit tracking
         if (isPostgreSQL) {
-            await pool.query(
+            const updateResult = await pool.query(
                 `UPDATE timesheet_entries 
                  SET clock_in_time = $1, clock_out_time = $2, 
                      edited_by_admin_id = $3, edited_by_admin_at = $4,
                      updated_at = $4
-                 WHERE id = $5`,
+                 WHERE id = $5
+                 RETURNING *`,
                 [amendedClockIn, amendedClockOut, adminId, now, entryId]
             );
+            
+            if (updateResult.rows.length === 0) {
+                throw new Error('Failed to update timesheet entry - no rows affected');
+            }
+            
+            console.log('Timesheet entry updated successfully:', updateResult.rows[0]);
         } else {
-            db.prepare(
+            const updateStmt = db.prepare(
                 `UPDATE timesheet_entries 
                  SET clock_in_time = ?, clock_out_time = ?, 
                      edited_by_admin_id = ?, edited_by_admin_at = ?,
                      updated_at = ?
                  WHERE id = ?`
-            ).run(amendedClockIn, amendedClockOut, adminId, now, now, entryId);
+            );
+            const updateInfo = updateStmt.run(amendedClockIn, amendedClockOut, adminId, now, now, entryId);
+            
+            if (updateInfo.changes === 0) {
+                throw new Error('Failed to update timesheet entry - no rows affected');
+            }
+            
+            console.log('Timesheet entry updated successfully, changes:', updateInfo.changes);
         }
         
         // Create an amendment record for audit trail (marked as approved/admin)
@@ -5979,6 +5999,8 @@ class ProductionDatabase {
                     te.weekend_hours,
                     te.overnight_hours,
                     te.total_hours,
+                    te.edited_by_admin_id,
+                    te.edited_by_admin_at,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
@@ -6046,6 +6068,8 @@ class ProductionDatabase {
                     te.weekend_hours,
                     te.overnight_hours,
                     te.total_hours,
+                    te.edited_by_admin_id,
+                    te.edited_by_admin_at,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id

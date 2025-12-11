@@ -269,7 +269,7 @@
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h2>Edit Timesheet Entry (Admin)</h2>
-                <button class="modal-close" onclick="hideModal('adminEditModal')">&times;</button>
+                <button class="modal-close" onclick="hideAdminEditModal()">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="adminEditForm">
@@ -305,7 +305,7 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" onclick="hideModal('adminEditModal')" class="btn btn-secondary">Cancel</button>
+                <button type="button" onclick="hideAdminEditModal()" class="btn btn-secondary">Cancel</button>
                 <button type="button" onclick="submitAdminEdit()" class="btn btn-primary">Save Changes</button>
             </div>
         </div>
@@ -992,8 +992,25 @@
             // Clear reason
             document.getElementById('adminEditReason').value = '';
             
-            document.getElementById('adminEditModal').style.display = 'block';
+            const modal = document.getElementById('adminEditModal');
+            if (modal) {
+                modal.style.display = 'block';
+            }
         }
+        
+        // Override hideModal for adminEditModal to use inline styles
+        function hideAdminEditModal() {
+            const modal = document.getElementById('adminEditModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+        
+        // Prevent form submission on Enter key
+        document.getElementById('adminEditForm')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            submitAdminEdit();
+        });
         
         async function submitAdminEdit() {
             const entryId = parseInt(document.getElementById('adminEditEntryId').value);
@@ -1011,7 +1028,7 @@
             const clockOutISO = new Date(amendedClockOut).toISOString();
             
             try {
-                await apiCall('/clock/amendments/admin', {
+                const result = await apiCall('/clock/amendments/admin', {
                     method: 'POST',
                     body: JSON.stringify({
                         entry_id: entryId,
@@ -1020,15 +1037,57 @@
                         reason: reason
                     })
                 });
-                showAlert('Timesheet entry updated successfully', 'success');
-                hideModal('adminEditModal');
-                // Reload the timesheet data
-                const weekStart = document.getElementById('payrollWeekStart').value;
-                if (weekStart) {
-                    await loadPayrollSummary();
+                
+                if (result && result.success) {
+                    console.log('Admin edit successful:', result);
+                    showAlert('Timesheet entry updated successfully', 'success');
+                    hideAdminEditModal();
+                    
+                    // Close any expanded daily breakdowns to force refresh
+                    document.querySelectorAll('[id^="daily-"]').forEach(row => {
+                        if (row.style.display !== 'none') {
+                            row.style.display = 'none';
+                            const userId = row.id.replace('daily-', '');
+                            const icon = document.getElementById(`icon-${userId}`);
+                            if (icon) icon.classList.remove('expanded');
+                            const content = document.getElementById(`daily-content-${userId}`);
+                            if (content) {
+                                content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
+                            }
+                        }
+                    });
+                    
+                    // Reload the timesheet data - try both possible element IDs
+                    const weekSelect = document.getElementById('payrollWeekSelect');
+                    const weekStart = document.getElementById('payrollWeekStart');
+                    const weekValue = weekSelect?.value || weekStart?.value;
+                    
+                    if (weekValue) {
+                        // Update the select if it exists
+                        if (weekSelect) {
+                            weekSelect.value = weekValue;
+                        }
+                        // Reload payroll summary which will refresh all data
+                        await loadPayrollSummary();
+                    } else {
+                        // If no week selected, try to reload active clock-ins
+                        try {
+                            await loadActiveClockIns();
+                        } catch (e) {
+                            console.log('Could not reload active clock-ins:', e);
+                        }
+                        // Force a page refresh to show updated data
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1000);
+                    }
+                } else {
+                    console.error('Admin edit failed:', result);
+                    showAlert('Error updating timesheet entry: ' + (result?.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                showAlert('Error updating timesheet entry: ' + error.message, 'error');
+                console.error('Admin edit error:', error);
+                showAlert('Error updating timesheet entry: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         
