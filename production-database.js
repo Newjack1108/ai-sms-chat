@@ -499,6 +499,14 @@ function initializeSQLite() {
             db.exec('ALTER TABLE timesheet_entries ADD COLUMN calculated_at TEXT');
             console.log('✅ Added calculated_at column to timesheet_entries');
         }
+        if (!columnNames.includes('edited_by_admin_id')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN edited_by_admin_id INTEGER');
+            console.log('✅ Added edited_by_admin_id column to timesheet_entries');
+        }
+        if (!columnNames.includes('edited_by_admin_at')) {
+            db.exec('ALTER TABLE timesheet_entries ADD COLUMN edited_by_admin_at TEXT');
+            console.log('✅ Added edited_by_admin_at column to timesheet_entries');
+        }
     } catch (error) {
         console.log('⚠️ Timesheet entries migration check skipped:', error.message);
     }
@@ -1146,6 +1154,20 @@ async function initializePostgreSQL() {
                     WHERE table_name='timesheet_entries' AND column_name='calculated_at'
                 ) THEN
                     ALTER TABLE timesheet_entries ADD COLUMN calculated_at TIMESTAMP;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='edited_by_admin_id'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN edited_by_admin_id INTEGER REFERENCES production_users(id);
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_entries' AND column_name='edited_by_admin_at'
+                ) THEN
+                    ALTER TABLE timesheet_entries ADD COLUMN edited_by_admin_at TIMESTAMP;
                 END IF;
             END $$;
         `);
@@ -5766,6 +5788,97 @@ class ProductionDatabase {
         });
         
         return amendment;
+    }
+    
+    // Admin-only: Directly amend timesheet entry (applies immediately, no approval needed)
+    static async adminAmendTimesheetEntry(entryId, adminId, amendedClockIn, amendedClockOut, reason) {
+        const entry = await this.getTimesheetEntryById(entryId);
+        if (!entry) {
+            throw new Error('Timesheet entry not found');
+        }
+        
+        const now = new Date().toISOString();
+        
+        // Update the timesheet entry directly with admin edit tracking
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE timesheet_entries 
+                 SET clock_in_time = $1, clock_out_time = $2, 
+                     edited_by_admin_id = $3, edited_by_admin_at = $4,
+                     updated_at = $4
+                 WHERE id = $5`,
+                [amendedClockIn, amendedClockOut, adminId, now, entryId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE timesheet_entries 
+                 SET clock_in_time = ?, clock_out_time = ?, 
+                     edited_by_admin_id = ?, edited_by_admin_at = ?,
+                     updated_at = ?
+                 WHERE id = ?`
+            ).run(amendedClockIn, amendedClockOut, adminId, now, now, entryId);
+        }
+        
+        // Create an amendment record for audit trail (marked as approved/admin)
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason, status, reviewed_by, reviewed_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved', $8, $9)`,
+                [entryId, entry.user_id, entry.clock_in_time, entry.clock_out_time,
+                 amendedClockIn, amendedClockOut, reason || 'Amended by admin', adminId, now]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason, status, reviewed_by, reviewed_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)`
+            ).run(entryId, entry.user_id, entry.clock_in_time, entry.clock_out_time,
+                 amendedClockIn, amendedClockOut, reason || 'Amended by admin', adminId, now);
+        }
+        
+        // Recalculate hours for this entry
+        const dailyEntry = await this.getDailyEntryByTimesheetEntryId(entryId);
+        const overnightAway = dailyEntry ? dailyEntry.overnight_away : false;
+        await this.calculateTimesheetHours(entryId, overnightAway);
+        
+        // Get clock-in date to determine which week
+        const clockInDate = new Date(amendedClockIn);
+        const clockInDateStr = clockInDate.toISOString().split('T')[0];
+        
+        // Find Monday of that week
+        const dayOfWeek = clockInDate.getDay();
+        const monday = new Date(clockInDate);
+        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+        monday.setHours(0, 0, 0, 0);
+        const weekStartDate = monday.toISOString().split('T')[0];
+        
+        // Get or create weekly timesheet
+        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
+        
+        // Get or create daily entry
+        let dailyEntryRecord = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+        if (!dailyEntryRecord) {
+            dailyEntryRecord = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entryId);
+        }
+        
+        // Aggregate hours from ALL entries for this day
+        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+        
+        // Update daily entry with aggregated hours from all entries
+        await this.updateDailyEntry(dailyEntryRecord.id, {
+            timesheet_entry_id: entryId,
+            regular_hours: aggregatedHours.regular_hours,
+            overtime_hours: aggregatedHours.overtime_hours,
+            weekend_hours: aggregatedHours.weekend_hours,
+            overnight_hours: aggregatedHours.overnight_hours,
+            total_hours: aggregatedHours.total_hours
+        });
+        
+        // Return the updated entry
+        return await this.getTimesheetEntryById(entryId);
     }
     
     static async getAmendmentById(id) {

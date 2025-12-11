@@ -1580,8 +1580,9 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        // Check if within allowed time window (up to 10 days back)
+        // Check if within allowed time window (up to 10 days back, but not future dates)
         const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const tenDaysAgo = new Date(today);
         tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
         tenDaysAgo.setHours(0, 0, 0, 0);
@@ -1589,10 +1590,29 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         const entryDate = new Date(clock_in_time);
         entryDate.setHours(0, 0, 0, 0);
         
+        // Prevent future dates
+        if (entryDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Cannot add missing times for future dates. You can only add times for past dates that were forgotten.' 
+            });
+        }
+        
+        // Prevent dates older than 10 days
         if (entryDate < tenDaysAgo) {
             return res.status(400).json({ 
                 success: false, 
                 error: 'Missing times can only be added for dates up to 10 days back. Please contact a manager for older entries.' 
+            });
+        }
+        
+        // Also check clock_out_time is not in the future
+        const clockOutDate = new Date(clock_out_time);
+        clockOutDate.setHours(0, 0, 0, 0);
+        if (clockOutDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Clock out time cannot be in the future. Please use a past date.' 
             });
         }
         
@@ -1738,8 +1758,9 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             return res.status(403).json({ success: false, error: 'You can only amend your own timesheet entries' });
         }
         
-        // Calculate the cutoff date (10 days back from today)
+        // Calculate the cutoff date (10 days back from today, but not future dates)
         const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const tenDaysAgo = new Date(today);
         tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
         tenDaysAgo.setHours(0, 0, 0, 0);
@@ -1747,11 +1768,41 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
         const entryDate = new Date(entry.clock_in_time);
         entryDate.setHours(0, 0, 0, 0);
         
+        // Prevent future dates
+        if (entryDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Cannot amend entries for future dates. You can only edit past times that were wrongly inserted.' 
+            });
+        }
+        
+        // Prevent dates older than 10 days
         if (entryDate < tenDaysAgo) {
             return res.status(400).json({ 
                 success: false, 
                 error: 'Amendments are only allowed for entries up to 10 days back. Please contact a manager for older entries.' 
             });
+        }
+        
+        // Check if amended times are in the future
+        const amendedClockInDate = new Date(amended_clock_in_time);
+        amendedClockInDate.setHours(0, 0, 0, 0);
+        if (amendedClockInDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Amended clock in time cannot be in the future. Please use a past date.' 
+            });
+        }
+        
+        if (amended_clock_out_time) {
+            const amendedClockOutDate = new Date(amended_clock_out_time);
+            amendedClockOutDate.setHours(0, 0, 0, 0);
+            if (amendedClockOutDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Amended clock out time cannot be in the future. Please use a past date.' 
+                });
+            }
         }
         
         // Check if this is an auto-clocked-out entry - if so, always allow amendment
@@ -1790,6 +1841,77 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Request amendment error:', error);
         res.status(500).json({ success: false, error: 'Failed to request amendment' });
+    }
+});
+
+// Admin-only: Directly amend staff timesheet entry (applies immediately, no approval needed)
+router.post('/clock/amendments/admin', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const adminId = req.session.production_user.id;
+        const { entry_id, amended_clock_in_time, amended_clock_out_time, reason } = req.body;
+        
+        if (!entry_id || !amended_clock_in_time || !amended_clock_out_time) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        // Get the entry
+        const entry = await ProductionDatabase.getTimesheetEntryById(entry_id);
+        if (!entry) {
+            return res.status(404).json({ success: false, error: 'Timesheet entry not found' });
+        }
+        
+        // Check if amended times are in the future
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const amendedClockInDate = new Date(amended_clock_in_time);
+        amendedClockInDate.setHours(0, 0, 0, 0);
+        if (amendedClockInDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Amended clock in time cannot be in the future. Please use a past date.' 
+            });
+        }
+        
+        const amendedClockOutDate = new Date(amended_clock_out_time);
+        amendedClockOutDate.setHours(0, 0, 0, 0);
+        if (amendedClockOutDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Amended clock out time cannot be in the future. Please use a past date.' 
+            });
+        }
+        
+        // Check for duplicate or overlapping times (excluding the current entry being amended)
+        const duplicates = await ProductionDatabase.checkDuplicateTimes(
+            entry.user_id, 
+            amended_clock_in_time, 
+            amended_clock_out_time, 
+            entry_id // Exclude the current entry
+        );
+        
+        // Filter out auto-clocked-out entries from duplicates (they can be replaced)
+        const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+        
+        if (realDuplicates && realDuplicates.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+            });
+        }
+        
+        // Apply the amendment immediately
+        const updatedEntry = await ProductionDatabase.adminAmendTimesheetEntry(
+            entry_id,
+            adminId,
+            amended_clock_in_time,
+            amended_clock_out_time,
+            reason || 'Amended by admin'
+        );
+        
+        res.json({ success: true, entry: updatedEntry, message: 'Timesheet entry amended successfully by admin' });
+    } catch (error) {
+        console.error('Admin amend timesheet error:', error);
+        res.status(500).json({ success: false, error: 'Failed to amend timesheet entry: ' + error.message });
     }
 });
 

@@ -1233,6 +1233,7 @@
                                 const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
                                 const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
                                 const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
+                                const isEditedByAdmin = day.edited_by_admin_id && day.edited_by_admin_at;
                                 
                                 let locationHtml = '<small style="color: #666;">';
                                 if (hasInLocation || hasOutLocation) {
@@ -1249,12 +1250,16 @@
                                 }
                                 locationHtml += '</small>';
                                 
+                                const editedByAdminStamp = isEditedByAdmin 
+                                    ? `<br><small style="color: #856404; font-weight: 600;">⚠️ Edited by Admin ${day.edited_by_admin_at ? `on ${formatDateTime(new Date(day.edited_by_admin_at))}` : ''}</small>`
+                                    : '';
+                                
                                 dailyHtml += `
                                     <tr ${idx === 0 ? `style="border-top: 2px solid #4CBB17;"` : ''}>
                                         <td ${idx === 0 ? `rowspan="${dayEntries.length}" style="vertical-align: top; font-weight: 600;"` : ''}>${idx === 0 ? dateStr : ''}</td>
                                         <td>${escapeHtml(day.job_name || '-')}</td>
-                                        <td>${clockIn}</td>
-                                        <td>${clockOut}</td>
+                                        <td><small>${clockIn}${editedByAdminStamp}</small></td>
+                                        <td><small>${clockOut}</small></td>
                                         <td>${locationHtml}</td>
                                         <td>${formatHours(regular)}</td>
                                         <td>${formatHours(overtime)}</td>

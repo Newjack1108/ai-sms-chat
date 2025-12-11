@@ -1179,12 +1179,19 @@
                                             const clockIn = te.clock_in_time ? formatDateTime(new Date(te.clock_in_time)) : '-';
                                             const clockOut = te.clock_out_time ? formatDateTime(new Date(te.clock_out_time)) : '<span style="color: #999;">Not clocked out</span>';
                                             const jobName = te.job_name || 'No job/site';
+                                            const isEditedByAdmin = te.edited_by_admin_id && te.edited_by_admin_at;
+                                            const editedByAdminStamp = isEditedByAdmin 
+                                                ? `<div style="margin-top: 6px; padding: 4px 8px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; font-size: 12px; color: #856404;">
+                                                    <strong>⚠️ Edited by Admin</strong> ${te.edited_by_admin_at ? `on ${formatDateTime(new Date(te.edited_by_admin_at))}` : ''}
+                                                </div>`
+                                                : '';
                                             return `
                                                 <div style="margin-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; padding-bottom: ${idx < dayEntries.length - 1 ? '8px' : '0'}; border-bottom: ${idx < dayEntries.length - 1 ? '1px solid #ddd' : 'none'};">
                                                     ${dayEntries.length > 1 ? `<strong style="color: #666;">Entry ${idx + 1}:</strong><br>` : ''}
                                                     <strong>Job/Site:</strong> ${escapeHtml(jobName)}<br>
                                                     <strong>Clock In:</strong> ${clockIn}<br>
                                                     <strong>Clock Out:</strong> ${clockOut}
+                                                    ${editedByAdminStamp}
                                                 </div>
                                             `;
                                         }).join('')}
