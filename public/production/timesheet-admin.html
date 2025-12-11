@@ -263,6 +263,53 @@
             </div>
         </div>
     </div>
+
+    <!-- Admin Edit Timesheet Entry Modal -->
+    <div id="adminEditModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>Edit Timesheet Entry (Admin)</h2>
+                <button class="modal-close" onclick="hideModal('adminEditModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="adminEditForm">
+                    <input type="hidden" id="adminEditEntryId">
+                    
+                    <div class="form-group">
+                        <label>Original Clock In:</label>
+                        <div id="adminOriginalClockIn" style="padding: 8px; background: #fee; border-radius: 4px;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Original Clock Out:</label>
+                        <div id="adminOriginalClockOut" style="padding: 8px; background: #fee; border-radius: 4px;"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="adminAmendedClockIn">New Clock In Time *</label>
+                        <input type="datetime-local" id="adminAmendedClockIn" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="adminAmendedClockOut">New Clock Out Time *</label>
+                        <input type="datetime-local" id="adminAmendedClockOut" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="adminEditReason">Reason for Edit *</label>
+                        <textarea id="adminEditReason" class="form-control" rows="3" required placeholder="Enter reason for editing this timesheet entry"></textarea>
+                    </div>
+                    
+                    <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #ffc107;">
+                        <strong>⚠️ Admin Edit:</strong> This change will be applied immediately and will be marked as "Edited by Admin" on the timesheet.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="hideModal('adminEditModal')" class="btn btn-secondary">Cancel</button>
+                <button type="button" onclick="submitAdminEdit()" class="btn btn-primary">Save Changes</button>
+            </div>
+        </div>
+    </div>
     
     <script src="common.js"></script>
     <script>
@@ -923,6 +970,68 @@
             }
         }
         
+        // Admin edit timesheet entry functions
+        function showAdminEditModal(entryId, clockInTime, clockOutTime, jobName) {
+            document.getElementById('adminEditEntryId').value = entryId;
+            document.getElementById('adminOriginalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
+            document.getElementById('adminOriginalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
+            
+            // Set default values to current times
+            if (clockInTime) {
+                const clockIn = new Date(clockInTime);
+                const localDateTime = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                document.getElementById('adminAmendedClockIn').value = localDateTime;
+            }
+            
+            if (clockOutTime) {
+                const clockOut = new Date(clockOutTime);
+                const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                document.getElementById('adminAmendedClockOut').value = localDateTime;
+            }
+            
+            // Clear reason
+            document.getElementById('adminEditReason').value = '';
+            
+            document.getElementById('adminEditModal').style.display = 'block';
+        }
+        
+        async function submitAdminEdit() {
+            const entryId = parseInt(document.getElementById('adminEditEntryId').value);
+            const amendedClockIn = document.getElementById('adminAmendedClockIn').value;
+            const amendedClockOut = document.getElementById('adminAmendedClockOut').value;
+            const reason = document.getElementById('adminEditReason').value;
+            
+            if (!amendedClockIn || !amendedClockOut || !reason) {
+                showAlert('Please fill in all fields', 'error');
+                return;
+            }
+            
+            // Convert local datetime to ISO string
+            const clockInISO = new Date(amendedClockIn).toISOString();
+            const clockOutISO = new Date(amendedClockOut).toISOString();
+            
+            try {
+                await apiCall('/clock/amendments/admin', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        entry_id: entryId,
+                        amended_clock_in_time: clockInISO,
+                        amended_clock_out_time: clockOutISO,
+                        reason: reason
+                    })
+                });
+                showAlert('Timesheet entry updated successfully', 'success');
+                hideModal('adminEditModal');
+                // Reload the timesheet data
+                const weekStart = document.getElementById('payrollWeekStart').value;
+                if (weekStart) {
+                    await loadPayrollSummary();
+                }
+            } catch (error) {
+                showAlert('Error updating timesheet entry: ' + error.message, 'error');
+            }
+        }
+        
         // Payroll functions
         async function cleanupOldEntries() {
             const btn = document.getElementById('cleanupBtn');
@@ -1267,6 +1376,12 @@
                                         <td>${formatHours(overnight)}</td>
                                         <td>${formatHours(total)}</td>
                                         <td>
+                                            <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}')" 
+                                                    class="btn btn-primary btn-sm" 
+                                                    style="padding: 4px 8px; font-size: 11px; margin-right: 4px;"
+                                                    title="Edit this entry">
+                                                ✏️ Edit
+                                            </button>
                                             <button onclick="deleteTimesheetEntry(${day.id}, ${userId}, '${weekStart}')" 
                                                     class="btn btn-danger btn-sm" 
                                                     style="padding: 4px 8px; font-size: 11px;"
