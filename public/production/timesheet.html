@@ -1672,13 +1672,6 @@
                 showAlert('Failed to save day type: ' + (error.message || 'Unknown error'), 'error');
             }
         }
-                console.error('Error saving overnight away:', error);
-                // Revert checkbox on error
-                checkbox.checked = !intendedState;
-                checkbox.disabled = false;
-                showAlert('Failed to save overnight away status: ' + (error.message || 'Unknown error'), 'error');
-            }
-        }
         
         // Time amendment functions
         function showAmendmentModal(entryId, clockInTime, clockOutTime) {
