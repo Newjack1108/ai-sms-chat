@@ -265,7 +265,7 @@
     </div>
 
     <!-- Admin Edit Timesheet Entry Modal -->
-    <div id="adminEditModal" class="modal" style="display: none;">
+    <div id="adminEditModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h2>Edit Timesheet Entry (Admin)</h2>
@@ -994,15 +994,15 @@
             
             const modal = document.getElementById('adminEditModal');
             if (modal) {
-                modal.style.display = 'block';
+                modal.classList.add('show');
             }
         }
         
-        // Override hideModal for adminEditModal to use inline styles
+        // Hide admin edit modal (use class-based approach)
         function hideAdminEditModal() {
             const modal = document.getElementById('adminEditModal');
             if (modal) {
-                modal.style.display = 'none';
+                modal.classList.remove('show');
             }
         }
         
@@ -1040,12 +1040,16 @@
                 
                 if (result && result.success) {
                     console.log('Admin edit successful:', result);
+                    const updatedEntry = result.entry;
                     showAlert('Timesheet entry updated successfully', 'success');
                     hideAdminEditModal();
                     
+                    // Get user ID from the updated entry to refresh the correct daily breakdown
+                    const editedUserId = updatedEntry?.user_id;
+                    
                     // Close any expanded daily breakdowns to force refresh
                     document.querySelectorAll('[id^="daily-"]').forEach(row => {
-                        if (row.style.display !== 'none') {
+                        if (row.style.display !== 'none' && row.style.display !== '') {
                             row.style.display = 'none';
                             const userId = row.id.replace('daily-', '');
                             const icon = document.getElementById(`icon-${userId}`);
@@ -1069,6 +1073,21 @@
                         }
                         // Reload payroll summary which will refresh all data
                         await loadPayrollSummary();
+                        
+                        // If the edited user's breakdown was open, refresh it
+                        if (editedUserId) {
+                            const dailyRow = document.getElementById(`daily-${editedUserId}`);
+                            if (dailyRow && dailyRow.style.display !== 'none') {
+                                // Force refresh by closing and reopening
+                                dailyRow.style.display = 'none';
+                                const icon = document.getElementById(`icon-${editedUserId}`);
+                                if (icon) icon.classList.remove('expanded');
+                                // Reopen after a short delay
+                                setTimeout(() => {
+                                    toggleDailyBreakdown(editedUserId, weekValue);
+                                }, 500);
+                            }
+                        }
                     } else {
                         // If no week selected, try to reload active clock-ins
                         try {
@@ -1401,7 +1420,20 @@
                                 const weekend = roundToQuarterHour(parseFloat(day.weekend_hours || 0));
                                 const overnight = roundToQuarterHour(parseFloat(day.overnight_hours || 0));
                                 const total = roundToQuarterHour(parseFloat(day.total_hours || 0));
-                                const isEditedByAdmin = day.edited_by_admin_id && day.edited_by_admin_at;
+                                // Check if edited by admin (more robust check)
+                                const isEditedByAdmin = day.edited_by_admin_id != null && day.edited_by_admin_id !== undefined && 
+                                                       day.edited_by_admin_at != null && day.edited_by_admin_at !== undefined;
+                                
+                                // Debug logging (only log if it should be edited by admin but isn't detected)
+                                if (day.id && (day.edited_by_admin_id || day.edited_by_admin_at) && !isEditedByAdmin) {
+                                    console.log('Admin edit fields present but not detected:', {
+                                        id: day.id,
+                                        edited_by_admin_id: day.edited_by_admin_id,
+                                        edited_by_admin_at: day.edited_by_admin_at,
+                                        type_id: typeof day.edited_by_admin_id,
+                                        type_at: typeof day.edited_by_admin_at
+                                    });
+                                }
                                 
                                 let locationHtml = '<small style="color: #666;">';
                                 if (hasInLocation || hasOutLocation) {
