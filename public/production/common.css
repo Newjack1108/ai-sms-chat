@@ -301,41 +301,6 @@ body.dashboard-page {
     overflow-y: auto;
 }
 
-.modal-content.modal-wide {
-    max-width: 900px;
-}
-
-/* Material Requirements Summary Styling */
-.summary-section {
-    margin-bottom: 40px;
-    padding-bottom: 20px;
-}
-
-.summary-section:last-child {
-    margin-bottom: 0;
-    padding-bottom: 0;
-}
-
-.summary-header {
-    color: #2c3e50;
-    font-size: 24px;
-    font-weight: 700;
-    text-decoration: underline;
-    text-decoration-thickness: 2px;
-    text-underline-offset: 8px;
-    margin-bottom: 20px;
-}
-
-.summary-subheader {
-    color: #343a40;
-    font-size: 18px;
-    font-weight: 600;
-    margin-top: 30px;
-    margin-bottom: 15px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #dee2e6;
-}
-
 .modal-header {
     display: flex;
     justify-content: space-between;
