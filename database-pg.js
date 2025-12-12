@@ -64,6 +64,7 @@ async function initializeDatabase() {
                 reminder_1hr_sent BOOLEAN DEFAULT FALSE,
                 reminder_24hr_sent BOOLEAN DEFAULT FALSE,
                 reminder_48hr_sent BOOLEAN DEFAULT FALSE,
+                webhook_timestamp TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_contact TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -189,6 +190,14 @@ async function initializeDatabase() {
                 ) THEN
                     ALTER TABLE leads ADD COLUMN reminder_48hr_sent BOOLEAN DEFAULT FALSE;
                 END IF;
+                
+                -- Webhook timestamp column
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='leads' AND column_name='webhook_timestamp'
+                ) THEN
+                    ALTER TABLE leads ADD COLUMN webhook_timestamp TIMESTAMP;
+                END IF;
             END $$;
         `);
         
@@ -210,8 +219,9 @@ class LeadDatabase {
         try {
             const result = await pool.query(`
                 INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, 
-                                   post_qualification_response_sent, answers, returning_customer, times_qualified)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                                   post_qualification_response_sent, answers, returning_customer, times_qualified,
+                                   webhook_timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
             `, [
                 data.phone,
@@ -225,7 +235,8 @@ class LeadDatabase {
                 data.post_qualification_response_sent || false,
                 JSON.stringify(data.answers || {}),
                 data.returning_customer || false,
-                data.times_qualified || 0
+                data.times_qualified || 0,
+                data.webhook_timestamp || null
             ]);
             
             const lead = result.rows[0];
@@ -337,8 +348,8 @@ class LeadDatabase {
                     ai_paused = $6, answers = $7, qualified_date = $8, 
                     post_qualification_response_sent = $9, returning_customer = $10, 
                     times_qualified = $11, first_qualified_date = $12, last_qualified_date = $13,
-                    last_contact = CURRENT_TIMESTAMP
-                WHERE id = $14
+                    webhook_timestamp = $14, last_contact = CURRENT_TIMESTAMP
+                WHERE id = $15
                 RETURNING *
             `, [
                 data.name,
@@ -354,6 +365,7 @@ class LeadDatabase {
                 data.times_qualified,
                 data.first_qualified_date,
                 data.last_qualified_date,
+                data.webhook_timestamp !== undefined ? data.webhook_timestamp : null,
                 id
             ]);
             

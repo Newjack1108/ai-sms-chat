@@ -1550,7 +1550,8 @@ app.post('/api/leads', async (req, res) => {
         console.log('📝 Creating new lead...');
         console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
 
-        const { name, email, phone, source, initialMessage } = req.body;
+        const { name, email, phone, source, initialMessage, TimeStamp, timestamp, Timestamp } = req.body;
+        const webhookTimestamp = TimeStamp || timestamp || Timestamp;
 
         if (!name || !email || !phone) {
             console.log('❌ Missing required fields');
@@ -1592,7 +1593,8 @@ app.post('/api/leads', async (req, res) => {
                     returning_customer: true,    // Flag as returning
                     times_qualified: (existingLead.times_qualified || 0) + 1,  // Increment
                     first_qualified_date: existingLead.first_qualified_date || previousQualifiedDate,
-                    last_qualified_date: previousQualifiedDate
+                    last_qualified_date: previousQualifiedDate,
+                    webhook_timestamp: webhookTimestamp || null
                 });
                 
                 console.log(`✅ Returning customer reset for NEW manual inquiry`);
@@ -1757,7 +1759,8 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             post_qualification_response_sent: false,
             answers: {},
             returning_customer: false,
-            times_qualified: 0
+            times_qualified: 0,
+            webhook_timestamp: webhookTimestamp || null
         });
         
         console.log(`✅ Lead created with ID: ${newLead.id}`);
@@ -2029,7 +2032,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
         console.log('   Content-Type:', req.headers['content-type']);
         
         // Handle different data formats (Make.com may send nested data)
-        let phone, source, name, email, initialMessage;
+        let phone, source, name, email, initialMessage, webhookTimestamp;
         
         // Try direct field access first
         if (req.body.phone) {
@@ -2038,6 +2041,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
             name = req.body.name;
             email = req.body.email;
             initialMessage = req.body.initialMessage || req.body.message || req.body.notes;
+            webhookTimestamp = req.body.TimeStamp || req.body.timestamp || req.body.Timestamp;
         } 
         // Try nested data (Make.com might wrap it)
         else if (req.body.data) {
@@ -2046,6 +2050,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
             name = req.body.data.name;
             email = req.body.data.email;
             initialMessage = req.body.data.initialMessage || req.body.data.message || req.body.data.notes;
+            webhookTimestamp = req.body.data.TimeStamp || req.body.data.timestamp || req.body.data.Timestamp || req.body.TimeStamp || req.body.timestamp || req.body.Timestamp;
         }
         // Try Facebook Lead Ads format
         else if (req.body.field_data || req.body.entry) {
@@ -2063,6 +2068,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
                 });
                 source = 'facebook_lead';
             }
+            webhookTimestamp = req.body.TimeStamp || req.body.timestamp || req.body.Timestamp;
         }
         // Try Make.com format variations
         else {
@@ -2072,6 +2078,7 @@ app.post('/api/leads/reactivate', async (req, res) => {
             email = req.body.email || req.body.Email || req.body.email_address || req.body['Email Address'];
             source = req.body.source || req.body.Source || 'facebook_lead';
             initialMessage = req.body.initialMessage || req.body.message || req.body.notes || req.body.Notes;
+            webhookTimestamp = req.body.TimeStamp || req.body.timestamp || req.body.Timestamp;
         }
         
         // Clean and validate phone
@@ -2121,7 +2128,8 @@ app.post('/api/leads/reactivate', async (req, res) => {
                     returning_customer: true,    // Flag as returning
                     times_qualified: (lead.times_qualified || 0) + 1,  // Increment
                     first_qualified_date: lead.first_qualified_date || previousQualifiedDate,
-                    last_qualified_date: previousQualifiedDate
+                    last_qualified_date: previousQualifiedDate,
+                    webhook_timestamp: webhookTimestamp || null
                 });
                 
                 console.log(`✅ Returning customer reset for NEW inquiry:`);
@@ -2312,7 +2320,8 @@ If you have any questions in the meantime our office hours are Monday to Friday,
                 qualified: false,
                 ai_paused: 0,
                 returning_customer: false,
-                times_qualified: 0
+                times_qualified: 0,
+                webhook_timestamp: webhookTimestamp || null
             });
             
             console.log(`✅ New lead created: ${lead.name} (ID: ${lead.id})`);
@@ -4175,10 +4184,41 @@ function findFirstUnansweredQuestion(lead) {
     return null;
 }
 
+// Helper: Find first unanswered question for reminders (includes previously asked questions)
+function findFirstUnansweredQuestionForReminder(lead) {
+    // Initialize answers if it doesn't exist
+    if (!lead.answers) {
+        lead.answers = {};
+    }
+    
+    // Find the first unanswered question, even if it was asked before
+    for (let i = 0; i < CUSTOM_QUESTIONS.length; i++) {
+        const questionKey = `question_${i + 1}`;
+        
+        // If not answered, return this question (even if it was asked before)
+        if (!lead.answers[questionKey]) {
+            const q = CUSTOM_QUESTIONS[i];
+            console.log(`   ✅ Q${i + 1} is unanswered - SELECTING for reminder`);
+            return typeof q === 'object' ? q.question : q;
+        }
+    }
+    
+    // All questions answered - return null
+    console.log(`   ⚠️ All questions have been answered - no reminders needed`);
+    return null;
+}
+
 // Send 1 hour reminder
 async function send1HourReminder(lead) {
     try {
-        const nextQuestion = findFirstUnansweredQuestion(lead);
+        const nextQuestion = findFirstUnansweredQuestionForReminder(lead);
+        
+        // If no question available, skip this reminder (all questions answered)
+        if (!nextQuestion) {
+            console.log(`⏭️ Skipping 1hr reminder for ${lead.name} - all questions answered`);
+            return;
+        }
+        
         const message = `Hi ${lead.name}, just following up - ${nextQuestion}`;
         
         await sendSMS(lead.phone, message);
@@ -4194,7 +4234,14 @@ async function send1HourReminder(lead) {
 // Send 24 hour reminder
 async function send24HourReminder(lead) {
     try {
-        const nextQuestion = findFirstUnansweredQuestion(lead);
+        const nextQuestion = findFirstUnansweredQuestionForReminder(lead);
+        
+        // If no question available, skip this reminder (all questions answered)
+        if (!nextQuestion) {
+            console.log(`⏭️ Skipping 24hr reminder for ${lead.name} - all questions answered`);
+            return;
+        }
+        
         const message = `Hi ${lead.name}, I wanted to check back with you - ${nextQuestion}`;
         
         await sendSMS(lead.phone, message);

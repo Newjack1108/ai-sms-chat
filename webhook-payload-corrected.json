@@ -1,0 +1,8 @@
+{
+  "phone": "{{11.data.phone_number}}",
+  "name": "{{11.data.first_name}}",
+  "email": "{{11.data.email}}",
+  "source": "facebook_lead",
+  "initialMessage": "{{1.data.when_would_you_like_your_new_building?_}} {{11.data.what_size_/_type_of_building_are_you_interested_in?}} {{11.data.post_code}}",
+  "TimeStamp": "{{16.currentDateTime}}"
+}

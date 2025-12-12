@@ -101,6 +101,7 @@ function initializeDatabase() {
             reminder_1hr_sent INTEGER DEFAULT 0,
             reminder_24hr_sent INTEGER DEFAULT 0,
             reminder_48hr_sent INTEGER DEFAULT 0,
+            webhook_timestamp TEXT,
             createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
             lastContact TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -227,8 +228,9 @@ const statements = db ? {
     createLead: db.prepare(`
         INSERT INTO leads (phone, name, email, source, status, progress, qualified, ai_paused, 
                            post_qualification_response_sent, answers, returning_customer, times_qualified,
-                           last_customer_message_time, reminder_1hr_sent, reminder_24hr_sent, reminder_48hr_sent)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           last_customer_message_time, reminder_1hr_sent, reminder_24hr_sent, reminder_48hr_sent,
+                           webhook_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     
     getLeadByPhone: db.prepare(`
@@ -249,7 +251,7 @@ const statements = db ? {
             ai_paused = ?, post_qualification_response_sent = ?, answers = ?, qualifiedDate = ?,
             returning_customer = ?, times_qualified = ?, first_qualified_date = ?, last_qualified_date = ?,
             last_customer_message_time = ?, reminder_1hr_sent = ?, reminder_24hr_sent = ?, reminder_48hr_sent = ?,
-            lastContact = CURRENT_TIMESTAMP
+            webhook_timestamp = ?, lastContact = CURRENT_TIMESTAMP
         WHERE id = ?
     `),
     
@@ -321,7 +323,8 @@ class LeadDatabase {
                 data.last_customer_message_time || null,
                 data.reminder_1hr_sent || 0,
                 data.reminder_24hr_sent || 0,
-                data.reminder_48hr_sent || 0
+                data.reminder_48hr_sent || 0,
+                data.webhook_timestamp || null
             );
             
             console.log(`✅ Created lead with ID: ${result.lastInsertRowid}`);
@@ -412,6 +415,7 @@ class LeadDatabase {
                 data.reminder_1hr_sent ? 1 : 0,
                 data.reminder_24hr_sent ? 1 : 0,
                 data.reminder_48hr_sent ? 1 : 0,
+                data.webhook_timestamp !== undefined ? data.webhook_timestamp : null,
                 id
             );
             
