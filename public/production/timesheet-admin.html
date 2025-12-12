@@ -390,8 +390,15 @@
             // Initialize payroll week selector to current week
             const weekSelect = document.getElementById('payrollWeekSelect');
             if (weekSelect) {
-                weekSelect.value = getCurrentWeekStart();
-                // Load payroll summary for current week
+                // Check if there's a selected week from dashboard reminder
+                const selectedWeek = localStorage.getItem('selectedWeek');
+                if (selectedWeek) {
+                    weekSelect.value = selectedWeek;
+                    localStorage.removeItem('selectedWeek'); // Clear after use
+                } else {
+                    weekSelect.value = getCurrentWeekStart();
+                }
+                // Load payroll summary for selected week
                 await loadPayrollSummary();
             }
             
@@ -405,6 +412,9 @@
             
             // Auto-refresh active clock ins every 30 seconds
             refreshInterval = setInterval(loadActiveClockIns, 30000);
+            
+            // Check for weekly approval reminder (on Saturdays)
+            await checkWeeklyApprovalReminder();
         }
         
         function requestLocation() {
@@ -1279,6 +1289,12 @@
                 exportBtn.style.display = 'inline-block';
                 exportBtn.onclick = () => exportPayroll(weekStart);
                 
+                // Check if this is Saturday and show reminder for previous week if needed
+                const today = new Date();
+                if (today.getDay() === 6) { // Saturday
+                    await checkWeeklyApprovalReminder();
+                }
+                
                 // Calculate totals (with rounding to 15-minute intervals)
                 let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
                 summary.forEach(row => {
@@ -1301,6 +1317,7 @@
                                 <th>Overnight (1.25x)</th>
                                 <th>Total Hours</th>
                                 <th>Days Worked</th>
+                                <th style="text-align: center;">Manager Approved</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1310,9 +1327,13 @@
                                 const weekend = roundToQuarterHour(parseFloat(row.total_weekend_hours || 0));
                                 const overnight = roundToQuarterHour(parseFloat(row.total_overnight_hours || 0));
                                 const total = roundToQuarterHour(parseFloat(row.total_hours || 0));
+                                const isApproved = row.manager_approved === true || row.manager_approved === 1;
+                                const approvedBy = row.approved_by_username || '';
+                                const approvedAt = row.approved_at ? new Date(row.approved_at).toLocaleDateString('en-GB') : '';
+                                const rowStyle = isApproved ? 'background-color: #e8f5e9;' : '';
                                 return `
-                                <tr class="payroll-row" data-user-id="${row.user_id}" style="cursor: pointer;" onclick="toggleDailyBreakdown(${row.user_id}, '${weekStart}')">
-                                    <td style="text-align: center;">
+                                <tr class="payroll-row" data-user-id="${row.user_id}" style="cursor: pointer; ${rowStyle}" onclick="toggleDailyBreakdown(${row.user_id}, '${weekStart}')">
+                                    <td style="text-align: center;" onclick="event.stopPropagation();">
                                         <span class="expand-icon" id="icon-${row.user_id}">▶</span>
                                     </td>
                                     <td><strong>${escapeHtml(row.username || 'Unknown')}</strong></td>
@@ -1322,9 +1343,19 @@
                                     <td>${formatHours(overnight)}</td>
                                     <td><strong>${formatHours(total)}</strong></td>
                                     <td>${row.days_worked || 0}</td>
+                                    <td style="text-align: center;" onclick="event.stopPropagation();">
+                                        <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;">
+                                            <input type="checkbox" 
+                                                   ${isApproved ? 'checked' : ''} 
+                                                   onchange="toggleManagerApproval(${row.user_id}, '${weekStart}')"
+                                                   style="width: 18px; height: 18px; cursor: pointer;">
+                                            ${isApproved ? '<span style="color: #28a745; font-weight: bold;">✓</span>' : ''}
+                                        </label>
+                                        ${isApproved && approvedBy ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">${escapeHtml(approvedBy)}<br>${approvedAt}</div>` : ''}
+                                    </td>
                                 </tr>
                                 <tr id="daily-${row.user_id}" style="display: none;">
-                                    <td colspan="8" style="padding: 0; background: #f8f9fa;">
+                                    <td colspan="9" style="padding: 0; background: #f8f9fa;">
                                         <div id="daily-content-${row.user_id}" style="padding: 15px;">
                                             <div class="loading">Loading daily breakdown...</div>
                                         </div>
@@ -1342,6 +1373,9 @@
                                 <td>${formatHours(totalOvernight)}</td>
                                 <td><strong>${formatHours(totalHours)}</strong></td>
                                 <td>-</td>
+                                <td style="text-align: center;">
+                                    ${summary.filter(r => r.manager_approved === true || r.manager_approved === 1).length} / ${summary.length}
+                                </td>
                             </tr>
                             ` : ''}
                         </tbody>
@@ -1389,6 +1423,95 @@
                 document.getElementById('payrollSummary').innerHTML = 
                     `<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading payroll summary: ${error.message || 'Unknown error'}</p>`;
                 showAlert('Error loading payroll summary: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function toggleManagerApproval(userId, weekStart) {
+            try {
+                await apiCall(`/clock/weekly/${weekStart}/approve/${userId}`, {
+                    method: 'PUT'
+                });
+                // Reload payroll summary to refresh approval status
+                await loadPayrollSummary();
+            } catch (error) {
+                console.error('Error toggling manager approval:', error);
+                showAlert('Error updating approval: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        async function checkWeeklyApprovalReminder() {
+            try {
+                const today = new Date();
+                const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+                
+                // Only show reminder on Saturday
+                if (dayOfWeek !== 6) {
+                    return;
+                }
+                
+                // Get previous week's start date (last Monday)
+                // On Saturday, the previous week ended on Friday, so go back to last Monday
+                const lastMonday = new Date(today);
+                lastMonday.setDate(lastMonday.getDate() - 5); // Go back 5 days from Saturday to get last Monday
+                lastMonday.setHours(0, 0, 0, 0);
+                const weekStartStr = lastMonday.toISOString().split('T')[0];
+                
+                // Get payroll summary for previous week
+                const data = await apiCall(`/clock/payroll/${weekStartStr}`);
+                const summary = data.summary || [];
+                
+                if (summary.length === 0) {
+                    return; // No timesheets for that week
+                }
+                
+                // Count approved vs total
+                const approvedCount = summary.filter(row => row.manager_approved === true || row.manager_approved === 1).length;
+                const totalCount = summary.length;
+                
+                if (approvedCount < totalCount) {
+                    const unapprovedCount = totalCount - approvedCount;
+                    const weekStartFormatted = lastMonday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                    
+                    // Show prominent reminder
+                    const reminderHtml = `
+                        <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; padding: 15px; margin-bottom: 20px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 24px;">⚠️</span>
+                                <div style="flex: 1;">
+                                    <strong style="color: #856404;">Weekly Timesheet Approval Reminder</strong>
+                                    <p style="margin: 5px 0 0 0; color: #856404;">
+                                        ${unapprovedCount} of ${totalCount} staff member${totalCount > 1 ? 's' : ''} still need${unapprovedCount === 1 ? 's' : ''} manager approval for the week starting ${weekStartFormatted}.
+                                        <br>
+                                        <button onclick="document.getElementById('payrollWeekSelect').value='${weekStartStr}'; loadPayrollSummary();" 
+                                                class="btn btn-warning" 
+                                                style="margin-top: 8px; padding: 6px 12px; font-size: 13px;">
+                                            Review Timesheets
+                                        </button>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Insert reminder at the top of payroll summary section
+                    const payrollCard = document.querySelector('.card:has(#payrollSummary)');
+                    if (payrollCard) {
+                        const existingReminder = payrollCard.querySelector('.approval-reminder');
+                        if (existingReminder) {
+                            existingReminder.remove();
+                        }
+                        const reminderDiv = document.createElement('div');
+                        reminderDiv.className = 'approval-reminder';
+                        reminderDiv.innerHTML = reminderHtml;
+                        const summaryEl = document.getElementById('payrollSummary');
+                        if (summaryEl && summaryEl.parentNode) {
+                            summaryEl.parentNode.insertBefore(reminderDiv, summaryEl);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking approval reminder:', error);
+                // Don't show error to user, just log it
             }
         }
         

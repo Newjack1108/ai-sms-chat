@@ -2101,6 +2101,36 @@ router.get('/clock/payroll/:weekStart', requireProductionAuth, requireAdminOrOff
     }
 });
 
+router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const weekStartDate = req.params.weekStart;
+        const userId = parseInt(req.params.userId);
+        const adminId = req.session.production_user.id;
+        
+        // Get or create weekly timesheet
+        const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+        
+        // Toggle approval status
+        const currentApproved = weeklyTimesheet.manager_approved || false;
+        const newApproved = !currentApproved;
+        
+        // Update approval status
+        const updated = await ProductionDatabase.updateWeeklyTimesheet(weeklyTimesheet.id, {
+            manager_approved: newApproved,
+            approved_by: newApproved ? adminId : null
+        });
+        
+        res.json({ 
+            success: true, 
+            weeklyTimesheet: updated,
+            message: newApproved ? 'Timesheet approved' : 'Timesheet approval removed'
+        });
+    } catch (error) {
+        console.error('Toggle manager approval error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update manager approval' });
+    }
+});
+
 router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
@@ -2202,8 +2232,27 @@ router.get('/reminders', requireProductionAuth, async (req, res) => {
 
 router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     try {
-        const reminders = await ProductionDatabase.getOverdueReminders();
-        res.json({ success: true, reminders });
+        const stockReminders = await ProductionDatabase.getOverdueReminders();
+        
+        // Get timesheet approval reminders (only for admin/office roles)
+        let timesheetReminders = [];
+        if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
+            const unapprovedWeeks = await ProductionDatabase.getUnapprovedTimesheetWeeks();
+            timesheetReminders = unapprovedWeeks.map(week => ({
+                type: 'timesheet_approval',
+                week_start_date: week.week_start_date,
+                unapproved_count: week.unapproved_count,
+                reminder_text: `${week.unapproved_count} timesheet${week.unapproved_count > 1 ? 's' : ''} need${week.unapproved_count === 1 ? 's' : ''} approval`
+            }));
+        }
+        
+        // Combine both types of reminders
+        const allReminders = [
+            ...stockReminders.map(r => ({ ...r, type: 'stock_check' })),
+            ...timesheetReminders
+        ];
+        
+        res.json({ success: true, reminders: allReminders });
     } catch (error) {
         console.error('Get overdue reminders error:', error);
         res.status(500).json({ success: false, error: 'Failed to get overdue reminders' });

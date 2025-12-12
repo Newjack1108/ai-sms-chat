@@ -545,6 +545,27 @@ function initializeSQLite() {
         )
     `);
     
+    // Migrate weekly_timesheets to add manager approval columns
+    try {
+        const weeklyColumns = db.prepare("PRAGMA table_info(weekly_timesheets)").all();
+        const weeklyColumnNames = weeklyColumns.map(col => col.name);
+        
+        if (!weeklyColumnNames.includes('manager_approved')) {
+            db.exec('ALTER TABLE weekly_timesheets ADD COLUMN manager_approved INTEGER DEFAULT 0');
+            console.log('✅ Added manager_approved column to weekly_timesheets');
+        }
+        if (!weeklyColumnNames.includes('approved_by')) {
+            db.exec('ALTER TABLE weekly_timesheets ADD COLUMN approved_by INTEGER');
+            console.log('✅ Added approved_by column to weekly_timesheets');
+        }
+        if (!weeklyColumnNames.includes('approved_at')) {
+            db.exec('ALTER TABLE weekly_timesheets ADD COLUMN approved_at TEXT');
+            console.log('✅ Added approved_at column to weekly_timesheets');
+        }
+    } catch (error) {
+        console.log('⚠️ Weekly timesheets migration check skipped:', error.message);
+    }
+    
     // Create timesheet_daily_entries table
     db.exec(`
         CREATE TABLE IF NOT EXISTS timesheet_daily_entries (
@@ -1250,6 +1271,34 @@ async function initializePostgreSQL() {
             END $$;
         `);
         console.log('✅ Checked/added day_type column to timesheet_daily_entries');
+        
+        // Migrate weekly_timesheets to add manager approval columns
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='weekly_timesheets' AND column_name='manager_approved'
+                ) THEN
+                    ALTER TABLE weekly_timesheets ADD COLUMN manager_approved BOOLEAN DEFAULT FALSE;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='weekly_timesheets' AND column_name='approved_by'
+                ) THEN
+                    ALTER TABLE weekly_timesheets ADD COLUMN approved_by INTEGER REFERENCES production_users(id);
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='weekly_timesheets' AND column_name='approved_at'
+                ) THEN
+                    ALTER TABLE weekly_timesheets ADD COLUMN approved_at TIMESTAMP;
+                END IF;
+            END $$;
+        `);
+        console.log('✅ Checked/added manager approval columns to weekly_timesheets');
         
         // Create timesheet_amendments table
         await pool.query(`
@@ -5567,6 +5616,26 @@ class ProductionDatabase {
             paramIndex++;
         }
         
+        if (data.manager_approved !== undefined) {
+            updates.push(isPostgreSQL ? `manager_approved = $${paramIndex}` : `manager_approved = ?`);
+            values.push(data.manager_approved ? 1 : 0);
+            paramIndex++;
+            
+            // If approving, set approved_by and approved_at
+            if (data.manager_approved) {
+                if (data.approved_by !== undefined) {
+                    updates.push(isPostgreSQL ? `approved_by = $${paramIndex}` : `approved_by = ?`);
+                    values.push(data.approved_by);
+                    paramIndex++;
+                }
+                updates.push(isPostgreSQL ? `approved_at = CURRENT_TIMESTAMP` : `approved_at = CURRENT_TIMESTAMP`);
+            } else {
+                // If unapproving, clear approved_by and approved_at
+                updates.push(`approved_by = NULL`);
+                updates.push(`approved_at = NULL`);
+            }
+        }
+        
         if (updates.length === 0) {
             return this.getWeeklyTimesheetById(id);
         }
@@ -5579,12 +5648,34 @@ class ProductionDatabase {
             );
             return result.rows[0];
         } else {
-            values.push(id);
-            const setClause = updates.map((update, idx) => {
-                const field = update.split(' = ')[0];
-                return `${field} = ?`;
-            }).join(', ');
-            db.prepare(`UPDATE weekly_timesheets SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values);
+            // Build set clause and values array separately for SQLite
+            // Need to match placeholders with values, skipping NULL and CURRENT_TIMESTAMP
+            const setParts = [];
+            const sqliteValues = [];
+            let valueIndex = 0; // Track position in values array
+            
+            for (const update of updates) {
+                if (update.includes('NULL')) {
+                    // NULL values don't need a placeholder
+                    setParts.push(update);
+                    // Don't increment valueIndex - no value needed
+                } else if (update.includes('CURRENT_TIMESTAMP')) {
+                    // CURRENT_TIMESTAMP doesn't need a placeholder
+                    setParts.push(update);
+                    // Don't increment valueIndex - no value needed
+                } else {
+                    // Extract field name and add placeholder
+                    const field = update.split(' = ')[0];
+                    setParts.push(`${field} = ?`);
+                    // Add corresponding value from values array
+                    sqliteValues.push(values[valueIndex]);
+                    valueIndex++; // Move to next value
+                }
+            }
+            
+            sqliteValues.push(id); // Add id at the end for WHERE clause
+            const setClause = setParts.join(', ');
+            db.prepare(`UPDATE weekly_timesheets SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...sqliteValues);
             return this.getWeeklyTimesheetById(id);
         }
     }
@@ -6174,13 +6265,18 @@ class ProductionDatabase {
                     COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
                     COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
                     COALESCE(SUM(tde.total_hours), 0) as total_hours,
-                    COUNT(DISTINCT tde.entry_date) as days_worked
+                    COUNT(DISTINCT tde.entry_date) as days_worked,
+                    wt.manager_approved,
+                    wt.approved_by,
+                    wt.approved_at,
+                    approver.username as approved_by_username
                  FROM production_users u
                  INNER JOIN weekly_timesheets wt ON u.id = wt.user_id AND wt.week_start_date = $1::date
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
+                 LEFT JOIN production_users approver ON wt.approved_by = approver.id
                  WHERE (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username
+                 GROUP BY u.id, u.username, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`,
                 [weekStartDate]
             );
@@ -6197,14 +6293,19 @@ class ProductionDatabase {
                     COALESCE(SUM(tde.weekend_hours), 0) as total_weekend_hours,
                     COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
                     COALESCE(SUM(tde.total_hours), 0) as total_hours,
-                    COUNT(DISTINCT tde.entry_date) as days_worked
+                    COUNT(DISTINCT tde.entry_date) as days_worked,
+                    wt.manager_approved,
+                    wt.approved_by,
+                    wt.approved_at,
+                    approver.username as approved_by_username
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
+                 LEFT JOIN production_users approver ON wt.approved_by = approver.id
                  WHERE wt.week_start_date = ?
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username, wt.week_start_date
+                 GROUP BY u.id, u.username, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`
             ).all(weekStartDate);
             
@@ -6588,6 +6689,61 @@ class ProductionDatabase {
                  WHERE r.is_active = 1 AND r.next_check_date < ?
                  ORDER BY r.next_check_date ASC`
             ).all(today);
+        }
+    }
+    
+    // Get unapproved timesheet weeks (for reminders)
+    // Returns weeks that have ended and still have unapproved timesheets
+    static async getUnapprovedTimesheetWeeks() {
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+        
+        // Calculate last Monday (previous week that has ended)
+        const lastMonday = new Date(today);
+        if (dayOfWeek === 0) {
+            // If Sunday, go back 6 days to get last Monday
+            lastMonday.setDate(lastMonday.getDate() - 6);
+        } else if (dayOfWeek === 6) {
+            // If Saturday, go back 5 days to get last Monday
+            lastMonday.setDate(lastMonday.getDate() - 5);
+        } else {
+            // For other days (Mon-Fri), go back (dayOfWeek + 6) days to get last Monday
+            lastMonday.setDate(lastMonday.getDate() - (dayOfWeek + 6));
+        }
+        lastMonday.setHours(0, 0, 0, 0);
+        const weekStartStr = lastMonday.toISOString().split('T')[0];
+        
+        // Also check the week before that (in case we're checking on Monday/Tuesday)
+        const weekBefore = new Date(lastMonday);
+        weekBefore.setDate(weekBefore.getDate() - 7);
+        const weekBeforeStr = weekBefore.toISOString().split('T')[0];
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT wt.week_start_date, COUNT(*) as unapproved_count
+                 FROM weekly_timesheets wt
+                 INNER JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.week_start_date IN ($1, $2)
+                   AND (wt.manager_approved IS NULL OR wt.manager_approved = FALSE)
+                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                 GROUP BY wt.week_start_date
+                 HAVING COUNT(*) > 0
+                 ORDER BY wt.week_start_date DESC`,
+                [weekStartStr, weekBeforeStr]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT wt.week_start_date, COUNT(*) as unapproved_count
+                 FROM weekly_timesheets wt
+                 INNER JOIN production_users u ON wt.user_id = u.id
+                 WHERE wt.week_start_date IN (?, ?)
+                   AND (wt.manager_approved IS NULL OR wt.manager_approved = 0)
+                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                 GROUP BY wt.week_start_date
+                 HAVING COUNT(*) > 0
+                 ORDER BY wt.week_start_date DESC`
+            ).all(weekStartStr, weekBeforeStr);
         }
     }
     

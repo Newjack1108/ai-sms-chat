@@ -208,12 +208,30 @@
                 if (remindersData.reminders.length === 0) {
                     remindersDiv.innerHTML = '<p>No overdue reminders</p>';
                 } else {
-                    remindersDiv.innerHTML = remindersData.reminders.slice(0, 5).map(reminder => `
-                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                            <strong>${reminder.stock_item_name}</strong><br>
-                            <small>Due: ${formatDate(reminder.next_check_date)}</small>
-                        </div>
-                    `).join('');
+                    remindersDiv.innerHTML = remindersData.reminders.slice(0, 5).map(reminder => {
+                        if (reminder.type === 'timesheet_approval') {
+                            const weekStart = new Date(reminder.week_start_date);
+                            const weekStartFormatted = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                            return `
+                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #fff3cd;">
+                                    <strong style="color: #856404;">⚠️ ${reminder.reminder_text}</strong><br>
+                                    <small style="color: #856404;">Week: ${weekStartFormatted}</small>
+                                    <br>
+                                    <a href="timesheet-admin.html" onclick="localStorage.setItem('selectedWeek', '${reminder.week_start_date}');" 
+                                       style="font-size: 11px; color: #856404; text-decoration: underline; margin-top: 4px; display: inline-block;">
+                                        Review Timesheets →
+                                    </a>
+                                </div>
+                            `;
+                        } else {
+                            return `
+                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
+                                    <strong>${reminder.stock_item_name}</strong><br>
+                                    <small>Due: ${formatDate(reminder.next_check_date)}</small>
+                                </div>
+                            `;
+                        }
+                    }).join('');
                 }
             } catch (error) {
                 document.getElementById('overdueReminders').innerHTML = '<p>Error loading reminders</p>';
