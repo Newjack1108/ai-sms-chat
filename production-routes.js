@@ -877,6 +877,32 @@ router.post('/products/:id/components', requireProductionAuth, requireAdminOrOff
     }
 });
 
+router.put('/products/:id/components/:compId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const compId = parseInt(req.params.compId);
+        const { component_type, component_id, quantity_required, unit } = req.body;
+        
+        if (!component_type || !component_id || !quantity_required || !unit) {
+            return res.status(400).json({ success: false, error: 'All component fields are required' });
+        }
+        
+        if (!['raw_material', 'component', 'built_item'].includes(component_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid component type. Must be raw_material, component, or built_item' });
+        }
+        
+        const component = await ProductionDatabase.updateProductComponent(compId, {
+            component_type,
+            component_id: parseInt(component_id),
+            quantity_required: parseFloat(quantity_required),
+            unit
+        });
+        res.json({ success: true, component });
+    } catch (error) {
+        console.error('Update product component error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update product component' });
+    }
+});
+
 router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
