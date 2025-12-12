@@ -417,3 +417,113 @@ body.dashboard-page {
     display: block;
 }
 
+/* Dropdown Navigation */
+.navbar-dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-toggle {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.2s;
+}
+
+.dropdown-toggle:hover {
+    background: #5a6268;
+}
+
+.dropdown-toggle::after {
+    content: '▼';
+    font-size: 10px;
+    margin-left: 4px;
+    transition: transform 0.2s;
+}
+
+.dropdown-toggle.open::after {
+    transform: rotate(180deg);
+}
+
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    min-width: 180px;
+    margin-top: 4px;
+    display: none;
+    z-index: 1000;
+    padding: 4px 0;
+}
+
+.dropdown-menu.show {
+    display: block;
+}
+
+.dropdown-item {
+    display: block;
+    padding: 10px 16px;
+    color: #333;
+    text-decoration: none;
+    font-size: 14px;
+    transition: background 0.2s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+}
+
+.dropdown-item:hover {
+    background: #f8f9fa;
+}
+
+.dropdown-item:first-child {
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+.dropdown-item:last-child {
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #dee2e6;
+    margin: 4px 0;
+}
+
+/* Mobile dropdown adjustments */
+@media (max-width: 768px) {
+    .navbar-dropdown {
+        width: 100%;
+    }
+    
+    .dropdown-menu {
+        position: static;
+        width: 100%;
+        box-shadow: none;
+        border: none;
+        border-top: 1px solid #dee2e6;
+        margin-top: 0;
+    }
+    
+    .dropdown-toggle {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+

@@ -20,20 +20,50 @@
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
-            <a href="stock.html" class="btn btn-secondary btn-sm admin-or-office">Raw Materials</a>
-            <a href="components.html" class="btn btn-secondary btn-sm admin-or-office">Components</a>
-            <a href="panels.html" class="btn btn-secondary btn-sm admin-or-office">Built Items</a>
-            <a href="wip.html" class="btn btn-secondary btn-sm admin-or-office">WIP</a>
-            <a href="planner.html" class="btn btn-secondary btn-sm admin-or-office">Planner</a>
-            <a href="products.html" class="btn btn-secondary btn-sm admin-or-office">Products</a>
-            <a href="production-orders.html" class="btn btn-secondary btn-sm admin-or-office">Works Orders</a>
+            
+            <!-- Production Dropdown (admin-or-office) -->
+            <div class="navbar-dropdown admin-or-office">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">
+                    Production
+                </button>
+                <div class="dropdown-menu">
+                    <a href="stock.html" class="dropdown-item">Raw Materials</a>
+                    <a href="components.html" class="dropdown-item">Components</a>
+                    <a href="panels.html" class="dropdown-item">Built Items</a>
+                    <a href="wip.html" class="dropdown-item">WIP</a>
+                    <a href="planner.html" class="dropdown-item">Planner</a>
+                    <a href="products.html" class="dropdown-item">Products</a>
+                    <a href="production-orders.html" class="dropdown-item">Works Orders</a>
+                </div>
+            </div>
+            
+            <!-- Timesheets Dropdown -->
+            <div class="navbar-dropdown">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">
+                    Timesheets
+                </button>
+                <div class="dropdown-menu">
+                    <a href="timesheet.html" class="dropdown-item">Clock ON/OFF</a>
+                    <a href="holidays.html" class="dropdown-item">Holidays</a>
+                    <a href="timesheet-admin.html" class="dropdown-item admin-or-office">Clock ON/OFF Admin</a>
+                    <a href="holidays-admin.html" class="dropdown-item admin-or-office">Holiday Admin</a>
+                </div>
+            </div>
+            
+            <!-- Always visible items -->
             <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
             <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
-            <a href="timesheet.html" class="btn btn-secondary btn-sm">Clock ON/OFF</a>
-            <a href="timesheet-admin.html" class="btn btn-secondary btn-sm admin-or-office">Clock ON/OFF Admin</a>
-            <a href="holidays.html" class="btn btn-secondary btn-sm">Holidays</a>
-            <a href="holidays-admin.html" class="btn btn-secondary btn-sm admin-or-office">Holiday Admin</a>
-            <a href="users.html" class="btn btn-secondary btn-sm admin-only">Users</a>
+            
+            <!-- Admin Dropdown (admin-only) -->
+            <div class="navbar-dropdown admin-only">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">
+                    Admin
+                </button>
+                <div class="dropdown-menu">
+                    <a href="users.html" class="dropdown-item">Users</a>
+                </div>
+            </div>
+            
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
     </nav>

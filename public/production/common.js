@@ -236,10 +236,18 @@ async function initNavbar() {
             adminItems.forEach(item => item.style.display = 'none');
         }
         
-        // Hide admin-or-office items for staff
+        // Hide admin-or-office items for staff (including items within dropdowns)
         if (user.role === 'staff') {
             const adminOrOfficeItems = document.querySelectorAll('.admin-or-office');
-            adminOrOfficeItems.forEach(item => item.style.display = 'none');
+            adminOrOfficeItems.forEach(item => {
+                // Check if it's a dropdown container - if so, hide the whole dropdown
+                if (item.classList.contains('navbar-dropdown')) {
+                    item.style.display = 'none';
+                } else {
+                    // Otherwise hide the individual item
+                    item.style.display = 'none';
+                }
+            });
         }
         
         // Hide manager-only items for staff (legacy support)
@@ -255,4 +263,43 @@ async function initNavbar() {
         }
     }
 }
+
+// Dropdown functionality
+function toggleDropdown(event, button) {
+    event.stopPropagation();
+    
+    // Close all other dropdowns
+    const allDropdowns = document.querySelectorAll('.dropdown-menu');
+    const allButtons = document.querySelectorAll('.dropdown-toggle');
+    
+    allDropdowns.forEach(menu => {
+        if (menu !== button.nextElementSibling) {
+            menu.classList.remove('show');
+        }
+    });
+    
+    allButtons.forEach(btn => {
+        if (btn !== button) {
+            btn.classList.remove('open');
+        }
+    });
+    
+    // Toggle current dropdown
+    const menu = button.nextElementSibling;
+    if (menu && menu.classList.contains('dropdown-menu')) {
+        menu.classList.toggle('show');
+        button.classList.toggle('open');
+    }
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('.navbar-dropdown')) {
+        const allDropdowns = document.querySelectorAll('.dropdown-menu');
+        const allButtons = document.querySelectorAll('.dropdown-toggle');
+        
+        allDropdowns.forEach(menu => menu.classList.remove('show'));
+        allButtons.forEach(btn => btn.classList.remove('open'));
+    }
+});
 
