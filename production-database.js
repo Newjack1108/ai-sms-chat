@@ -3138,6 +3138,20 @@ class ProductionDatabase {
     }
     
     static async updatePlannerItem(id, data) {
+        // Get current item to check previous status and item details
+        const currentItem = await this.getPlannerItemById(id);
+        if (!currentItem) {
+            throw new Error('Planner item not found');
+        }
+        
+        const previousStatus = currentItem.status;
+        const quantityBuilt = data.quantity_built !== undefined ? data.quantity_built : (currentItem.quantity_built || 0);
+        
+        // Check if status is changing to completed and we have quantity_built
+        const statusChangingToCompleted = data.status === 'completed' && 
+            previousStatus !== 'completed' &&
+            parseFloat(quantityBuilt) > 0;
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `UPDATE planner_items SET quantity_to_build = $1, quantity_built = $2, hours_used = $3, priority = $4, status = $5, start_day = $6, end_day = $7
@@ -3153,7 +3167,39 @@ class ProductionDatabase {
                     id
                 ]
             );
-            return result.rows[0];
+            const updatedItem = result.rows[0];
+            
+            // If status changed to completed and quantity_built > 0, depreciate stock
+            if (statusChangingToCompleted) {
+                // Handle both new schema (item_type/item_id) and old schema (panel_id)
+                const itemType = updatedItem.item_type || (updatedItem.panel_id ? 'built_item' : null);
+                const itemId = updatedItem.item_id || updatedItem.panel_id;
+                const userId = null; // Planner items don't track user_id directly
+                
+                if (itemType === 'component' && itemId) {
+                    // Record component build movement (automatically depreciates raw materials)
+                    await this.recordComponentMovement({
+                        component_id: itemId,
+                        movement_type: 'build',
+                        quantity: parseFloat(quantityBuilt),
+                        reference: `Planner Item #${id}`,
+                        user_id: userId
+                    });
+                    console.log(`✅ Depreciated stock for component build in planner item #${id} (quantity: ${quantityBuilt})`);
+                } else if ((itemType === 'built_item' || updatedItem.panel_id) && itemId) {
+                    // Record panel build movement (automatically depreciates materials and components)
+                    await this.recordPanelMovement({
+                        panel_id: itemId,
+                        movement_type: 'build',
+                        quantity: parseFloat(quantityBuilt),
+                        reference: `Planner Item #${id}`,
+                        user_id: userId
+                    });
+                    console.log(`✅ Depreciated stock for built item build in planner item #${id} (quantity: ${quantityBuilt})`);
+                }
+            }
+            
+            return updatedItem;
         } else {
             db.prepare(
                 `UPDATE planner_items SET quantity_to_build = ?, quantity_built = ?, hours_used = ?, priority = ?, status = ?, start_day = ?, end_day = ?
@@ -3168,7 +3214,39 @@ class ProductionDatabase {
                 data.end_day !== undefined ? data.end_day : null,
                 id
             );
-            return this.getPlannerItemById(id);
+            const updatedItem = await this.getPlannerItemById(id);
+            
+            // If status changed to completed and quantity_built > 0, depreciate stock
+            if (statusChangingToCompleted) {
+                // Handle both new schema (item_type/item_id) and old schema (panel_id)
+                const itemType = updatedItem.item_type || (updatedItem.panel_id ? 'built_item' : null);
+                const itemId = updatedItem.item_id || updatedItem.panel_id;
+                const userId = null; // Planner items don't track user_id directly
+                
+                if (itemType === 'component' && itemId) {
+                    // Record component build movement (automatically depreciates raw materials)
+                    await this.recordComponentMovement({
+                        component_id: itemId,
+                        movement_type: 'build',
+                        quantity: parseFloat(quantityBuilt),
+                        reference: `Planner Item #${id}`,
+                        user_id: userId
+                    });
+                    console.log(`✅ Depreciated stock for component build in planner item #${id} (quantity: ${quantityBuilt})`);
+                } else if ((itemType === 'built_item' || updatedItem.panel_id) && itemId) {
+                    // Record panel build movement (automatically depreciates materials and components)
+                    await this.recordPanelMovement({
+                        panel_id: itemId,
+                        movement_type: 'build',
+                        quantity: parseFloat(quantityBuilt),
+                        reference: `Planner Item #${id}`,
+                        user_id: userId
+                    });
+                    console.log(`✅ Depreciated stock for built item build in planner item #${id} (quantity: ${quantityBuilt})`);
+                }
+            }
+            
+            return updatedItem;
         }
     }
     
@@ -3700,7 +3778,51 @@ class ProductionDatabase {
         }
     }
     
+    // Deduct stock for all product components when a product order is completed
+    static async deductProductComponents(productId, quantity, userId, reference) {
+        const productComponents = await this.getProductComponents(productId);
+        for (const comp of productComponents) {
+            const quantityToDeduct = parseFloat(comp.quantity_required) * quantity;
+            if (comp.component_type === 'raw_material') {
+                // Deduct raw material from stock
+                await this.recordStockMovement({
+                    stock_item_id: comp.component_id,
+                    movement_type: 'out',
+                    quantity: quantityToDeduct,
+                    reference: `Product order: ${reference}`,
+                    user_id: userId,
+                    cost_gbp: 0
+                });
+            } else if (comp.component_type === 'component') {
+                // Deduct from component stock
+                await this.recordComponentMovement({
+                    component_id: comp.component_id,
+                    movement_type: 'use',
+                    quantity: quantityToDeduct,
+                    reference: `Product order: ${reference}`,
+                    user_id: userId
+                });
+            } else if (comp.component_type === 'built_item') {
+                // Deduct from built item (panel) stock
+                await this.recordPanelMovement({
+                    panel_id: comp.component_id,
+                    movement_type: 'use',
+                    quantity: quantityToDeduct,
+                    reference: `Product order: ${reference}`,
+                    user_id: userId
+                });
+            }
+        }
+    }
+    
     static async updateProductOrder(id, data) {
+        // Get current order to check previous status
+        const currentOrder = await this.getProductOrderById(id);
+        if (!currentOrder) {
+            throw new Error('Product order not found');
+        }
+        
+        const previousStatus = currentOrder.status;
         const updates = [];
         const values = [];
         let paramIndex = 1;
@@ -3727,24 +3849,62 @@ class ProductionDatabase {
         }
         
         if (updates.length === 0) {
-            return this.getProductOrderById(id);
+            return currentOrder;
         }
         
         values.push(id);
+        
+        // Check if status is changing to complete/completed/finished
+        const statusChangingToComplete = data.status !== undefined && 
+            ['complete', 'completed', 'finished'].includes(data.status.toLowerCase()) &&
+            previousStatus && 
+            !['complete', 'completed', 'finished'].includes(previousStatus.toLowerCase());
         
         if (isPostgreSQL) {
             const result = await pool.query(
                 `UPDATE product_orders SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
                 values
             );
-            return result.rows[0];
+            const updatedOrder = result.rows[0];
+            
+            // If status changed to complete, depreciate product components
+            if (statusChangingToComplete) {
+                const orderQuantity = data.quantity !== undefined ? data.quantity : updatedOrder.quantity;
+                const orderProductId = data.product_id !== undefined ? data.product_id : updatedOrder.product_id;
+                const userId = updatedOrder.created_by || null;
+                await this.deductProductComponents(
+                    orderProductId, 
+                    orderQuantity, 
+                    userId, 
+                    `Order #${id}`
+                );
+                console.log(`✅ Depreciated stock for product order #${id} (quantity: ${orderQuantity})`);
+            }
+            
+            return updatedOrder;
         } else {
             const setClause = updates.map((update, idx) => {
                 const field = update.split(' = ')[0];
                 return `${field} = ?`;
             }).join(', ');
             db.prepare(`UPDATE product_orders SET ${setClause} WHERE id = ?`).run(...values);
-            return this.getProductOrderById(id);
+            const updatedOrder = await this.getProductOrderById(id);
+            
+            // If status changed to complete, depreciate product components
+            if (statusChangingToComplete) {
+                const orderQuantity = data.quantity !== undefined ? data.quantity : updatedOrder.quantity;
+                const orderProductId = data.product_id !== undefined ? data.product_id : updatedOrder.product_id;
+                const userId = updatedOrder.created_by || null;
+                await this.deductProductComponents(
+                    orderProductId, 
+                    orderQuantity, 
+                    userId, 
+                    `Order #${id}`
+                );
+                console.log(`✅ Depreciated stock for product order #${id} (quantity: ${orderQuantity})`);
+            }
+            
+            return updatedOrder;
         }
     }
     
