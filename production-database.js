@@ -7238,21 +7238,27 @@ class ProductionDatabase {
     }
     
     static async getHolidayEntitlement(userId, year) {
+        // Ensure userId and year are integers
+        const userIdInt = parseInt(userId);
+        const yearInt = parseInt(year);
+        console.log('getHolidayEntitlement called with userId:', userIdInt, 'year:', yearInt);
+        
         let entitlement;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT *, (total_days - days_used) as days_remaining 
                  FROM holiday_entitlements WHERE user_id = $1 AND year = $2`,
-                [userId, year]
+                [userIdInt, yearInt]
             );
             entitlement = result.rows[0] || null;
         } else {
             const row = db.prepare(
                 `SELECT *, (total_days - days_used) as days_remaining 
                  FROM holiday_entitlements WHERE user_id = ? AND year = ?`
-            ).get(userId, year);
+            ).get(userIdInt, yearInt);
             entitlement = row || null;
         }
+        console.log('getHolidayEntitlement result:', entitlement);
         if (entitlement && entitlement.days_remaining !== undefined) {
             entitlement.days_remaining = parseFloat(entitlement.days_remaining);
         }

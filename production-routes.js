@@ -2986,9 +2986,17 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
         
         // Check entitlement
         const currentYear = new Date(start_date).getFullYear();
-        const entitlement = await ProductionDatabase.getHolidayEntitlement(user.id, currentYear);
+        const userId = parseInt(user.id);
+        console.log('Checking holiday entitlement for user:', userId, 'type:', typeof userId, 'year:', currentYear, 'type:', typeof currentYear);
+        const entitlement = await ProductionDatabase.getHolidayEntitlement(userId, currentYear);
+        console.log('Entitlement lookup result:', entitlement);
         
         if (!entitlement) {
+            // Check if entitlement exists for any year or user
+            const allEntitlements = await ProductionDatabase.getAllHolidayEntitlements();
+            console.log('All entitlements in database:', allEntitlements);
+            const userEntitlements = allEntitlements.filter(e => parseInt(e.user_id) === userId);
+            console.log('Entitlements for this user:', userEntitlements);
             return res.status(400).json({ success: false, error: `No holiday entitlement found for year ${currentYear}` });
         }
         
