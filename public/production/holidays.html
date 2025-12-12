@@ -91,10 +91,10 @@
         async function loadMyEntitlement() {
             try {
                 // First try to get current user info
-                const meResponse = await apiCall('/production/api/me');
+                const meResponse = await apiCall('/me');
                 if (meResponse && meResponse.success && meResponse.user) {
                     const userId = meResponse.user.id;
-                    const response = await apiCall(`/production/api/holidays/entitlements/${userId}/${currentYear}`);
+                    const response = await apiCall(`/holidays/entitlements/${userId}/${currentYear}`);
                     if (response.success && response.entitlement) {
                         currentEntitlement = response.entitlement;
                         displayEntitlement(response.entitlement);
@@ -107,7 +107,7 @@
             
             // Alternative: get all entitlements and filter
             try {
-                const response = await apiCall('/production/api/holidays/entitlements');
+                const response = await apiCall('/holidays/entitlements');
                 if (response.success && response.entitlements && response.entitlements.length > 0) {
                     const thisYear = response.entitlements.find(e => e.year === currentYear);
                     if (thisYear) {
@@ -230,7 +230,7 @@
             }
             
             try {
-                const response = await apiCall('/production/api/holidays/requests', 'POST', {
+                const response = await apiCall('/holidays/requests', 'POST', {
                     start_date: startDate,
                     end_date: endDate
                 });
@@ -250,7 +250,7 @@
         
         async function loadMyRequests() {
             try {
-                const response = await apiCall('/production/api/holidays/requests');
+                const response = await apiCall('/holidays/requests');
                 if (response.success) {
                     displayMyRequests(response.requests);
                 }
@@ -305,7 +305,7 @@
             if (!confirm('Cancel this holiday request?')) return;
             
             try {
-                const response = await apiCall(`/production/api/holidays/requests/${requestId}`, 'PUT', {
+                const response = await apiCall(`/holidays/requests/${requestId}`, 'PUT', {
                     action: 'cancel'
                 });
                 

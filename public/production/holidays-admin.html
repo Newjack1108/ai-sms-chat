@@ -154,7 +154,7 @@
         
         async function loadUsers() {
             try {
-                const response = await apiCall('/production/api/users');
+                const response = await apiCall('/users');
                 if (response.success) {
                     users = response.users;
                     const select = document.getElementById('entitlementUserId');
@@ -173,7 +173,7 @@
         
         async function loadEntitlements() {
             try {
-                const response = await apiCall('/production/api/holidays/entitlements');
+                const response = await apiCall('/holidays/entitlements');
                 if (response.success) {
                     displayEntitlements(response.entitlements);
                 }
@@ -235,7 +235,7 @@
             const totalDays = parseFloat(document.getElementById('entitlementTotalDays').value);
             
             try {
-                const response = await apiCall('/production/api/holidays/entitlements', 'POST', {
+                const response = await apiCall('/holidays/entitlements', 'POST', {
                     user_id: userId,
                     year: year,
                     total_days: totalDays
@@ -253,7 +253,7 @@
         
         async function loadPendingRequests() {
             try {
-                const response = await apiCall('/production/api/holidays/requests/pending');
+                const response = await apiCall('/holidays/requests/pending');
                 if (response.success) {
                     displayPendingRequests(response.requests);
                 }
@@ -299,7 +299,7 @@
             if (!confirm('Approve this holiday request?')) return;
             
             try {
-                const response = await apiCall(`/production/api/holidays/requests/${requestId}/approve`, 'PUT', {});
+                const response = await apiCall(`/holidays/requests/${requestId}/approve`, 'PUT', {});
                 if (response.success) {
                     await loadPendingRequests();
                     alert('Request approved successfully');
@@ -314,7 +314,7 @@
             if (reviewNotes === null) return;
             
             try {
-                const response = await apiCall(`/production/api/holidays/requests/${requestId}/reject`, 'PUT', {
+                const response = await apiCall(`/holidays/requests/${requestId}/reject`, 'PUT', {
                     review_notes: reviewNotes || null
                 });
                 if (response.success) {
@@ -333,7 +333,7 @@
         
         async function loadShutdownPeriods() {
             try {
-                const response = await apiCall('/production/api/holidays/shutdown-periods');
+                const response = await apiCall('/holidays/shutdown-periods');
                 if (response.success) {
                     displayShutdownPeriods(response.periods);
                 }
@@ -393,7 +393,7 @@
             }
             
             try {
-                const response = await apiCall('/production/api/holidays/shutdown-periods', 'POST', {
+                const response = await apiCall('/holidays/shutdown-periods', 'POST', {
                     year: year,
                     start_date: startDate,
                     end_date: endDate,
@@ -414,7 +414,7 @@
             if (!confirm('Apply this shutdown period to all user entitlements? This will deduct weekdays from everyone\'s entitlement for this year.')) return;
             
             try {
-                const response = await apiCall(`/production/api/holidays/shutdown-periods/${periodId}/apply`, 'POST', {});
+                const response = await apiCall(`/holidays/shutdown-periods/${periodId}/apply`, 'POST', {});
                 if (response.success) {
                     alert(response.message || 'Shutdown applied successfully');
                     await loadEntitlements();
