@@ -5575,9 +5575,10 @@ class ProductionDatabase {
         let calculatedTotal = 0;
         
         if (overnightAway) {
-            // All hours are overnight (1.25x)
-            overnightHours = totalHours;
-            calculatedTotal = totalHours;
+            // All hours are overnight (1.25x) - but still deduct normal 1hr break
+            const netHours = Math.max(0, totalHours - 1);
+            overnightHours = netHours;
+            calculatedTotal = netHours;
         } else if (isWeekend) {
             // All hours are weekend (1.5x)
             weekendHours = totalHours;
