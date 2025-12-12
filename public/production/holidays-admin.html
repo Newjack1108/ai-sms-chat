@@ -250,10 +250,13 @@
             
             try {
                 console.log('Saving entitlement:', { userId, year, totalDays });
-                const response = await apiCall('/holidays/entitlements', 'POST', {
-                    user_id: userId,
-                    year: year,
-                    total_days: totalDays
+                const response = await apiCall('/holidays/entitlements', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_id: userId,
+                        year: year,
+                        total_days: totalDays
+                    })
                 });
                 
                 console.log('Save entitlement response:', response);
@@ -331,7 +334,10 @@
             
             try {
                 console.log('Approving request:', requestId);
-                const response = await apiCall(`/holidays/requests/${requestId}/approve`, 'PUT', {});
+                const response = await apiCall(`/holidays/requests/${requestId}/approve`, {
+                    method: 'PUT',
+                    body: JSON.stringify({})
+                });
                 console.log('Approve response:', response);
                 
                 if (response && response.success) {
@@ -354,8 +360,11 @@
             
             try {
                 console.log('Rejecting request:', requestId);
-                const response = await apiCall(`/holidays/requests/${requestId}/reject`, 'PUT', {
-                    review_notes: reviewNotes || null
+                const response = await apiCall(`/holidays/requests/${requestId}/reject`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        review_notes: reviewNotes || null
+                    })
                 });
                 console.log('Reject response:', response);
                 
@@ -450,11 +459,14 @@
             
             try {
                 console.log('Saving shutdown period:', { year, startDate, endDate, description });
-                const response = await apiCall('/holidays/shutdown-periods', 'POST', {
-                    year: year,
-                    start_date: startDate,
-                    end_date: endDate,
-                    description: description || null
+                const response = await apiCall('/holidays/shutdown-periods', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        year: year,
+                        start_date: startDate,
+                        end_date: endDate,
+                        description: description || null
+                    })
                 });
                 
                 console.log('Shutdown period save response:', response);
@@ -479,7 +491,10 @@
             if (!confirm('Apply this shutdown period to all user entitlements? This will deduct weekdays from everyone\'s entitlement for this year.')) return;
             
             try {
-                const response = await apiCall(`/holidays/shutdown-periods/${periodId}/apply`, 'POST', {});
+                const response = await apiCall(`/holidays/shutdown-periods/${periodId}/apply`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
                 if (response.success) {
                     alert(response.message || 'Shutdown applied successfully');
                     await loadEntitlements();

@@ -230,9 +230,12 @@
             }
             
             try {
-                const response = await apiCall('/holidays/requests', 'POST', {
-                    start_date: startDate,
-                    end_date: endDate
+                const response = await apiCall('/holidays/requests', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        start_date: startDate,
+                        end_date: endDate
+                    })
                 });
                 
                 if (response.success) {
@@ -305,8 +308,11 @@
             if (!confirm('Cancel this holiday request?')) return;
             
             try {
-                const response = await apiCall(`/holidays/requests/${requestId}`, 'PUT', {
-                    action: 'cancel'
+                const response = await apiCall(`/holidays/requests/${requestId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        action: 'cancel'
+                    })
                 });
                 
                 if (response.success) {
