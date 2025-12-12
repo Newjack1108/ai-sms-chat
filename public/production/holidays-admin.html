@@ -185,6 +185,11 @@
         function displayEntitlements(entitlements) {
             const container = document.getElementById('entitlementsList');
             
+            if (!entitlements || entitlements.length === 0) {
+                container.innerHTML = '<div class="info">No entitlements found. Add an entitlement to get started.</div>';
+                return;
+            }
+            
             // Group by year
             const byYear = {};
             entitlements.forEach(e => {
@@ -201,7 +206,7 @@
                         <td>${ent.username || 'Unknown'}</td>
                         <td>${ent.total_days}</td>
                         <td>${parseFloat(ent.days_used || 0).toFixed(1)}</td>
-                        <td><strong>${parseFloat(ent.days_remaining || (ent.total_days - ent.days_used)).toFixed(1)}</strong></td>
+                        <td><strong>${parseFloat(ent.days_remaining !== undefined ? ent.days_remaining : (parseFloat(ent.total_days || 0) - parseFloat(ent.days_used || 0))).toFixed(1)}</strong></td>
                         <td><button onclick="editEntitlement(${ent.user_id}, ${ent.year}, ${ent.total_days})" class="btn btn-sm btn-secondary">Edit</button></td>
                     </tr>`;
                 });
@@ -241,10 +246,15 @@
                     total_days: totalDays
                 });
                 
-                if (response.success) {
+                if (response && response.success) {
                     closeModal('entitlementModal');
-                    await loadEntitlements();
+                    // Small delay to ensure database update is complete
+                    setTimeout(async () => {
+                        await loadEntitlements();
+                    }, 100);
                     alert('Entitlement saved successfully');
+                } else {
+                    alert('Error saving entitlement: ' + (response?.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Error saving entitlement: ' + (error.message || 'Unknown error'));
@@ -334,11 +344,14 @@
         async function loadShutdownPeriods() {
             try {
                 const response = await apiCall('/holidays/shutdown-periods');
-                if (response.success) {
-                    displayShutdownPeriods(response.periods);
+                if (response && response.success) {
+                    displayShutdownPeriods(response.periods || []);
+                } else {
+                    document.getElementById('shutdownPeriodsList').innerHTML = '<div class="error">Error loading shutdown periods</div>';
                 }
             } catch (error) {
-                document.getElementById('shutdownPeriodsList').innerHTML = '<div class="error">Error loading shutdown periods</div>';
+                console.error('Error loading shutdown periods:', error);
+                document.getElementById('shutdownPeriodsList').innerHTML = '<div class="error">Error loading shutdown periods: ' + (error.message || 'Unknown error') + '</div>';
             }
         }
         
@@ -355,7 +368,7 @@
             periods.forEach(period => {
                 const startDate = new Date(period.start_date).toLocaleDateString();
                 const endDate = new Date(period.end_date).toLocaleDateString();
-                const weekdays = ProductionDatabase ? ProductionDatabase.calculateWorkingDays(period.start_date, period.end_date) : 'N/A';
+                const weekdays = calculateWorkingDays(period.start_date, period.end_date);
                 
                 html += `<tr>
                     <td>${period.year}</td>
@@ -400,10 +413,15 @@
                     description: description || null
                 });
                 
-                if (response.success) {
+                if (response && response.success) {
                     closeModal('shutdownModal');
-                    await loadShutdownPeriods();
+                    // Small delay to ensure database update is complete
+                    setTimeout(async () => {
+                        await loadShutdownPeriods();
+                    }, 100);
                     alert('Shutdown period created successfully');
+                } else {
+                    alert('Error creating shutdown period: ' + (response?.error || 'Unknown error'));
                 }
             } catch (error) {
                 alert('Error creating shutdown period: ' + (error.message || 'Unknown error'));
