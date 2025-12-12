@@ -2903,11 +2903,22 @@ router.post('/holidays/entitlements', requireProductionAuth, requireAdminOrOffic
             return res.status(400).json({ success: false, error: 'User ID, year, and total days are required' });
         }
         
+        console.log('Creating holiday entitlement:', { user_id, year, total_days });
+        
         const entitlement = await ProductionDatabase.createHolidayEntitlement(parseInt(user_id), parseInt(year), parseInt(total_days));
+        
+        console.log('Created holiday entitlement:', entitlement);
+        
+        if (!entitlement) {
+            console.error('createHolidayEntitlement returned null/undefined');
+            return res.status(500).json({ success: false, error: 'Failed to create holiday entitlement - database returned null' });
+        }
+        
         res.json({ success: true, entitlement });
     } catch (error) {
         console.error('Create holiday entitlement error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create holiday entitlement' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to create holiday entitlement: ' + error.message });
     }
 });
 
@@ -3163,6 +3174,8 @@ router.post('/holidays/shutdown-periods', requireProductionAuth, requireAdminOrO
             return res.status(400).json({ success: false, error: 'Year, start date, and end date are required' });
         }
         
+        console.log('Creating shutdown period:', { year, start_date, end_date, description, user_id: req.session.production_user.id });
+        
         const period = await ProductionDatabase.createCompanyShutdownPeriod({
             year: parseInt(year),
             start_date,
@@ -3171,10 +3184,18 @@ router.post('/holidays/shutdown-periods', requireProductionAuth, requireAdminOrO
             created_by_user_id: req.session.production_user.id
         });
         
+        console.log('Created shutdown period:', period);
+        
+        if (!period) {
+            console.error('createCompanyShutdownPeriod returned null/undefined');
+            return res.status(500).json({ success: false, error: 'Failed to create shutdown period - database returned null' });
+        }
+        
         res.json({ success: true, period });
     } catch (error) {
         console.error('Create shutdown period error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create shutdown period' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to create shutdown period: ' + error.message });
     }
 });
 

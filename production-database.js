@@ -7215,6 +7215,7 @@ class ProductionDatabase {
             const existing = await this.getHolidayEntitlement(userId, year);
             if (existing) {
                 // Update existing
+                console.log('Updating existing entitlement:', { userId, year, totalDays });
                 db.prepare(
                     `UPDATE holiday_entitlements 
                      SET total_days = ?, updated_at = CURRENT_TIMESTAMP
@@ -7222,12 +7223,17 @@ class ProductionDatabase {
                 ).run(totalDays, userId, year);
             } else {
                 // Insert new
-                db.prepare(
+                console.log('Inserting new entitlement:', { userId, year, totalDays });
+                const stmt = db.prepare(
                     `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
                      VALUES (?, ?, ?, 0)`
-                ).run(userId, year, totalDays);
+                );
+                const info = stmt.run(userId, year, totalDays);
+                console.log('Inserted entitlement (SQLite), lastInsertRowid:', info.lastInsertRowid);
             }
-            return await this.getHolidayEntitlement(userId, year);
+            const result = await this.getHolidayEntitlement(userId, year);
+            console.log('Retrieved entitlement after save:', result);
+            return result;
         }
     }
     
@@ -7579,21 +7585,30 @@ class ProductionDatabase {
     static async createCompanyShutdownPeriod(data) {
         const { year, start_date, end_date, description, created_by_user_id } = data;
         
-        if (isPostgreSQL) {
-            const result = await pool.query(
-                `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
-                 VALUES ($1, $2, $3, $4, $5, TRUE)
-                 RETURNING *`,
-                [year, start_date, end_date, description, created_by_user_id]
-            );
-            return result.rows[0];
-        } else {
-            const stmt = db.prepare(
-                `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
-                 VALUES (?, ?, ?, ?, ?, 1)`
-            );
-            const info = stmt.run(year, start_date, end_date, description, created_by_user_id);
-            return this.getCompanyShutdownPeriodById(info.lastInsertRowid);
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
+                     VALUES ($1, $2, $3, $4, $5, TRUE)
+                     RETURNING *`,
+                    [year, start_date, end_date, description, created_by_user_id]
+                );
+                console.log('Created shutdown period (PostgreSQL):', result.rows[0]);
+                return result.rows[0];
+            } else {
+                const stmt = db.prepare(
+                    `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
+                     VALUES (?, ?, ?, ?, ?, 1)`
+                );
+                const info = stmt.run(year, start_date, end_date, description, created_by_user_id);
+                console.log('Inserted shutdown period (SQLite), lastInsertRowid:', info.lastInsertRowid);
+                const created = await this.getCompanyShutdownPeriodById(info.lastInsertRowid);
+                console.log('Retrieved created shutdown period:', created);
+                return created;
+            }
+        } catch (error) {
+            console.error('Error in createCompanyShutdownPeriod:', error);
+            throw error;
         }
     }
     
