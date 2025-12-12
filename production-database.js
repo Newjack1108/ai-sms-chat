@@ -217,9 +217,35 @@ function initializeSQLite() {
             last_checked_date TEXT,
             next_check_date TEXT,
             is_active INTEGER DEFAULT 1,
-            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE
+            user_id INTEGER,
+            target_role TEXT,
+            created_by_user_id INTEGER,
+            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
         )
     `);
+    
+    // Migrate stock_check_reminders to add user assignment columns
+    try {
+        const reminderColumns = db.prepare("PRAGMA table_info(stock_check_reminders)").all();
+        const reminderColumnNames = reminderColumns.map(col => col.name);
+        
+        if (!reminderColumnNames.includes('user_id')) {
+            db.exec('ALTER TABLE stock_check_reminders ADD COLUMN user_id INTEGER');
+            console.log('✅ Added user_id column to stock_check_reminders');
+        }
+        if (!reminderColumnNames.includes('target_role')) {
+            db.exec('ALTER TABLE stock_check_reminders ADD COLUMN target_role TEXT');
+            console.log('✅ Added target_role column to stock_check_reminders');
+        }
+        if (!reminderColumnNames.includes('created_by_user_id')) {
+            db.exec('ALTER TABLE stock_check_reminders ADD COLUMN created_by_user_id INTEGER');
+            console.log('✅ Added created_by_user_id column to stock_check_reminders');
+        }
+    } catch (error) {
+        console.log('⚠️ Stock check reminders migration check skipped:', error.message);
+    }
     
     // Tasks table
     db.exec(`
@@ -785,9 +811,40 @@ async function initializePostgreSQL() {
                 check_frequency_days INTEGER NOT NULL,
                 last_checked_date DATE,
                 next_check_date DATE,
-                is_active BOOLEAN DEFAULT TRUE
+                is_active BOOLEAN DEFAULT TRUE,
+                user_id INTEGER REFERENCES production_users(id),
+                target_role VARCHAR(20),
+                created_by_user_id INTEGER REFERENCES production_users(id)
             )
         `);
+        
+        // Migrate stock_check_reminders to add user assignment columns
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' AND column_name='user_id'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ADD COLUMN user_id INTEGER REFERENCES production_users(id);
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' AND column_name='target_role'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ADD COLUMN target_role VARCHAR(20);
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' AND column_name='created_by_user_id'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ADD COLUMN created_by_user_id INTEGER REFERENCES production_users(id);
+                END IF;
+            END $$;
+        `);
+        console.log('✅ Checked/added user assignment columns to stock_check_reminders');
         
         // Tasks
         await pool.query(`
@@ -6626,17 +6683,35 @@ class ProductionDatabase {
     static async createReminder(data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [data.stock_item_id, data.check_frequency_days, data.last_checked_date, data.next_check_date, data.is_active !== false]
+                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [
+                    data.stock_item_id, 
+                    data.check_frequency_days, 
+                    data.last_checked_date, 
+                    data.next_check_date, 
+                    data.is_active !== false,
+                    data.user_id || null,
+                    data.target_role || null,
+                    data.created_by_user_id || null
+                ]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active)
-                 VALUES (?, ?, ?, ?, ?)`
+                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.stock_item_id, data.check_frequency_days, data.last_checked_date, data.next_check_date, data.is_active !== false ? 1 : 0);
+            const info = stmt.run(
+                data.stock_item_id, 
+                data.check_frequency_days, 
+                data.last_checked_date, 
+                data.next_check_date, 
+                data.is_active !== false ? 1 : 0,
+                data.user_id || null,
+                data.target_role || null,
+                data.created_by_user_id || null
+            );
             return this.getReminderById(info.lastInsertRowid);
         }
     }
@@ -6650,51 +6725,116 @@ class ProductionDatabase {
         }
     }
     
-    static async getAllReminders() {
+    static async getAllReminders(userId = null, userRole = null) {
+        // Build WHERE clause based on user permissions
+        let whereClause = '';
+        const params = [];
+        let paramIndex = 1;
+        
+        if (userId && userRole) {
+            // Filter reminders: show if user_id matches, target_role matches, both NULL (global - admin only), or created by user
+            if (userRole === 'admin') {
+                // Admins see all reminders they created OR all global reminders (both NULL)
+                whereClause = `(r.created_by_user_id = $${paramIndex} OR (r.user_id IS NULL AND r.target_role IS NULL))`;
+                params.push(userId);
+                paramIndex++;
+            } else {
+                // Regular users see: their own reminders, role-based reminders, or reminders they created
+                whereClause = `(r.user_id = $${paramIndex} OR r.target_role = $${paramIndex + 1} OR r.created_by_user_id = $${paramIndex})`;
+                params.push(userId, userRole, userId);
+                paramIndex += 3;
+            }
+        }
+        
+        const whereSQL = whereClause ? `WHERE ${whereClause}` : '';
+        
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT r.*, si.name as stock_item_name
+                `SELECT r.*, si.name as stock_item_name,
+                        u.username as assigned_user_name,
+                        creator.username as created_by_username
                  FROM stock_check_reminders r
                  JOIN stock_items si ON r.stock_item_id = si.id
-                 ORDER BY r.next_check_date ASC`
+                 LEFT JOIN production_users u ON r.user_id = u.id
+                 LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                 ${whereSQL}
+                 ORDER BY r.next_check_date ASC`,
+                params
             );
             return result.rows;
         } else {
-            return db.prepare(
-                `SELECT r.*, si.name as stock_item_name
-                 FROM stock_check_reminders r
-                 JOIN stock_items si ON r.stock_item_id = si.id
-                 ORDER BY r.next_check_date ASC`
-            ).all();
+            const query = `SELECT r.*, si.name as stock_item_name,
+                                  u.username as assigned_user_name,
+                                  creator.username as created_by_username
+                           FROM stock_check_reminders r
+                           JOIN stock_items si ON r.stock_item_id = si.id
+                           LEFT JOIN production_users u ON r.user_id = u.id
+                           LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                           ${whereSQL}
+                           ORDER BY r.next_check_date ASC`;
+            
+            if (params.length > 0) {
+                return db.prepare(query).all(...params);
+            } else {
+                return db.prepare(query).all();
+            }
         }
     }
     
-    static async getOverdueReminders() {
+    static async getOverdueReminders(userId = null, userRole = null) {
         const today = new Date().toISOString().split('T')[0];
+        
+        // Build WHERE clause based on user permissions
+        let whereClause = isPostgreSQL ? 'r.is_active = TRUE' : 'r.is_active = 1';
+        const params = [today];
+        let paramIndex = 2;
+        
+        if (userId && userRole) {
+            if (userRole === 'admin') {
+                // Admins see all overdue reminders they created OR all global reminders
+                whereClause += ` AND (r.created_by_user_id = $${paramIndex} OR (r.user_id IS NULL AND r.target_role IS NULL))`;
+                params.push(userId);
+                paramIndex++;
+            } else {
+                // Regular users see: their own reminders, role-based reminders, or reminders they created
+                whereClause += ` AND (r.user_id = $${paramIndex} OR r.target_role = $${paramIndex + 1} OR r.created_by_user_id = $${paramIndex})`;
+                params.push(userId, userRole, userId);
+                paramIndex += 3;
+            }
+        }
+        
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT r.*, si.name as stock_item_name
+                `SELECT r.*, si.name as stock_item_name,
+                        u.username as assigned_user_name,
+                        creator.username as created_by_username
                  FROM stock_check_reminders r
                  JOIN stock_items si ON r.stock_item_id = si.id
-                 WHERE r.is_active = TRUE AND r.next_check_date < $1
+                 LEFT JOIN production_users u ON r.user_id = u.id
+                 LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                 WHERE ${whereClause} AND r.next_check_date < $1
                  ORDER BY r.next_check_date ASC`,
-                [today]
+                params
             );
             return result.rows;
         } else {
-            return db.prepare(
-                `SELECT r.*, si.name as stock_item_name
-                 FROM stock_check_reminders r
-                 JOIN stock_items si ON r.stock_item_id = si.id
-                 WHERE r.is_active = 1 AND r.next_check_date < ?
-                 ORDER BY r.next_check_date ASC`
-            ).all(today);
+            const query = `SELECT r.*, si.name as stock_item_name,
+                                  u.username as assigned_user_name,
+                                  creator.username as created_by_username
+                           FROM stock_check_reminders r
+                           JOIN stock_items si ON r.stock_item_id = si.id
+                           LEFT JOIN production_users u ON r.user_id = u.id
+                           LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                           WHERE ${whereClause} AND r.next_check_date < ?
+                           ORDER BY r.next_check_date ASC`;
+            return db.prepare(query).all(...params);
         }
     }
     
     // Get unapproved timesheet weeks (for reminders)
     // Returns weeks that have ended and still have unapproved timesheets
     // Only returns complete weeks (weeks that have finished)
+    // Only counts timesheets with actual hours worked (matching getPayrollSummary logic)
     static async getUnapprovedTimesheetWeeks() {
         const today = new Date();
         const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
@@ -6706,16 +6846,19 @@ class ProductionDatabase {
         const currentWeekStartStr = currentWeekMonday.toISOString().split('T')[0];
         
         // Only get weeks that are complete (week_start_date < current week start)
+        // Only count timesheets with actual hours (matching getPayrollSummary filter)
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT wt.week_start_date, COUNT(*) as unapproved_count
+                `SELECT wt.week_start_date, COUNT(DISTINCT wt.user_id) as unapproved_count
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
+                 INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date < $1
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = FALSE)
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND tde.total_hours > 0
                  GROUP BY wt.week_start_date
-                 HAVING COUNT(*) > 0
+                 HAVING COUNT(DISTINCT wt.user_id) > 0
                  ORDER BY wt.week_start_date DESC
                  LIMIT 2`,
                 [currentWeekStartStr]
@@ -6723,14 +6866,16 @@ class ProductionDatabase {
             return result.rows;
         } else {
             return db.prepare(
-                `SELECT wt.week_start_date, COUNT(*) as unapproved_count
+                `SELECT wt.week_start_date, COUNT(DISTINCT wt.user_id) as unapproved_count
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
+                 INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date < ?
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = 0)
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND tde.total_hours > 0
                  GROUP BY wt.week_start_date
-                 HAVING COUNT(*) > 0
+                 HAVING COUNT(DISTINCT wt.user_id) > 0
                  ORDER BY wt.week_start_date DESC
                  LIMIT 2`
             ).all(currentWeekStartStr);
@@ -6738,16 +6883,50 @@ class ProductionDatabase {
     }
     
     static async updateReminder(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.check_frequency_days !== undefined) {
+            updates.push(isPostgreSQL ? `check_frequency_days = $${paramIndex}` : `check_frequency_days = ?`);
+            values.push(data.check_frequency_days);
+            paramIndex++;
+        }
+        
+        if (data.is_active !== undefined) {
+            updates.push(isPostgreSQL ? `is_active = $${paramIndex}` : `is_active = ?`);
+            values.push(data.is_active !== false ? (isPostgreSQL ? true : 1) : (isPostgreSQL ? false : 0));
+            paramIndex++;
+        }
+        
+        if (data.user_id !== undefined) {
+            updates.push(isPostgreSQL ? `user_id = $${paramIndex}` : `user_id = ?`);
+            values.push(data.user_id || null);
+            paramIndex++;
+        }
+        
+        if (data.target_role !== undefined) {
+            updates.push(isPostgreSQL ? `target_role = $${paramIndex}` : `target_role = ?`);
+            values.push(data.target_role || null);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getReminderById(id);
+        }
+        
+        values.push(id);
+        
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE stock_check_reminders SET check_frequency_days = $1, is_active = $2 WHERE id = $3 RETURNING *`,
-                [data.check_frequency_days, data.is_active !== false, id]
+                `UPDATE stock_check_reminders SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+                values
             );
             return result.rows[0];
         } else {
             db.prepare(
-                `UPDATE stock_check_reminders SET check_frequency_days = ?, is_active = ? WHERE id = ?`
-            ).run(data.check_frequency_days, data.is_active !== false ? 1 : 0, id);
+                `UPDATE stock_check_reminders SET ${updates.join(', ')} WHERE id = ?`
+            ).run(...values);
             return this.getReminderById(id);
         }
     }

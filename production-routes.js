@@ -2238,7 +2238,9 @@ router.get('/clock/weekly/user/:userId/:weekStart', requireProductionAuth, requi
 
 router.get('/reminders', requireProductionAuth, async (req, res) => {
     try {
-        const reminders = await ProductionDatabase.getAllReminders();
+        const userId = req.session.production_user.id;
+        const userRole = req.session.production_user.role;
+        const reminders = await ProductionDatabase.getAllReminders(userId, userRole);
         res.json({ success: true, reminders });
     } catch (error) {
         console.error('Get reminders error:', error);
@@ -2248,7 +2250,9 @@ router.get('/reminders', requireProductionAuth, async (req, res) => {
 
 router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     try {
-        const stockReminders = await ProductionDatabase.getOverdueReminders();
+        const userId = req.session.production_user.id;
+        const userRole = req.session.production_user.role;
+        const stockReminders = await ProductionDatabase.getOverdueReminders(userId, userRole);
         
         // Get timesheet approval reminders (only for admin/office roles)
         let timesheetReminders = [];
@@ -2296,16 +2300,57 @@ router.post('/reminders', requireProductionAuth, requireAdminOrOffice, async (re
     }
 });
 
-router.put('/reminders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/reminders/:id', requireProductionAuth, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
-        const { check_frequency_days, is_active } = req.body;
+        const currentUser = req.session.production_user;
+        const currentUserId = currentUser.id;
+        const currentUserRole = currentUser.role;
         
-        const reminder = await ProductionDatabase.updateReminder(reminderId, {
-            check_frequency_days: parseInt(check_frequency_days),
+        // Check permission: user must own the reminder OR be admin
+        const reminder = await ProductionDatabase.getReminderById(reminderId);
+        if (!reminder) {
+            return res.status(404).json({ success: false, error: 'Reminder not found' });
+        }
+        
+        if (reminder.created_by_user_id !== currentUserId && currentUserRole !== 'admin') {
+            return res.status(403).json({ success: false, error: 'You can only edit reminders you created' });
+        }
+        
+        const { check_frequency_days, is_active, user_id, target_role, assign_to } = req.body;
+        const updateData = {
+            check_frequency_days: check_frequency_days !== undefined ? parseInt(check_frequency_days) : undefined,
             is_active
-        });
-        res.json({ success: true, reminder });
+        };
+        
+        // Handle assignment updates (only if provided)
+        if (assign_to) {
+            if (assign_to === 'myself') {
+                updateData.user_id = currentUserId;
+                updateData.target_role = null;
+            } else if (assign_to === 'user' && user_id) {
+                if (currentUserRole !== 'admin') {
+                    return res.status(403).json({ success: false, error: 'Only admins can assign reminders to specific users' });
+                }
+                updateData.user_id = parseInt(user_id);
+                updateData.target_role = null;
+            } else if (assign_to === 'role' && target_role) {
+                if (currentUserRole !== 'admin') {
+                    return res.status(403).json({ success: false, error: 'Only admins can assign reminders to roles' });
+                }
+                updateData.user_id = null;
+                updateData.target_role = target_role;
+            } else if (assign_to === 'all') {
+                if (currentUserRole !== 'admin') {
+                    return res.status(403).json({ success: false, error: 'Only admins can create global reminders' });
+                }
+                updateData.user_id = null;
+                updateData.target_role = null;
+            }
+        }
+        
+        const updatedReminder = await ProductionDatabase.updateReminder(reminderId, updateData);
+        res.json({ success: true, reminder: updatedReminder });
     } catch (error) {
         console.error('Update reminder error:', error);
         res.status(500).json({ success: false, error: 'Failed to update reminder' });

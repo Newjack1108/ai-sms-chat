@@ -59,6 +59,31 @@
                     <input type="date" id="reminderNextCheck" class="form-input">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Assign To *</label>
+                    <select id="reminderAssignTo" class="form-select" required onchange="updateAssignmentFields()">
+                        <option value="myself">Myself</option>
+                        <option value="user" id="assignToUserOption" style="display: none;">Specific User</option>
+                        <option value="role" id="assignToRoleOption" style="display: none;">By Role</option>
+                        <option value="all" id="assignToAllOption" style="display: none;">All Users</option>
+                    </select>
+                </div>
+                <div class="form-group" id="reminderUserGroup" style="display: none;">
+                    <label class="form-label">User</label>
+                    <select id="reminderUserId" class="form-select">
+                        <option value="">Select user</option>
+                    </select>
+                </div>
+                <div class="form-group" id="reminderRoleGroup" style="display: none;">
+                    <label class="form-label">Role</label>
+                    <select id="reminderTargetRole" class="form-select">
+                        <option value="">Select role</option>
+                        <option value="staff">Staff</option>
+                        <option value="office">Office</option>
+                        <option value="admin">Admin</option>
+                        <option value="manager">Manager</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>
                         <input type="checkbox" id="reminderActive" checked> Active
                     </label>
@@ -76,6 +101,8 @@
         let currentUser = null;
         let stockItems = [];
         
+        let allUsers = [];
+        
         async function init() {
             // Redirect staff users
             if (await restrictStaffAccess()) return;
@@ -84,7 +111,63 @@
             if (!currentUser) return;
             initNavbar();
             await loadStockItems();
+            await loadUsers();
             loadReminders();
+            updateAssignmentOptions();
+        }
+        
+        async function loadUsers() {
+            try {
+                const data = await apiCall('/users');
+                allUsers = data.users || [];
+                
+                // Populate user dropdown
+                const userSelect = document.getElementById('reminderUserId');
+                userSelect.innerHTML = '<option value="">Select user</option>';
+                allUsers.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.username;
+                    userSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+        
+        function updateAssignmentOptions() {
+            if (!currentUser) return;
+            
+            const assignToSelect = document.getElementById('reminderAssignTo');
+            const assignToUserOption = document.getElementById('assignToUserOption');
+            const assignToRoleOption = document.getElementById('assignToRoleOption');
+            const assignToAllOption = document.getElementById('assignToAllOption');
+            
+            if (currentUser.role === 'admin') {
+                assignToUserOption.style.display = 'block';
+                assignToRoleOption.style.display = 'block';
+                assignToAllOption.style.display = 'block';
+            } else {
+                // Non-admins can only assign to themselves
+                assignToSelect.value = 'myself';
+                assignToSelect.disabled = true;
+            }
+        }
+        
+        function updateAssignmentFields() {
+            const assignTo = document.getElementById('reminderAssignTo').value;
+            const userGroup = document.getElementById('reminderUserGroup');
+            const roleGroup = document.getElementById('reminderRoleGroup');
+            
+            userGroup.style.display = assignTo === 'user' ? 'block' : 'none';
+            roleGroup.style.display = assignTo === 'role' ? 'block' : 'none';
+            
+            if (assignTo !== 'user') {
+                document.getElementById('reminderUserId').value = '';
+            }
+            if (assignTo !== 'role') {
+                document.getElementById('reminderTargetRole').value = '';
+            }
         }
         
         async function loadStockItems() {
@@ -129,9 +212,27 @@
                             ${data.reminders.map(reminder => {
                                 const isOverdue = reminder.next_check_date && reminder.next_check_date < today;
                                 const isActive = reminder.is_active === true || reminder.is_active === 1;
+                                
+                                // Determine assignment display
+                                let assignmentText = '';
+                                if (reminder.assigned_user_name) {
+                                    assignmentText = `User: ${reminder.assigned_user_name}`;
+                                } else if (reminder.target_role) {
+                                    assignmentText = `Role: ${reminder.target_role}`;
+                                } else if (!reminder.user_id && !reminder.target_role) {
+                                    assignmentText = 'All Users';
+                                } else {
+                                    assignmentText = 'Myself';
+                                }
+                                
+                                const canEdit = currentUser.role === 'admin' || reminder.created_by_user_id === currentUser.id;
+                                
                                 return `
                                     <tr>
-                                        <td><strong>${reminder.stock_item_name}</strong></td>
+                                        <td>
+                                            <strong>${reminder.stock_item_name}</strong><br>
+                                            <small style="color: #666;">${assignmentText}</small>
+                                        </td>
                                         <td>Every ${reminder.check_frequency_days} days</td>
                                         <td>${formatDate(reminder.last_checked_date)}</td>
                                         <td>${formatDate(reminder.next_check_date)}</td>
@@ -141,7 +242,7 @@
                                         </td>
                                         <td>
                                             <button onclick="markChecked(${reminder.id})" class="btn btn-success btn-sm">Mark Checked</button>
-                                            ${currentUser.role === 'admin' ? `
+                                            ${canEdit ? `
                                                 <button onclick="editReminder(${reminder.id})" class="btn btn-secondary btn-sm">Edit</button>
                                                 <button onclick="deleteReminder(${reminder.id})" class="btn btn-danger btn-sm">Delete</button>
                                             ` : ''}
@@ -162,6 +263,8 @@
             document.getElementById('reminderForm').reset();
             document.getElementById('reminderId').value = '';
             document.getElementById('reminderActive').checked = true;
+            document.getElementById('reminderAssignTo').value = currentUser.role === 'admin' ? 'myself' : 'myself';
+            updateAssignmentFields();
             showModal('reminderModal');
         }
         
@@ -178,6 +281,21 @@
                 document.getElementById('reminderLastChecked').value = reminder.last_checked_date || '';
                 document.getElementById('reminderNextCheck').value = reminder.next_check_date || '';
                 document.getElementById('reminderActive').checked = reminder.is_active === true || reminder.is_active === 1;
+                
+                // Set assignment fields
+                if (reminder.user_id) {
+                    document.getElementById('reminderAssignTo').value = 'user';
+                    document.getElementById('reminderUserId').value = reminder.user_id;
+                } else if (reminder.target_role) {
+                    document.getElementById('reminderAssignTo').value = 'role';
+                    document.getElementById('reminderTargetRole').value = reminder.target_role;
+                } else if (!reminder.user_id && !reminder.target_role) {
+                    document.getElementById('reminderAssignTo').value = 'all';
+                } else {
+                    document.getElementById('reminderAssignTo').value = 'myself';
+                }
+                updateAssignmentFields();
+                
                 showModal('reminderModal');
             } catch (error) {
                 showAlert('Error loading reminder', 'error');
@@ -223,12 +341,19 @@
                 nextCheck = nextDate.toISOString().split('T')[0];
             }
             
+            const assignTo = document.getElementById('reminderAssignTo').value;
+            const userId = document.getElementById('reminderUserId').value;
+            const targetRole = document.getElementById('reminderTargetRole').value;
+            
             const data = {
                 stock_item_id: document.getElementById('reminderStockItem').value,
                 check_frequency_days: frequency,
                 last_checked_date: lastChecked || null,
                 next_check_date: nextCheck,
-                is_active: document.getElementById('reminderActive').checked
+                is_active: document.getElementById('reminderActive').checked,
+                assign_to: assignTo,
+                user_id: assignTo === 'user' ? userId : null,
+                target_role: assignTo === 'role' ? targetRole : null
             };
             
             try {
