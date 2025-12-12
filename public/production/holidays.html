@@ -114,11 +114,20 @@
                         currentEntitlement = thisYear;
                         displayEntitlement(thisYear);
                     } else {
-                        document.getElementById('entitlementInfo').innerHTML = '<div class="info">No entitlement set for this year. Please contact admin.</div>';
+                        currentEntitlement = null;
+                        document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-warning">No entitlement set for this year. Please contact admin to set up your holiday entitlement.</div>';
+                        // Disable submit button if no entitlement
+                        document.getElementById('submitBtn').disabled = true;
                     }
+                } else {
+                    currentEntitlement = null;
+                    document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-warning">No entitlement set for this year. Please contact admin to set up your holiday entitlement.</div>';
+                    document.getElementById('submitBtn').disabled = true;
                 }
             } catch (error) {
-                document.getElementById('entitlementInfo').innerHTML = '<div class="error">Error loading entitlement</div>';
+                currentEntitlement = null;
+                document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-error">Error loading entitlement. Please contact admin.</div>';
+                document.getElementById('submitBtn').disabled = true;
             }
         }
         
@@ -203,8 +212,8 @@
                     document.getElementById('submitBtn').disabled = false;
                 }
             } else {
-                document.getElementById('entitlementCheck').innerHTML = '<span style="color: orange;">Unable to check entitlement. Please contact admin.</span>';
-                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('entitlementCheck').innerHTML = '<span style="color: red; font-weight: bold;">No holiday entitlement set for this year. Please contact admin to set up your entitlement before requesting holidays.</span>';
+                document.getElementById('submitBtn').disabled = true;
             }
         }
         
@@ -226,6 +235,12 @@
             const weekdays = calculateWorkingDays(startDate, endDate);
             if (weekdays === 0) {
                 alert('Please select a date range that includes at least one weekday');
+                return;
+            }
+            
+            // Check if entitlement exists before submitting
+            if (!currentEntitlement) {
+                alert('You do not have a holiday entitlement set for this year. Please contact your administrator to set up your holiday entitlement before requesting holidays.');
                 return;
             }
             
