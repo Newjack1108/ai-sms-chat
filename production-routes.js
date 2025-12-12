@@ -3008,6 +3008,13 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             is_company_shutdown: is_company_shutdown || false
         });
         
+        console.log('Created holiday request:', request);
+        console.log('Request status:', request?.status);
+        
+        if (request && request.status !== 'pending') {
+            console.warn('WARNING: Holiday request was created with status:', request.status, 'instead of pending');
+        }
+        
         res.json({ success: true, request });
     } catch (error) {
         console.error('Create holiday request error:', error);

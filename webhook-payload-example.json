@@ -1,0 +1,8 @@
+{
+  "name": "{{11.data.first_name}} {{11.data.last_name}}",
+  "email": "{{11.data.email}}",
+  "phone": "{{11.data.phone_number}}",
+  "source": "facebook_lead",
+  "initialMessage": "{{1.data.when_would_you_like_your_new_building?_}} {{1.data.please_give_details_of_the_type_and_size_of_building_you're_interested_in.}} {{11.data.post_code}}"
+}
+

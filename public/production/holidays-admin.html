@@ -206,7 +206,7 @@
                 byYear[e.year].push(e);
             });
             
-            let html = '<table class="data-table"><thead><tr><th>Year</th><th>User</th><th>Total Days</th><th>Days Used</th><th>Days Remaining</th><th>Actions</th></tr></thead><tbody>';
+            let html = '<div class="table-wrapper"><table class="data-table"><thead><tr><th style="width: 80px;">Year</th><th style="min-width: 150px;">User</th><th style="width: 100px;">Total Days</th><th style="width: 100px;">Days Used</th><th style="width: 120px;">Days Remaining</th><th style="width: 100px;">Actions</th></tr></thead><tbody>';
             
             Object.keys(byYear).sort((a, b) => b - a).forEach(year => {
                 byYear[year].forEach(ent => {
@@ -221,7 +221,7 @@
                 });
             });
             
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             container.innerHTML = html;
         }
         
@@ -325,7 +325,7 @@
                 </tr>`;
             });
             
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             container.innerHTML = html;
         }
         
@@ -415,7 +415,7 @@
                 return;
             }
             
-            let html = '<table class="data-table"><thead><tr><th>Year</th><th>Start Date</th><th>End Date</th><th>Weekdays</th><th>Description</th><th>Created By</th><th>Actions</th></tr></thead><tbody>';
+            let html = '<div class="table-wrapper"><table class="data-table"><thead><tr><th style="width: 80px;">Year</th><th style="width: 110px;">Start Date</th><th style="width: 110px;">End Date</th><th style="width: 100px;">Weekdays</th><th style="min-width: 200px;">Description</th><th style="min-width: 120px;">Created By</th><th style="min-width: 150px;">Actions</th></tr></thead><tbody>';
             
             periods.forEach(period => {
                 const startDate = new Date(period.start_date).toLocaleDateString();
@@ -435,7 +435,7 @@
                 </tr>`;
             });
             
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             container.innerHTML = html;
         }
         

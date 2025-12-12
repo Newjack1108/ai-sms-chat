@@ -7366,6 +7366,8 @@ class ProductionDatabase {
         const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown } = data;
         const weekdays = this.calculateWorkingDays(start_date, end_date);
         
+        console.log('Creating holiday request with status="pending":', { user_id, start_date, end_date, weekdays });
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO holiday_requests 
@@ -7374,6 +7376,8 @@ class ProductionDatabase {
                  RETURNING *`,
                 [user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown || false]
             );
+            console.log('Created holiday request (PostgreSQL):', result.rows[0]);
+            console.log('Request status:', result.rows[0]?.status);
             return result.rows[0];
         } else {
             const stmt = db.prepare(
@@ -7382,7 +7386,10 @@ class ProductionDatabase {
                  VALUES (?, ?, ?, ?, ?, ?, 'pending')`
             );
             const info = stmt.run(user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown ? 1 : 0);
-            return this.getHolidayRequestById(info.lastInsertRowid);
+            const created = await this.getHolidayRequestById(info.lastInsertRowid);
+            console.log('Created holiday request (SQLite):', created);
+            console.log('Request status:', created?.status);
+            return created;
         }
     }
     
@@ -7692,6 +7699,13 @@ class ProductionDatabase {
     
     // Timesheet Integration Methods
     static async populateHolidayTimesheetEntry(userId, date, holidayRequestId) {
+        // Verify the holiday request is approved before populating timesheet
+        const holidayRequest = await this.getHolidayRequestById(holidayRequestId);
+        if (!holidayRequest || holidayRequest.status !== 'approved') {
+            console.warn(`Cannot populate timesheet entry: holiday request ${holidayRequestId} is not approved (status: ${holidayRequest?.status || 'not found'})`);
+            return null;
+        }
+        
         // Check if date is a weekday (skip weekends)
         const dateObj = new Date(date);
         const dayOfWeek = dateObj.getDay();

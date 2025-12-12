@@ -67,7 +67,7 @@
     
     <!-- Components Modal -->
     <div id="componentsModal" class="modal">
-        <div class="modal-content modal-wide">
+        <div class="modal-content">
             <div class="modal-header">
                 <h3 id="componentsModalTitle">Product Components</h3>
                 <button class="modal-close" onclick="hideModal('componentsModal')">&times;</button>
@@ -150,7 +150,6 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
-                                <th>Description</th>
                                 <th>Type</th>
                                 <th>Status</th>
                                 <th>Cost (Auto)</th>
@@ -158,27 +157,18 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${productsWithCosts.map(product => {
-                                const truncatedDesc = product.description 
-                                    ? product.description.split(' ').slice(0, 10).join(' ') + (product.description.split(' ').length > 10 ? '...' : '')
-                                    : '-';
-                                return `
+                            ${productsWithCosts.map(product => `
                                 <tr>
                                     <td><strong>${product.name}</strong></td>
-                                    <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${product.description || ''}">${truncatedDesc}</td>
                                     <td>${product.product_type || '-'}</td>
                                     <td><span class="badge badge-info">${product.status}</span></td>
                                     <td>${formatCurrency(product.calculated_cost)}</td>
                                     <td>
                                         <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
-                                        ${currentUser.role === 'admin' ? `
-                                            <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                            <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm">Duplicate</button>
-                                        ` : ''}
+                                        ${currentUser.role === 'admin' ? `<button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
                                     </td>
                                 </tr>
-                            `;
-                            }).join('')}
+                            `).join('')}
                         </tbody>
                     </table>
                 `;
@@ -245,10 +235,7 @@
                                     <td>${comp.unit}</td>
                                     ${currentUser.role === 'admin' ? `
                                         <td>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button onclick="editComponent(${comp.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                                <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
-                                            </div>
+                                            <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
                                         </td>
                                     ` : ''}
                                 </tr>
@@ -262,33 +249,25 @@
             }
         }
         
-        let editingComponentId = null;
-        
-        function showAddComponent(componentId = null) {
-            editingComponentId = componentId;
+        function showAddComponent() {
             const componentsContent = document.getElementById('componentsContent');
-            const isEditing = componentId !== null;
-            
             componentsContent.innerHTML = `
-                <h4>${isEditing ? 'Edit Component' : 'Add Component'}</h4>
+                <h4>Add Component</h4>
                 <form id="componentForm">
-                    <input type="hidden" id="compEditId" value="${componentId || ''}">
                     <div class="form-group">
                         <label class="form-label">Component Type *</label>
-                        <select id="compType" class="form-select" required onchange="updateComponentOptions()" ${isEditing ? 'disabled' : ''}>
+                        <select id="compType" class="form-select" required onchange="updateComponentOptions()">
                             <option value="">Select type</option>
                             <option value="raw_material">Raw Material</option>
                             <option value="component">Component</option>
                             <option value="built_item">Built Item</option>
                         </select>
-                        ${isEditing ? '<small style="color: #6c757d;">Component type cannot be changed when editing</small>' : ''}
                     </div>
                     <div class="form-group">
                         <label class="form-label">Component *</label>
-                        <select id="compId" class="form-select" required ${isEditing ? 'disabled' : ''}>
+                        <select id="compId" class="form-select" required>
                             <option value="">Select component</option>
                         </select>
-                        ${isEditing ? '<small style="color: #6c757d;">Component cannot be changed when editing</small>' : ''}
                     </div>
                     <div class="form-group">
                         <label class="form-label">Quantity Required *</label>
@@ -300,93 +279,29 @@
                     </div>
                     <div class="text-right">
                         <button type="button" onclick="viewComponents(${currentProductId})" class="btn btn-secondary">Cancel</button>
-                        <button type="submit" class="btn btn-primary">${isEditing ? 'Update' : 'Add'}</button>
+                        <button type="submit" class="btn btn-primary">Add</button>
                     </div>
                 </form>
             `;
             
-            // If editing, load the component data
-            if (isEditing) {
-                loadComponentForEdit(componentId);
-            }
-            
             document.getElementById('componentForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 try {
-                    if (isEditing) {
-                        await apiCall(`/products/${currentProductId}/components/${componentId}`, {
-                            method: 'PUT',
-                            body: JSON.stringify({
-                                quantity_required: document.getElementById('compQty').value,
-                                unit: document.getElementById('compUnit').value
-                            })
-                        });
-                        showAlert('Component updated');
-                    } else {
-                        await apiCall(`/products/${currentProductId}/components`, {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                component_type: document.getElementById('compType').value,
-                                component_id: document.getElementById('compId').value,
-                                quantity_required: document.getElementById('compQty').value,
-                                unit: document.getElementById('compUnit').value
-                            })
-                        });
-                        showAlert('Component added');
-                    }
+                    await apiCall(`/products/${currentProductId}/components`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            component_type: document.getElementById('compType').value,
+                            component_id: document.getElementById('compId').value,
+                            quantity_required: document.getElementById('compQty').value,
+                            unit: document.getElementById('compUnit').value
+                        })
+                    });
+                    showAlert('Component added');
                     viewComponents(currentProductId);
-                    // Refresh products list to show updated cost
-                    loadProducts();
                 } catch (error) {
                     showAlert(error.message, 'error');
                 }
             });
-        }
-        
-        async function loadComponentForEdit(componentId) {
-            try {
-                const componentsData = await apiCall(`/products/${currentProductId}/components`);
-                const component = componentsData.components.find(c => c.id === componentId);
-                if (!component) {
-                    showAlert('Component not found', 'error');
-                    viewComponents(currentProductId);
-                    return;
-                }
-                
-                // Set the form values
-                const typeSelect = document.getElementById('compType');
-                const compSelect = document.getElementById('compId');
-                
-                typeSelect.value = component.component_type;
-                
-                // Populate component options based on type (even though disabled)
-                compSelect.innerHTML = '<option value="">Select component</option>';
-                if (component.component_type === 'raw_material') {
-                    stockItems.forEach(item => {
-                        compSelect.innerHTML += `<option value="${item.id}">${item.name} (${item.unit})</option>`;
-                    });
-                } else if (component.component_type === 'component') {
-                    components.forEach(comp => {
-                        compSelect.innerHTML += `<option value="${comp.id}">${comp.name}</option>`;
-                    });
-                } else if (component.component_type === 'built_item') {
-                    panels.forEach(panel => {
-                        compSelect.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
-                    });
-                }
-                
-                // Set the selected component and other values
-                compSelect.value = component.component_id;
-                document.getElementById('compQty').value = component.quantity_required;
-                document.getElementById('compUnit').value = component.unit;
-            } catch (error) {
-                showAlert('Error loading component', 'error');
-                viewComponents(currentProductId);
-            }
-        }
-        
-        async function editComponent(componentId) {
-            showAddComponent(componentId);
         }
         
         function updateComponentOptions() {
@@ -415,21 +330,6 @@
                 await apiCall(`/products/${currentProductId}/components/${compId}`, { method: 'DELETE' });
                 showAlert('Component deleted');
                 viewComponents(currentProductId);
-                // Refresh products list to show updated cost
-                loadProducts();
-            } catch (error) {
-                showAlert(error.message, 'error');
-            }
-        }
-        
-        async function duplicateProduct(productId) {
-            if (!confirm('Duplicate this product? This will create a copy with all components.')) return;
-            try {
-                const result = await apiCall(`/products/${productId}/duplicate`, {
-                    method: 'POST'
-                });
-                showAlert('Product duplicated successfully');
-                loadProducts();
             } catch (error) {
                 showAlert(error.message, 'error');
             }

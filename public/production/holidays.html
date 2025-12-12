@@ -238,15 +238,27 @@
                     })
                 });
                 
+                console.log('Holiday request response:', response);
+                
                 if (response.success) {
-                    alert('Holiday request submitted successfully');
+                    console.log('Request created:', response.request);
+                    console.log('Request status:', response.request?.status);
+                    
+                    if (response.request?.status !== 'pending') {
+                        console.warn('WARNING: Request was not created with status "pending"');
+                    }
+                    
+                    alert('Holiday request submitted successfully. Status: ' + (response.request?.status || 'unknown'));
                     document.getElementById('requestForm').reset();
                     document.getElementById('daysRequested').textContent = '0';
                     document.getElementById('entitlementCheck').textContent = '';
                     await loadMyRequests();
                     await loadMyEntitlement(); // Refresh entitlement in case it was updated
+                } else {
+                    alert('Error submitting request: ' + (response.error || 'Unknown error'));
                 }
             } catch (error) {
+                console.error('Error submitting holiday request:', error);
                 alert('Error submitting request: ' + (error.message || 'Unknown error'));
             }
         }
@@ -273,7 +285,7 @@
             // Sort by start date (most recent first)
             requests.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
             
-            let html = '<table class="data-table"><thead><tr><th>Start Date</th><th>End Date</th><th>Days</th><th>Status</th><th>Requested</th><th>Reviewed</th><th>Actions</th></tr></thead><tbody>';
+            let html = '<div class="table-wrapper"><table class="data-table"><thead><tr><th style="width: 110px;">Start Date</th><th style="width: 110px;">End Date</th><th style="width: 100px;">Days</th><th style="width: 100px;">Status</th><th style="width: 110px;">Requested</th><th style="width: 110px;">Reviewed</th><th style="min-width: 150px;">Actions</th></tr></thead><tbody>';
             
             requests.forEach(req => {
                 const startDate = new Date(req.start_date).toLocaleDateString();
@@ -300,7 +312,7 @@
                 </tr>`;
             });
             
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             container.innerHTML = html;
         }
         
