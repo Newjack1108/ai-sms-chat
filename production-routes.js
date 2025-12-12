@@ -2107,6 +2107,22 @@ router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, re
         const userId = parseInt(req.params.userId);
         const adminId = req.session.production_user.id;
         
+        // Check if week is complete (only allow approval of completed weeks)
+        const today = new Date();
+        const dayOfWeek = today.getDay();
+        const currentWeekMonday = new Date(today);
+        currentWeekMonday.setDate(currentWeekMonday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+        currentWeekMonday.setHours(0, 0, 0, 0);
+        const currentWeekStartStr = currentWeekMonday.toISOString().split('T')[0];
+        
+        // Week is complete if its start date is before current week's start
+        if (weekStartDate >= currentWeekStartStr) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Cannot approve timesheet for week in progress. Week must be complete before approval.' 
+            });
+        }
+        
         // Get or create weekly timesheet
         const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
         

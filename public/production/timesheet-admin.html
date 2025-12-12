@@ -1223,6 +1223,12 @@
             return monday.toISOString().split('T')[0];
         }
         
+        function isWeekComplete(weekStartDate) {
+            // A week is complete if its start date is before the current week's start date
+            const currentWeekStart = getCurrentWeekStart();
+            return weekStartDate < currentWeekStart;
+        }
+        
         // Round hours down to 15-minute intervals (0.25 hour increments)
         function roundToQuarterHour(hours) {
             if (!hours || isNaN(hours)) return 0;
@@ -1331,6 +1337,8 @@
                                 const approvedBy = row.approved_by_username || '';
                                 const approvedAt = row.approved_at ? new Date(row.approved_at).toLocaleDateString('en-GB') : '';
                                 const rowStyle = isApproved ? 'background-color: #e8f5e9;' : '';
+                                const weekComplete = isWeekComplete(weekStart);
+                                const canApprove = weekComplete;
                                 return `
                                 <tr class="payroll-row" data-user-id="${row.user_id}" style="cursor: pointer; ${rowStyle}" onclick="toggleDailyBreakdown(${row.user_id}, '${weekStart}')">
                                     <td style="text-align: center;" onclick="event.stopPropagation();">
@@ -1344,6 +1352,7 @@
                                     <td><strong>${formatHours(total)}</strong></td>
                                     <td>${row.days_worked || 0}</td>
                                     <td style="text-align: center;" onclick="event.stopPropagation();">
+                                        ${canApprove ? `
                                         <label style="cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;">
                                             <input type="checkbox" 
                                                    ${isApproved ? 'checked' : ''} 
@@ -1352,6 +1361,11 @@
                                             ${isApproved ? '<span style="color: #28a745; font-weight: bold;">✓</span>' : ''}
                                         </label>
                                         ${isApproved && approvedBy ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">${escapeHtml(approvedBy)}<br>${approvedAt}</div>` : ''}
+                                        ` : `
+                                        <div style="color: #999; font-size: 11px; padding: 5px;" title="Week in progress - approval available after week ends">
+                                            <span style="opacity: 0.6;">Week in progress</span>
+                                        </div>
+                                        `}
                                     </td>
                                 </tr>
                                 <tr id="daily-${row.user_id}" style="display: none;">

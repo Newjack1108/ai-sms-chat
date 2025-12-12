@@ -6694,42 +6694,31 @@ class ProductionDatabase {
     
     // Get unapproved timesheet weeks (for reminders)
     // Returns weeks that have ended and still have unapproved timesheets
+    // Only returns complete weeks (weeks that have finished)
     static async getUnapprovedTimesheetWeeks() {
         const today = new Date();
         const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
         
-        // Calculate last Monday (previous week that has ended)
-        const lastMonday = new Date(today);
-        if (dayOfWeek === 0) {
-            // If Sunday, go back 6 days to get last Monday
-            lastMonday.setDate(lastMonday.getDate() - 6);
-        } else if (dayOfWeek === 6) {
-            // If Saturday, go back 5 days to get last Monday
-            lastMonday.setDate(lastMonday.getDate() - 5);
-        } else {
-            // For other days (Mon-Fri), go back (dayOfWeek + 6) days to get last Monday
-            lastMonday.setDate(lastMonday.getDate() - (dayOfWeek + 6));
-        }
-        lastMonday.setHours(0, 0, 0, 0);
-        const weekStartStr = lastMonday.toISOString().split('T')[0];
+        // Calculate current week's Monday
+        const currentWeekMonday = new Date(today);
+        currentWeekMonday.setDate(currentWeekMonday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+        currentWeekMonday.setHours(0, 0, 0, 0);
+        const currentWeekStartStr = currentWeekMonday.toISOString().split('T')[0];
         
-        // Also check the week before that (in case we're checking on Monday/Tuesday)
-        const weekBefore = new Date(lastMonday);
-        weekBefore.setDate(weekBefore.getDate() - 7);
-        const weekBeforeStr = weekBefore.toISOString().split('T')[0];
-        
+        // Only get weeks that are complete (week_start_date < current week start)
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT wt.week_start_date, COUNT(*) as unapproved_count
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
-                 WHERE wt.week_start_date IN ($1, $2)
+                 WHERE wt.week_start_date < $1
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = FALSE)
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                  GROUP BY wt.week_start_date
                  HAVING COUNT(*) > 0
-                 ORDER BY wt.week_start_date DESC`,
-                [weekStartStr, weekBeforeStr]
+                 ORDER BY wt.week_start_date DESC
+                 LIMIT 2`,
+                [currentWeekStartStr]
             );
             return result.rows;
         } else {
@@ -6737,13 +6726,14 @@ class ProductionDatabase {
                 `SELECT wt.week_start_date, COUNT(*) as unapproved_count
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
-                 WHERE wt.week_start_date IN (?, ?)
+                 WHERE wt.week_start_date < ?
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = 0)
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
                  GROUP BY wt.week_start_date
                  HAVING COUNT(*) > 0
-                 ORDER BY wt.week_start_date DESC`
-            ).all(weekStartStr, weekBeforeStr);
+                 ORDER BY wt.week_start_date DESC
+                 LIMIT 2`
+            ).all(currentWeekStartStr);
         }
     }
     
