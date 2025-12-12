@@ -1480,10 +1480,14 @@ router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
         if (!weeklyTimesheet) {
             // Create if doesn't exist
             const created = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            // Check and populate approved holidays for this week
+            await ProductionDatabase.checkAndPopulateApprovedHolidays(userId, weekStartDate);
             const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(created.id);
             return res.json({ success: true, weeklyTimesheet: created, dailyEntries });
         }
         
+        // Check and populate approved holidays for this week
+        await ProductionDatabase.checkAndPopulateApprovedHolidays(userId, weekStartDate);
         const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
         res.json({ success: true, weeklyTimesheet, dailyEntries });
     } catch (error) {
@@ -1511,6 +1515,8 @@ router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) =
         const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
         if (!weeklyTimesheet) {
             const created = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            // Check and populate approved holidays for this week
+            await ProductionDatabase.checkAndPopulateApprovedHolidays(userId, weekStartDate);
             const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(created.id);
             
             // Also get all timesheet entries for this week
@@ -1519,6 +1525,8 @@ router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) =
             return res.json({ success: true, weeklyTimesheet: created, dailyEntries, timesheetEntries });
         }
         
+        // Check and populate approved holidays for this week
+        await ProductionDatabase.checkAndPopulateApprovedHolidays(userId, weekStartDate);
         const dailyEntries = await ProductionDatabase.getDailyEntriesForWeek(weeklyTimesheet.id);
         
         // Also get all timesheet entries for this week
@@ -2836,6 +2844,388 @@ router.post('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Add task comment error:', error);
         res.status(500).json({ success: false, error: 'Failed to add task comment' });
+    }
+});
+
+// ============ HOLIDAY ROUTES ============
+
+// Holiday Entitlement Routes
+router.get('/holidays/entitlements', requireProductionAuth, async (req, res) => {
+    try {
+        const user = req.session.production_user;
+        if (user.role === 'admin' || user.role === 'office') {
+            const entitlements = await ProductionDatabase.getAllHolidayEntitlements();
+            res.json({ success: true, entitlements });
+        } else {
+            const entitlements = await ProductionDatabase.getUserHolidayEntitlements(user.id);
+            res.json({ success: true, entitlements });
+        }
+    } catch (error) {
+        console.error('Get holiday entitlements error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get holiday entitlements' });
+    }
+});
+
+router.get('/holidays/entitlements/:userId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const entitlements = await ProductionDatabase.getUserHolidayEntitlements(userId);
+        res.json({ success: true, entitlements });
+    } catch (error) {
+        console.error('Get user holiday entitlements error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get user holiday entitlements' });
+    }
+});
+
+router.get('/holidays/entitlements/:userId/:year', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const year = parseInt(req.params.year);
+        const user = req.session.production_user;
+        
+        // Users can only see their own entitlements unless they're admin/office
+        if (user.role !== 'admin' && user.role !== 'office' && user.id !== userId) {
+            return res.status(403).json({ success: false, error: 'Access denied' });
+        }
+        
+        const entitlement = await ProductionDatabase.getHolidayEntitlement(userId, year);
+        res.json({ success: true, entitlement });
+    } catch (error) {
+        console.error('Get holiday entitlement error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get holiday entitlement' });
+    }
+});
+
+router.post('/holidays/entitlements', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { user_id, year, total_days } = req.body;
+        if (!user_id || !year || total_days === undefined) {
+            return res.status(400).json({ success: false, error: 'User ID, year, and total days are required' });
+        }
+        
+        const entitlement = await ProductionDatabase.createHolidayEntitlement(parseInt(user_id), parseInt(year), parseInt(total_days));
+        res.json({ success: true, entitlement });
+    } catch (error) {
+        console.error('Create holiday entitlement error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create holiday entitlement' });
+    }
+});
+
+router.put('/holidays/entitlements/:userId/:year', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.userId);
+        const year = parseInt(req.params.year);
+        const { total_days } = req.body;
+        
+        if (total_days === undefined) {
+            return res.status(400).json({ success: false, error: 'Total days is required' });
+        }
+        
+        const entitlement = await ProductionDatabase.createHolidayEntitlement(userId, year, parseInt(total_days));
+        res.json({ success: true, entitlement });
+    } catch (error) {
+        console.error('Update holiday entitlement error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update holiday entitlement' });
+    }
+});
+
+// Holiday Request Routes
+router.get('/holidays/requests', requireProductionAuth, async (req, res) => {
+    try {
+        const user = req.session.production_user;
+        const year = req.query.year ? parseInt(req.query.year) : null;
+        
+        if (user.role === 'admin' || user.role === 'office') {
+            const requests = await ProductionDatabase.getAllHolidayRequests(year);
+            res.json({ success: true, requests });
+        } else {
+            const requests = await ProductionDatabase.getHolidayRequestsByUser(user.id, year);
+            res.json({ success: true, requests });
+        }
+    } catch (error) {
+        console.error('Get holiday requests error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get holiday requests' });
+    }
+});
+
+router.get('/holidays/requests/pending', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const requests = await ProductionDatabase.getPendingHolidayRequests();
+        res.json({ success: true, requests });
+    } catch (error) {
+        console.error('Get pending holiday requests error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get pending holiday requests' });
+    }
+});
+
+router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, is_company_shutdown } = req.body;
+        const user = req.session.production_user;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ success: false, error: 'Start date and end date are required' });
+        }
+        
+        // Calculate weekdays
+        const weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        if (weekdays <= 0) {
+            return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
+        }
+        
+        // Check entitlement
+        const currentYear = new Date(start_date).getFullYear();
+        const entitlement = await ProductionDatabase.getHolidayEntitlement(user.id, currentYear);
+        
+        if (!entitlement) {
+            return res.status(400).json({ success: false, error: `No holiday entitlement found for year ${currentYear}` });
+        }
+        
+        const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
+        if (daysRemaining < weekdays) {
+            return res.status(400).json({ 
+                success: false, 
+                error: `Insufficient holiday entitlement. Requested: ${weekdays} days, Available: ${daysRemaining.toFixed(1)} days` 
+            });
+        }
+        
+        const request = await ProductionDatabase.createHolidayRequest({
+            user_id: user.id,
+            start_date,
+            end_date,
+            requested_by_user_id: user.id,
+            is_company_shutdown: is_company_shutdown || false
+        });
+        
+        res.json({ success: true, request });
+    } catch (error) {
+        console.error('Create holiday request error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create holiday request' });
+    }
+});
+
+router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const requestId = parseInt(req.params.id);
+        const { action, review_notes } = req.body;
+        const user = req.session.production_user;
+        
+        const request = await ProductionDatabase.getHolidayRequestById(requestId);
+        if (!request) {
+            return res.status(404).json({ success: false, error: 'Holiday request not found' });
+        }
+        
+        // Users can cancel their own pending requests
+        if (action === 'cancel' && request.status === 'pending') {
+            if (user.role !== 'admin' && user.role !== 'office' && request.user_id !== user.id) {
+                return res.status(403).json({ success: false, error: 'You can only cancel your own requests' });
+            }
+            
+            const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'cancelled', user.id, review_notes);
+            res.json({ success: true, request: updated });
+        } else if (action === 'approve' || action === 'reject') {
+            // Only admins/office can approve/reject
+            if (user.role !== 'admin' && user.role !== 'office') {
+                return res.status(403).json({ success: false, error: 'Only admins can approve/reject requests' });
+            }
+            
+            if (action === 'approve') {
+                // Check entitlement again before approving
+                const currentYear = new Date(request.start_date).getFullYear();
+                const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
+                const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
+                
+                if (daysRemaining < parseFloat(request.days_requested)) {
+                    return res.status(400).json({ 
+                        success: false, 
+                        error: `Insufficient holiday entitlement. Available: ${daysRemaining.toFixed(1)} days` 
+                    });
+                }
+                
+                // Deduct days from entitlement
+                await ProductionDatabase.deductHolidayDays(request.user_id, currentYear, parseFloat(request.days_requested));
+                
+                // Populate timesheet entries for approved holidays
+                const start = new Date(request.start_date);
+                const end = new Date(request.end_date);
+                const current = new Date(start);
+                
+                while (current <= end) {
+                    const dateStr = current.toISOString().split('T')[0];
+                    await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, dateStr, requestId);
+                    current.setDate(current.getDate() + 1);
+                }
+            }
+            
+            const status = action === 'approve' ? 'approved' : 'rejected';
+            const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, status, user.id, review_notes);
+            res.json({ success: true, request: updated });
+        } else {
+            return res.status(400).json({ success: false, error: 'Invalid action. Must be "cancel", "approve", or "reject"' });
+        }
+    } catch (error) {
+        console.error('Update holiday request error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update holiday request' });
+    }
+});
+
+router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const requestId = parseInt(req.params.id);
+        const { review_notes } = req.body;
+        const user = req.session.production_user;
+        
+        const request = await ProductionDatabase.getHolidayRequestById(requestId);
+        if (!request) {
+            return res.status(404).json({ success: false, error: 'Holiday request not found' });
+        }
+        
+        if (request.status !== 'pending') {
+            return res.status(400).json({ success: false, error: 'Request is not pending' });
+        }
+        
+        // Check entitlement
+        const currentYear = new Date(request.start_date).getFullYear();
+        const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
+        const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
+        
+        if (daysRemaining < parseFloat(request.days_requested)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: `Insufficient holiday entitlement. Available: ${daysRemaining.toFixed(1)} days` 
+            });
+        }
+        
+        // Deduct days from entitlement
+        await ProductionDatabase.deductHolidayDays(request.user_id, currentYear, parseFloat(request.days_requested));
+        
+        // Populate timesheet entries for approved holidays
+        const start = new Date(request.start_date);
+        const end = new Date(request.end_date);
+        const current = new Date(start);
+        
+        while (current <= end) {
+            const dateStr = current.toISOString().split('T')[0];
+            await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, dateStr, requestId);
+            current.setDate(current.getDate() + 1);
+        }
+        
+        const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'approved', user.id, review_notes);
+        res.json({ success: true, request: updated });
+    } catch (error) {
+        console.error('Approve holiday request error:', error);
+        res.status(500).json({ success: false, error: 'Failed to approve holiday request' });
+    }
+});
+
+router.put('/holidays/requests/:id/reject', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const requestId = parseInt(req.params.id);
+        const { review_notes } = req.body;
+        const user = req.session.production_user;
+        
+        const request = await ProductionDatabase.getHolidayRequestById(requestId);
+        if (!request) {
+            return res.status(404).json({ success: false, error: 'Holiday request not found' });
+        }
+        
+        const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'rejected', user.id, review_notes);
+        res.json({ success: true, request: updated });
+    } catch (error) {
+        console.error('Reject holiday request error:', error);
+        res.status(500).json({ success: false, error: 'Failed to reject holiday request' });
+    }
+});
+
+// Company Shutdown Routes
+router.get('/holidays/shutdown-periods', requireProductionAuth, async (req, res) => {
+    try {
+        const year = req.query.year ? parseInt(req.query.year) : null;
+        
+        if (year) {
+            const periods = await ProductionDatabase.getShutdownPeriodsByYear(year);
+            res.json({ success: true, periods });
+        } else {
+            const periods = await ProductionDatabase.getActiveShutdownPeriods();
+            res.json({ success: true, periods });
+        }
+    } catch (error) {
+        console.error('Get shutdown periods error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get shutdown periods' });
+    }
+});
+
+router.post('/holidays/shutdown-periods', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { year, start_date, end_date, description } = req.body;
+        
+        if (!year || !start_date || !end_date) {
+            return res.status(400).json({ success: false, error: 'Year, start date, and end date are required' });
+        }
+        
+        const period = await ProductionDatabase.createCompanyShutdownPeriod({
+            year: parseInt(year),
+            start_date,
+            end_date,
+            description: description || null,
+            created_by_user_id: req.session.production_user.id
+        });
+        
+        res.json({ success: true, period });
+    } catch (error) {
+        console.error('Create shutdown period error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create shutdown period' });
+    }
+});
+
+router.put('/holidays/shutdown-periods/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const periodId = parseInt(req.params.id);
+        const { year, start_date, end_date, description, is_active } = req.body;
+        
+        // This would require an update method in the database class
+        // For now, we'll just return an error
+        res.status(501).json({ success: false, error: 'Update shutdown period not yet implemented' });
+    } catch (error) {
+        console.error('Update shutdown period error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update shutdown period' });
+    }
+});
+
+router.delete('/holidays/shutdown-periods/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        // This would require a delete method in the database class
+        // For now, we'll just return an error
+        res.status(501).json({ success: false, error: 'Delete shutdown period not yet implemented' });
+    } catch (error) {
+        console.error('Delete shutdown period error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete shutdown period' });
+    }
+});
+
+router.post('/holidays/shutdown-periods/:id/apply', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const periodId = parseInt(req.params.id);
+        const period = await ProductionDatabase.getCompanyShutdownPeriodById(periodId);
+        
+        if (!period) {
+            return res.status(404).json({ success: false, error: 'Shutdown period not found' });
+        }
+        
+        // Apply shutdown to all user entitlements
+        const weekdaysDeducted = await ProductionDatabase.applyShutdownToEntitlements(
+            period.year,
+            period.start_date,
+            period.end_date
+        );
+        
+        res.json({ 
+            success: true, 
+            message: `Shutdown applied. ${weekdaysDeducted} weekdays deducted from all user entitlements.` 
+        });
+    } catch (error) {
+        console.error('Apply shutdown period error:', error);
+        res.status(500).json({ success: false, error: 'Failed to apply shutdown period' });
     }
 });
 

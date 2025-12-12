@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Holiday Requests - Production System</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'">
+            <h1>Holiday Requests</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <!-- My Entitlement -->
+        <div class="card">
+            <div class="card-header">
+                <h2>My Holiday Entitlement</h2>
+            </div>
+            <div id="entitlementInfo">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- Request Holiday -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Request Holiday</h2>
+            </div>
+            <form id="requestForm" onsubmit="submitRequest(event)">
+                <div class="form-group">
+                    <label>Start Date:</label>
+                    <input type="date" id="requestStartDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label>End Date:</label>
+                    <input type="date" id="requestEndDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <div id="requestSummary" style="padding: 10px; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px;">
+                        <p><strong>Days requested:</strong> <span id="daysRequested">0</span> weekdays</p>
+                        <p id="entitlementCheck" style="margin: 5px 0;"></p>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Submit Request</button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- My Requests -->
+        <div class="card">
+            <div class="card-header">
+                <h2>My Holiday Requests</h2>
+                <button onclick="loadMyRequests()" class="btn btn-secondary btn-sm">Refresh</button>
+            </div>
+            <div id="myRequestsList">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentEntitlement = null;
+        const currentYear = new Date().getFullYear();
+        
+        async function init() {
+            await checkAuth();
+            await loadMyEntitlement();
+            await loadMyRequests();
+            
+            // Add date change listeners
+            document.getElementById('requestStartDate').addEventListener('change', updateRequestSummary);
+            document.getElementById('requestEndDate').addEventListener('change', updateRequestSummary);
+            
+            // Set minimum date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('requestStartDate').min = today;
+            document.getElementById('requestEndDate').min = today;
+        }
+        
+        async function loadMyEntitlement() {
+            try {
+                // First try to get current user info
+                const meResponse = await apiCall('/production/api/me');
+                if (meResponse && meResponse.success && meResponse.user) {
+                    const userId = meResponse.user.id;
+                    const response = await apiCall(`/production/api/holidays/entitlements/${userId}/${currentYear}`);
+                    if (response.success && response.entitlement) {
+                        currentEntitlement = response.entitlement;
+                        displayEntitlement(response.entitlement);
+                        return;
+                    }
+                }
+            } catch (e) {
+                // Fall through to alternative method
+            }
+            
+            // Alternative: get all entitlements and filter
+            try {
+                const response = await apiCall('/production/api/holidays/entitlements');
+                if (response.success && response.entitlements && response.entitlements.length > 0) {
+                    const thisYear = response.entitlements.find(e => e.year === currentYear);
+                    if (thisYear) {
+                        currentEntitlement = thisYear;
+                        displayEntitlement(thisYear);
+                    } else {
+                        document.getElementById('entitlementInfo').innerHTML = '<div class="info">No entitlement set for this year. Please contact admin.</div>';
+                    }
+                }
+            } catch (error) {
+                document.getElementById('entitlementInfo').innerHTML = '<div class="error">Error loading entitlement</div>';
+            }
+        }
+        
+        function displayEntitlement(entitlement) {
+            if (!entitlement) {
+                document.getElementById('entitlementInfo').innerHTML = '<div class="info">No entitlement set for this year</div>';
+                return;
+            }
+            
+            const daysUsed = parseFloat(entitlement.days_used || 0);
+            const totalDays = parseFloat(entitlement.total_days || 0);
+            const daysRemaining = entitlement.days_remaining !== undefined 
+                ? parseFloat(entitlement.days_remaining) 
+                : (totalDays - daysUsed);
+            
+            document.getElementById('entitlementInfo').innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px;">
+                    <div>
+                        <strong>Total Entitlement:</strong><br>
+                        <span style="font-size: 24px; color: #007bff;">${totalDays} days</span>
+                    </div>
+                    <div>
+                        <strong>Days Used:</strong><br>
+                        <span style="font-size: 24px; color: #ff9800;">${daysUsed.toFixed(1)} days</span>
+                    </div>
+                    <div>
+                        <strong>Days Remaining:</strong><br>
+                        <span style="font-size: 24px; color: ${daysRemaining > 0 ? '#28a745' : '#dc3545'};">${daysRemaining.toFixed(1)} days</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function calculateWorkingDays(startDate, endDate) {
+            if (!startDate || !endDate) return 0;
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            let count = 0;
+            const current = new Date(start);
+            while (current <= end) {
+                const dayOfWeek = current.getDay();
+                if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                    count++;
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return count;
+        }
+        
+        function updateRequestSummary() {
+            const startDate = document.getElementById('requestStartDate').value;
+            const endDate = document.getElementById('requestEndDate').value;
+            
+            if (!startDate || !endDate) {
+                document.getElementById('daysRequested').textContent = '0';
+                document.getElementById('entitlementCheck').textContent = '';
+                return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+                document.getElementById('daysRequested').textContent = '0';
+                document.getElementById('entitlementCheck').innerHTML = '<span style="color: red;">End date must be after start date</span>';
+                document.getElementById('submitBtn').disabled = true;
+                return;
+            }
+            
+            const weekdays = calculateWorkingDays(startDate, endDate);
+            document.getElementById('daysRequested').textContent = weekdays;
+            
+            if (currentEntitlement) {
+                const daysRemaining = currentEntitlement.days_remaining !== undefined 
+                    ? parseFloat(currentEntitlement.days_remaining) 
+                    : (parseFloat(currentEntitlement.total_days || 0) - parseFloat(currentEntitlement.days_used || 0));
+                
+                if (weekdays > daysRemaining) {
+                    document.getElementById('entitlementCheck').innerHTML = 
+                        `<span style="color: red;">Insufficient entitlement. You have ${daysRemaining.toFixed(1)} days remaining.</span>`;
+                    document.getElementById('submitBtn').disabled = true;
+                } else {
+                    document.getElementById('entitlementCheck').innerHTML = 
+                        `<span style="color: green;">After this request, you will have ${(daysRemaining - weekdays).toFixed(1)} days remaining.</span>`;
+                    document.getElementById('submitBtn').disabled = false;
+                }
+            } else {
+                document.getElementById('entitlementCheck').innerHTML = '<span style="color: orange;">Unable to check entitlement. Please contact admin.</span>';
+                document.getElementById('submitBtn').disabled = false;
+            }
+        }
+        
+        async function submitRequest(event) {
+            event.preventDefault();
+            const startDate = document.getElementById('requestStartDate').value;
+            const endDate = document.getElementById('requestEndDate').value;
+            
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates');
+                return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('End date must be after start date');
+                return;
+            }
+            
+            const weekdays = calculateWorkingDays(startDate, endDate);
+            if (weekdays === 0) {
+                alert('Please select a date range that includes at least one weekday');
+                return;
+            }
+            
+            try {
+                const response = await apiCall('/production/api/holidays/requests', 'POST', {
+                    start_date: startDate,
+                    end_date: endDate
+                });
+                
+                if (response.success) {
+                    alert('Holiday request submitted successfully');
+                    document.getElementById('requestForm').reset();
+                    document.getElementById('daysRequested').textContent = '0';
+                    document.getElementById('entitlementCheck').textContent = '';
+                    await loadMyRequests();
+                    await loadMyEntitlement(); // Refresh entitlement in case it was updated
+                }
+            } catch (error) {
+                alert('Error submitting request: ' + (error.message || 'Unknown error'));
+            }
+        }
+        
+        async function loadMyRequests() {
+            try {
+                const response = await apiCall('/production/api/holidays/requests');
+                if (response.success) {
+                    displayMyRequests(response.requests);
+                }
+            } catch (error) {
+                document.getElementById('myRequestsList').innerHTML = '<div class="error">Error loading requests</div>';
+            }
+        }
+        
+        function displayMyRequests(requests) {
+            const container = document.getElementById('myRequestsList');
+            
+            if (requests.length === 0) {
+                container.innerHTML = '<div class="info">No holiday requests yet</div>';
+                return;
+            }
+            
+            // Sort by start date (most recent first)
+            requests.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+            
+            let html = '<table class="data-table"><thead><tr><th>Start Date</th><th>End Date</th><th>Days</th><th>Status</th><th>Requested</th><th>Reviewed</th><th>Actions</th></tr></thead><tbody>';
+            
+            requests.forEach(req => {
+                const startDate = new Date(req.start_date).toLocaleDateString();
+                const endDate = new Date(req.end_date).toLocaleDateString();
+                const requestedAt = req.requested_at ? new Date(req.requested_at).toLocaleDateString() : '-';
+                const reviewedAt = req.reviewed_at ? new Date(req.reviewed_at).toLocaleDateString() : '-';
+                
+                let statusClass = 'info';
+                if (req.status === 'approved') statusClass = 'success';
+                else if (req.status === 'rejected') statusClass = 'danger';
+                else if (req.status === 'pending') statusClass = 'warning';
+                
+                html += `<tr>
+                    <td>${startDate}</td>
+                    <td>${endDate}</td>
+                    <td><strong>${parseFloat(req.days_requested).toFixed(1)}</strong> weekdays</td>
+                    <td><span class="badge badge-${statusClass}">${req.status.toUpperCase()}</span></td>
+                    <td>${requestedAt}</td>
+                    <td>${reviewedAt}</td>
+                    <td>
+                        ${req.status === 'pending' ? `<button onclick="cancelRequest(${req.id})" class="btn btn-sm btn-danger">Cancel</button>` : ''}
+                        ${req.review_notes ? `<button onclick="viewNotes(${req.id}, '${req.review_notes.replace(/'/g, "\\'")}')" class="btn btn-sm btn-secondary">View Notes</button>` : ''}
+                    </td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+        
+        async function cancelRequest(requestId) {
+            if (!confirm('Cancel this holiday request?')) return;
+            
+            try {
+                const response = await apiCall(`/production/api/holidays/requests/${requestId}`, 'PUT', {
+                    action: 'cancel'
+                });
+                
+                if (response.success) {
+                    await loadMyRequests();
+                    await loadMyEntitlement();
+                    alert('Request cancelled');
+                }
+            } catch (error) {
+                alert('Error cancelling request: ' + (error.message || 'Unknown error'));
+            }
+        }
+        
+        function viewNotes(requestId, notes) {
+            alert(`Review Notes:\n\n${notes}`);
+        }
+        
+        init();
+    </script>
+</body>
+</html>

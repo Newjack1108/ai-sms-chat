@@ -657,6 +657,80 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status);
     `);
     
+    // Holiday entitlements table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS holiday_entitlements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            year INTEGER NOT NULL,
+            total_days INTEGER NOT NULL,
+            days_used DECIMAL(10,2) DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            UNIQUE(user_id, year)
+        )
+    `);
+    
+    // Holiday requests table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS holiday_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            days_requested DECIMAL(10,2) NOT NULL,
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'cancelled')),
+            requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            requested_by_user_id INTEGER NOT NULL,
+            reviewed_by_user_id INTEGER,
+            reviewed_at TEXT,
+            review_notes TEXT,
+            is_company_shutdown INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            FOREIGN KEY (requested_by_user_id) REFERENCES production_users(id),
+            FOREIGN KEY (reviewed_by_user_id) REFERENCES production_users(id)
+        )
+    `);
+    
+    // Company shutdown periods table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS company_shutdown_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            year INTEGER NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            description TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_by_user_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
+        )
+    `);
+    
+    // Migrate timesheet_daily_entries to add holiday_request_id column
+    try {
+        const dailyColumns = db.prepare("PRAGMA table_info(timesheet_daily_entries)").all();
+        const dailyColumnNames = dailyColumns.map(col => col.name);
+        
+        if (!dailyColumnNames.includes('holiday_request_id')) {
+            db.exec('ALTER TABLE timesheet_daily_entries ADD COLUMN holiday_request_id INTEGER REFERENCES holiday_requests(id)');
+            console.log('✅ Added holiday_request_id column to timesheet_daily_entries');
+        }
+    } catch (error) {
+        console.log('⚠️ Timesheet daily entries holiday_request_id migration check skipped:', error.message);
+    }
+    
+    // Create indexes for holiday tables
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_holiday_entitlements_user ON holiday_entitlements(user_id);
+        CREATE INDEX IF NOT EXISTS idx_holiday_entitlements_year ON holiday_entitlements(year);
+        CREATE INDEX IF NOT EXISTS idx_holiday_requests_user ON holiday_requests(user_id);
+        CREATE INDEX IF NOT EXISTS idx_holiday_requests_status ON holiday_requests(status);
+        CREATE INDEX IF NOT EXISTS idx_holiday_requests_dates ON holiday_requests(start_date, end_date);
+        CREATE INDEX IF NOT EXISTS idx_shutdown_periods_year ON company_shutdown_periods(year);
+    `);
+    
     console.log('✅ Production SQLite database initialized');
 }
 
@@ -1430,6 +1504,74 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_entry ON timesheet_amendments(timesheet_entry_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_user ON timesheet_amendments(user_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_amendments_status ON timesheet_amendments(status)`);
+        
+        // Holiday entitlements table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS holiday_entitlements (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                year INTEGER NOT NULL,
+                total_days INTEGER NOT NULL,
+                days_used DECIMAL(10,2) DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, year)
+            )
+        `);
+        
+        // Holiday requests table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS holiday_requests (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                days_requested DECIMAL(10,2) NOT NULL,
+                status VARCHAR(20) DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'cancelled')),
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                requested_by_user_id INTEGER NOT NULL REFERENCES production_users(id),
+                reviewed_by_user_id INTEGER REFERENCES production_users(id),
+                reviewed_at TIMESTAMP,
+                review_notes TEXT,
+                is_company_shutdown BOOLEAN DEFAULT FALSE
+            )
+        `);
+        
+        // Company shutdown periods table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS company_shutdown_periods (
+                id SERIAL PRIMARY KEY,
+                year INTEGER NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_by_user_id INTEGER NOT NULL REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Migrate timesheet_daily_entries to add holiday_request_id column
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='timesheet_daily_entries' AND column_name='holiday_request_id'
+                ) THEN
+                    ALTER TABLE timesheet_daily_entries ADD COLUMN holiday_request_id INTEGER REFERENCES holiday_requests(id);
+                END IF;
+            END $$;
+        `);
+        console.log('✅ Checked/added holiday_request_id column to timesheet_daily_entries');
+        
+        // Create indexes for holiday tables
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_entitlements_user ON holiday_entitlements(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_entitlements_year ON holiday_entitlements(year)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_requests_user ON holiday_requests(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_requests_status ON holiday_requests(status)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_requests_dates ON holiday_requests(start_date, end_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_shutdown_periods_year ON company_shutdown_periods(year)`);
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -7026,6 +7168,582 @@ class ProductionDatabase {
         } else {
             db.prepare(`DELETE FROM stock_check_reminders WHERE id = ?`).run(id);
         }
+    }
+    
+    // ============ HOLIDAY OPERATIONS ============
+    
+    // Helper function to calculate working days (weekdays only, excluding weekends)
+    static calculateWorkingDays(startDate, endDate) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        let count = 0;
+        
+        // Ensure start date is before or equal to end date
+        if (start > end) {
+            return 0;
+        }
+        
+        const currentDate = new Date(start);
+        while (currentDate <= end) {
+            const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 6 = Saturday
+            // Only count weekdays (Monday-Friday, i.e., 1-5)
+            if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+                count++;
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        return count;
+    }
+    
+    // Holiday Entitlement Methods
+    static async createHolidayEntitlement(userId, year, totalDays) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
+                 VALUES ($1, $2, $3, 0)
+                 ON CONFLICT (user_id, year) 
+                 DO UPDATE SET total_days = $3, updated_at = CURRENT_TIMESTAMP
+                 RETURNING *`,
+                [userId, year, totalDays]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
+                 VALUES (?, ?, ?, 0)
+                 ON CONFLICT(user_id, year) 
+                 DO UPDATE SET total_days = ?, updated_at = CURRENT_TIMESTAMP`
+            );
+            stmt.run(userId, year, totalDays, totalDays);
+            return this.getHolidayEntitlement(userId, year);
+        }
+    }
+    
+    static async getHolidayEntitlement(userId, year) {
+        let entitlement;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT *, (total_days - days_used) as days_remaining 
+                 FROM holiday_entitlements WHERE user_id = $1 AND year = $2`,
+                [userId, year]
+            );
+            entitlement = result.rows[0] || null;
+        } else {
+            const row = db.prepare(
+                `SELECT *, (total_days - days_used) as days_remaining 
+                 FROM holiday_entitlements WHERE user_id = ? AND year = ?`
+            ).get(userId, year);
+            entitlement = row || null;
+        }
+        if (entitlement && entitlement.days_remaining !== undefined) {
+            entitlement.days_remaining = parseFloat(entitlement.days_remaining);
+        }
+        return entitlement;
+    }
+    
+    static async getUserHolidayEntitlements(userId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT *, (total_days - days_used) as days_remaining 
+                 FROM holiday_entitlements WHERE user_id = $1 ORDER BY year DESC`,
+                [userId]
+            );
+            return result.rows.map(row => ({
+                ...row,
+                days_remaining: parseFloat(row.days_remaining || 0)
+            }));
+        } else {
+            const rows = db.prepare(
+                `SELECT *, (total_days - days_used) as days_remaining 
+                 FROM holiday_entitlements WHERE user_id = ? ORDER BY year DESC`
+            ).all(userId);
+            return rows.map(row => ({
+                ...row,
+                days_remaining: parseFloat(row.days_remaining || 0)
+            }));
+        }
+    }
+    
+    static async deductHolidayDays(userId, year, days) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE holiday_entitlements 
+                 SET days_used = days_used + $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = $2 AND year = $3
+                 RETURNING *`,
+                [days, userId, year]
+            );
+            return result.rows[0] || null;
+        } else {
+            db.prepare(
+                `UPDATE holiday_entitlements 
+                 SET days_used = days_used + ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = ? AND year = ?`
+            ).run(days, userId, year);
+            return this.getHolidayEntitlement(userId, year);
+        }
+    }
+    
+    static async addHolidayDays(userId, year, days) {
+        // Get current entitlement first
+        const entitlement = await this.getHolidayEntitlement(userId, year);
+        if (!entitlement) return null;
+        
+        const newDaysUsed = Math.max(0, parseFloat(entitlement.days_used || 0) - days);
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE holiday_entitlements 
+                 SET days_used = $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = $2 AND year = $3
+                 RETURNING *`,
+                [newDaysUsed, userId, year]
+            );
+            return result.rows[0] || null;
+        } else {
+            db.prepare(
+                `UPDATE holiday_entitlements 
+                 SET days_used = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = ? AND year = ?`
+            ).run(newDaysUsed, userId, year);
+            return this.getHolidayEntitlement(userId, year);
+        }
+    }
+    
+    static async getAllHolidayEntitlements() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT he.*, 
+                 (he.total_days - he.days_used) as days_remaining,
+                 u.username 
+                 FROM holiday_entitlements he
+                 JOIN production_users u ON he.user_id = u.id
+                 ORDER BY he.year DESC, u.username`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT he.*, 
+                 (he.total_days - he.days_used) as days_remaining,
+                 u.username 
+                 FROM holiday_entitlements he
+                 JOIN production_users u ON he.user_id = u.id
+                 ORDER BY he.year DESC, u.username`
+            ).all();
+        }
+    }
+    
+    static async getHolidayEntitlementWithRemaining(userId, year) {
+        const entitlement = await this.getHolidayEntitlement(userId, year);
+        if (!entitlement) return null;
+        
+        return {
+            ...entitlement,
+            days_remaining: parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0)
+        };
+    }
+    
+    // Holiday Request Methods
+    static async createHolidayRequest(data) {
+        const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown } = data;
+        const weekdays = this.calculateWorkingDays(start_date, end_date);
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO holiday_requests 
+                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+                 RETURNING *`,
+                [user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown || false]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO holiday_requests 
+                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status)
+                 VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+            );
+            const info = stmt.run(user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown ? 1 : 0);
+            return this.getHolidayRequestById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getHolidayRequestById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT hr.*, 
+                 u1.username as user_name,
+                 u2.username as requested_by_name,
+                 u3.username as reviewed_by_name
+                 FROM holiday_requests hr
+                 LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                 LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                 LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
+                 WHERE hr.id = $1`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT hr.*, 
+                 u1.username as user_name,
+                 u2.username as requested_by_name,
+                 u3.username as reviewed_by_name
+                 FROM holiday_requests hr
+                 LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                 LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                 LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
+                 WHERE hr.id = ?`
+            ).get(id) || null;
+        }
+    }
+    
+    static async getHolidayRequestsByUser(userId, year = null) {
+        if (isPostgreSQL) {
+            let query = `SELECT hr.*, 
+                u1.username as user_name,
+                u2.username as requested_by_name,
+                u3.username as reviewed_by_name
+                FROM holiday_requests hr
+                LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
+                WHERE hr.user_id = $1`;
+            const params = [userId];
+            
+            if (year) {
+                query += ` AND EXTRACT(YEAR FROM hr.start_date) = $2 ORDER BY hr.start_date DESC`;
+                params.push(year);
+            } else {
+                query += ` ORDER BY hr.start_date DESC`;
+            }
+            
+            const result = await pool.query(query, params);
+            return result.rows;
+        } else {
+            let query = `SELECT hr.*, 
+                u1.username as user_name,
+                u2.username as requested_by_name,
+                u3.username as reviewed_by_name
+                FROM holiday_requests hr
+                LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
+                WHERE hr.user_id = ?`;
+            
+            if (year) {
+                query += ` AND strftime('%Y', hr.start_date) = ? ORDER BY hr.start_date DESC`;
+                return db.prepare(query).all(userId, year.toString());
+            } else {
+                query += ` ORDER BY hr.start_date DESC`;
+                return db.prepare(query).all(userId);
+            }
+        }
+    }
+    
+    static async getAllHolidayRequests(year = null) {
+        if (isPostgreSQL) {
+            let query = `SELECT hr.*, 
+                u1.username as user_name,
+                u2.username as requested_by_name,
+                u3.username as reviewed_by_name
+                FROM holiday_requests hr
+                LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id`;
+            
+            const params = [];
+            if (year) {
+                query += ` WHERE EXTRACT(YEAR FROM hr.start_date) = $1 ORDER BY hr.start_date DESC`;
+                params.push(year);
+            } else {
+                query += ` ORDER BY hr.start_date DESC`;
+            }
+            
+            const result = await pool.query(query, params);
+            return result.rows;
+        } else {
+            let query = `SELECT hr.*, 
+                u1.username as user_name,
+                u2.username as requested_by_name,
+                u3.username as reviewed_by_name
+                FROM holiday_requests hr
+                LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id`;
+            
+            if (year) {
+                query += ` WHERE strftime('%Y', hr.start_date) = ? ORDER BY hr.start_date DESC`;
+                return db.prepare(query).all(year.toString());
+            } else {
+                query += ` ORDER BY hr.start_date DESC`;
+                return db.prepare(query).all();
+            }
+        }
+    }
+    
+    static async getPendingHolidayRequests() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT hr.*, 
+                 u1.username as user_name,
+                 u2.username as requested_by_name
+                 FROM holiday_requests hr
+                 LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                 LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                 WHERE hr.status = 'pending'
+                 ORDER BY hr.requested_at ASC`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT hr.*, 
+                 u1.username as user_name,
+                 u2.username as requested_by_name
+                 FROM holiday_requests hr
+                 LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                 LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                 WHERE hr.status = 'pending'
+                 ORDER BY hr.requested_at ASC`
+            ).all();
+        }
+    }
+    
+    static async updateHolidayRequestStatus(id, status, reviewedBy, reviewNotes = null) {
+        const now = new Date().toISOString();
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE holiday_requests 
+                 SET status = $1, reviewed_by_user_id = $2, reviewed_at = $3, review_notes = $4
+                 WHERE id = $5
+                 RETURNING *`,
+                [status, reviewedBy, now, reviewNotes, id]
+            );
+            return result.rows[0] || null;
+        } else {
+            db.prepare(
+                `UPDATE holiday_requests 
+                 SET status = ?, reviewed_by_user_id = ?, reviewed_at = ?, review_notes = ?
+                 WHERE id = ?`
+            ).run(status, reviewedBy, now, reviewNotes, id);
+            return this.getHolidayRequestById(id);
+        }
+    }
+    
+    static async getApprovedHolidaysInDateRange(startDate, endDate, userId = null) {
+        if (isPostgreSQL) {
+            let query = `SELECT * FROM holiday_requests 
+                WHERE status = 'approved'
+                AND start_date <= $2 
+                AND end_date >= $1`;
+            const params = [startDate, endDate];
+            
+            if (userId) {
+                query += ` AND user_id = $3`;
+                params.push(userId);
+            }
+            
+            query += ` ORDER BY start_date`;
+            const result = await pool.query(query, params);
+            return result.rows;
+        } else {
+            let query = `SELECT * FROM holiday_requests 
+                WHERE status = 'approved'
+                AND start_date <= ? 
+                AND end_date >= ?`;
+            
+            if (userId) {
+                query += ` AND user_id = ? ORDER BY start_date`;
+                return db.prepare(query).all(endDate, startDate, userId);
+            } else {
+                query += ` ORDER BY start_date`;
+                return db.prepare(query).all(endDate, startDate);
+            }
+        }
+    }
+    
+    // Company Shutdown Methods
+    static async createCompanyShutdownPeriod(data) {
+        const { year, start_date, end_date, description, created_by_user_id } = data;
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
+                 VALUES ($1, $2, $3, $4, $5, TRUE)
+                 RETURNING *`,
+                [year, start_date, end_date, description, created_by_user_id]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO company_shutdown_periods (year, start_date, end_date, description, created_by_user_id, is_active)
+                 VALUES (?, ?, ?, ?, ?, 1)`
+            );
+            const info = stmt.run(year, start_date, end_date, description, created_by_user_id);
+            return this.getCompanyShutdownPeriodById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getCompanyShutdownPeriodById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.id = $1`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.id = ?`
+            ).get(id) || null;
+        }
+    }
+    
+    static async getActiveShutdownPeriods() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.is_active = TRUE
+                 ORDER BY csp.year DESC, csp.start_date`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.is_active = 1
+                 ORDER BY csp.year DESC, csp.start_date`
+            ).all();
+        }
+    }
+    
+    static async getShutdownPeriodsByYear(year) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.year = $1
+                 ORDER BY csp.start_date`,
+                [year]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT csp.*, u.username as created_by_name
+                 FROM company_shutdown_periods csp
+                 LEFT JOIN production_users u ON csp.created_by_user_id = u.id
+                 WHERE csp.year = ?
+                 ORDER BY csp.start_date`
+            ).all(year);
+        }
+    }
+    
+    static async applyShutdownToEntitlements(year, startDate, endDate) {
+        const weekdays = this.calculateWorkingDays(startDate, endDate);
+        
+        // Get all users with entitlements for this year
+        const entitlements = await this.getAllHolidayEntitlements();
+        const yearEntitlements = entitlements.filter(e => e.year === year);
+        
+        // Deduct weekdays from each user's entitlement
+        for (const entitlement of yearEntitlements) {
+            await this.deductHolidayDays(entitlement.user_id, year, weekdays);
+        }
+        
+        return weekdays;
+    }
+    
+    // Timesheet Integration Methods
+    static async populateHolidayTimesheetEntry(userId, date, holidayRequestId) {
+        // Check if date is a weekday (skip weekends)
+        const dateObj = new Date(date);
+        const dayOfWeek = dateObj.getDay();
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            // Weekend, don't populate
+            return null;
+        }
+        
+        // Find Monday of the week for this date
+        const day = dateObj.getDay();
+        const diff = dateObj.getDate() - day + (day === 0 ? -6 : 1);
+        const monday = new Date(dateObj);
+        monday.setDate(diff);
+        monday.setHours(0, 0, 0, 0);
+        const weekStartDate = monday.toISOString().split('T')[0];
+        
+        // Get or create weekly timesheet
+        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+        
+        // Get or create daily entry
+        const dailyEntry = await this.getOrCreateDailyEntry(
+            weeklyTimesheet.id,
+            date,
+            null // No timesheet_entry_id for holidays
+        );
+        
+        // Update daily entry with holiday information
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE timesheet_daily_entries 
+                 SET day_type = 'holiday_paid',
+                     regular_hours = 8,
+                     total_hours = 8,
+                     holiday_request_id = $1,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $2
+                 RETURNING *`,
+                [holidayRequestId, dailyEntry.id]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(
+                `UPDATE timesheet_daily_entries 
+                 SET day_type = 'holiday_paid',
+                     regular_hours = 8,
+                     total_hours = 8,
+                     holiday_request_id = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`
+            ).run(holidayRequestId, dailyEntry.id);
+            return this.getDailyEntryById(dailyEntry.id);
+        }
+    }
+    
+    static async checkAndPopulateApprovedHolidays(userId, weekStartDate) {
+        const weekStart = new Date(weekStartDate);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        
+        // Get approved holidays for this week
+        const holidays = await this.getApprovedHolidaysInDateRange(weekStartDate, weekEndStr, userId);
+        
+        // Populate timesheet entries for each holiday day
+        for (const holiday of holidays) {
+            const start = new Date(holiday.start_date);
+            const end = new Date(holiday.end_date);
+            const current = new Date(Math.max(start, weekStart));
+            const weekEndDate = new Date(Math.min(end, weekEnd));
+            
+            while (current <= weekEndDate) {
+                const dateStr = current.toISOString().split('T')[0];
+                await this.populateHolidayTimesheetEntry(userId, dateStr, holiday.id);
+                current.setDate(current.getDate() + 1);
+            }
+        }
+        
+        return holidays;
     }
     
     // ============ TASKS OPERATIONS ============
