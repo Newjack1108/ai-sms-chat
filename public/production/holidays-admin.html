@@ -173,12 +173,21 @@
         
         async function loadEntitlements() {
             try {
+                console.log('Loading entitlements...');
                 const response = await apiCall('/holidays/entitlements');
-                if (response.success) {
-                    displayEntitlements(response.entitlements);
+                console.log('Entitlements response:', response);
+                
+                if (response && response.success) {
+                    const entitlements = response.entitlements || [];
+                    console.log('Entitlements data:', entitlements);
+                    displayEntitlements(entitlements);
+                } else {
+                    console.error('Failed to load entitlements:', response);
+                    document.getElementById('entitlementsList').innerHTML = '<div class="error">Error loading entitlements: ' + (response?.error || 'Unknown error') + '</div>';
                 }
             } catch (error) {
-                document.getElementById('entitlementsList').innerHTML = '<div class="error">Error loading entitlements</div>';
+                console.error('Error loading entitlements:', error);
+                document.getElementById('entitlementsList').innerHTML = '<div class="error">Error loading entitlements: ' + (error.message || 'Unknown error') + '</div>';
             }
         }
         
@@ -240,6 +249,7 @@
             const totalDays = parseFloat(document.getElementById('entitlementTotalDays').value);
             
             try {
+                console.log('Saving entitlement:', { userId, year, totalDays });
                 const response = await apiCall('/holidays/entitlements', 'POST', {
                     user_id: userId,
                     year: year,
