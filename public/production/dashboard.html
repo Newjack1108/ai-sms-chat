@@ -224,9 +224,14 @@
                                 </div>
                             `;
                         } else {
+                            // Stock check or text reminder
+                            const reminderType = reminder.reminder_type || 'stock_check';
+                            const reminderContent = reminderType === 'text' 
+                                ? `📝 ${reminder.reminder_text || 'Text Reminder'}`
+                                : reminder.stock_item_name || 'Stock Item';
                             return `
                                 <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                                    <strong>${reminder.stock_item_name}</strong><br>
+                                    <strong>${reminderContent}</strong><br>
                                     <small>Due: ${formatDate(reminder.next_check_date)}</small>
                                 </div>
                             `;

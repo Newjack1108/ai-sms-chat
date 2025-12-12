@@ -212,21 +212,23 @@ function initializeSQLite() {
     db.exec(`
         CREATE TABLE IF NOT EXISTS stock_check_reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            stock_item_id INTEGER NOT NULL,
-            check_frequency_days INTEGER NOT NULL,
+            stock_item_id INTEGER,
+            check_frequency_days INTEGER,
             last_checked_date TEXT,
             next_check_date TEXT,
             is_active INTEGER DEFAULT 1,
             user_id INTEGER,
             target_role TEXT,
             created_by_user_id INTEGER,
+            reminder_text TEXT,
+            reminder_type TEXT DEFAULT 'stock_check',
             FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES production_users(id),
             FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
         )
     `);
     
-    // Migrate stock_check_reminders to add user assignment columns
+    // Migrate stock_check_reminders to add user assignment columns and text reminder fields
     try {
         const reminderColumns = db.prepare("PRAGMA table_info(stock_check_reminders)").all();
         const reminderColumnNames = reminderColumns.map(col => col.name);
@@ -242,6 +244,14 @@ function initializeSQLite() {
         if (!reminderColumnNames.includes('created_by_user_id')) {
             db.exec('ALTER TABLE stock_check_reminders ADD COLUMN created_by_user_id INTEGER');
             console.log('✅ Added created_by_user_id column to stock_check_reminders');
+        }
+        if (!reminderColumnNames.includes('reminder_text')) {
+            db.exec('ALTER TABLE stock_check_reminders ADD COLUMN reminder_text TEXT');
+            console.log('✅ Added reminder_text column to stock_check_reminders');
+        }
+        if (!reminderColumnNames.includes('reminder_type')) {
+            db.exec('ALTER TABLE stock_check_reminders ADD COLUMN reminder_type TEXT DEFAULT \'stock_check\'');
+            console.log('✅ Added reminder_type column to stock_check_reminders');
         }
     } catch (error) {
         console.log('⚠️ Stock check reminders migration check skipped:', error.message);
@@ -807,18 +817,20 @@ async function initializePostgreSQL() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS stock_check_reminders (
                 id SERIAL PRIMARY KEY,
-                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-                check_frequency_days INTEGER NOT NULL,
+                stock_item_id INTEGER REFERENCES stock_items(id) ON DELETE CASCADE,
+                check_frequency_days INTEGER,
                 last_checked_date DATE,
                 next_check_date DATE,
                 is_active BOOLEAN DEFAULT TRUE,
                 user_id INTEGER REFERENCES production_users(id),
                 target_role VARCHAR(20),
-                created_by_user_id INTEGER REFERENCES production_users(id)
+                created_by_user_id INTEGER REFERENCES production_users(id),
+                reminder_text TEXT,
+                reminder_type VARCHAR(20) DEFAULT 'stock_check'
             )
         `);
         
-        // Migrate stock_check_reminders to add user assignment columns
+        // Migrate stock_check_reminders to add user assignment columns and text reminder fields
         await pool.query(`
             DO $$ 
             BEGIN 
@@ -842,9 +854,43 @@ async function initializePostgreSQL() {
                 ) THEN
                     ALTER TABLE stock_check_reminders ADD COLUMN created_by_user_id INTEGER REFERENCES production_users(id);
                 END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' AND column_name='reminder_text'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ADD COLUMN reminder_text TEXT;
+                END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' AND column_name='reminder_type'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ADD COLUMN reminder_type VARCHAR(20) DEFAULT 'stock_check';
+                END IF;
+                
+                -- Make stock_item_id nullable if it's currently NOT NULL
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' 
+                    AND column_name='stock_item_id' 
+                    AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ALTER COLUMN stock_item_id DROP NOT NULL;
+                END IF;
+                
+                -- Make check_frequency_days nullable if it's currently NOT NULL
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='stock_check_reminders' 
+                    AND column_name='check_frequency_days' 
+                    AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE stock_check_reminders ALTER COLUMN check_frequency_days DROP NOT NULL;
+                END IF;
             END $$;
         `);
-        console.log('✅ Checked/added user assignment columns to stock_check_reminders');
+        console.log('✅ Checked/added user assignment and text reminder columns to stock_check_reminders');
         
         // Tasks
         await pool.query(`
@@ -6681,36 +6727,42 @@ class ProductionDatabase {
     // ============ STOCK CHECK REMINDERS OPERATIONS ============
     
     static async createReminder(data) {
+        const reminderType = data.reminder_type || 'stock_check';
+        
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id, reminder_text, reminder_type)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
                 [
-                    data.stock_item_id, 
-                    data.check_frequency_days, 
-                    data.last_checked_date, 
+                    data.stock_item_id || null, 
+                    data.check_frequency_days || null, 
+                    data.last_checked_date || null, 
                     data.next_check_date, 
                     data.is_active !== false,
                     data.user_id || null,
                     data.target_role || null,
-                    data.created_by_user_id || null
+                    data.created_by_user_id || null,
+                    data.reminder_text || null,
+                    reminderType
                 ]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO stock_check_reminders (stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, created_by_user_id, reminder_text, reminder_type)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
-                data.stock_item_id, 
-                data.check_frequency_days, 
-                data.last_checked_date, 
+                data.stock_item_id || null, 
+                data.check_frequency_days || null, 
+                data.last_checked_date || null, 
                 data.next_check_date, 
                 data.is_active !== false ? 1 : 0,
                 data.user_id || null,
                 data.target_role || null,
-                data.created_by_user_id || null
+                data.created_by_user_id || null,
+                data.reminder_text || null,
+                reminderType
             );
             return this.getReminderById(info.lastInsertRowid);
         }
@@ -6754,7 +6806,7 @@ class ProductionDatabase {
                         u.username as assigned_user_name,
                         creator.username as created_by_username
                  FROM stock_check_reminders r
-                 JOIN stock_items si ON r.stock_item_id = si.id
+                 LEFT JOIN stock_items si ON r.stock_item_id = si.id
                  LEFT JOIN production_users u ON r.user_id = u.id
                  LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
                  ${whereSQL}
@@ -6767,7 +6819,7 @@ class ProductionDatabase {
                                   u.username as assigned_user_name,
                                   creator.username as created_by_username
                            FROM stock_check_reminders r
-                           JOIN stock_items si ON r.stock_item_id = si.id
+                           LEFT JOIN stock_items si ON r.stock_item_id = si.id
                            LEFT JOIN production_users u ON r.user_id = u.id
                            LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
                            ${whereSQL}
@@ -6809,7 +6861,7 @@ class ProductionDatabase {
                         u.username as assigned_user_name,
                         creator.username as created_by_username
                  FROM stock_check_reminders r
-                 JOIN stock_items si ON r.stock_item_id = si.id
+                 LEFT JOIN stock_items si ON r.stock_item_id = si.id
                  LEFT JOIN production_users u ON r.user_id = u.id
                  LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
                  WHERE ${whereClause} AND r.next_check_date < $1
@@ -6822,7 +6874,7 @@ class ProductionDatabase {
                                   u.username as assigned_user_name,
                                   creator.username as created_by_username
                            FROM stock_check_reminders r
-                           JOIN stock_items si ON r.stock_item_id = si.id
+                           LEFT JOIN stock_items si ON r.stock_item_id = si.id
                            LEFT JOIN production_users u ON r.user_id = u.id
                            LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
                            WHERE ${whereClause} AND r.next_check_date < ?
@@ -6908,6 +6960,18 @@ class ProductionDatabase {
         if (data.target_role !== undefined) {
             updates.push(isPostgreSQL ? `target_role = $${paramIndex}` : `target_role = ?`);
             values.push(data.target_role || null);
+            paramIndex++;
+        }
+        
+        if (data.reminder_text !== undefined) {
+            updates.push(isPostgreSQL ? `reminder_text = $${paramIndex}` : `reminder_text = ?`);
+            values.push(data.reminder_text || null);
+            paramIndex++;
+        }
+        
+        if (data.reminder_type !== undefined) {
+            updates.push(isPostgreSQL ? `reminder_type = $${paramIndex}` : `reminder_type = ?`);
+            values.push(data.reminder_type);
             paramIndex++;
         }
         

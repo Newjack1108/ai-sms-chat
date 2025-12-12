@@ -41,14 +41,25 @@
             <form id="reminderForm">
                 <input type="hidden" id="reminderId">
                 <div class="form-group">
+                    <label class="form-label">Reminder Type *</label>
+                    <select id="reminderType" class="form-select" required onchange="updateReminderTypeFields()">
+                        <option value="stock_check">Stock Item Reminder</option>
+                        <option value="text">Text Reminder</option>
+                    </select>
+                </div>
+                <div class="form-group" id="reminderStockItemGroup">
                     <label class="form-label">Stock Item *</label>
-                    <select id="reminderStockItem" class="form-select" required>
+                    <select id="reminderStockItem" class="form-select">
                         <option value="">Select stock item</option>
                     </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="reminderTextGroup" style="display: none;">
+                    <label class="form-label">Reminder Text *</label>
+                    <textarea id="reminderText" class="form-input" rows="3" placeholder="Enter reminder text..."></textarea>
+                </div>
+                <div class="form-group" id="reminderFrequencyGroup">
                     <label class="form-label">Check Frequency (Days) *</label>
-                    <input type="number" id="reminderFrequency" class="form-input" required min="1">
+                    <input type="number" id="reminderFrequency" class="form-input" min="1">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Last Checked Date</label>
@@ -170,6 +181,32 @@
             }
         }
         
+        function updateReminderTypeFields() {
+            const reminderType = document.getElementById('reminderType').value;
+            const stockItemGroup = document.getElementById('reminderStockItemGroup');
+            const reminderTextGroup = document.getElementById('reminderTextGroup');
+            const frequencyGroup = document.getElementById('reminderFrequencyGroup');
+            const stockItemSelect = document.getElementById('reminderStockItem');
+            const reminderText = document.getElementById('reminderText');
+            const frequency = document.getElementById('reminderFrequency');
+            
+            if (reminderType === 'stock_check') {
+                stockItemGroup.style.display = 'block';
+                reminderTextGroup.style.display = 'none';
+                frequencyGroup.style.display = 'block';
+                stockItemSelect.required = true;
+                reminderText.required = false;
+                frequency.required = true;
+            } else {
+                stockItemGroup.style.display = 'none';
+                reminderTextGroup.style.display = 'block';
+                frequencyGroup.style.display = 'none';
+                stockItemSelect.required = false;
+                reminderText.required = true;
+                frequency.required = false;
+            }
+        }
+        
         async function loadStockItems() {
             try {
                 const data = await apiCall('/stock');
@@ -200,10 +237,10 @@
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Stock Item</th>
+                                <th>Reminder</th>
                                 <th>Frequency</th>
                                 <th>Last Checked</th>
-                                <th>Next Check</th>
+                                <th>Due Date</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -212,6 +249,7 @@
                             ${data.reminders.map(reminder => {
                                 const isOverdue = reminder.next_check_date && reminder.next_check_date < today;
                                 const isActive = reminder.is_active === true || reminder.is_active === 1;
+                                const reminderType = reminder.reminder_type || 'stock_check';
                                 
                                 // Determine assignment display
                                 let assignmentText = '';
@@ -227,13 +265,20 @@
                                 
                                 const canEdit = currentUser.role === 'admin' || reminder.created_by_user_id === currentUser.id;
                                 
+                                // Display reminder content
+                                let reminderContent = '';
+                                if (reminderType === 'text') {
+                                    reminderContent = `<strong>📝 ${reminder.reminder_text || 'Text Reminder'}</strong><br><small style="color: #666;">${assignmentText}</small>`;
+                                } else {
+                                    reminderContent = `<strong>${reminder.stock_item_name || 'Stock Item'}</strong><br><small style="color: #666;">${assignmentText}</small>`;
+                                }
+                                
                                 return `
                                     <tr>
                                         <td>
-                                            <strong>${reminder.stock_item_name}</strong><br>
-                                            <small style="color: #666;">${assignmentText}</small>
+                                            ${reminderContent}
                                         </td>
-                                        <td>Every ${reminder.check_frequency_days} days</td>
+                                        <td>${reminderType === 'text' ? 'One-time' : `Every ${reminder.check_frequency_days || 0} days`}</td>
                                         <td>${formatDate(reminder.last_checked_date)}</td>
                                         <td>${formatDate(reminder.next_check_date)}</td>
                                         <td>
@@ -263,7 +308,9 @@
             document.getElementById('reminderForm').reset();
             document.getElementById('reminderId').value = '';
             document.getElementById('reminderActive').checked = true;
+            document.getElementById('reminderType').value = 'stock_check';
             document.getElementById('reminderAssignTo').value = currentUser.role === 'admin' ? 'myself' : 'myself';
+            updateReminderTypeFields();
             updateAssignmentFields();
             showModal('reminderModal');
         }
@@ -276,8 +323,16 @@
                 
                 document.getElementById('reminderModalTitle').textContent = 'Edit Reminder';
                 document.getElementById('reminderId').value = reminder.id;
-                document.getElementById('reminderStockItem').value = reminder.stock_item_id;
-                document.getElementById('reminderFrequency').value = reminder.check_frequency_days;
+                document.getElementById('reminderType').value = reminder.reminder_type || 'stock_check';
+                updateReminderTypeFields();
+                
+                if (reminder.reminder_type === 'text') {
+                    document.getElementById('reminderText').value = reminder.reminder_text || '';
+                } else {
+                    document.getElementById('reminderStockItem').value = reminder.stock_item_id || '';
+                    document.getElementById('reminderFrequency').value = reminder.check_frequency_days || '';
+                }
+                
                 document.getElementById('reminderLastChecked').value = reminder.last_checked_date || '';
                 document.getElementById('reminderNextCheck').value = reminder.next_check_date || '';
                 document.getElementById('reminderActive').checked = reminder.is_active === true || reminder.is_active === 1;
@@ -344,10 +399,14 @@
             const assignTo = document.getElementById('reminderAssignTo').value;
             const userId = document.getElementById('reminderUserId').value;
             const targetRole = document.getElementById('reminderTargetRole').value;
+            const reminderType = document.getElementById('reminderType').value;
+            const reminderText = document.getElementById('reminderText').value;
             
             const data = {
-                stock_item_id: document.getElementById('reminderStockItem').value,
-                check_frequency_days: frequency,
+                reminder_type: reminderType,
+                stock_item_id: reminderType === 'stock_check' ? document.getElementById('reminderStockItem').value : null,
+                check_frequency_days: reminderType === 'stock_check' ? frequency : null,
+                reminder_text: reminderType === 'text' ? reminderText : null,
                 last_checked_date: lastChecked || null,
                 next_check_date: nextCheck,
                 is_active: document.getElementById('reminderActive').checked,

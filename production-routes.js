@@ -2279,19 +2279,79 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/reminders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/reminders', requireProductionAuth, async (req, res) => {
     try {
-        const { stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active } = req.body;
-        if (!stock_item_id || !check_frequency_days) {
-            return res.status(400).json({ success: false, error: 'Stock item ID and frequency are required' });
+        const { stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, assign_to, reminder_text, reminder_type } = req.body;
+        
+        const reminderType = reminder_type || 'stock_check';
+        
+        // Validation based on reminder type
+        if (reminderType === 'stock_check') {
+            if (!stock_item_id || !check_frequency_days) {
+                return res.status(400).json({ success: false, error: 'Stock item ID and frequency are required for stock check reminders' });
+            }
+        } else if (reminderType === 'text') {
+            if (!reminder_text || !reminder_text.trim()) {
+                return res.status(400).json({ success: false, error: 'Reminder text is required for text reminders' });
+            }
+            if (!next_check_date) {
+                return res.status(400).json({ success: false, error: 'Due date (next check date) is required for text reminders' });
+            }
+        } else {
+            return res.status(400).json({ success: false, error: 'Invalid reminder type. Must be "stock_check" or "text"' });
+        }
+        
+        const currentUser = req.session.production_user;
+        const currentUserId = currentUser.id;
+        const currentUserRole = currentUser.role;
+        
+        // Determine assignment based on assign_to field
+        let finalUserId = null;
+        let finalTargetRole = null;
+        
+        if (assign_to === 'myself') {
+            // User creating reminder for themselves
+            finalUserId = currentUserId;
+        } else if (assign_to === 'user' && user_id) {
+            // Admin assigning to specific user
+            if (currentUserRole !== 'admin') {
+                return res.status(403).json({ success: false, error: 'Only admins can assign reminders to specific users' });
+            }
+            finalUserId = parseInt(user_id);
+        } else if (assign_to === 'role' && target_role) {
+            // Admin assigning to role
+            if (currentUserRole !== 'admin') {
+                return res.status(403).json({ success: false, error: 'Only admins can assign reminders to roles' });
+            }
+            finalTargetRole = target_role;
+        } else if (assign_to === 'all') {
+            // Admin assigning to all users (global)
+            if (currentUserRole !== 'admin') {
+                return res.status(403).json({ success: false, error: 'Only admins can create global reminders' });
+            }
+            // Both null = global reminder
+            finalUserId = null;
+            finalTargetRole = null;
+        } else {
+            // Default: assign to self for non-admins
+            if (currentUserRole !== 'admin') {
+                finalUserId = currentUserId;
+            } else {
+                return res.status(400).json({ success: false, error: 'Invalid assignment. Please specify assign_to, user_id, or target_role' });
+            }
         }
         
         const reminder = await ProductionDatabase.createReminder({
-            stock_item_id: parseInt(stock_item_id),
-            check_frequency_days: parseInt(check_frequency_days),
+            stock_item_id: stock_item_id ? parseInt(stock_item_id) : null,
+            check_frequency_days: check_frequency_days ? parseInt(check_frequency_days) : null,
             last_checked_date,
             next_check_date,
-            is_active
+            is_active,
+            user_id: finalUserId,
+            target_role: finalTargetRole,
+            created_by_user_id: currentUserId,
+            reminder_text: reminder_text || null,
+            reminder_type: reminderType
         });
         res.json({ success: true, reminder });
     } catch (error) {
@@ -2317,11 +2377,25 @@ router.put('/reminders/:id', requireProductionAuth, async (req, res) => {
             return res.status(403).json({ success: false, error: 'You can only edit reminders you created' });
         }
         
-        const { check_frequency_days, is_active, user_id, target_role, assign_to } = req.body;
+        const { check_frequency_days, is_active, user_id, target_role, assign_to, reminder_text, reminder_type } = req.body;
         const updateData = {
             check_frequency_days: check_frequency_days !== undefined ? parseInt(check_frequency_days) : undefined,
             is_active
         };
+        
+        // Handle reminder type and text
+        if (reminder_type !== undefined) {
+            updateData.reminder_type = reminder_type;
+        }
+        if (reminder_text !== undefined) {
+            updateData.reminder_text = reminder_text;
+        }
+        
+        // Validate based on reminder type
+        const finalReminderType = reminder_type !== undefined ? reminder_type : (reminder.reminder_type || 'stock_check');
+        if (finalReminderType === 'text' && updateData.reminder_text !== undefined && !updateData.reminder_text?.trim()) {
+            return res.status(400).json({ success: false, error: 'Reminder text is required for text reminders' });
+        }
         
         // Handle assignment updates (only if provided)
         if (assign_to) {
