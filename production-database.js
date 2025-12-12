@@ -7200,6 +7200,13 @@ class ProductionDatabase {
     
     // Holiday Entitlement Methods
     static async createHolidayEntitlement(userId, year, totalDays) {
+        // Ensure all values are integers
+        const userIdInt = parseInt(userId);
+        const yearInt = parseInt(year);
+        const totalDaysInt = parseInt(totalDays);
+        
+        console.log('createHolidayEntitlement called with:', { userId: userIdInt, year: yearInt, totalDays: totalDaysInt });
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
@@ -7207,31 +7214,32 @@ class ProductionDatabase {
                  ON CONFLICT (user_id, year) 
                  DO UPDATE SET total_days = $3, updated_at = CURRENT_TIMESTAMP
                  RETURNING *`,
-                [userId, year, totalDays]
+                [userIdInt, yearInt, totalDaysInt]
             );
+            console.log('Created/updated entitlement (PostgreSQL):', result.rows[0]);
             return result.rows[0];
         } else {
             // Check if entitlement exists first
-            const existing = await this.getHolidayEntitlement(userId, year);
+            const existing = await this.getHolidayEntitlement(userIdInt, yearInt);
             if (existing) {
                 // Update existing
-                console.log('Updating existing entitlement:', { userId, year, totalDays });
+                console.log('Updating existing entitlement:', { userId: userIdInt, year: yearInt, totalDays: totalDaysInt });
                 db.prepare(
                     `UPDATE holiday_entitlements 
                      SET total_days = ?, updated_at = CURRENT_TIMESTAMP
                      WHERE user_id = ? AND year = ?`
-                ).run(totalDays, userId, year);
+                ).run(totalDaysInt, userIdInt, yearInt);
             } else {
                 // Insert new
-                console.log('Inserting new entitlement:', { userId, year, totalDays });
+                console.log('Inserting new entitlement:', { userId: userIdInt, year: yearInt, totalDays: totalDaysInt });
                 const stmt = db.prepare(
                     `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
                      VALUES (?, ?, ?, 0)`
                 );
-                const info = stmt.run(userId, year, totalDays);
+                const info = stmt.run(userIdInt, yearInt, totalDaysInt);
                 console.log('Inserted entitlement (SQLite), lastInsertRowid:', info.lastInsertRowid);
             }
-            const result = await this.getHolidayEntitlement(userId, year);
+            const result = await this.getHolidayEntitlement(userIdInt, yearInt);
             console.log('Retrieved entitlement after save:', result);
             return result;
         }
@@ -7241,7 +7249,7 @@ class ProductionDatabase {
         // Ensure userId and year are integers
         const userIdInt = parseInt(userId);
         const yearInt = parseInt(year);
-        console.log('getHolidayEntitlement called with userId:', userIdInt, 'year:', yearInt);
+        console.log('getHolidayEntitlement called with userId:', userIdInt, 'type:', typeof userIdInt, 'year:', yearInt, 'type:', typeof yearInt);
         
         let entitlement;
         if (isPostgreSQL) {
@@ -7251,12 +7259,36 @@ class ProductionDatabase {
                 [userIdInt, yearInt]
             );
             entitlement = result.rows[0] || null;
+            // Also try a broader query to see what's in the database
+            if (!entitlement) {
+                const allForUser = await pool.query(
+                    `SELECT * FROM holiday_entitlements WHERE user_id = $1`,
+                    [userIdInt]
+                );
+                console.log('All entitlements for user', userIdInt, ':', allForUser.rows);
+                const allForYear = await pool.query(
+                    `SELECT * FROM holiday_entitlements WHERE year = $1`,
+                    [yearInt]
+                );
+                console.log('All entitlements for year', yearInt, ':', allForYear.rows);
+            }
         } else {
             const row = db.prepare(
                 `SELECT *, (total_days - days_used) as days_remaining 
                  FROM holiday_entitlements WHERE user_id = ? AND year = ?`
             ).get(userIdInt, yearInt);
             entitlement = row || null;
+            // Also try a broader query to see what's in the database
+            if (!entitlement) {
+                const allForUser = db.prepare(
+                    `SELECT * FROM holiday_entitlements WHERE user_id = ?`
+                ).all(userIdInt);
+                console.log('All entitlements for user', userIdInt, ':', allForUser);
+                const allForYear = db.prepare(
+                    `SELECT * FROM holiday_entitlements WHERE year = ?`
+                ).all(yearInt);
+                console.log('All entitlements for year', yearInt, ':', allForYear);
+            }
         }
         console.log('getHolidayEntitlement result:', entitlement);
         if (entitlement && entitlement.days_remaining !== undefined) {
