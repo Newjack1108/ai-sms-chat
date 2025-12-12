@@ -714,7 +714,9 @@ function initializeSQLite() {
         const dailyColumnNames = dailyColumns.map(col => col.name);
         
         if (!dailyColumnNames.includes('holiday_request_id')) {
-            db.exec('ALTER TABLE timesheet_daily_entries ADD COLUMN holiday_request_id INTEGER REFERENCES holiday_requests(id)');
+            // SQLite doesn't support adding foreign key constraints via ALTER TABLE
+            // Just add the column; the foreign key relationship is conceptual
+            db.exec('ALTER TABLE timesheet_daily_entries ADD COLUMN holiday_request_id INTEGER');
             console.log('✅ Added holiday_request_id column to timesheet_daily_entries');
         }
     } catch (error) {
@@ -7209,14 +7211,23 @@ class ProductionDatabase {
             );
             return result.rows[0];
         } else {
-            const stmt = db.prepare(
-                `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
-                 VALUES (?, ?, ?, 0)
-                 ON CONFLICT(user_id, year) 
-                 DO UPDATE SET total_days = ?, updated_at = CURRENT_TIMESTAMP`
-            );
-            stmt.run(userId, year, totalDays, totalDays);
-            return this.getHolidayEntitlement(userId, year);
+            // Check if entitlement exists first
+            const existing = await this.getHolidayEntitlement(userId, year);
+            if (existing) {
+                // Update existing
+                db.prepare(
+                    `UPDATE holiday_entitlements 
+                     SET total_days = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE user_id = ? AND year = ?`
+                ).run(totalDays, userId, year);
+            } else {
+                // Insert new
+                db.prepare(
+                    `INSERT INTO holiday_entitlements (user_id, year, total_days, days_used)
+                     VALUES (?, ?, ?, 0)`
+                ).run(userId, year, totalDays);
+            }
+            return await this.getHolidayEntitlement(userId, year);
         }
     }
     
