@@ -262,7 +262,24 @@
             
             // Show selected tab
             document.getElementById(`${tabName}-tab`).style.display = 'block';
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                // Find the button for this tab
+                document.querySelectorAll('.tab-btn').forEach(btn => {
+                    if ((tabName === 'entitlements' && btn.textContent.includes('Entitlements')) ||
+                        (tabName === 'requests' && btn.textContent.includes('Pending')) ||
+                        (tabName === 'calendar' && btn.textContent.includes('Calendar')) ||
+                        (tabName === 'shutdown' && btn.textContent.includes('Shutdown'))) {
+                        btn.classList.add('active');
+                    }
+                });
+            }
+            
+            // Load calendar if calendar tab is selected
+            if (tabName === 'calendar') {
+                loadCalendar();
+            }
         }
         
         async function loadUsers() {
@@ -660,18 +677,29 @@
         
         // Calendar functions
         async function loadCalendar() {
+            const container = document.getElementById('calendarContainer');
             try {
+                container.innerHTML = '<div class="loading">Loading calendar...</div>';
+                
                 const year = calendarYear;
                 const month = calendarMonth;
                 
+                console.log('Loading calendar for:', month, year);
+                
                 // Fetch all holiday requests for the year
                 const requestsResponse = await apiCall(`/holidays/requests?year=${year}`);
+                console.log('Holiday requests response:', requestsResponse);
+                
+                if (!requestsResponse) {
+                    throw new Error('No response from server. Please check your connection.');
+                }
+                
                 if (!requestsResponse.success) {
-                    throw new Error('Failed to load holiday requests');
+                    throw new Error('Failed to load holiday requests: ' + (requestsResponse.error || 'Unknown error'));
                 }
                 
                 // Filter for approved and pending only, and check if they overlap with current month
-                const allRequests = requestsResponse.requests || [];
+                const allRequests = Array.isArray(requestsResponse.requests) ? requestsResponse.requests : [];
                 const monthRequests = allRequests.filter(req => {
                     if (req.status !== 'approved' && req.status !== 'pending') {
                         return false;
@@ -685,8 +713,18 @@
                 });
                 
                 // Fetch shutdown periods for the year
-                const shutdownsResponse = await apiCall(`/holidays/shutdown-periods?year=${year}`);
-                const allShutdowns = shutdownsResponse.success ? (shutdownsResponse.periods || shutdownsResponse.shutdowns || []) : [];
+                let allShutdowns = [];
+                try {
+                    const shutdownsResponse = await apiCall(`/holidays/shutdown-periods?year=${year}`);
+                    console.log('Shutdown periods response:', shutdownsResponse);
+                    if (shutdownsResponse && shutdownsResponse.success) {
+                        allShutdowns = Array.isArray(shutdownsResponse.periods) ? shutdownsResponse.periods : 
+                                      (Array.isArray(shutdownsResponse.shutdowns) ? shutdownsResponse.shutdowns : []);
+                    }
+                } catch (shutdownError) {
+                    console.warn('Error loading shutdown periods (continuing without them):', shutdownError);
+                    // Continue without shutdown periods
+                }
                 const monthShutdowns = allShutdowns.filter(shutdown => {
                     const shutdownStart = new Date(shutdown.start_date);
                     const shutdownEnd = new Date(shutdown.end_date);
@@ -696,22 +734,34 @@
                     return shutdownStart <= monthEnd && shutdownEnd >= monthStart;
                 });
                 
+                console.log('Rendering calendar with', monthRequests.length, 'requests and', monthShutdowns.length, 'shutdowns');
                 renderCalendar(month, year, monthRequests, monthShutdowns);
             } catch (error) {
                 console.error('Error loading calendar:', error);
-                document.getElementById('calendarContainer').innerHTML = 
-                    '<div class="error">Error loading calendar: ' + (error.message || 'Unknown error') + '</div>';
+                const container = document.getElementById('calendarContainer');
+                container.innerHTML = 
+                    '<div class="error" style="padding: 20px; color: #dc3545;">' +
+                    'Error loading calendar: ' + (error.message || 'Unknown error') + 
+                    '<br><small>Check browser console for details</small>' +
+                    '</div>';
             }
         }
         
         function renderCalendar(month, year, requests, shutdowns) {
             const container = document.getElementById('calendarContainer');
+            if (!container) {
+                console.error('Calendar container not found');
+                return;
+            }
+            
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
                               'July', 'August', 'September', 'October', 'November', 'December'];
             
             // Update month/year display
-            document.getElementById('calendarMonthYear').textContent = 
-                `${monthNames[month]} ${year}`;
+            const monthYearElement = document.getElementById('calendarMonthYear');
+            if (monthYearElement) {
+                monthYearElement.textContent = `${monthNames[month]} ${year}`;
+            }
             
             // Get first day of month and number of days
             const firstDay = new Date(year, month, 1);
@@ -824,7 +874,13 @@
             
             html += '</div></div>';
             
-            container.innerHTML = html;
+            try {
+                container.innerHTML = html;
+                console.log('Calendar rendered successfully');
+            } catch (error) {
+                console.error('Error rendering calendar HTML:', error);
+                container.innerHTML = '<div class="error">Error rendering calendar. Please check console for details.</div>';
+            }
         }
         
         function previousMonth() {
