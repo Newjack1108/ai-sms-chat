@@ -7533,6 +7533,10 @@ class ProductionDatabase {
     }
     
     static async getHolidayRequestsByUser(userId, year = null) {
+        // Ensure userId is an integer for proper comparison
+        const userIdInt = parseInt(userId);
+        const yearInt = year ? parseInt(year) : null;
+        
         if (isPostgreSQL) {
             let query = `SELECT hr.*, 
                 u1.username as user_name,
@@ -7543,11 +7547,11 @@ class ProductionDatabase {
                 LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
                 LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
                 WHERE hr.user_id = $1`;
-            const params = [userId];
+            const params = [userIdInt];
             
-            if (year) {
+            if (yearInt) {
                 query += ` AND EXTRACT(YEAR FROM hr.start_date) = $2 ORDER BY hr.start_date DESC`;
-                params.push(year);
+                params.push(yearInt);
             } else {
                 query += ` ORDER BY hr.start_date DESC`;
             }
@@ -7565,12 +7569,12 @@ class ProductionDatabase {
                 LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id
                 WHERE hr.user_id = ?`;
             
-            if (year) {
+            if (yearInt) {
                 query += ` AND strftime('%Y', hr.start_date) = ? ORDER BY hr.start_date DESC`;
-                return db.prepare(query).all(userId, year.toString());
+                return db.prepare(query).all(userIdInt, yearInt.toString());
             } else {
                 query += ` ORDER BY hr.start_date DESC`;
-                return db.prepare(query).all(userId);
+                return db.prepare(query).all(userIdInt);
             }
         }
     }

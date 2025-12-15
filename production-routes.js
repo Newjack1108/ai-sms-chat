@@ -2955,7 +2955,11 @@ router.get('/holidays/requests', requireProductionAuth, async (req, res) => {
             const requests = await ProductionDatabase.getAllHolidayRequests(year);
             res.json({ success: true, requests });
         } else {
-            const requests = await ProductionDatabase.getHolidayRequestsByUser(user.id, year);
+            // Ensure user ID is parsed as integer for proper filtering
+            const userId = parseInt(user.id);
+            console.log('Getting holiday requests for user ID:', userId, 'type:', typeof userId);
+            const requests = await ProductionDatabase.getHolidayRequestsByUser(userId, year);
+            console.log('Found', requests.length, 'requests for user', userId);
             res.json({ success: true, requests });
         }
     } catch (error) {
