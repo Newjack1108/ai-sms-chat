@@ -209,8 +209,8 @@ document.addEventListener('click', (e) => {
 async function restrictStaffAccess() {
     const user = await checkAuth();
     if (user && user.role === 'staff') {
-        // Staff can access timesheet, tasks, and reminders pages
-        const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html', 'login.html'];
+        // Staff can access timesheet, tasks, reminders, and holidays pages
+        const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html', 'holidays.html', 'login.html'];
         const currentPage = window.location.pathname.split('/').pop();
         
         if (!allowedPages.includes(currentPage) && !window.location.pathname.includes('login.html')) {
