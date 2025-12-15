@@ -7291,30 +7291,41 @@ class ProductionDatabase {
             }
         }
         console.log('getHolidayEntitlement result:', entitlement);
-        if (entitlement && entitlement.days_remaining !== undefined) {
-            entitlement.days_remaining = parseFloat(entitlement.days_remaining);
+        if (entitlement) {
+            // Normalize types to ensure consistency
+            entitlement.user_id = parseInt(entitlement.user_id);
+            entitlement.year = parseInt(entitlement.year);
+            if (entitlement.days_remaining !== undefined) {
+                entitlement.days_remaining = parseFloat(entitlement.days_remaining);
+            }
         }
         return entitlement;
     }
     
     static async getUserHolidayEntitlements(userId) {
+        // Ensure userId is an integer
+        const userIdInt = parseInt(userId);
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT *, (total_days - days_used) as days_remaining 
                  FROM holiday_entitlements WHERE user_id = $1 ORDER BY year DESC`,
-                [userId]
+                [userIdInt]
             );
             return result.rows.map(row => ({
                 ...row,
+                user_id: parseInt(row.user_id),
+                year: parseInt(row.year),
                 days_remaining: parseFloat(row.days_remaining || 0)
             }));
         } else {
             const rows = db.prepare(
                 `SELECT *, (total_days - days_used) as days_remaining 
                  FROM holiday_entitlements WHERE user_id = ? ORDER BY year DESC`
-            ).all(userId);
+            ).all(userIdInt);
             return rows.map(row => ({
                 ...row,
+                user_id: parseInt(row.user_id),
+                year: parseInt(row.year),
                 days_remaining: parseFloat(row.days_remaining || 0)
             }));
         }
@@ -7367,6 +7378,7 @@ class ProductionDatabase {
     }
     
     static async getAllHolidayEntitlements() {
+        let rows;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT he.*, 
@@ -7376,9 +7388,9 @@ class ProductionDatabase {
                  JOIN production_users u ON he.user_id = u.id
                  ORDER BY he.year DESC, u.username`
             );
-            return result.rows;
+            rows = result.rows;
         } else {
-            return db.prepare(
+            rows = db.prepare(
                 `SELECT he.*, 
                  (he.total_days - he.days_used) as days_remaining,
                  u.username 
@@ -7387,6 +7399,13 @@ class ProductionDatabase {
                  ORDER BY he.year DESC, u.username`
             ).all();
         }
+        // Normalize types to ensure consistency
+        return rows.map(row => ({
+            ...row,
+            user_id: parseInt(row.user_id),
+            year: parseInt(row.year),
+            days_remaining: parseFloat(row.days_remaining || 0)
+        }));
     }
     
     static async getHolidayEntitlementWithRemaining(userId, year) {

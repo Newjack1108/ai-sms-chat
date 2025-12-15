@@ -70,70 +70,56 @@
     
     <script src="common.js"></script>
     <script>
-        let currentEntitlement = null;
+        let allEntitlements = []; // Store all entitlements for all years
+        let currentEntitlement = null; // Current entitlement for selected year
         const currentYear = new Date().getFullYear();
         
         async function init() {
             await checkAuth();
-            await loadMyEntitlement();
+            await loadAllEntitlements();
             await loadMyRequests();
             
             // Add date change listeners
             document.getElementById('requestStartDate').addEventListener('change', updateRequestSummary);
             document.getElementById('requestEndDate').addEventListener('change', updateRequestSummary);
             
-            // Set minimum date to today
+            // Set minimum date to today (but allow future years)
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('requestStartDate').min = today;
             document.getElementById('requestEndDate').min = today;
         }
         
-        async function loadMyEntitlement() {
-            try {
-                // First try to get current user info
-                const meResponse = await apiCall('/me');
-                if (meResponse && meResponse.success && meResponse.user) {
-                    const userId = meResponse.user.id;
-                    const response = await apiCall(`/holidays/entitlements/${userId}/${currentYear}`);
-                    if (response.success && response.entitlement) {
-                        currentEntitlement = response.entitlement;
-                        displayEntitlement(response.entitlement);
-                        return;
-                    }
-                }
-            } catch (e) {
-                // Fall through to alternative method
-            }
-            
-            // Alternative: get all entitlements and filter
+        async function loadAllEntitlements() {
             try {
                 const response = await apiCall('/holidays/entitlements');
-                if (response.success && response.entitlements && response.entitlements.length > 0) {
-                    const thisYear = response.entitlements.find(e => e.year === currentYear);
-                    if (thisYear) {
-                        currentEntitlement = thisYear;
-                        displayEntitlement(thisYear);
-                    } else {
-                        currentEntitlement = null;
-                        document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-warning">No entitlement set for this year. Please contact admin to set up your holiday entitlement.</div>';
-                        // Disable submit button if no entitlement
-                        document.getElementById('submitBtn').disabled = true;
-                    }
+                if (response.success && response.entitlements) {
+                    allEntitlements = response.entitlements;
+                    // Display current year's entitlement by default
+                    updateEntitlementForYear(currentYear);
                 } else {
-                    currentEntitlement = null;
-                    document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-warning">No entitlement set for this year. Please contact admin to set up your holiday entitlement.</div>';
-                    document.getElementById('submitBtn').disabled = true;
+                    allEntitlements = [];
+                    updateEntitlementForYear(currentYear);
                 }
             } catch (error) {
-                currentEntitlement = null;
-                document.getElementById('entitlementInfo').innerHTML = '<div class="alert alert-error">Error loading entitlement. Please contact admin.</div>';
-                document.getElementById('submitBtn').disabled = true;
+                console.error('Error loading entitlements:', error);
+                allEntitlements = [];
+                updateEntitlementForYear(currentYear);
             }
         }
         
-        function displayEntitlement(entitlement) {
+        function updateEntitlementForYear(year) {
+            const entitlement = allEntitlements.find(e => parseInt(e.year) === year);
+            currentEntitlement = entitlement || null;
+            displayEntitlement(entitlement, year);
+        }
+        
+        function displayEntitlement(entitlement, year) {
             if (!entitlement) {
-                document.getElementById('entitlementInfo').innerHTML = '<div class="info">No entitlement set for this year</div>';
+                document.getElementById('entitlementInfo').innerHTML = `
+                    <div class="alert alert-warning">
+                        <strong>Year ${year}:</strong> No entitlement set for this year. Please contact admin to set up your holiday entitlement.
+                    </div>
+                `;
                 return;
             }
             
@@ -144,6 +130,9 @@
                 : (totalDays - daysUsed);
             
             document.getElementById('entitlementInfo').innerHTML = `
+                <div style="margin-bottom: 15px;">
+                    <strong style="font-size: 18px;">Holiday Entitlement for ${year}</strong>
+                </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px;">
                     <div>
                         <strong>Total Entitlement:</strong><br>
@@ -158,6 +147,20 @@
                         <span style="font-size: 24px; color: ${daysRemaining > 0 ? '#28a745' : '#dc3545'};">${daysRemaining.toFixed(1)} days</span>
                     </div>
                 </div>
+                ${allEntitlements.length > 1 ? `
+                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                        <strong>Other Years:</strong>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
+                            ${allEntitlements.filter(e => parseInt(e.year) !== year).map(e => {
+                                const otherYear = parseInt(e.year);
+                                const otherRemaining = parseFloat(e.days_remaining || 0);
+                                return `<span style="padding: 5px 10px; background: #f5f5f5; border-radius: 4px;">
+                                    ${otherYear}: ${otherRemaining.toFixed(1)} days remaining
+                                </span>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
             `;
         }
         
@@ -184,6 +187,8 @@
             if (!startDate || !endDate) {
                 document.getElementById('daysRequested').textContent = '0';
                 document.getElementById('entitlementCheck').textContent = '';
+                // Show current year's entitlement when no dates selected
+                updateEntitlementForYear(currentYear);
                 return;
             }
             
@@ -194,25 +199,34 @@
                 return;
             }
             
+            // Get the year from the start date
+            const requestYear = new Date(startDate).getFullYear();
+            
+            // Update entitlement display for the selected year
+            updateEntitlementForYear(requestYear);
+            
+            // Get entitlement for the request year
+            const entitlement = allEntitlements.find(e => parseInt(e.year) === requestYear);
+            
             const weekdays = calculateWorkingDays(startDate, endDate);
             document.getElementById('daysRequested').textContent = weekdays;
             
-            if (currentEntitlement) {
-                const daysRemaining = currentEntitlement.days_remaining !== undefined 
-                    ? parseFloat(currentEntitlement.days_remaining) 
-                    : (parseFloat(currentEntitlement.total_days || 0) - parseFloat(currentEntitlement.days_used || 0));
+            if (entitlement) {
+                const daysRemaining = entitlement.days_remaining !== undefined 
+                    ? parseFloat(entitlement.days_remaining) 
+                    : (parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0));
                 
                 if (weekdays > daysRemaining) {
                     document.getElementById('entitlementCheck').innerHTML = 
-                        `<span style="color: red;">Insufficient entitlement. You have ${daysRemaining.toFixed(1)} days remaining.</span>`;
+                        `<span style="color: red;">Insufficient entitlement for ${requestYear}. You have ${daysRemaining.toFixed(1)} days remaining.</span>`;
                     document.getElementById('submitBtn').disabled = true;
                 } else {
                     document.getElementById('entitlementCheck').innerHTML = 
-                        `<span style="color: green;">After this request, you will have ${(daysRemaining - weekdays).toFixed(1)} days remaining.</span>`;
+                        `<span style="color: green;">After this request, you will have ${(daysRemaining - weekdays).toFixed(1)} days remaining for ${requestYear}.</span>`;
                     document.getElementById('submitBtn').disabled = false;
                 }
             } else {
-                document.getElementById('entitlementCheck').innerHTML = '<span style="color: red; font-weight: bold;">No holiday entitlement set for this year. Please contact admin to set up your entitlement before requesting holidays.</span>';
+                document.getElementById('entitlementCheck').innerHTML = `<span style="color: red; font-weight: bold;">No holiday entitlement set for ${requestYear}. Please contact admin to set up your entitlement before requesting holidays.</span>`;
                 document.getElementById('submitBtn').disabled = true;
             }
         }
@@ -238,9 +252,13 @@
                 return;
             }
             
-            // Check if entitlement exists before submitting
-            if (!currentEntitlement) {
-                alert('You do not have a holiday entitlement set for this year. Please contact your administrator to set up your holiday entitlement before requesting holidays.');
+            // Get the year from the start date and check entitlement for that year
+            const requestYear = new Date(startDate).getFullYear();
+            const entitlement = allEntitlements.find(e => parseInt(e.year) === requestYear);
+            
+            // Check if entitlement exists for the selected year
+            if (!entitlement) {
+                alert(`You do not have a holiday entitlement set for ${requestYear}. Please contact your administrator to set up your holiday entitlement before requesting holidays.`);
                 return;
             }
             
@@ -268,7 +286,7 @@
                     document.getElementById('daysRequested').textContent = '0';
                     document.getElementById('entitlementCheck').textContent = '';
                     await loadMyRequests();
-                    await loadMyEntitlement(); // Refresh entitlement in case it was updated
+                    await loadAllEntitlements(); // Refresh entitlements in case they were updated
                 } else {
                     alert('Error submitting request: ' + (response.error || 'Unknown error'));
                 }
@@ -344,7 +362,7 @@
                 
                 if (response.success) {
                     await loadMyRequests();
-                    await loadMyEntitlement();
+                    await loadAllEntitlements();
                     alert('Request cancelled');
                 }
             } catch (error) {
@@ -360,3 +378,4 @@
     </script>
 </body>
 </html>
+

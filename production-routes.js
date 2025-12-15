@@ -2857,7 +2857,8 @@ router.get('/holidays/entitlements', requireProductionAuth, async (req, res) => 
             const entitlements = await ProductionDatabase.getAllHolidayEntitlements();
             res.json({ success: true, entitlements });
         } else {
-            const entitlements = await ProductionDatabase.getUserHolidayEntitlements(user.id);
+            const userId = parseInt(user.id);
+            const entitlements = await ProductionDatabase.getUserHolidayEntitlements(userId);
             res.json({ success: true, entitlements });
         }
     } catch (error) {
