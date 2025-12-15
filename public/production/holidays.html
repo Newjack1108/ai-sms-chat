@@ -329,11 +329,22 @@
         
         async function loadMyRequests() {
             try {
+                // Get current user info first
+                const meResponse = await apiCall('/me');
+                const currentUserId = meResponse?.user?.id ? parseInt(meResponse.user.id) : null;
+                
                 const response = await apiCall('/holidays/requests');
                 if (response.success) {
-                    displayMyRequests(response.requests);
+                    // Filter to only show current user's requests (even if admin can see all)
+                    let myRequests = response.requests;
+                    if (currentUserId !== null) {
+                        myRequests = response.requests.filter(req => parseInt(req.user_id) === currentUserId);
+                        console.log('Filtered requests: showing', myRequests.length, 'out of', response.requests.length, 'for user', currentUserId);
+                    }
+                    displayMyRequests(myRequests);
                 }
             } catch (error) {
+                console.error('Error loading requests:', error);
                 document.getElementById('myRequestsList').innerHTML = '<div class="error">Error loading requests</div>';
             }
         }
@@ -362,28 +373,26 @@
                 else if (req.status === 'rejected') statusClass = 'danger';
                 else if (req.status === 'pending') statusClass = 'warning';
                 
-                // Show rejection reason more prominently for rejected requests
-                const hasRejectionReason = req.status === 'rejected' && req.review_notes;
-                const rejectionReasonRow = hasRejectionReason 
-                    ? `<tr style="background: #fee;">
-                        <td colspan="7" style="padding: 10px; border-left: 3px solid #dc3545;">
-                            <strong style="color: #dc3545;">Rejection Reason:</strong> ${req.review_notes}
-                        </td>
-                       </tr>`
+                // Show rejection reason on the same line for rejected requests
+                const rejectionReason = req.status === 'rejected' && req.review_notes 
+                    ? `<div style="margin-top: 4px; font-size: 0.85em; color: #dc3545; font-style: italic;">Reason: ${req.review_notes}</div>`
                     : '';
                 
                 html += `<tr>
                     <td>${startDate}</td>
                     <td>${endDate}</td>
                     <td><strong>${parseFloat(req.days_requested).toFixed(1)}</strong> weekdays</td>
-                    <td><span class="badge badge-${statusClass}">${req.status.toUpperCase()}</span></td>
+                    <td>
+                        <span class="badge badge-${statusClass}">${req.status.toUpperCase()}</span>
+                        ${rejectionReason}
+                    </td>
                     <td>${requestedAt}</td>
                     <td>${reviewedAt}</td>
                     <td>
                         ${req.status === 'pending' ? `<button onclick="cancelRequest(${req.id})" class="btn btn-sm btn-danger">Cancel</button>` : ''}
                         ${req.review_notes && req.status !== 'rejected' ? `<button onclick="viewNotes(${req.id}, '${req.review_notes.replace(/'/g, "\\'")}')" class="btn btn-sm btn-secondary">View Notes</button>` : ''}
                     </td>
-                </tr>${rejectionReasonRow}`;
+                </tr>`;
             });
             
             html += '</tbody></table></div>';
