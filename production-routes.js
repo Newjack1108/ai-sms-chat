@@ -2853,12 +2853,16 @@ router.post('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
 router.get('/holidays/entitlements', requireProductionAuth, async (req, res) => {
     try {
         const user = req.session.production_user;
+        console.log('Getting entitlements for user:', user.id, 'role:', user.role);
         if (user.role === 'admin' || user.role === 'office') {
             const entitlements = await ProductionDatabase.getAllHolidayEntitlements();
+            console.log('Admin/Office - All entitlements:', entitlements);
             res.json({ success: true, entitlements });
         } else {
             const userId = parseInt(user.id);
+            console.log('Regular user - Getting entitlements for userId:', userId);
             const entitlements = await ProductionDatabase.getUserHolidayEntitlements(userId);
+            console.log('User entitlements:', entitlements);
             res.json({ success: true, entitlements });
         }
     } catch (error) {
@@ -2885,7 +2889,7 @@ router.get('/holidays/entitlements/:userId/:year', requireProductionAuth, async 
         const user = req.session.production_user;
         
         // Users can only see their own entitlements unless they're admin/office
-        if (user.role !== 'admin' && user.role !== 'office' && user.id !== userId) {
+        if (user.role !== 'admin' && user.role !== 'office' && parseInt(user.id) !== userId) {
             return res.status(403).json({ success: false, error: 'Access denied' });
         }
         
@@ -2975,6 +2979,11 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
         const { start_date, end_date, is_company_shutdown } = req.body;
         const user = req.session.production_user;
         
+        if (!user || !user.id) {
+            console.error('No user in session or user.id is missing');
+            return res.status(401).json({ success: false, error: 'User not authenticated' });
+        }
+        
         if (!start_date || !end_date) {
             return res.status(400).json({ success: false, error: 'Start date and end date are required' });
         }
@@ -2988,17 +2997,37 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
         // Check entitlement
         const currentYear = new Date(start_date).getFullYear();
         const userId = parseInt(user.id);
-        console.log('Checking holiday entitlement for user:', userId, 'type:', typeof userId, 'year:', currentYear, 'type:', typeof currentYear);
+        console.log('=== HOLIDAY REQUEST SUBMISSION ===');
+        console.log('User object:', JSON.stringify(user, null, 2));
+        console.log('User ID from session:', user.id, 'type:', typeof user.id);
+        console.log('Parsed user ID:', userId, 'type:', typeof userId);
+        console.log('Request year:', currentYear, 'type:', typeof currentYear);
+        console.log('Start date:', start_date, 'End date:', end_date);
+        
         const entitlement = await ProductionDatabase.getHolidayEntitlement(userId, currentYear);
         console.log('Entitlement lookup result:', entitlement);
         
         if (!entitlement) {
             // Check if entitlement exists for any year or user
             const allEntitlements = await ProductionDatabase.getAllHolidayEntitlements();
-            console.log('All entitlements in database:', allEntitlements);
+            console.log('All entitlements in database:', JSON.stringify(allEntitlements, null, 2));
             const userEntitlements = allEntitlements.filter(e => parseInt(e.user_id) === userId);
-            console.log('Entitlements for this user:', userEntitlements);
-            return res.status(400).json({ success: false, error: `No holiday entitlement found for year ${currentYear}` });
+            console.log('Entitlements for this user (userId=' + userId + '):', JSON.stringify(userEntitlements, null, 2));
+            
+            // Also check what user_ids exist in entitlements
+            const uniqueUserIds = [...new Set(allEntitlements.map(e => e.user_id))];
+            console.log('Unique user_ids in entitlements table:', uniqueUserIds);
+            
+            return res.status(400).json({ 
+                success: false, 
+                error: `No holiday entitlement found for year ${currentYear}`,
+                debug: {
+                    userId: userId,
+                    year: currentYear,
+                    userEntitlements: userEntitlements,
+                    allUserIds: uniqueUserIds
+                }
+            });
         }
         
         const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);

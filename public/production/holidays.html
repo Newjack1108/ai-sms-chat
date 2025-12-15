@@ -91,12 +91,21 @@
         
         async function loadAllEntitlements() {
             try {
+                // Get current user info first
+                const meResponse = await apiCall('/me');
+                console.log('Current user:', meResponse);
+                
                 const response = await apiCall('/holidays/entitlements');
+                console.log('Entitlements API response:', response);
                 if (response.success && response.entitlements) {
                     allEntitlements = response.entitlements;
+                    console.log('Loaded entitlements:', allEntitlements);
+                    console.log('Current user ID:', meResponse?.user?.id);
+                    console.log('Entitlements user_ids:', allEntitlements.map(e => ({ user_id: e.user_id, year: e.year, total_days: e.total_days })));
                     // Display current year's entitlement by default
                     updateEntitlementForYear(currentYear);
                 } else {
+                    console.warn('No entitlements in response or response not successful:', response);
                     allEntitlements = [];
                     updateEntitlementForYear(currentYear);
                 }
@@ -108,8 +117,15 @@
         }
         
         function updateEntitlementForYear(year) {
-            const entitlement = allEntitlements.find(e => parseInt(e.year) === year);
+            console.log('Looking for entitlement for year:', year, 'Available entitlements:', allEntitlements);
+            const entitlement = allEntitlements.find(e => {
+                const eYear = parseInt(e.year);
+                const match = eYear === year;
+                console.log(`Comparing entitlement year ${eYear} (type: ${typeof eYear}) with ${year} (type: ${typeof year}): ${match}`);
+                return match;
+            });
             currentEntitlement = entitlement || null;
+            console.log('Found entitlement for year', year, ':', entitlement);
             displayEntitlement(entitlement, year);
         }
         
@@ -206,7 +222,10 @@
             updateEntitlementForYear(requestYear);
             
             // Get entitlement for the request year
-            const entitlement = allEntitlements.find(e => parseInt(e.year) === requestYear);
+            const entitlement = allEntitlements.find(e => {
+                const eYear = parseInt(e.year);
+                return eYear === requestYear;
+            });
             
             const weekdays = calculateWorkingDays(startDate, endDate);
             document.getElementById('daysRequested').textContent = weekdays;
@@ -254,7 +273,13 @@
             
             // Get the year from the start date and check entitlement for that year
             const requestYear = new Date(startDate).getFullYear();
-            const entitlement = allEntitlements.find(e => parseInt(e.year) === requestYear);
+            console.log('Submitting request for year:', requestYear);
+            console.log('Available entitlements:', allEntitlements);
+            const entitlement = allEntitlements.find(e => {
+                const eYear = parseInt(e.year);
+                return eYear === requestYear;
+            });
+            console.log('Found entitlement for submission:', entitlement);
             
             // Check if entitlement exists for the selected year
             if (!entitlement) {

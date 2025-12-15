@@ -94,10 +94,11 @@ async function loginProductionUser(username, password) {
         }
         
         // Return user data (without password hash)
+        // Ensure id is an integer for consistency
         return {
             success: true,
             user: {
-                id: user.id,
+                id: parseInt(user.id),
                 username: user.username,
                 role: user.role
             }
