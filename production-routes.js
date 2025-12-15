@@ -3071,10 +3071,21 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
             return res.status(404).json({ success: false, error: 'Holiday request not found' });
         }
         
-        // Users can cancel their own pending requests
-        if (action === 'cancel' && request.status === 'pending') {
+        // Users can cancel their own pending or approved requests
+        if (action === 'cancel') {
+            if (request.status !== 'pending' && request.status !== 'approved') {
+                return res.status(400).json({ success: false, error: 'Can only cancel pending or approved requests' });
+            }
+            
             if (user.role !== 'admin' && user.role !== 'office' && request.user_id !== user.id) {
                 return res.status(403).json({ success: false, error: 'You can only cancel your own requests' });
+            }
+            
+            // If cancelling an approved request, restore the days to entitlement
+            if (request.status === 'approved') {
+                const currentYear = new Date(request.start_date).getFullYear();
+                // Recalculate days_used to ensure accuracy (includes all approved requests)
+                await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
             }
             
             const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'cancelled', user.id, review_notes);
@@ -3088,6 +3099,9 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
             if (action === 'approve') {
                 // Check entitlement again before approving
                 const currentYear = new Date(request.start_date).getFullYear();
+                
+                // Recalculate days_used first to ensure we have accurate count (includes all currently approved holidays)
+                await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
                 const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
                 const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
                 
@@ -3098,8 +3112,12 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
                     });
                 }
                 
-                // Deduct days from entitlement
-                await ProductionDatabase.deductHolidayDays(request.user_id, currentYear, parseFloat(request.days_requested));
+                // Update status first, then recalculate to include this new approved request
+                const status = 'approved';
+                const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, status, user.id, review_notes);
+                
+                // Recalculate days_used to include the newly approved request
+                await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
                 
                 // Populate timesheet entries for approved holidays
                 const start = new Date(request.start_date);
@@ -3111,11 +3129,14 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
                     await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, dateStr, requestId);
                     current.setDate(current.getDate() + 1);
                 }
+                
+                res.json({ success: true, request: updated });
+            } else {
+                // Reject - just update status
+                const status = 'rejected';
+                const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, status, user.id, review_notes);
+                res.json({ success: true, request: updated });
             }
-            
-            const status = action === 'approve' ? 'approved' : 'rejected';
-            const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, status, user.id, review_notes);
-            res.json({ success: true, request: updated });
         } else {
             return res.status(400).json({ success: false, error: 'Invalid action. Must be "cancel", "approve", or "reject"' });
         }
@@ -3142,6 +3163,9 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
         
         // Check entitlement
         const currentYear = new Date(request.start_date).getFullYear();
+        
+        // Recalculate days_used first to ensure we have accurate count (includes future approved holidays)
+        await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
         const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
         const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
         
@@ -3152,8 +3176,11 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
             });
         }
         
-        // Deduct days from entitlement
-        await ProductionDatabase.deductHolidayDays(request.user_id, currentYear, parseFloat(request.days_requested));
+        // Update status first, then recalculate to include this new approved request
+        const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'approved', user.id, review_notes);
+        
+        // Recalculate days_used to include the newly approved request
+        await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
         
         // Populate timesheet entries for approved holidays
         const start = new Date(request.start_date);
@@ -3166,7 +3193,6 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
             current.setDate(current.getDate() + 1);
         }
         
-        const updated = await ProductionDatabase.updateHolidayRequestStatus(requestId, 'approved', user.id, review_notes);
         res.json({ success: true, request: updated });
     } catch (error) {
         console.error('Approve holiday request error:', error);

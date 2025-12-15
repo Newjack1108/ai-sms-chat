@@ -7377,6 +7377,58 @@ class ProductionDatabase {
         }
     }
     
+    // Recalculate days_used based on all approved holiday requests for a user/year
+    // This ensures accuracy and includes future approved holidays
+    static async recalculateHolidayDaysUsed(userId, year) {
+        const userIdInt = parseInt(userId);
+        const yearInt = parseInt(year);
+        
+        // Get all approved holiday requests for this user and year
+        let approvedRequests;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM holiday_requests 
+                 WHERE user_id = $1 
+                 AND status = 'approved'
+                 AND EXTRACT(YEAR FROM start_date) = $2`,
+                [userIdInt, yearInt]
+            );
+            approvedRequests = result.rows;
+        } else {
+            approvedRequests = db.prepare(
+                `SELECT * FROM holiday_requests 
+                 WHERE user_id = ? 
+                 AND status = 'approved'
+                 AND strftime('%Y', start_date) = ?`
+            ).all(userIdInt, yearInt.toString());
+        }
+        
+        // Sum up all days from approved requests
+        let totalDaysUsed = 0;
+        for (const request of approvedRequests) {
+            totalDaysUsed += parseFloat(request.days_requested || 0);
+        }
+        
+        // Update the entitlement with the recalculated value
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE holiday_entitlements 
+                 SET days_used = $1, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = $2 AND year = $3
+                 RETURNING *`,
+                [totalDaysUsed, userIdInt, yearInt]
+            );
+            return result.rows[0] || null;
+        } else {
+            db.prepare(
+                `UPDATE holiday_entitlements 
+                 SET days_used = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE user_id = ? AND year = ?`
+            ).run(totalDaysUsed, userIdInt, yearInt);
+            return this.getHolidayEntitlement(userIdInt, yearInt);
+        }
+    }
+    
     static async getAllHolidayEntitlements() {
         let rows;
         if (isPostgreSQL) {
