@@ -166,7 +166,11 @@
                     </div>
                     <div>
                         <strong>Days Remaining:</strong><br>
-                        <span style="font-size: 24px; color: ${daysRemaining > 0 ? '#28a745' : '#dc3545'};">${daysRemaining.toFixed(1)} days</span>
+                        <span style="font-size: 24px; color: ${daysRemaining < 0 ? '#dc3545' : (daysRemaining < 5 ? '#ff9800' : '#28a745')};">
+                            ${daysRemaining >= 0 ? '' : '-'}${Math.abs(daysRemaining).toFixed(1)} days
+                        </span>
+                        ${daysRemaining < 0 ? '<br><small style="color: #dc3545;">(Negative due to shutdown periods)</small>' : ''}
+                        ${daysUsed > totalDays ? '<br><small style="color: #dc3545;">(Includes shutdown periods)</small>' : ''}
                     </div>
                 </div>
                 ${allEntitlements.length > 1 ? `
@@ -241,13 +245,15 @@
                     ? parseFloat(entitlement.days_remaining) 
                     : (parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0));
                 
-                if (weekdays > daysRemaining) {
+                const afterRequest = daysRemaining - weekdays;
+                // Allow negative balances (shutdown periods can cause this)
+                if (afterRequest < 0) {
                     document.getElementById('entitlementCheck').innerHTML = 
-                        `<span style="color: red;">Insufficient entitlement for ${requestYear}. You have ${daysRemaining.toFixed(1)} days remaining.</span>`;
-                    document.getElementById('submitBtn').disabled = true;
+                        `<span style="color: orange;">After this request, you will have <strong>${afterRequest.toFixed(1)} days</strong> remaining for ${requestYear} (negative due to shutdown periods).</span>`;
+                    document.getElementById('submitBtn').disabled = false;
                 } else {
                     document.getElementById('entitlementCheck').innerHTML = 
-                        `<span style="color: green;">After this request, you will have ${(daysRemaining - weekdays).toFixed(1)} days remaining for ${requestYear}.</span>`;
+                        `<span style="color: green;">After this request, you will have ${afterRequest.toFixed(1)} days remaining for ${requestYear}.</span>`;
                     document.getElementById('submitBtn').disabled = false;
                 }
             } else {

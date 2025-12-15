@@ -3034,12 +3034,12 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             });
         }
         
+        // Calculate days remaining (can be negative if shutdown periods have been applied)
         const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
+        // Allow negative balances - shutdown periods can cause this
+        // Just log a warning if going negative
         if (daysRemaining < weekdays) {
-            return res.status(400).json({ 
-                success: false, 
-                error: `Insufficient holiday entitlement. Requested: ${weekdays} days, Available: ${daysRemaining.toFixed(1)} days` 
-            });
+            console.log(`Warning: User ${userId} requesting ${weekdays} days but only has ${daysRemaining.toFixed(1)} days remaining (will go negative)`);
         }
         
         const request = await ProductionDatabase.createHolidayRequest({
@@ -3109,11 +3109,10 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
                 const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
                 const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
                 
+                // Allow negative balances - shutdown periods can cause this
+                // Just log a warning if going negative
                 if (daysRemaining < parseFloat(request.days_requested)) {
-                    return res.status(400).json({ 
-                        success: false, 
-                        error: `Insufficient holiday entitlement. Available: ${daysRemaining.toFixed(1)} days` 
-                    });
+                    console.log(`Warning: Approving request that will result in negative entitlement. User will have ${(daysRemaining - parseFloat(request.days_requested)).toFixed(1)} days remaining`);
                 }
                 
                 // Update status first, then recalculate to include this new approved request
@@ -3173,11 +3172,10 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
         const entitlement = await ProductionDatabase.getHolidayEntitlement(request.user_id, currentYear);
         const daysRemaining = parseFloat(entitlement.total_days || 0) - parseFloat(entitlement.days_used || 0);
         
+        // Allow negative balances - shutdown periods can cause this
+        // Just log a warning if going negative
         if (daysRemaining < parseFloat(request.days_requested)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: `Insufficient holiday entitlement. Available: ${daysRemaining.toFixed(1)} days` 
-            });
+            console.log(`Warning: Approving request that will result in negative entitlement. User will have ${(daysRemaining - parseFloat(request.days_requested)).toFixed(1)} days remaining`);
         }
         
         // Update status first, then recalculate to include this new approved request
