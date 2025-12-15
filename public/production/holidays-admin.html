@@ -24,6 +24,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="showTab('entitlements')">Entitlements</button>
             <button class="tab-btn" onclick="showTab('requests')">Pending Requests</button>
+            <button class="tab-btn" onclick="showTab('calendar')">Calendar</button>
             <button class="tab-btn" onclick="showTab('shutdown')">Shutdown Periods</button>
         </div>
         
@@ -49,6 +50,24 @@
                 </div>
                 <div id="pendingRequestsList">
                     <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Calendar Tab -->
+        <div id="calendar-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Holiday Calendar</h2>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <button onclick="previousMonth()" class="btn btn-secondary btn-sm">← Previous</button>
+                        <h3 id="calendarMonthYear" style="margin: 0; min-width: 200px; text-align: center;"></h3>
+                        <button onclick="nextMonth()" class="btn btn-secondary btn-sm">Next →</button>
+                        <button onclick="goToToday()" class="btn btn-primary btn-sm">Today</button>
+                    </div>
+                </div>
+                <div id="calendarContainer">
+                    <div class="loading">Loading calendar...</div>
                 </div>
             </div>
         </div>
@@ -126,9 +145,103 @@
     </div>
     
     <script src="common.js"></script>
+    <style>
+        .holiday-calendar {
+            width: 100%;
+            margin-top: 20px;
+        }
+        
+        .calendar-header {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            margin-bottom: 1px;
+        }
+        
+        .calendar-header-cell {
+            background: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            border: 1px solid #dee2e6;
+        }
+        
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background: #dee2e6;
+            border: 1px solid #dee2e6;
+        }
+        
+        .calendar-day {
+            min-height: 100px;
+            background: white;
+            padding: 5px;
+            border: 1px solid #dee2e6;
+            position: relative;
+        }
+        
+        .calendar-day.other-month {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+        
+        .calendar-day.today {
+            background: #e7f3ff;
+            border: 2px solid #007bff;
+        }
+        
+        .calendar-day.weekend {
+            background: #f8f9fa;
+        }
+        
+        .calendar-day-number {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        
+        .holiday-item {
+            font-size: 11px;
+            padding: 2px 4px;
+            margin: 2px 0;
+            border-radius: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .holiday-approved {
+            background: #28a745;
+            color: white;
+        }
+        
+        .holiday-pending {
+            background: #ffc107;
+            color: #000;
+        }
+        
+        .shutdown-period {
+            background: #17a2b8;
+            color: white;
+            font-weight: bold;
+            margin-top: 5px;
+            padding: 3px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        
+        .holiday-multiple {
+            font-size: 10px;
+            color: #666;
+        }
+    </style>
     <script>
         let currentYear = new Date().getFullYear();
         let users = [];
+        let calendarMonth = new Date().getMonth();
+        let calendarYear = new Date().getFullYear();
         
         async function init() {
             await checkAuth();
@@ -544,6 +657,200 @@
         
         // Use this for shutdown periods display
         const ProductionDatabase = { calculateWorkingDays };
+        
+        // Calendar functions
+        async function loadCalendar() {
+            try {
+                const year = calendarYear;
+                const month = calendarMonth;
+                
+                // Fetch all holiday requests for the year
+                const requestsResponse = await apiCall(`/holidays/requests?year=${year}`);
+                if (!requestsResponse.success) {
+                    throw new Error('Failed to load holiday requests');
+                }
+                
+                // Filter for approved and pending only, and check if they overlap with current month
+                const allRequests = requestsResponse.requests || [];
+                const monthRequests = allRequests.filter(req => {
+                    if (req.status !== 'approved' && req.status !== 'pending') {
+                        return false;
+                    }
+                    const reqStart = new Date(req.start_date);
+                    const reqEnd = new Date(req.end_date);
+                    const monthStart = new Date(year, month, 1);
+                    const monthEnd = new Date(year, month + 1, 0);
+                    // Check if request overlaps with the month
+                    return reqStart <= monthEnd && reqEnd >= monthStart;
+                });
+                
+                // Fetch shutdown periods for the year
+                const shutdownsResponse = await apiCall(`/holidays/shutdown-periods?year=${year}`);
+                const allShutdowns = shutdownsResponse.success ? (shutdownsResponse.periods || shutdownsResponse.shutdowns || []) : [];
+                const monthShutdowns = allShutdowns.filter(shutdown => {
+                    const shutdownStart = new Date(shutdown.start_date);
+                    const shutdownEnd = new Date(shutdown.end_date);
+                    const monthStart = new Date(year, month, 1);
+                    const monthEnd = new Date(year, month + 1, 0);
+                    // Check if shutdown overlaps with the month
+                    return shutdownStart <= monthEnd && shutdownEnd >= monthStart;
+                });
+                
+                renderCalendar(month, year, monthRequests, monthShutdowns);
+            } catch (error) {
+                console.error('Error loading calendar:', error);
+                document.getElementById('calendarContainer').innerHTML = 
+                    '<div class="error">Error loading calendar: ' + (error.message || 'Unknown error') + '</div>';
+            }
+        }
+        
+        function renderCalendar(month, year, requests, shutdowns) {
+            const container = document.getElementById('calendarContainer');
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                              'July', 'August', 'September', 'October', 'November', 'December'];
+            
+            // Update month/year display
+            document.getElementById('calendarMonthYear').textContent = 
+                `${monthNames[month]} ${year}`;
+            
+            // Get first day of month and number of days
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const daysInMonth = lastDay.getDate();
+            const startingDayOfWeek = firstDay.getDay(); // 0 = Sunday, 1 = Monday, etc.
+            
+            // Create a map of dates to holidays
+            const holidaysByDate = {};
+            requests.forEach(req => {
+                const start = new Date(req.start_date);
+                const end = new Date(req.end_date);
+                const current = new Date(start);
+                
+                while (current <= end) {
+                    const dateKey = current.toISOString().split('T')[0];
+                    if (!holidaysByDate[dateKey]) {
+                        holidaysByDate[dateKey] = [];
+                    }
+                    // Only add if it's a weekday and within the current month
+                    const dayOfWeek = current.getDay();
+                    if (dayOfWeek >= 1 && dayOfWeek <= 5 && 
+                        current.getMonth() === month && 
+                        current.getFullYear() === year) {
+                        holidaysByDate[dateKey].push({
+                            user_name: req.user_name || 'Unknown',
+                            status: req.status
+                        });
+                    }
+                    current.setDate(current.getDate() + 1);
+                }
+            });
+            
+            // Create shutdown map
+            const shutdownsByDate = {};
+            shutdowns.forEach(shutdown => {
+                const start = new Date(shutdown.start_date);
+                const end = new Date(shutdown.end_date);
+                const current = new Date(start);
+                
+                while (current <= end) {
+                    const dateKey = current.toISOString().split('T')[0];
+                    if (current.getMonth() === month && current.getFullYear() === year) {
+                        shutdownsByDate[dateKey] = shutdown.description || 'Company Shutdown';
+                    }
+                    current.setDate(current.getDate() + 1);
+                }
+            });
+            
+            // Build calendar HTML
+            let html = '<div class="holiday-calendar">';
+            
+            // Header with day names
+            html += '<div class="calendar-header">';
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            dayNames.forEach(day => {
+                html += `<div class="calendar-header-cell">${day}</div>`;
+            });
+            html += '</div>';
+            
+            // Calendar grid
+            html += '<div class="calendar-grid">';
+            
+            // Add empty cells for days before month starts
+            for (let i = 0; i < startingDayOfWeek; i++) {
+                html += '<div class="calendar-day other-month"></div>';
+            }
+            
+            // Add cells for each day of the month
+            const today = new Date();
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(year, month, day);
+                const dateKey = date.toISOString().split('T')[0];
+                const dayOfWeek = date.getDay();
+                const isToday = date.toDateString() === today.toDateString();
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                
+                let dayClass = 'calendar-day';
+                if (isToday) dayClass += ' today';
+                if (isWeekend) dayClass += ' weekend';
+                
+                html += `<div class="${dayClass}">`;
+                html += `<div class="calendar-day-number">${day}</div>`;
+                
+                // Add shutdown period if exists
+                if (shutdownsByDate[dateKey]) {
+                    html += `<div class="shutdown-period">${shutdownsByDate[dateKey]}</div>`;
+                }
+                
+                // Add holidays for this day
+                if (holidaysByDate[dateKey] && holidaysByDate[dateKey].length > 0) {
+                    const holidays = holidaysByDate[dateKey];
+                    holidays.forEach(holiday => {
+                        const statusClass = holiday.status === 'approved' ? 'holiday-approved' : 'holiday-pending';
+                        html += `<div class="holiday-item ${statusClass}" title="${holiday.user_name} - ${holiday.status}">`;
+                        html += `${holiday.user_name} (${holiday.status === 'approved' ? 'Approved' : 'Pending'})`;
+                        html += `</div>`;
+                    });
+                }
+                
+                html += '</div>';
+            }
+            
+            // Add empty cells for days after month ends
+            const totalCells = startingDayOfWeek + daysInMonth;
+            const remainingCells = 42 - totalCells; // 6 weeks * 7 days
+            for (let i = 0; i < remainingCells && i < 7; i++) {
+                html += '<div class="calendar-day other-month"></div>';
+            }
+            
+            html += '</div></div>';
+            
+            container.innerHTML = html;
+        }
+        
+        function previousMonth() {
+            calendarMonth--;
+            if (calendarMonth < 0) {
+                calendarMonth = 11;
+                calendarYear--;
+            }
+            loadCalendar();
+        }
+        
+        function nextMonth() {
+            calendarMonth++;
+            if (calendarMonth > 11) {
+                calendarMonth = 0;
+                calendarYear++;
+            }
+            loadCalendar();
+        }
+        
+        function goToToday() {
+            const today = new Date();
+            calendarMonth = today.getMonth();
+            calendarYear = today.getFullYear();
+            loadCalendar();
+        }
     </script>
 </body>
 </html>
