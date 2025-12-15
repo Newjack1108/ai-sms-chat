@@ -94,14 +94,20 @@
                 // Get current user info first
                 const meResponse = await apiCall('/me');
                 console.log('Current user:', meResponse);
+                const currentUserId = meResponse?.user?.id ? parseInt(meResponse.user.id) : null;
                 
                 const response = await apiCall('/holidays/entitlements');
                 console.log('Entitlements API response:', response);
                 if (response.success && response.entitlements) {
-                    allEntitlements = response.entitlements;
-                    console.log('Loaded entitlements:', allEntitlements);
-                    console.log('Current user ID:', meResponse?.user?.id);
-                    console.log('Entitlements user_ids:', allEntitlements.map(e => ({ user_id: e.user_id, year: e.year, total_days: e.total_days })));
+                    // Filter to only show entitlements for the current user
+                    // Even if admin can see all entitlements, they should only see their own for booking
+                    if (currentUserId !== null) {
+                        allEntitlements = response.entitlements.filter(e => parseInt(e.user_id) === currentUserId);
+                        console.log('Filtered entitlements for current user (ID:', currentUserId, '):', allEntitlements);
+                    } else {
+                        allEntitlements = [];
+                        console.warn('Could not determine current user ID');
+                    }
                     // Display current year's entitlement by default
                     updateEntitlementForYear(currentYear);
                 } else {
