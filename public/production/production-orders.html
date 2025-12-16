@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Works Orders - Production System</title>
     <link rel="stylesheet" href="common.css">
+    <style>
+        .requirements-section h4 {
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        .requirements-section h4:first-child {
+            margin-top: 0;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar">
@@ -473,6 +482,7 @@
                                     }).join('')}
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -528,7 +538,7 @@
                     <div class="alert alert-info">
                         <strong>Total Estimated Cost:</strong> ${formatCurrency(requirements.total_cost_gbp || totalCost)}
                     </div>
-                    
+                    <div class="requirements-section">
                     <h4>Built Items Required</h4>
                     <table class="table">
                         <thead>
@@ -631,6 +641,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    </div>
                 `;
             } catch (error) {
                 showAlert('Error calculating requirements: ' + error.message, 'error');
@@ -652,7 +663,7 @@
                             <h3>Order Requirements</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
-                        <div>
+                        <div class="requirements-section">
                             <h4>Built Items Required</h4>
                             <table class="table">
                                 <thead>
@@ -750,6 +761,7 @@
                                     }).join('')}
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                 `;
