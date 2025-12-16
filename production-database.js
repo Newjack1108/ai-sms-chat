@@ -6775,6 +6775,11 @@ class ProductionDatabase {
                     const bomItems = await this.getPanelBOM(panelId);
                     for (const bomItem of bomItems) {
                         const stockItemId = bomItem.stock_item_id;
+                        // Skip if stockItemId is invalid
+                        if (!stockItemId || stockItemId === null || stockItemId === undefined) {
+                            console.warn(`Skipping panel BOM item with invalid stock_item_id:`, bomItem);
+                            continue;
+                        }
                         const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
                         
                         if (!rawMaterialsRequired[stockItemId]) {
@@ -6800,6 +6805,11 @@ class ProductionDatabase {
                             if (bomItems && bomItems.length > 0) {
                                 for (const bomItem of bomItems) {
                                     const stockItemId = bomItem.stock_item_id;
+                                    // Skip if stockItemId is invalid
+                                    if (!stockItemId || stockItemId === null || stockItemId === undefined) {
+                                        console.warn(`Skipping BOM item with invalid stock_item_id:`, bomItem);
+                                        continue;
+                                    }
                                     const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
                                     
                                     if (!rawMaterialsRequired[stockItemId]) {
@@ -6821,6 +6831,11 @@ class ProductionDatabase {
                     }
                 } else if (comp.component_type === 'raw_material') {
                     const stockItemId = comp.component_id;
+                    // Skip if stockItemId is invalid
+                    if (!stockItemId || stockItemId === null || stockItemId === undefined) {
+                        console.warn(`Skipping raw material component with invalid component_id:`, comp);
+                        continue;
+                    }
                     if (!rawMaterialsRequired[stockItemId]) {
                         const stockItem = await this.getStockItemById(stockItemId);
                         rawMaterialsRequired[stockItemId] = {
@@ -6884,7 +6899,12 @@ class ProductionDatabase {
         const materialsArray = [];
         let totalCost = 0;
         for (const [stockItemId, data] of Object.entries(rawMaterialsRequired)) {
-            const stockItem = await this.getStockItemById(stockItemId);
+            // Skip invalid stock item IDs
+            if (!stockItemId || stockItemId === 'undefined' || stockItemId === 'null') {
+                console.warn(`Skipping invalid stockItemId:`, stockItemId);
+                continue;
+            }
+            const stockItem = await this.getStockItemById(parseInt(stockItemId));
             const available = parseFloat(stockItem ? stockItem.current_quantity : 0);
             const shortfall = Math.max(0, data.total_quantity - available);
             const cost = parseFloat(stockItem ? stockItem.cost_per_unit_gbp : 0) * data.total_quantity;
