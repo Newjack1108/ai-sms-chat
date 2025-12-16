@@ -6774,23 +6774,59 @@ class ProductionDatabase {
                     // Get BOM for this panel
                     const bomItems = await this.getPanelBOM(panelId);
                     for (const bomItem of bomItems) {
-                        const stockItemId = bomItem.stock_item_id;
-                        // Skip if stockItemId is invalid
-                        if (!stockItemId || stockItemId === null || stockItemId === undefined) {
-                            console.warn(`Skipping panel BOM item with invalid stock_item_id:`, bomItem);
-                            continue;
-                        }
-                        const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
+                        const bomItemQty = parseFloat(bomItem.quantity_required) * totalQty;
                         
-                        if (!rawMaterialsRequired[stockItemId]) {
-                            rawMaterialsRequired[stockItemId] = {
-                                stock_item_id: stockItemId,
-                                name: bomItem.stock_item_name,
-                                unit: bomItem.unit,
-                                total_quantity: 0
-                            };
+                        if (bomItem.item_type === 'raw_material') {
+                            const stockItemId = bomItem.item_id; // Use item_id, not stock_item_id
+                            // Skip if stockItemId is invalid
+                            if (!stockItemId || stockItemId === null || stockItemId === undefined) {
+                                console.warn(`Skipping panel BOM item with invalid item_id:`, bomItem);
+                                continue;
+                            }
+                            
+                            if (!rawMaterialsRequired[stockItemId]) {
+                                const stockItem = await this.getStockItemById(stockItemId);
+                                rawMaterialsRequired[stockItemId] = {
+                                    stock_item_id: stockItemId,
+                                    name: bomItem.item_name || (stockItem ? stockItem.name : 'Unknown'),
+                                    unit: bomItem.item_unit || bomItem.unit,
+                                    total_quantity: 0
+                                };
+                            }
+                            rawMaterialsRequired[stockItemId].total_quantity += bomItemQty;
+                            
+                        } else if (bomItem.item_type === 'component') {
+                            // Component in panel BOM - get its BOM and process raw materials
+                            try {
+                                const componentBomItems = await this.getComponentBOM(bomItem.item_id);
+                                if (componentBomItems && componentBomItems.length > 0) {
+                                    for (const componentBomItem of componentBomItems) {
+                                        const stockItemId = componentBomItem.stock_item_id;
+                                        // Skip if stockItemId is invalid
+                                        if (!stockItemId || stockItemId === null || stockItemId === undefined) {
+                                            console.warn(`Skipping component BOM item with invalid stock_item_id:`, componentBomItem);
+                                            continue;
+                                        }
+                                        // Multiply: component_bom_qty * panel_bom_qty * order_qty
+                                        const materialQty = parseFloat(componentBomItem.quantity_required) * bomItemQty;
+                                        
+                                        if (!rawMaterialsRequired[stockItemId]) {
+                                            const stockItem = await this.getStockItemById(stockItemId);
+                                            rawMaterialsRequired[stockItemId] = {
+                                                stock_item_id: stockItemId,
+                                                name: componentBomItem.stock_item_name || (stockItem ? stockItem.name : 'Unknown'),
+                                                unit: componentBomItem.unit || componentBomItem.stock_item_unit || 'unit',
+                                                total_quantity: 0
+                                            };
+                                        }
+                                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                                    }
+                                }
+                            } catch (error) {
+                                console.error(`Error processing component ${bomItem.item_id} in panel BOM:`, error);
+                                // Continue processing other BOM items even if one fails
+                            }
                         }
-                        rawMaterialsRequired[stockItemId].total_quantity += materialQty;
                     }
                 } else if (comp.component_type === 'component') {
                     // Component can be direct product component - calculate labour hours and process BOM
