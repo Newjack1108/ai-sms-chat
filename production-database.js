@@ -6788,11 +6788,36 @@ class ProductionDatabase {
                         rawMaterialsRequired[stockItemId].total_quantity += materialQty;
                     }
                 } else if (comp.component_type === 'component') {
-                    // Component can be direct product component - calculate labour hours
-                    const component = await this.getComponentById(comp.component_id);
-                    if (component) {
-                        const labourHours = parseFloat(component.labour_hours || 0) * totalQty;
-                        totalLabourHours += labourHours;
+                    // Component can be direct product component - calculate labour hours and process BOM
+                    try {
+                        const component = await this.getComponentById(comp.component_id);
+                        if (component) {
+                            const labourHours = parseFloat(component.labour_hours || 0) * totalQty;
+                            totalLabourHours += labourHours;
+                            
+                            // Get BOM for this component to process raw materials
+                            const bomItems = await this.getComponentBOM(comp.component_id);
+                            if (bomItems && bomItems.length > 0) {
+                                for (const bomItem of bomItems) {
+                                    const stockItemId = bomItem.stock_item_id;
+                                    const materialQty = parseFloat(bomItem.quantity_required) * totalQty;
+                                    
+                                    if (!rawMaterialsRequired[stockItemId]) {
+                                        const stockItem = await this.getStockItemById(stockItemId);
+                                        rawMaterialsRequired[stockItemId] = {
+                                            stock_item_id: stockItemId,
+                                            name: bomItem.stock_item_name || (stockItem ? stockItem.name : 'Unknown'),
+                                            unit: bomItem.unit || bomItem.stock_item_unit || 'unit',
+                                            total_quantity: 0
+                                        };
+                                    }
+                                    rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error processing component ${comp.component_id}:`, error);
+                        // Continue processing other components even if one fails
                     }
                 } else if (comp.component_type === 'raw_material') {
                     const stockItemId = comp.component_id;
