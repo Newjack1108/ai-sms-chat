@@ -6728,6 +6728,7 @@ class ProductionDatabase {
     static async calculateMaterialRequirements(orders) {
         // orders: array of {product_id, quantity}
         const panelsRequired = {};
+        const componentsRequired = {};
         const rawMaterialsRequired = {};
         let totalLabourHours = 0;
         const breakdown = {
@@ -6829,15 +6830,24 @@ class ProductionDatabase {
                         }
                     }
                 } else if (comp.component_type === 'component') {
-                    // Component can be direct product component - calculate labour hours and process BOM
+                    // Component can be direct product component - track it and process BOM
+                    const componentId = comp.component_id;
+                    
+                    // Track component separately (only direct product components, not components in built item BOMs)
+                    if (!componentsRequired[componentId]) {
+                        componentsRequired[componentId] = 0;
+                    }
+                    componentsRequired[componentId] += totalQty;
+                    
+                    // Calculate labour hours and process BOM for raw materials
                     try {
-                        const component = await this.getComponentById(comp.component_id);
+                        const component = await this.getComponentById(componentId);
                         if (component) {
                             const labourHours = parseFloat(component.labour_hours || 0) * totalQty;
                             totalLabourHours += labourHours;
                             
                             // Get BOM for this component to process raw materials
-                            const bomItems = await this.getComponentBOM(comp.component_id);
+                            const bomItems = await this.getComponentBOM(componentId);
                             if (bomItems && bomItems.length > 0) {
                                 for (const bomItem of bomItems) {
                                     const stockItemId = bomItem.stock_item_id;
@@ -6862,7 +6872,7 @@ class ProductionDatabase {
                             }
                         }
                     } catch (error) {
-                        console.error(`Error processing component ${comp.component_id}:`, error);
+                        console.error(`Error processing component ${componentId}:`, error);
                         // Continue processing other components even if one fails
                     }
                 } else if (comp.component_type === 'raw_material') {
@@ -6920,14 +6930,41 @@ class ProductionDatabase {
             breakdown.by_panel.push(panelBreakdown);
         }
         
-        // Convert panelsRequired to array
+        // Convert panelsRequired to array with detailed information
         const panelsArray = [];
         for (const [panelId, totalQty] of Object.entries(panelsRequired)) {
             const panel = await this.getPanelById(panelId);
+            const available = parseFloat(panel ? panel.built_quantity : 0);
+            const shortfall = Math.max(0, totalQty - available);
+            const cost = parseFloat(panel ? panel.cost_gbp : 0) * totalQty;
+            
             panelsArray.push({
                 panel_id: parseInt(panelId),
                 panel_name: panel ? panel.name : 'Unknown',
-                total_quantity: totalQty
+                total_quantity: totalQty,
+                available: available,
+                shortfall: shortfall,
+                cost_gbp: cost,
+                type: 'Built Item'
+            });
+        }
+        
+        // Convert componentsRequired to array with detailed information
+        const componentsArray = [];
+        for (const [componentId, totalQty] of Object.entries(componentsRequired)) {
+            const component = await this.getComponentById(componentId);
+            const available = parseFloat(component ? component.built_quantity : 0);
+            const shortfall = Math.max(0, totalQty - available);
+            const cost = parseFloat(component ? component.cost_gbp : 0) * totalQty;
+            
+            componentsArray.push({
+                component_id: parseInt(componentId),
+                component_name: component ? component.name : 'Unknown',
+                total_quantity: totalQty,
+                available: available,
+                shortfall: shortfall,
+                cost_gbp: cost,
+                type: 'Component'
             });
         }
         
@@ -6959,6 +6996,7 @@ class ProductionDatabase {
         
         return {
             panels_required: panelsArray,
+            components_required: componentsArray,
             raw_materials_required: materialsArray,
             breakdown: breakdown,
             total_cost_gbp: totalCost,

@@ -381,16 +381,62 @@
                                 <thead>
                                     <tr>
                                         <th>Built Item</th>
-                                        <th>Quantity</th>
+                                        <th>Total Quantity</th>
+                                        <th>Type</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                        <th>Total Cost (GBP)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${requirements.panels_required.map(p => `
-                                        <tr>
-                                            <td>${p.panel_name}</td>
-                                            <td>${p.total_quantity.toFixed(2)}</td>
-                                        </tr>
-                                    `).join('')}
+                                    ${requirements.panels_required.length === 0 ? '<tr><td colspan="6">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                        const available = parseFloat(p.available || 0);
+                                        const required = parseFloat(p.total_quantity || 0);
+                                        const shortfall = Math.max(0, required - available);
+                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                        return `
+                                            <tr>
+                                                <td><strong>${p.panel_name}</strong></td>
+                                                <td>${required.toFixed(2)}</td>
+                                                <td>${p.type || 'Built Item'}</td>
+                                                <td>${available.toFixed(2)}</td>
+                                                <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                                <td>${formatCurrency(p.cost_gbp || 0)}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            
+                            <h4>Components Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Total Quantity</th>
+                                        <th>Type</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                        <th>Total Cost (GBP)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.components_required && requirements.components_required.length > 0 ? requirements.components_required.map(c => {
+                                        const available = parseFloat(c.available || 0);
+                                        const required = parseFloat(c.total_quantity || 0);
+                                        const shortfall = Math.max(0, required - available);
+                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                        return `
+                                            <tr>
+                                                <td><strong>${c.component_name}</strong></td>
+                                                <td>${required.toFixed(2)}</td>
+                                                <td>${c.type || 'Component'}</td>
+                                                <td>${available.toFixed(2)}</td>
+                                                <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                                <td>${formatCurrency(c.cost_gbp || 0)}</td>
+                                            </tr>
+                                        `;
+                                    }).join('') : '<tr><td colspan="6">No components required</td></tr>'}
                                 </tbody>
                             </table>
                             
@@ -489,15 +535,61 @@
                             <tr>
                                 <th>Built Item</th>
                                 <th>Total Quantity</th>
+                                <th>Type</th>
+                                <th>Available</th>
+                                <th>Shortfall</th>
+                                <th>Total Cost (GBP)</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="2">No built items required</td></tr>' : requirements.panels_required.map(p => `
-                                <tr>
-                                    <td>${p.panel_name}</td>
-                                    <td>${p.total_quantity.toFixed(2)}</td>
-                                </tr>
-                            `).join('')}
+                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="6">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                const available = parseFloat(p.available || 0);
+                                const required = parseFloat(p.total_quantity || 0);
+                                const shortfall = Math.max(0, required - available);
+                                const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                return `
+                                    <tr>
+                                        <td><strong>${p.panel_name}</strong></td>
+                                        <td>${required.toFixed(2)}</td>
+                                        <td>${p.type || 'Built Item'}</td>
+                                        <td>${available.toFixed(2)}</td>
+                                        <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                        <td>${formatCurrency(p.cost_gbp || 0)}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                    
+                    <h4>Components Required</h4>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Component</th>
+                                <th>Total Quantity</th>
+                                <th>Type</th>
+                                <th>Available</th>
+                                <th>Shortfall</th>
+                                <th>Total Cost (GBP)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${requirements.components_required && requirements.components_required.length > 0 ? requirements.components_required.map(c => {
+                                const available = parseFloat(c.available || 0);
+                                const required = parseFloat(c.total_quantity || 0);
+                                const shortfall = Math.max(0, required - available);
+                                const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                return `
+                                    <tr>
+                                        <td><strong>${c.component_name}</strong></td>
+                                        <td>${required.toFixed(2)}</td>
+                                        <td>${c.type || 'Component'}</td>
+                                        <td>${available.toFixed(2)}</td>
+                                        <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                        <td>${formatCurrency(c.cost_gbp || 0)}</td>
+                                    </tr>
+                                `;
+                            }).join('') : '<tr><td colspan="6">No components required</td></tr>'}
                         </tbody>
                     </table>
                     
@@ -566,16 +658,62 @@
                                 <thead>
                                     <tr>
                                         <th>Built Item</th>
-                                        <th>Quantity</th>
+                                        <th>Total Quantity</th>
+                                        <th>Type</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                        <th>Total Cost (GBP)</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${requirements.panels_required.map(p => `
-                                        <tr>
-                                            <td>${p.panel_name}</td>
-                                            <td>${p.total_quantity.toFixed(2)}</td>
-                                        </tr>
-                                    `).join('')}
+                                    ${requirements.panels_required.length === 0 ? '<tr><td colspan="6">No built items required</td></tr>' : requirements.panels_required.map(p => {
+                                        const available = parseFloat(p.available || 0);
+                                        const required = parseFloat(p.total_quantity || 0);
+                                        const shortfall = Math.max(0, required - available);
+                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                        return `
+                                            <tr>
+                                                <td><strong>${p.panel_name}</strong></td>
+                                                <td>${required.toFixed(2)}</td>
+                                                <td>${p.type || 'Built Item'}</td>
+                                                <td>${available.toFixed(2)}</td>
+                                                <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                                <td>${formatCurrency(p.cost_gbp || 0)}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            
+                            <h4>Components Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Total Quantity</th>
+                                        <th>Type</th>
+                                        <th>Available</th>
+                                        <th>Shortfall</th>
+                                        <th>Total Cost (GBP)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${requirements.components_required && requirements.components_required.length > 0 ? requirements.components_required.map(c => {
+                                        const available = parseFloat(c.available || 0);
+                                        const required = parseFloat(c.total_quantity || 0);
+                                        const shortfall = Math.max(0, required - available);
+                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                        return `
+                                            <tr>
+                                                <td><strong>${c.component_name}</strong></td>
+                                                <td>${required.toFixed(2)}</td>
+                                                <td>${c.type || 'Component'}</td>
+                                                <td>${available.toFixed(2)}</td>
+                                                <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
+                                                <td>${formatCurrency(c.cost_gbp || 0)}</td>
+                                            </tr>
+                                        `;
+                                    }).join('') : '<tr><td colspan="6">No components required</td></tr>'}
                                 </tbody>
                             </table>
                             
