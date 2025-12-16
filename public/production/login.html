@@ -185,7 +185,21 @@
                     body: JSON.stringify({ username, password })
                 });
                 
-                const data = await response.json();
+                let data;
+                try {
+                    data = await response.json();
+                } catch (jsonError) {
+                    console.error('Failed to parse JSON response:', jsonError);
+                    const text = await response.text();
+                    console.error('Response text:', text);
+                    errorMessage.textContent = `Server error (${response.status}): ${text || 'Invalid response'}`;
+                    errorMessage.classList.add('show');
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = 'Login';
+                    return;
+                }
+                
+                console.log('Login response:', data);
                 
                 if (data.success) {
                     // Redirect staff to timesheet, others to dashboard
@@ -201,6 +215,7 @@
                     loginBtn.textContent = 'Login';
                 }
             } catch (error) {
+                console.error('Login error:', error);
                 errorMessage.textContent = 'Connection error. Please try again.';
                 errorMessage.classList.add('show');
                 loginBtn.disabled = false;

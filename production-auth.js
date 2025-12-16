@@ -83,15 +83,33 @@ function requireManager(req, res, next) {
 // Login function
 async function loginProductionUser(username, password) {
     try {
+        console.log('Login attempt for username:', username);
+        
+        if (!username || !password) {
+            console.log('Missing username or password');
+            return { success: false, error: 'Username and password are required' };
+        }
+        
         const user = await ProductionDatabase.getUserByUsername(username);
         if (!user) {
+            console.log('User not found:', username);
             return { success: false, error: 'Invalid credentials' };
+        }
+        
+        console.log('User found, checking password for user ID:', user.id);
+        
+        if (!user.password_hash) {
+            console.error('User has no password hash:', user.id);
+            return { success: false, error: 'User account error - no password set' };
         }
         
         const validPassword = await bcrypt.compare(password, user.password_hash);
         if (!validPassword) {
+            console.log('Invalid password for user:', username);
             return { success: false, error: 'Invalid credentials' };
         }
+        
+        console.log('Login successful for user:', username, 'ID:', user.id, 'Role:', user.role);
         
         // Return user data (without password hash)
         // Ensure id is an integer for consistency
@@ -105,7 +123,8 @@ async function loginProductionUser(username, password) {
         };
     } catch (error) {
         console.error('Login error:', error);
-        return { success: false, error: 'Login failed' };
+        console.error('Error stack:', error.stack);
+        return { success: false, error: 'Login failed: ' + error.message };
     }
 }
 

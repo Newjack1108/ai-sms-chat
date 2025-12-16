@@ -9,19 +9,35 @@ const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManage
 router.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+        console.log('=== LOGIN REQUEST ===');
+        console.log('Username received:', username);
+        console.log('Password received:', password ? '***' : 'MISSING');
+        console.log('Session ID:', req.sessionID);
+        
+        if (!username || !password) {
+            console.log('Missing username or password in request');
+            return res.status(401).json({ success: false, error: 'Username and password are required' });
+        }
+        
         const { loginProductionUser } = require('./production-auth');
         const result = await loginProductionUser(username, password);
+        
+        console.log('Login result:', result.success ? 'SUCCESS' : 'FAILED', result.error || '');
         
         if (result.success) {
             req.session.production_authenticated = true;
             req.session.production_user = result.user;
+            console.log('Session set - authenticated:', req.session.production_authenticated);
+            console.log('Session user:', req.session.production_user);
             res.json({ success: true, user: result.user });
         } else {
+            console.log('Login failed:', result.error);
             res.status(401).json({ success: false, error: result.error });
         }
     } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ success: false, error: 'Login failed' });
+        console.error('Login route error:', error);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Login failed: ' + error.message });
     }
 });
 
