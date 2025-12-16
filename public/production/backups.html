@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backup & Restore - Production System</title>
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .backup-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        .backup-status.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .backup-status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .backup-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .schedule-config {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            <h1>Backup & Restore</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <!-- Backup Actions -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Backup Management</h2>
+                <button onclick="createBackup()" class="btn btn-primary" id="createBackupBtn">Create Backup</button>
+            </div>
+            <div id="backupStatus" style="padding: 15px; display: none;"></div>
+        </div>
+        
+        <!-- Schedule Configuration -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Automatic Backup Schedule</h2>
+            </div>
+            <div class="schedule-config">
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="scheduleEnabled" onchange="toggleSchedule()">
+                        Enable automatic backups
+                    </label>
+                </div>
+                <div id="scheduleOptions" style="display: none; margin-top: 15px;">
+                    <div class="form-group">
+                        <label class="form-label">Frequency</label>
+                        <select id="scheduleFrequency" class="form-select">
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Time (24-hour format)</label>
+                        <input type="time" id="scheduleTime" class="form-input" value="02:00">
+                    </div>
+                    <div class="form-group" id="dayOfWeekGroup" style="display: none;">
+                        <label class="form-label">Day of Week</label>
+                        <select id="scheduleDayOfWeek" class="form-select">
+                            <option value="0">Sunday</option>
+                            <option value="1">Monday</option>
+                            <option value="2">Tuesday</option>
+                            <option value="3">Wednesday</option>
+                            <option value="4">Thursday</option>
+                            <option value="5">Friday</option>
+                            <option value="6">Saturday</option>
+                        </select>
+                    </div>
+                    <button onclick="saveSchedule()" class="btn btn-primary">Save Schedule</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Backups List -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Backup History</h2>
+                <button onclick="loadBackups()" class="btn btn-secondary btn-sm">Refresh</button>
+            </div>
+            <div id="backupsList">
+                <div class="loading">Loading backups...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Restore Confirmation Modal -->
+    <div id="restoreModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Confirm Restore</h3>
+                <button class="modal-close" onclick="hideModal('restoreModal')">&times;</button>
+            </div>
+            <div style="padding: 20px;">
+                <p><strong>⚠️ Warning:</strong> This will restore the system from the selected backup.</p>
+                <ul style="margin: 15px 0; padding-left: 20px;">
+                    <li>A safety backup will be created automatically before restore</li>
+                    <li>All current data will be replaced with backup data</li>
+                    <li>This action cannot be undone</li>
+                </ul>
+                <p>Are you sure you want to restore from backup: <strong id="restoreBackupId"></strong>?</p>
+                <div class="text-right" style="margin-top: 20px;">
+                    <button onclick="hideModal('restoreModal')" class="btn btn-secondary">Cancel</button>
+                    <button onclick="confirmRestore()" class="btn btn-danger">Yes, Restore</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let backups = [];
+        let restoreBackupId = null;
+        
+        async function init() {
+            // Redirect staff users
+            if (await restrictStaffAccess()) return;
+            
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            if (currentUser.role !== 'admin') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            initNavbar();
+            loadBackups();
+            loadSchedule();
+        }
+        
+        async function createBackup() {
+            const btn = document.getElementById('createBackupBtn');
+            const statusDiv = document.getElementById('backupStatus');
+            
+            btn.disabled = true;
+            btn.textContent = 'Creating Backup...';
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<div class="backup-status">Creating backup, please wait...</div>';
+            
+            try {
+                const data = await apiCall('/backups/create', {
+                    method: 'POST'
+                });
+                
+                statusDiv.innerHTML = `<div class="backup-status success">✅ Backup created successfully: ${data.backup.file_name} (${data.backup.file_size_formatted})</div>`;
+                
+                // Reload backups list
+                setTimeout(() => {
+                    loadBackups();
+                    statusDiv.style.display = 'none';
+                }, 2000);
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="backup-status error">❌ Error creating backup: ${error.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Backup';
+            }
+        }
+        
+        async function loadBackups() {
+            try {
+                const data = await apiCall('/backups');
+                backups = data.backups || [];
+                
+                const backupsList = document.getElementById('backupsList');
+                
+                if (backups.length === 0) {
+                    backupsList.innerHTML = '<p>No backups found. Create your first backup to get started.</p>';
+                    return;
+                }
+                
+                backupsList.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Backup ID</th>
+                                <th>Created</th>
+                                <th>Size</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${backups.map(backup => `
+                                <tr>
+                                    <td><code>${backup.id}</code></td>
+                                    <td>${formatDate(backup.created_at)}</td>
+                                    <td>${backup.file_size_formatted || formatFileSize(backup.file_size)}</td>
+                                    <td>
+                                        <div class="backup-actions">
+                                            <button onclick="downloadBackup('${backup.id}')" class="btn btn-secondary btn-sm">Download</button>
+                                            <button onclick="showRestoreModal('${backup.id}')" class="btn btn-warning btn-sm">Restore</button>
+                                            <button onclick="deleteBackup('${backup.id}')" class="btn btn-danger btn-sm">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('backupsList').innerHTML = `<p>Error loading backups: ${error.message}</p>`;
+            }
+        }
+        
+        function downloadBackup(backupId) {
+            window.location.href = `/production/api/backups/${backupId}/download`;
+        }
+        
+        function showRestoreModal(backupId) {
+            restoreBackupId = backupId;
+            document.getElementById('restoreBackupId').textContent = backupId;
+            showModal('restoreModal');
+        }
+        
+        async function confirmRestore() {
+            if (!restoreBackupId) return;
+            
+            const btn = document.querySelector('#restoreModal .btn-danger');
+            btn.disabled = true;
+            btn.textContent = 'Restoring...';
+            
+            try {
+                const data = await apiCall(`/backups/${restoreBackupId}/restore`, {
+                    method: 'POST',
+                    body: JSON.stringify({ confirm: true })
+                });
+                
+                alert(`✅ Restore completed successfully!\n\nSafety backup created: ${data.result.safety_backup_id}`);
+                hideModal('restoreModal');
+                loadBackups();
+            } catch (error) {
+                alert(`❌ Restore failed: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Yes, Restore';
+            }
+        }
+        
+        async function deleteBackup(backupId) {
+            if (!confirm(`Are you sure you want to delete backup: ${backupId}?`)) {
+                return;
+            }
+            
+            try {
+                await apiCall(`/backups/${backupId}`, {
+                    method: 'DELETE'
+                });
+                
+                alert('Backup deleted successfully');
+                loadBackups();
+            } catch (error) {
+                alert(`Error deleting backup: ${error.message}`);
+            }
+        }
+        
+        async function loadSchedule() {
+            try {
+                const data = await apiCall('/backups/schedule');
+                const schedule = data.schedule || {};
+                
+                document.getElementById('scheduleEnabled').checked = schedule.enabled || false;
+                document.getElementById('scheduleFrequency').value = schedule.frequency || 'daily';
+                document.getElementById('scheduleTime').value = schedule.time || '02:00';
+                document.getElementById('scheduleDayOfWeek').value = schedule.day_of_week || 0;
+                
+                toggleSchedule();
+            } catch (error) {
+                console.error('Error loading schedule:', error);
+            }
+        }
+        
+        function toggleSchedule() {
+            const enabled = document.getElementById('scheduleEnabled').checked;
+            const options = document.getElementById('scheduleOptions');
+            const dayOfWeekGroup = document.getElementById('dayOfWeekGroup');
+            const frequency = document.getElementById('scheduleFrequency').value;
+            
+            if (enabled) {
+                options.style.display = 'block';
+                dayOfWeekGroup.style.display = frequency === 'weekly' ? 'block' : 'none';
+            } else {
+                options.style.display = 'none';
+            }
+        }
+        
+        document.getElementById('scheduleFrequency').addEventListener('change', function() {
+            const dayOfWeekGroup = document.getElementById('dayOfWeekGroup');
+            dayOfWeekGroup.style.display = this.value === 'weekly' ? 'block' : 'none';
+        });
+        
+        async function saveSchedule() {
+            const schedule = {
+                enabled: document.getElementById('scheduleEnabled').checked,
+                frequency: document.getElementById('scheduleFrequency').value,
+                time: document.getElementById('scheduleTime').value,
+                day_of_week: parseInt(document.getElementById('scheduleDayOfWeek').value)
+            };
+            
+            try {
+                await apiCall('/backups/schedule', {
+                    method: 'POST',
+                    body: JSON.stringify(schedule)
+                });
+                
+                alert('Backup schedule saved successfully');
+            } catch (error) {
+                alert(`Error saving schedule: ${error.message}`);
+            }
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>
+

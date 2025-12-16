@@ -376,11 +376,11 @@
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
-                            <h4>Panels Required</h4>
+                            <h4>Built Items Required</h4>
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>Panel</th>
+                                        <th>Built Item</th>
                                         <th>Quantity</th>
                                     </tr>
                                 </thead>
@@ -476,16 +476,16 @@
                         <strong>Total Estimated Cost:</strong> ${formatCurrency(requirements.total_cost_gbp || totalCost)}
                     </div>
                     
-                    <h4>Panels Required</h4>
+                    <h4>Built Items Required</h4>
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Panel</th>
+                                <th>Built Item</th>
                                 <th>Total Quantity</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="2">No panels required</td></tr>' : requirements.panels_required.map(p => `
+                            ${requirements.panels_required.length === 0 ? '<tr><td colspan="2">No built items required</td></tr>' : requirements.panels_required.map(p => `
                                 <tr>
                                     <td>${p.panel_name}</td>
                                     <td>${p.total_quantity.toFixed(2)}</td>
@@ -547,11 +547,11 @@
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div>
-                            <h4>Panels Required</h4>
+                            <h4>Built Items Required</h4>
                             <table class="table">
                                 <thead>
                                     <tr>
-                                        <th>Panel</th>
+                                        <th>Built Item</th>
                                         <th>Quantity</th>
                                     </tr>
                                 </thead>

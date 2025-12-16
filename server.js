@@ -4407,6 +4407,16 @@ async function startServer() {
             await checkAndSendReminders();
         }, checkIntervalMs);
         
+        // Initialize backup scheduler
+        try {
+            const { getScheduler } = require('./backup-scheduler');
+            const backupScheduler = getScheduler();
+            backupScheduler.start();
+            console.log('✅ Backup scheduler initialized');
+        } catch (error) {
+            console.error('❌ Error initializing backup scheduler:', error);
+        }
+        
         console.log(`🔔 Reminder service started (checks every ${REMINDER_INTERVALS.checkInterval} minutes)`);
         console.log(`   First reminder: ${REMINDER_INTERVALS.first} minutes`);
         console.log(`   Second reminder: ${REMINDER_INTERVALS.second} minutes`);

@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
 const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManager, hashPassword } = require('./production-auth');
+const BackupService = require('./backup-service');
 
 // ============ AUTHENTICATION ROUTES ============
 
@@ -3355,6 +3356,142 @@ router.post('/holidays/shutdown-periods/:id/apply', requireProductionAuth, requi
     } catch (error) {
         console.error('Apply shutdown period error:', error);
         res.status(500).json({ success: false, error: 'Failed to apply shutdown period' });
+    }
+});
+
+// ============ BACKUP AND RESTORE ROUTES (Admin only) ============
+
+const backupService = new BackupService();
+
+// Create a new backup
+router.post('/backups/create', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        console.log('📦 Backup creation requested by:', req.session.production_user.username);
+        const backup = await backupService.createBackup();
+        res.json({ success: true, backup });
+    } catch (error) {
+        console.error('Create backup error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create backup: ' + error.message });
+    }
+});
+
+// List all backups
+router.get('/backups', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const backups = await backupService.listBackups();
+        res.json({ success: true, backups });
+    } catch (error) {
+        console.error('List backups error:', error);
+        res.status(500).json({ success: false, error: 'Failed to list backups: ' + error.message });
+    }
+});
+
+// Download backup file
+router.get('/backups/:id/download', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const backupId = req.params.id;
+        const backupPath = backupService.getBackupPath(backupId);
+        
+        // Check if file exists
+        if (!require('fs').existsSync(backupPath)) {
+            return res.status(404).json({ success: false, error: 'Backup file not found' });
+        }
+        
+        const fileName = backupId.endsWith('.tar.gz') ? backupId : `${backupId}.tar.gz`;
+        res.download(backupPath, fileName, (err) => {
+            if (err) {
+                console.error('Download error:', err);
+                if (!res.headersSent) {
+                    res.status(500).json({ success: false, error: 'Failed to download backup' });
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Download backup error:', error);
+        res.status(500).json({ success: false, error: 'Failed to download backup: ' + error.message });
+    }
+});
+
+// Restore from backup
+router.post('/backups/:id/restore', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const backupId = req.params.id;
+        const { confirm } = req.body;
+        
+        if (!confirm) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Restore confirmation required. Set confirm: true in request body.' 
+            });
+        }
+        
+        console.log('🔄 Restore requested by:', req.session.production_user.username, 'for backup:', backupId);
+        
+        const result = await backupService.restoreBackup(backupId);
+        
+        res.json({ 
+            success: true, 
+            message: 'Backup restored successfully. A safety backup was created before restore.',
+            result 
+        });
+    } catch (error) {
+        console.error('Restore backup error:', error);
+        res.status(500).json({ success: false, error: 'Failed to restore backup: ' + error.message });
+    }
+});
+
+// Delete backup
+router.delete('/backups/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const backupId = req.params.id;
+        await backupService.deleteBackup(backupId);
+        res.json({ success: true, message: 'Backup deleted successfully' });
+    } catch (error) {
+        console.error('Delete backup error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete backup: ' + error.message });
+    }
+});
+
+// Get backup schedule configuration
+router.get('/backups/schedule', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const { getScheduler } = require('./backup-scheduler');
+        const scheduler = getScheduler();
+        const schedule = scheduler.getSchedule();
+        
+        res.json({ 
+            success: true, 
+            schedule
+        });
+    } catch (error) {
+        console.error('Get backup schedule error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get backup schedule' });
+    }
+});
+
+// Set backup schedule configuration
+router.post('/backups/schedule', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const { enabled, frequency, time, day_of_week } = req.body;
+        
+        const { getScheduler } = require('./backup-scheduler');
+        const scheduler = getScheduler();
+        
+        scheduler.updateSchedule({
+            enabled: enabled || false,
+            frequency: frequency || 'daily',
+            time: time || '02:00',
+            day_of_week: day_of_week || 0
+        });
+        
+        res.json({ 
+            success: true, 
+            message: 'Backup schedule updated',
+            schedule: scheduler.getSchedule()
+        });
+    } catch (error) {
+        console.error('Set backup schedule error:', error);
+        res.status(500).json({ success: false, error: 'Failed to set backup schedule' });
     }
 });
 
