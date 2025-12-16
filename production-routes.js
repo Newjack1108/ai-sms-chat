@@ -2274,20 +2274,38 @@ router.get('/reminders', requireProductionAuth, async (req, res) => {
 
 router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     try {
-        const userId = req.session.production_user.id;
+        const userId = parseInt(req.session.production_user.id);
         const userRole = req.session.production_user.role;
-        const stockReminders = await ProductionDatabase.getOverdueReminders(userId, userRole);
+        
+        console.log('Getting overdue reminders for user:', userId, 'role:', userRole);
+        
+        let stockReminders = [];
+        try {
+            stockReminders = await ProductionDatabase.getOverdueReminders(userId, userRole);
+            console.log('Stock reminders found:', stockReminders.length);
+        } catch (stockError) {
+            console.error('Error getting stock reminders:', stockError);
+            console.error('Stack:', stockError.stack);
+            // Continue with empty array instead of failing completely
+        }
         
         // Get timesheet approval reminders (only for admin/office roles)
         let timesheetReminders = [];
         if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
-            const unapprovedWeeks = await ProductionDatabase.getUnapprovedTimesheetWeeks();
-            timesheetReminders = unapprovedWeeks.map(week => ({
-                type: 'timesheet_approval',
-                week_start_date: week.week_start_date,
-                unapproved_count: week.unapproved_count,
-                reminder_text: `${week.unapproved_count} timesheet${week.unapproved_count > 1 ? 's' : ''} need${week.unapproved_count === 1 ? 's' : ''} approval`
-            }));
+            try {
+                const unapprovedWeeks = await ProductionDatabase.getUnapprovedTimesheetWeeks();
+                timesheetReminders = unapprovedWeeks.map(week => ({
+                    type: 'timesheet_approval',
+                    week_start_date: week.week_start_date,
+                    unapproved_count: week.unapproved_count,
+                    reminder_text: `${week.unapproved_count} timesheet${week.unapproved_count > 1 ? 's' : ''} need${week.unapproved_count === 1 ? 's' : ''} approval`
+                }));
+                console.log('Timesheet reminders found:', timesheetReminders.length);
+            } catch (timesheetError) {
+                console.error('Error getting timesheet reminders:', timesheetError);
+                console.error('Stack:', timesheetError.stack);
+                // Continue with empty array instead of failing completely
+            }
         }
         
         // Combine both types of reminders
@@ -2299,7 +2317,8 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
         res.json({ success: true, reminders: allReminders });
     } catch (error) {
         console.error('Get overdue reminders error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get overdue reminders' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to get overdue reminders: ' + error.message });
     }
 });
 

@@ -6979,52 +6979,69 @@ class ProductionDatabase {
     }
     
     static async getOverdueReminders(userId = null, userRole = null) {
-        const today = new Date().toISOString().split('T')[0];
-        
-        // Build WHERE clause based on user permissions
-        let whereClause = isPostgreSQL ? 'r.is_active = TRUE' : 'r.is_active = 1';
-        const params = [today];
-        let paramIndex = 2;
-        
-        if (userId && userRole) {
-            if (userRole === 'admin') {
-                // Admins see all overdue reminders they created OR all global reminders
-                whereClause += ` AND (r.created_by_user_id = $${paramIndex} OR (r.user_id IS NULL AND r.target_role IS NULL))`;
-                params.push(userId);
-                paramIndex++;
-            } else {
-                // Regular users see: their own reminders, role-based reminders, or reminders they created
-                whereClause += ` AND (r.user_id = $${paramIndex} OR r.target_role = $${paramIndex + 1} OR r.created_by_user_id = $${paramIndex})`;
-                params.push(userId, userRole, userId);
-                paramIndex += 3;
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            
+            // Ensure userId is an integer if provided
+            const userIdInt = userId ? parseInt(userId) : null;
+            
+            // Build WHERE clause based on user permissions
+            let whereClause = isPostgreSQL ? 'r.is_active = TRUE' : 'r.is_active = 1';
+            const params = [today];
+            let paramIndex = 2;
+            
+            if (userIdInt && userRole) {
+                if (userRole === 'admin') {
+                    // Admins see all overdue reminders they created OR all global reminders
+                    whereClause += isPostgreSQL 
+                        ? ` AND (r.created_by_user_id = $${paramIndex} OR (r.user_id IS NULL AND r.target_role IS NULL))`
+                        : ` AND (r.created_by_user_id = ? OR (r.user_id IS NULL AND r.target_role IS NULL))`;
+                    params.push(userIdInt);
+                    paramIndex++;
+                } else {
+                    // Regular users see: their own reminders, role-based reminders, or reminders they created
+                    if (isPostgreSQL) {
+                        whereClause += ` AND (r.user_id = $${paramIndex} OR r.target_role = $${paramIndex + 1} OR r.created_by_user_id = $${paramIndex + 2})`;
+                        params.push(userIdInt, userRole, userIdInt);
+                        paramIndex += 3;
+                    } else {
+                        whereClause += ` AND (r.user_id = ? OR r.target_role = ? OR r.created_by_user_id = ?)`;
+                        params.push(userIdInt, userRole, userIdInt);
+                    }
+                }
             }
-        }
-        
-        if (isPostgreSQL) {
-            const result = await pool.query(
-                `SELECT r.*, si.name as stock_item_name,
-                        u.username as assigned_user_name,
-                        creator.username as created_by_username
-                 FROM stock_check_reminders r
-                 LEFT JOIN stock_items si ON r.stock_item_id = si.id
-                 LEFT JOIN production_users u ON r.user_id = u.id
-                 LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
-                 WHERE ${whereClause} AND r.next_check_date < $1
-                 ORDER BY r.next_check_date ASC`,
-                params
-            );
-            return result.rows;
-        } else {
-            const query = `SELECT r.*, si.name as stock_item_name,
-                                  u.username as assigned_user_name,
-                                  creator.username as created_by_username
-                           FROM stock_check_reminders r
-                           LEFT JOIN stock_items si ON r.stock_item_id = si.id
-                           LEFT JOIN production_users u ON r.user_id = u.id
-                           LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
-                           WHERE ${whereClause} AND r.next_check_date < ?
-                           ORDER BY r.next_check_date ASC`;
-            return db.prepare(query).all(...params);
+            
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT r.*, si.name as stock_item_name,
+                            u.username as assigned_user_name,
+                            creator.username as created_by_username
+                     FROM stock_check_reminders r
+                     LEFT JOIN stock_items si ON r.stock_item_id = si.id
+                     LEFT JOIN production_users u ON r.user_id = u.id
+                     LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                     WHERE ${whereClause} AND r.next_check_date < $1
+                     ORDER BY r.next_check_date ASC`,
+                    params
+                );
+                return result.rows;
+            } else {
+                const query = `SELECT r.*, si.name as stock_item_name,
+                                      u.username as assigned_user_name,
+                                      creator.username as created_by_username
+                               FROM stock_check_reminders r
+                               LEFT JOIN stock_items si ON r.stock_item_id = si.id
+                               LEFT JOIN production_users u ON r.user_id = u.id
+                               LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+                               WHERE ${whereClause} AND r.next_check_date < ?
+                               ORDER BY r.next_check_date ASC`;
+                return db.prepare(query).all(...params);
+            }
+        } catch (error) {
+            console.error('getOverdueReminders error:', error);
+            console.error('Error stack:', error.stack);
+            console.error('Parameters - userId:', userId, 'userRole:', userRole);
+            throw error;
         }
     }
     
