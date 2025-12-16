@@ -394,6 +394,13 @@
                                 </tbody>
                             </table>
                             
+                            ${requirements.labour_hours_required > 0 ? `
+                            <h4>Labour Requirements</h4>
+                            <div class="alert alert-info">
+                                <strong>Total Labour Hours Required:</strong> ${parseFloat(requirements.labour_hours_required || 0).toFixed(2)} hours
+                            </div>
+                            ` : ''}
+                            
                             <h4>Raw Materials Required</h4>
                             <table class="table">
                                 <thead>
@@ -494,6 +501,13 @@
                         </tbody>
                     </table>
                     
+                    ${requirements.labour_hours_required > 0 ? `
+                    <h4>Labour Requirements</h4>
+                    <div class="alert alert-info">
+                        <strong>Total Labour Hours Required:</strong> ${parseFloat(requirements.labour_hours_required || 0).toFixed(2)} hours
+                    </div>
+                    ` : ''}
+                    
                     <h4>Raw Materials Required</h4>
                     <table class="table">
                         <thead>
@@ -564,6 +578,13 @@
                                     `).join('')}
                                 </tbody>
                             </table>
+                            
+                            ${requirements.labour_hours_required > 0 ? `
+                            <h4>Labour Requirements</h4>
+                            <div class="alert alert-info">
+                                <strong>Total Labour Hours Required:</strong> ${parseFloat(requirements.labour_hours_required || 0).toFixed(2)} hours
+                            </div>
+                            ` : ''}
                             
                             <h4>Raw Materials Required</h4>
                             <table class="table">

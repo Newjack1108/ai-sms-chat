@@ -6729,6 +6729,7 @@ class ProductionDatabase {
         // orders: array of {product_id, quantity}
         const panelsRequired = {};
         const rawMaterialsRequired = {};
+        let totalLabourHours = 0;
         const breakdown = {
             by_product: [],
             by_panel: []
@@ -6750,12 +6751,19 @@ class ProductionDatabase {
             for (const comp of components) {
                 const totalQty = parseFloat(comp.quantity_required) * order.quantity;
                 
-                if (comp.component_type === 'panel') {
+                if (comp.component_type === 'built_item') {
                     const panelId = comp.component_id;
                     if (!panelsRequired[panelId]) {
                         panelsRequired[panelId] = 0;
                     }
                     panelsRequired[panelId] += totalQty;
+                    
+                    // Get panel to calculate labour hours
+                    const panel = await this.getPanelById(panelId);
+                    if (panel) {
+                        const labourHours = parseFloat(panel.labour_hours || 0) * totalQty;
+                        totalLabourHours += labourHours;
+                    }
                     
                     productBreakdown.panels.push({
                         panel_id: panelId,
@@ -6778,6 +6786,13 @@ class ProductionDatabase {
                             };
                         }
                         rawMaterialsRequired[stockItemId].total_quantity += materialQty;
+                    }
+                } else if (comp.component_type === 'component') {
+                    // Component can be direct product component - calculate labour hours
+                    const component = await this.getComponentById(comp.component_id);
+                    if (component) {
+                        const labourHours = parseFloat(component.labour_hours || 0) * totalQty;
+                        totalLabourHours += labourHours;
                     }
                 } else if (comp.component_type === 'raw_material') {
                     const stockItemId = comp.component_id;
@@ -6865,7 +6880,8 @@ class ProductionDatabase {
             panels_required: panelsArray,
             raw_materials_required: materialsArray,
             breakdown: breakdown,
-            total_cost_gbp: totalCost
+            total_cost_gbp: totalCost,
+            labour_hours_required: totalLabourHours
         };
     }
     
