@@ -336,22 +336,36 @@
                                 <th>Raw Material</th>
                                 <th>Quantity Required</th>
                                 <th>Unit</th>
+                                <th>Cost (GBP)</th>
                                 ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '4' : '3'}">No BOM items</td></tr>` : bomData.bom.map(item => `
-                                <tr>
-                                    <td>${item.stock_item_name}</td>
-                                    <td>${item.quantity_required}</td>
-                                    <td>${item.stock_item_unit || item.unit}</td>
-                                    ${currentUser.role === 'admin' ? `
-                                        <td>
-                                            <button onclick="deleteBOMItem(${item.id}, ${componentId})" class="btn btn-danger btn-sm">Delete</button>
-                                        </td>
-                                    ` : ''}
-                                </tr>
-                            `).join('')}
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '5' : '4'}">No BOM items</td></tr>` : (() => {
+                                let totalCost = 0;
+                                const rows = bomData.bom.map(item => {
+                                    const itemCost = parseFloat(item.item_cost_gbp || 0);
+                                    totalCost += itemCost;
+                                    return `
+                                        <tr>
+                                            <td>${item.stock_item_name}</td>
+                                            <td>${item.quantity_required}</td>
+                                            <td>${item.stock_item_unit || item.unit}</td>
+                                            <td>${formatCurrency(itemCost)}</td>
+                                            ${currentUser.role === 'admin' ? `
+                                                <td>
+                                                    <button onclick="deleteBOMItem(${item.id}, ${componentId})" class="btn btn-danger btn-sm">Delete</button>
+                                                </td>
+                                            ` : ''}
+                                        </tr>
+                                    `;
+                                }).join('');
+                                return rows + `<tr style="font-weight: bold; background-color: #f8f9fa;">
+                                    <td colspan="3" style="text-align: right;">Total BOM Cost:</td>
+                                    <td>${formatCurrency(totalCost)}</td>
+                                    ${currentUser.role === 'admin' ? '<td></td>' : ''}
+                                </tr>`;
+                            })()}
                         </tbody>
                     </table>
                 `;

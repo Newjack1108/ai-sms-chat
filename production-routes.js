@@ -395,12 +395,34 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const bom = await ProductionDatabase.getPanelBOM(panelId);
-        res.json({ success: true, bom });
+        
+        // Enrich BOM items with cost information
+        const bomWithCosts = await Promise.all(bom.map(async (item) => {
+            const qty = parseFloat(item.quantity_required || 0);
+            let itemCost = 0;
+            
+            if (item.item_type === 'raw_material') {
+                const stockItem = await ProductionDatabase.getStockItemById(item.item_id);
+                if (stockItem) {
+                    itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * qty;
+                }
+            } else if (item.item_type === 'component') {
+                const componentCost = await ProductionDatabase.calculateComponentTrueCost(item.item_id);
+                itemCost = componentCost * qty;
+            }
+            
+            return {
+                ...item,
+                item_cost_gbp: itemCost
+            };
+        }));
+        
+        res.json({ success: true, bom: bomWithCosts });
     } catch (error) {
         console.error('Get panel BOM error:', error);
         console.error('Error stack:', error.stack);
         console.error('Panel ID:', req.params.id);
-        
+
         // Provide more detailed error messages
         let errorMessage = 'Failed to get panel BOM';
         if (error.message) {
@@ -604,7 +626,20 @@ router.get('/components/:id/bom', requireProductionAuth, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const bom = await ProductionDatabase.getComponentBOM(componentId);
-        res.json({ success: true, bom });
+        
+        // Enrich BOM items with cost information
+        const bomWithCosts = await Promise.all(bom.map(async (item) => {
+            const stockItem = await ProductionDatabase.getStockItemById(item.stock_item_id);
+            const qty = parseFloat(item.quantity_required || 0);
+            const itemCost = stockItem ? parseFloat(stockItem.cost_per_unit_gbp || 0) * qty : 0;
+            
+            return {
+                ...item,
+                item_cost_gbp: itemCost
+            };
+        }));
+        
+        res.json({ success: true, bom: bomWithCosts });
     } catch (error) {
         console.error('Get component BOM error:', error);
         res.status(500).json({ success: false, error: 'Failed to get component BOM' });
@@ -928,6 +963,56 @@ router.delete('/products/:id/components/:compId', requireProductionAuth, require
     } catch (error) {
         console.error('Delete product component error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete product component' });
+    }
+});
+
+router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        const originalProduct = await ProductionDatabase.getProductById(productId);
+        
+        if (!originalProduct) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        
+        // Get all products to check for existing copies
+        const allProducts = await ProductionDatabase.getAllProducts();
+        const baseName = originalProduct.name;
+        let newName = `${baseName} (Copy)`;
+        let copyNumber = 1;
+        
+        // Check if a copy already exists and increment the number
+        while (allProducts.some(p => p.name === newName)) {
+            copyNumber++;
+            newName = `${baseName} (Copy ${copyNumber})`;
+        }
+        
+        // Create the duplicate product
+        const duplicateProduct = await ProductionDatabase.createProduct({
+            name: newName,
+            description: originalProduct.description || '',
+            product_type: originalProduct.product_type || '',
+            status: originalProduct.status || 'active'
+        });
+        
+        // Copy all components from the original product
+        const originalComponents = await ProductionDatabase.getProductComponents(productId);
+        for (const comp of originalComponents) {
+            await ProductionDatabase.addProductComponent(
+                duplicateProduct.id,
+                comp.component_type,
+                comp.component_id,
+                parseFloat(comp.quantity_required),
+                comp.unit
+            );
+        }
+        
+        // Get the final product with all components
+        const finalProduct = await ProductionDatabase.getProductById(duplicateProduct.id);
+        res.json({ success: true, product: finalProduct });
+    } catch (error) {
+        console.error('Duplicate product error:', error);
+        res.status(500).json({ success: false, error: 'Failed to duplicate product' });
     }
 });
 

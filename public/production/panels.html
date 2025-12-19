@@ -135,6 +135,17 @@
                     return;
                 }
                 
+                // Calculate costs for all panels
+                const panelsWithCosts = await Promise.all(data.panels.map(async (panel) => {
+                    try {
+                        const costData = await apiCall(`/panels/${panel.id}/true-cost`);
+                        return { ...panel, calculated_cost: costData.true_cost };
+                    } catch (error) {
+                        console.error(`Error calculating cost for panel ${panel.id}:`, error);
+                        return { ...panel, calculated_cost: panel.cost_gbp || 0 };
+                    }
+                }));
+                
                 panelsList.innerHTML = `
                     <table class="table">
                         <thead>
@@ -143,12 +154,13 @@
                                 <th>Type</th>
                                 <th>Built Qty</th>
                                 <th>Min Stock</th>
+                                <th>Cost (GBP)</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.panels.map(panel => {
+                            ${panelsWithCosts.map(panel => {
                                 const builtQty = parseFloat(panel.built_quantity || 0);
                                 const minStock = parseFloat(panel.min_stock || 0);
                                 const isLow = builtQty <= minStock && minStock > 0;
@@ -158,6 +170,7 @@
                                     <td>${panel.panel_type || '-'}</td>
                                     <td>${builtQty.toFixed(2)} ${isLow ? '<span class="badge badge-danger">Low</span>' : ''}</td>
                                     <td>${minStock.toFixed(2)}</td>
+                                    <td>${formatCurrency(panel.calculated_cost)}</td>
                                     <td><span class="badge badge-info">${panel.status}</span></td>
                                     <td>
                                         <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
@@ -347,23 +360,37 @@
                                 <th>Item Name</th>
                                 <th>Quantity Required</th>
                                 <th>Unit</th>
+                                <th>Cost (GBP)</th>
                                 ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '5' : '4'}">No BOM items</td></tr>` : bomData.bom.map(item => `
-                                <tr>
-                                    <td>${item.item_type === 'raw_material' ? 'Raw Material' : 'Component'}</td>
-                                    <td>${item.item_name || '-'}</td>
-                                    <td>${item.quantity_required}</td>
-                                    <td>${item.item_unit || item.unit}</td>
-                                    ${currentUser.role === 'admin' ? `
-                                        <td>
-                                            <button onclick="deleteBOMItem(${item.id}, ${panelId})" class="btn btn-danger btn-sm">Delete</button>
-                                        </td>
-                                    ` : ''}
-                                </tr>
-                            `).join('')}
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '6' : '5'}">No BOM items</td></tr>` : (() => {
+                                let totalCost = 0;
+                                const rows = bomData.bom.map(item => {
+                                    const itemCost = parseFloat(item.item_cost_gbp || 0);
+                                    totalCost += itemCost;
+                                    return `
+                                        <tr>
+                                            <td>${item.item_type === 'raw_material' ? 'Raw Material' : 'Component'}</td>
+                                            <td>${item.item_name || '-'}</td>
+                                            <td>${item.quantity_required}</td>
+                                            <td>${item.item_unit || item.unit}</td>
+                                            <td>${formatCurrency(itemCost)}</td>
+                                            ${currentUser.role === 'admin' ? `
+                                                <td>
+                                                    <button onclick="deleteBOMItem(${item.id}, ${panelId})" class="btn btn-danger btn-sm">Delete</button>
+                                                </td>
+                                            ` : ''}
+                                        </tr>
+                                    `;
+                                }).join('');
+                                return rows + `<tr style="font-weight: bold; background-color: #f8f9fa;">
+                                    <td colspan="4" style="text-align: right;">Total BOM Cost:</td>
+                                    <td>${formatCurrency(totalCost)}</td>
+                                    ${currentUser.role === 'admin' ? '<td></td>' : ''}
+                                </tr>`;
+                            })()}
                         </tbody>
                     </table>
                 `;

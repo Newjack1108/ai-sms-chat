@@ -165,7 +165,10 @@
                                     <td>${formatCurrency(product.calculated_cost)}</td>
                                     <td>
                                         <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
-                                        ${currentUser.role === 'admin' ? `<button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        ${currentUser.role === 'admin' ? `
+                                            <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                            <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm">Duplicate</button>
+                                        ` : ''}
                                     </td>
                                 </tr>
                             `).join('')}
@@ -332,6 +335,17 @@
                 viewComponents(currentProductId);
             } catch (error) {
                 showAlert(error.message, 'error');
+            }
+        }
+        
+        async function duplicateProduct(id) {
+            if (!confirm('Duplicate this product? This will create a copy with all its components.')) return;
+            try {
+                await apiCall(`/products/${id}/duplicate`, { method: 'POST' });
+                showAlert('Product duplicated successfully');
+                loadProducts();
+            } catch (error) {
+                showAlert(error.message || 'Failed to duplicate product', 'error');
             }
         }
         
