@@ -842,7 +842,7 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, status } = req.body;
+        const { name, description, product_type, category, status } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -852,6 +852,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             name,
             description,
             product_type,
+            category,
             status
         });
         res.json({ success: true, product });
@@ -864,13 +865,14 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, status } = req.body;
+        const { name, description, product_type, category, status } = req.body;
         
         // Cost is calculated automatically from components
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
             product_type,
+            category,
             status
         });
         res.json({ success: true, product });

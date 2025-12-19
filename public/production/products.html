@@ -25,6 +25,13 @@
                 <h2>Products</h2>
                 <button onclick="showAddProductModal()" class="btn btn-primary admin-only">Add Product</button>
             </div>
+            <div class="tabs" style="margin-bottom: 0;">
+                <button class="tab-btn active" onclick="filterProducts('all')" id="tab-all">All Products</button>
+                <button class="tab-btn" onclick="filterProducts('Standard Product')" id="tab-standard">Standard Product</button>
+                <button class="tab-btn" onclick="filterProducts('Customer Product')" id="tab-customer">Customer Product</button>
+                <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
+                <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
+            </div>
             <div id="productsList">
                 <div class="loading">Loading...</div>
             </div>
@@ -51,6 +58,15 @@
                 <div class="form-group">
                     <label class="form-label">Product Type</label>
                     <input type="text" id="productType" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Category *</label>
+                    <select id="productCategory" class="form-select" required>
+                        <option value="Standard Product">Standard Product</option>
+                        <option value="Customer Product">Customer Product</option>
+                        <option value="Bespoke Build">Bespoke Build</option>
+                        <option value="Other">Other</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cost (GBP)</label>
@@ -85,6 +101,8 @@
         let stockItems = [];
         let components = [];
         let currentProductId = null;
+        let selectedCategory = 'all';
+        let allProducts = [];
         
         async function init() {
             // Redirect staff users
@@ -131,6 +149,7 @@
                 
                 if (data.products.length === 0) {
                     productsList.innerHTML = '<p>No products found</p>';
+                    allProducts = [];
                     return;
                 }
                 
@@ -145,39 +164,84 @@
                     }
                 }));
                 
-                productsList.innerHTML = `
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Cost (Auto)</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${productsWithCosts.map(product => `
-                                <tr>
-                                    <td><strong>${product.name}</strong></td>
-                                    <td>${product.product_type || '-'}</td>
-                                    <td><span class="badge badge-info">${product.status}</span></td>
-                                    <td>${formatCurrency(product.calculated_cost)}</td>
-                                    <td>
-                                        <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
-                                        ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
-                                            <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                            <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
-                                        ` : ''}
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
+                // Store all products
+                allProducts = productsWithCosts;
+                
+                // Filter products based on selected category
+                displayProducts();
             } catch (error) {
                 document.getElementById('productsList').innerHTML = '<p>Error loading products</p>';
+                allProducts = [];
             }
+        }
+        
+        function displayProducts() {
+            const productsList = document.getElementById('productsList');
+            
+            // Filter products by category
+            let filteredProducts = allProducts;
+            if (selectedCategory !== 'all') {
+                filteredProducts = allProducts.filter(product => product.category === selectedCategory);
+            }
+            
+            if (filteredProducts.length === 0) {
+                productsList.innerHTML = '<p>No products found in this category</p>';
+                return;
+            }
+            
+            productsList.innerHTML = `
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Cost (Auto)</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filteredProducts.map(product => `
+                            <tr>
+                                <td><strong>${product.name}</strong></td>
+                                <td><span class="badge badge-secondary">${product.category || 'Other'}</span></td>
+                                <td>${product.product_type || '-'}</td>
+                                <td><span class="badge badge-info">${product.status}</span></td>
+                                <td>${formatCurrency(product.calculated_cost)}</td>
+                                <td>
+                                    <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
+                                    ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
+                                        <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                        <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
+                                    ` : ''}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+        
+        function filterProducts(category) {
+            selectedCategory = category;
+            
+            // Update active tab
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            if (category === 'all') {
+                document.getElementById('tab-all').classList.add('active');
+            } else if (category === 'Standard Product') {
+                document.getElementById('tab-standard').classList.add('active');
+            } else if (category === 'Customer Product') {
+                document.getElementById('tab-customer').classList.add('active');
+            } else if (category === 'Bespoke Build') {
+                document.getElementById('tab-bespoke').classList.add('active');
+            } else if (category === 'Other') {
+                document.getElementById('tab-other').classList.add('active');
+            }
+            
+            // Display filtered products
+            displayProducts();
         }
         
         function showAddProductModal() {
@@ -198,6 +262,7 @@
                 document.getElementById('productName').value = product.name;
                 document.getElementById('productDescription').value = product.description || '';
                 document.getElementById('productType').value = product.product_type || '';
+                document.getElementById('productCategory').value = product.category || 'Other';
                 // Load calculated cost
                 const costData = await apiCall(`/products/${product.id}/cost`);
                 document.getElementById('productCost').value = costData.cost.toFixed(2);
@@ -356,6 +421,7 @@
                 name: document.getElementById('productName').value,
                 description: document.getElementById('productDescription').value,
                 product_type: document.getElementById('productType').value,
+                category: document.getElementById('productCategory').value,
                 status: 'active'
             };
             

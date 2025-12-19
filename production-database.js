@@ -158,6 +158,7 @@ function initializeSQLite() {
             name TEXT NOT NULL,
             description TEXT,
             product_type TEXT,
+            category TEXT DEFAULT 'Other',
             status TEXT DEFAULT 'active',
             cost_gbp REAL DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -191,6 +192,18 @@ function initializeSQLite() {
             FOREIGN KEY (created_by) REFERENCES production_users(id)
         )
     `);
+    
+    // Migrate finished_products to add category column
+    try {
+        const tableInfo = db.prepare(`PRAGMA table_info(finished_products)`).all();
+        const hasCategory = tableInfo.some(col => col.name === 'category');
+        if (!hasCategory) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN category TEXT DEFAULT \'Other\'');
+            console.log('✅ Added category column to finished_products table');
+        }
+    } catch (error) {
+        console.log('⚠️ Finished products category migration check skipped:', error.message);
+    }
     
     // Stock movements table
     db.exec(`
@@ -844,6 +857,7 @@ async function initializePostgreSQL() {
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
                 product_type VARCHAR(100),
+                category VARCHAR(100) DEFAULT 'Other',
                 status VARCHAR(50) DEFAULT 'active',
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -874,6 +888,21 @@ async function initializePostgreSQL() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        
+        // Migrate finished_products to add category column
+        try {
+            const columnCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'finished_products' AND column_name = 'category'
+            `);
+            if (columnCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN category VARCHAR(100) DEFAULT 'Other'`);
+                console.log('✅ Added category column to finished_products table');
+            }
+        } catch (error) {
+            console.log('⚠️ Finished products category migration check skipped:', error.message);
+        }
         
         // Stock movements
         await pool.query(`
@@ -3836,12 +3865,13 @@ class ProductionDatabase {
     static async createProduct(data) {
         // Cost will be calculated automatically from components
         const initialCost = data.cost_gbp || 0;
+        const category = data.category || 'Other';
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, status, cost_gbp)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [data.name, data.description, data.product_type, data.status || 'active', initialCost]
+                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+                [data.name, data.description, data.product_type, category, data.status || 'active', initialCost]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist)
@@ -3849,10 +3879,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, status, cost_gbp)
-                 VALUES (?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp)
+                 VALUES (?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, data.status || 'active', initialCost);
+            const info = stmt.run(data.name, data.description, data.product_type, category, data.status || 'active', initialCost);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation
             await this.updateProductCost(product.id);
@@ -3881,18 +3911,18 @@ class ProductionDatabase {
     static async updateProduct(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE finished_products SET name = $1, description = $2, product_type = $3, status = $4
-                 WHERE id = $5 RETURNING *`,
-                [data.name, data.description, data.product_type, data.status, id]
+                `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5
+                 WHERE id = $6 RETURNING *`,
+                [data.name, data.description, data.product_type, data.category || 'Other', data.status, id]
             );
             // Recalculate cost automatically from components
             await this.updateProductCost(id);
             return await this.getProductById(id);
         } else {
             db.prepare(
-                `UPDATE finished_products SET name = ?, description = ?, product_type = ?, status = ?
+                `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?
                  WHERE id = ?`
-            ).run(data.name, data.description, data.product_type, data.status, id);
+            ).run(data.name, data.description, data.product_type, data.category || 'Other', data.status, id);
             // Recalculate cost automatically
             await this.updateProductCost(id);
             return this.getProductById(id);
