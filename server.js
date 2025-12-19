@@ -1,6 +1,7 @@
 // Lead Qualification System - Professional CRM Interface v5.6.0 with Database Persistence
 // Forcing rebuild with Node 20
 // Trigger deployment - 2025-12-19
+// Railway GitHub reconnected - trigger deploy
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
