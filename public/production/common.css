@@ -92,12 +92,12 @@ body.dashboard-page {
 }
 
 .btn-primary {
-    background: #4CBB17;
+    background: #48872B;
     color: white;
 }
 
 .btn-primary:hover {
-    background: #3DA014;
+    background: #3E6E23;
 }
 
 .btn-secondary {
@@ -119,12 +119,12 @@ body.dashboard-page {
 }
 
 .btn-success {
-    background: #4CBB17;
+    background: #48872B;
     color: white;
 }
 
 .btn-success:hover {
-    background: #3DA014;
+    background: #3E6E23;
 }
 
 .btn-sm {
@@ -268,7 +268,7 @@ body.dashboard-page {
 .form-select:focus,
 .form-textarea:focus {
     outline: none;
-    border-color: #4CBB17;
+    border-color: #48872B;
 }
 
 .form-textarea {
@@ -459,8 +459,8 @@ body.dashboard-page {
 }
 
 .tab-btn.active {
-    color: #4CBB17;
-    border-bottom-color: #4CBB17;
+    color: #48872B;
+    border-bottom-color: #48872B;
 }
 
 .tab-content {
