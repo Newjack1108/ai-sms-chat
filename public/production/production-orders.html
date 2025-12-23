@@ -22,11 +22,12 @@
             cursor: pointer;
         }
         .load-sheet-print-area {
-            padding: 20px;
+            padding: 10px;
             background: white;
             color: black;
             font-family: Arial, sans-serif;
             font-size: 12px;
+            box-sizing: border-box;
         }
         .load-sheet-print-area h3 {
             margin-bottom: 20px;
@@ -38,14 +39,17 @@
             max-width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
-            table-layout: auto;
+            table-layout: fixed;
+            box-sizing: border-box;
         }
         .load-sheet-print-area table th,
         .load-sheet-print-area table td {
             border: 1px solid #ddd;
-            padding: 6px 8px;
+            padding: 6px 4px;
             text-align: left;
             word-wrap: break-word;
+            overflow-wrap: break-word;
+            box-sizing: border-box;
         }
         .load-sheet-print-area table th {
             background-color: #f2f2f2;
@@ -1382,15 +1386,16 @@
                 printDiv.className = 'load-sheet-print-area';
                 
                 // Style for proper rendering
-                printDiv.style.width = '210mm';
-                printDiv.style.maxWidth = '210mm';
-                printDiv.style.padding = '15px';
+                printDiv.style.width = '190mm';
+                printDiv.style.maxWidth = '190mm';
+                printDiv.style.padding = '10px';
                 printDiv.style.backgroundColor = 'white';
                 printDiv.style.color = 'black';
                 printDiv.style.fontFamily = 'Arial, sans-serif';
-                printDiv.style.fontSize = '12px';
+                printDiv.style.fontSize = '11px';
                 printDiv.style.lineHeight = '1.4';
                 printDiv.style.boxSizing = 'border-box';
+                printDiv.style.margin = '0';
                 
                 // Create a visible container (html2canvas needs element in viewport)
                 const container = document.createElement('div');
@@ -1431,7 +1436,7 @@
                 
                 // Generate PDF with improved options
                 const opt = {
-                    margin: [10, 10, 10, 10],
+                    margin: [5, 5, 5, 5],
                     filename: `LoadSheet_Order_${orderId}_${(loadSheet.product_name || 'Order').replace(/[^a-z0-9]/gi, '_')}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: { 
@@ -1440,7 +1445,9 @@
                         logging: false,
                         letterRendering: true,
                         allowTaint: false,
-                        backgroundColor: '#ffffff'
+                        backgroundColor: '#ffffff',
+                        width: printDiv.scrollWidth,
+                        height: printDiv.scrollHeight
                     },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
                     pagebreak: { 
