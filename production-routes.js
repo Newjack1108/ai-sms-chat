@@ -1074,6 +1074,17 @@ router.post('/orders/:id/requirements', requireProductionAuth, async (req, res) 
     }
 });
 
+router.get('/orders/:id/load-sheet', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const loadSheet = await ProductionDatabase.getLoadSheet(orderId);
+        res.json({ success: true, load_sheet: loadSheet });
+    } catch (error) {
+        console.error('Get load sheet error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to get load sheet' });
+    }
+});
+
 // ============ QUOTES ROUTES ============
 
 router.get('/quotes', requireProductionAuth, async (req, res) => {

@@ -4041,6 +4041,61 @@ class ProductionDatabase {
         }
     }
     
+    static async getLoadSheet(orderId) {
+        // Get the order
+        const order = await this.getProductOrderById(orderId);
+        if (!order) {
+            throw new Error('Order not found');
+        }
+        
+        const productId = order.product_id;
+        const orderQuantity = parseFloat(order.quantity || 1);
+        
+        // Get direct product components (no drilling down into nested materials)
+        const productComponents = await this.getProductComponents(productId);
+        
+        const components = [];
+        const builtItems = [];
+        const rawMaterials = [];
+        
+        for (const comp of productComponents) {
+            const quantity = parseFloat(comp.quantity_required || 0) * orderQuantity;
+            const item = {
+                id: comp.component_id,
+                name: comp.component_name || 'Unknown',
+                quantity: quantity,
+                unit: comp.unit || 'unit',
+                component_type: comp.component_type
+            };
+            
+            if (comp.component_type === 'component') {
+                components.push(item);
+            } else if (comp.component_type === 'built_item') {
+                builtItems.push(item);
+            } else if (comp.component_type === 'raw_material') {
+                // Get stock item details for raw materials
+                const stockItem = await this.getStockItemById(comp.component_id);
+                if (stockItem) {
+                    item.available = parseFloat(stockItem.current_quantity || 0);
+                    item.location = stockItem.location || '';
+                    item.cost_per_unit = parseFloat(stockItem.cost_per_unit_gbp || 0);
+                    item.total_cost = quantity * item.cost_per_unit;
+                }
+                rawMaterials.push(item);
+            }
+        }
+        
+        return {
+            order_id: orderId,
+            product_id: productId,
+            product_name: order.product_name || 'Unknown',
+            quantity: orderQuantity,
+            components,
+            built_items: builtItems,
+            raw_materials: rawMaterials
+        };
+    }
+    
     // ============ PRODUCT ORDERS OPERATIONS ============
     
     static async createProductOrder(data) {

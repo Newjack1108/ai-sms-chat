@@ -310,6 +310,7 @@
                                     <td>${order.created_by_name || '-'}</td>
                                     <td>
                                         <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View Requirements</button>
+                                        <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
                                         <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Update Status</button>
                                         <button onclick="showEditOrderModal(${order.id})" class="btn btn-info btn-sm">Edit</button>
                                         <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
@@ -645,6 +646,104 @@
                 `;
             } catch (error) {
                 showAlert('Error calculating requirements: ' + error.message, 'error');
+            }
+        }
+        
+        async function viewLoadSheet(orderId) {
+            try {
+                const result = await apiCall(`/orders/${orderId}/load-sheet`);
+                const loadSheet = result.load_sheet;
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal show';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width: 900px;">
+                        <div class="modal-header">
+                            <h3>Load Sheet - ${loadSheet.product_name} (Qty: ${loadSheet.quantity})</h3>
+                            <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                        </div>
+                        <div class="requirements-section">
+                            ${loadSheet.components.length > 0 ? `
+                            <h4>Components Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Component</th>
+                                        <th>Quantity</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.components.map(c => `
+                                        <tr>
+                                            <td><strong>${c.name}</strong></td>
+                                            <td>${parseFloat(c.quantity).toFixed(2)}</td>
+                                            <td>${c.unit}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            
+                            ${loadSheet.built_items.length > 0 ? `
+                            <h4>Built Items Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Built Item</th>
+                                        <th>Quantity</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.built_items.map(bi => `
+                                        <tr>
+                                            <td><strong>${bi.name}</strong></td>
+                                            <td>${parseFloat(bi.quantity).toFixed(2)}</td>
+                                            <td>${bi.unit}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            
+                            ${loadSheet.raw_materials.length > 0 ? `
+                            <h4>Raw Materials Required</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Material</th>
+                                        <th>Quantity</th>
+                                        <th>Unit</th>
+                                        <th>Available</th>
+                                        <th>Location</th>
+                                        <th>Cost (GBP)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.raw_materials.map(rm => {
+                                        const shortfall = Math.max(0, parseFloat(rm.quantity) - parseFloat(rm.available || 0));
+                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
+                                        return `
+                                            <tr>
+                                                <td><strong>${rm.name}</strong></td>
+                                                <td>${parseFloat(rm.quantity).toFixed(2)}</td>
+                                                <td>${rm.unit}</td>
+                                                <td>${parseFloat(rm.available || 0).toFixed(2)}</td>
+                                                <td>${rm.location || '-'}</td>
+                                                <td>${formatCurrency(rm.total_cost || 0)}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : '<p>No raw materials required</p>'}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showAlert('Error loading load sheet: ' + error.message, 'error');
             }
         }
         
