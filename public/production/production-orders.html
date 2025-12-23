@@ -1305,17 +1305,24 @@
                 const printDiv = document.createElement('div');
                 printDiv.innerHTML = printHTML;
                 printDiv.className = 'load-sheet-print-area';
-                printDiv.style.position = 'fixed';
-                printDiv.style.top = '0';
+                // Position off-screen but with proper dimensions for html2canvas
+                printDiv.style.position = 'absolute';
                 printDiv.style.left = '0';
+                printDiv.style.top = '0';
                 printDiv.style.width = '210mm';
-                printDiv.style.maxWidth = '210mm';
+                printDiv.style.minHeight = '297mm'; // A4 height
                 printDiv.style.backgroundColor = 'white';
-                printDiv.style.zIndex = '10000';
-                printDiv.style.overflow = 'visible';
-                document.body.appendChild(printDiv);
+                printDiv.style.color = 'black';
+                // Add to a container that's off-screen
+                const container = document.createElement('div');
+                container.style.position = 'absolute';
+                container.style.left = '-10000px';
+                container.style.top = '0';
+                container.style.width = '210mm';
+                container.appendChild(printDiv);
+                document.body.appendChild(container);
                 
-                // Wait for element to render and be visible
+                // Wait for element to render
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
                 // Verify content exists
@@ -1345,7 +1352,7 @@
                 await html2pdf().set(opt).from(printDiv).save();
                 
                 // Clean up
-                document.body.removeChild(printDiv);
+                document.body.removeChild(container);
                 
                 showAlert('PDF generated successfully');
             } catch (error) {
