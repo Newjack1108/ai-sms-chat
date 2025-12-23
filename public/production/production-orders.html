@@ -52,16 +52,13 @@
             margin-top: 20px;
             margin-bottom: 10px;
             color: black;
-            page-break-after: avoid;
         }
         .load-sheet-print-area h5 {
             margin-top: 15px;
             margin-bottom: 8px;
             color: black;
-            page-break-after: avoid;
         }
         .load-sheet-print-area .table-section {
-            page-break-inside: avoid;
             margin-bottom: 20px;
         }
         .load-sheet-print-area table {
@@ -74,8 +71,7 @@
             display: table-row-group;
         }
         .load-sheet-print-area table tr {
-            page-break-inside: avoid;
-            page-break-after: auto;
+            page-break-inside: auto;
         }
         .load-sheet-print-area p {
             color: black;
@@ -1421,10 +1417,7 @@
                     },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
                     pagebreak: { 
-                        mode: ['avoid-all', 'css', 'legacy'],
-                        before: '.table-section',
-                        after: '.table-section',
-                        avoid: ['h4', 'h5', '.table-section']
+                        mode: ['css', 'legacy']
                     }
                 };
                 
