@@ -4132,11 +4132,34 @@ class ProductionDatabase {
         
         for (const comp of productComponents) {
             const quantity = parseFloat(comp.quantity_required || 0) * orderQuantity;
+            
+            // Get unit from source table if product_components.unit is missing or looks like a number
+            let unit = comp.unit || 'unit';
+            if (!comp.unit || !isNaN(parseFloat(comp.unit))) {
+                // Unit is missing or is a number, get from source table
+                if (comp.component_type === 'component') {
+                    const component = await this.getComponentById(comp.component_id);
+                    if (component) {
+                        unit = component.unit || 'unit';
+                    }
+                } else if (comp.component_type === 'built_item') {
+                    const panel = await this.getPanelById(comp.component_id);
+                    if (panel) {
+                        unit = panel.unit || 'piece';
+                    }
+                } else if (comp.component_type === 'raw_material') {
+                    const stockItem = await this.getStockItemById(comp.component_id);
+                    if (stockItem) {
+                        unit = stockItem.unit || 'unit';
+                    }
+                }
+            }
+            
             const item = {
                 id: comp.component_id,
                 name: comp.component_name || 'Unknown',
                 quantity: quantity,
-                unit: comp.unit || 'unit',
+                unit: unit,
                 component_type: comp.component_type,
                 spares: []
             };
@@ -4182,11 +4205,30 @@ class ProductionDatabase {
             );
             
             if (!foundInComponents) {
+                // Get unit from source table for standalone spares
+                let unit = 'unit';
+                if (spare.item_type === 'component') {
+                    const component = await this.getComponentById(spare.item_id);
+                    if (component) {
+                        unit = component.unit || 'unit';
+                    }
+                } else if (spare.item_type === 'built_item') {
+                    const panel = await this.getPanelById(spare.item_id);
+                    if (panel) {
+                        unit = panel.unit || 'piece';
+                    }
+                } else if (spare.item_type === 'raw_material') {
+                    const stockItem = await this.getStockItemById(spare.item_id);
+                    if (stockItem) {
+                        unit = stockItem.unit || 'unit';
+                    }
+                }
+                
                 const spareItem = {
                     id: spare.item_id,
                     name: spare.item_name || 'Unknown',
                     quantity: 0, // Not part of main requirements
-                    unit: 'unit',
+                    unit: unit,
                     component_type: spare.item_type,
                     spares: [{
                         id: spare.id,
