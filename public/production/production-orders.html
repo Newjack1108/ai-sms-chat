@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Works Orders - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
     <link rel="stylesheet" href="common.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
@@ -1086,8 +1088,13 @@
                 // Create print-friendly HTML
                 const printHTML = `
                     <div class="load-sheet-print-area">
-                        <h3>Load Sheet - ${loadSheet.product_name} (Quantity: ${loadSheet.quantity})</h3>
-                        <p><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                        <div style="display: flex; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
+                            <img src="logo.png" alt="Company Logo" style="height: 80px; width: auto; margin-right: 20px;" onerror="this.style.display='none';">
+                            <div style="flex: 1;">
+                                <h3 style="margin: 0 0 5px 0;">Load Sheet - ${loadSheet.product_name} (Quantity: ${loadSheet.quantity})</h3>
+                                <p style="margin: 0;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                            </div>
+                        </div>
                         
                         ${loadSheet.components.length > 0 ? `
                         <h4>Components Required</h4>
@@ -1897,6 +1904,17 @@
         
         init();
     </script>
+    
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            </div>
+            <div class="footer-info">
+                <p>&copy; <script>document.write(new Date().getFullYear())</script> Production System. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
 </body>
 </html>
 

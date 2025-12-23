@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Production Planner - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
     <link rel="stylesheet" href="common.css">
     <style>
         .build-rate-indicator {
@@ -1187,6 +1189,43 @@
                 
                 let yPos = 20;
                 
+                // Add logo to PDF header
+                try {
+                    const logoImg = new Image();
+                    logoImg.crossOrigin = 'anonymous';
+                    logoImg.src = 'logo.png';
+                    
+                    await new Promise((resolve, reject) => {
+                        logoImg.onload = () => {
+                            try {
+                                const canvas = document.createElement('canvas');
+                                canvas.width = logoImg.width;
+                                canvas.height = logoImg.height;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(logoImg, 0, 0);
+                                const logoDataUrl = canvas.toDataURL('image/png');
+                                
+                                // Add logo (80px height, positioned on left)
+                                const logoHeight = 20; // mm
+                                const logoWidth = (logoImg.width / logoImg.height) * logoHeight;
+                                doc.addImage(logoDataUrl, 'PNG', 14, 10, logoWidth, logoHeight);
+                                yPos = 35; // Adjust yPos to account for logo
+                            } catch (err) {
+                                console.warn('Could not add logo to PDF:', err);
+                            }
+                            resolve();
+                        };
+                        logoImg.onerror = () => {
+                            console.warn('Logo image not found, continuing without logo');
+                            resolve();
+                        };
+                        // Timeout after 2 seconds if image doesn't load
+                        setTimeout(() => resolve(), 2000);
+                    });
+                } catch (error) {
+                    console.warn('Error loading logo for PDF:', error);
+                }
+                
                 // Header
                 doc.setFontSize(20);
                 doc.setFont(undefined, 'bold');
@@ -1643,6 +1682,17 @@
         
         init();
     </script>
+    
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            </div>
+            <div class="footer-info">
+                <p>&copy; <script>document.write(new Date().getFullYear())</script> Production System. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
 </body>
 </html>
 
