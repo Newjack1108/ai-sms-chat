@@ -60,6 +60,16 @@
             color: black;
             margin-bottom: 10px;
         }
+        .table td:last-child {
+            white-space: nowrap;
+        }
+        .table td:last-child .btn {
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }
+        .table td:last-child .btn:last-child {
+            margin-right: 0;
+        }
     </style>
 </head>
 <body>
@@ -400,10 +410,10 @@
                                     <td>${formatDate(order.order_date)}</td>
                                     <td>${order.created_by_name || '-'}</td>
                                     <td>
-                                        <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View Requirements</button>
+                                        <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
                                         <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
-                                        <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Manage Spares</button>
-                                        <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Update Status</button>
+                                        <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Spares</button>
+                                        <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Status</button>
                                         <button onclick="showEditOrderModal(${order.id})" class="btn btn-info btn-sm">Edit</button>
                                         <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
                                     </td>
