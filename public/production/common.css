@@ -59,7 +59,7 @@ body.dashboard-page {
 }
 
 .navbar h1 {
-    color: #2c3e50;
+    color: #2E7A0F;
     font-size: 24px;
     margin: 0;
 }
@@ -92,12 +92,12 @@ body.dashboard-page {
 }
 
 .btn-primary {
-    background: #667eea;
+    background: #4CBB17;
     color: white;
 }
 
 .btn-primary:hover {
-    background: #5568d3;
+    background: #3DA014;
 }
 
 .btn-secondary {
@@ -119,12 +119,12 @@ body.dashboard-page {
 }
 
 .btn-success {
-    background: #28a745;
+    background: #4CBB17;
     color: white;
 }
 
 .btn-success:hover {
-    background: #218838;
+    background: #3DA014;
 }
 
 .btn-sm {
@@ -161,7 +161,7 @@ body.dashboard-page {
 }
 
 .card-header h2 {
-    color: #2c3e50;
+    color: #2E7A0F;
     font-size: 20px;
 }
 
@@ -178,13 +178,13 @@ body.dashboard-page {
 }
 
 .table th {
-    background: #f8f9fa;
+    background: #E8F5E9;
     font-weight: 600;
-    color: #2c3e50;
+    color: #2E7A0F;
 }
 
 .table tr:hover {
-    background: #f8f9fa;
+    background: #E8F5E9;
 }
 
 /* Data table styling with better column spacing */
@@ -203,9 +203,9 @@ body.dashboard-page {
 }
 
 .data-table th {
-    background: #f8f9fa;
+    background: #E8F5E9;
     font-weight: 600;
-    color: #2c3e50;
+    color: #2E7A0F;
     position: sticky;
     top: 0;
     z-index: 10;
@@ -217,7 +217,7 @@ body.dashboard-page {
 }
 
 .data-table tr:hover {
-    background: #f8f9fa;
+    background: #E8F5E9;
 }
 
 .data-table tr:last-child td {
@@ -248,7 +248,7 @@ body.dashboard-page {
 .form-label {
     display: block;
     margin-bottom: 5px;
-    color: #2c3e50;
+    color: #2E7A0F;
     font-weight: 600;
     font-size: 14px;
 }
@@ -268,7 +268,7 @@ body.dashboard-page {
 .form-select:focus,
 .form-textarea:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #4CBB17;
 }
 
 .form-textarea {
@@ -365,7 +365,7 @@ body.dashboard-page {
 }
 
 .modal-header h3 {
-    color: #2c3e50;
+    color: #2E7A0F;
     font-size: 20px;
 }
 
@@ -378,7 +378,7 @@ body.dashboard-page {
 }
 
 .modal-close:hover {
-    color: #2c3e50;
+    color: #2E7A0F;
 }
 
 .grid {
@@ -454,13 +454,13 @@ body.dashboard-page {
 }
 
 .tab-btn:hover {
-    color: #495057;
-    background: #f8f9fa;
+    color: #2E7A0F;
+    background: #E8F5E9;
 }
 
 .tab-btn.active {
-    color: #007bff;
-    border-bottom-color: #007bff;
+    color: #4CBB17;
+    border-bottom-color: #4CBB17;
 }
 
 .tab-content {
@@ -541,7 +541,7 @@ body.dashboard-page {
 }
 
 .dropdown-item:hover {
-    background: #f8f9fa;
+    background: #E8F5E9;
 }
 
 .dropdown-item:first-child {
