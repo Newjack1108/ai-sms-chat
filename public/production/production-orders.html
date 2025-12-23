@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Works Orders - Production System</title>
     <link rel="stylesheet" href="common.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         .requirements-section h4 {
             margin-top: 30px;
@@ -12,6 +13,38 @@
         }
         .requirements-section h4:first-child {
             margin-top: 0;
+        }
+        .load-sheet-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        .load-sheet-print-area {
+            padding: 20px;
+        }
+        .load-sheet-print-area h3 {
+            margin-bottom: 20px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+        }
+        .load-sheet-print-area table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        .load-sheet-print-area table th,
+        .load-sheet-print-area table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .load-sheet-print-area table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .load-sheet-print-area h4 {
+            margin-top: 20px;
+            margin-bottom: 10px;
         }
     </style>
 </head>
@@ -656,26 +689,32 @@
                 
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
+                modal.id = 'loadSheetModal';
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 900px;">
                         <div class="modal-header">
                             <h3>Load Sheet - ${loadSheet.product_name} (Qty: ${loadSheet.quantity})</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
-                        <div class="requirements-section">
+                        <div style="padding: 15px; border-bottom: 1px solid #dee2e6;">
+                            <button onclick="printLoadSheetPDF(${orderId})" class="btn btn-primary">Print PDF</button>
+                        </div>
+                        <div class="requirements-section" id="loadSheetContent">
                             ${loadSheet.components.length > 0 ? `
                             <h4>Components Required</h4>
                             <table class="table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 50px;">✓</th>
                                         <th>Component</th>
                                         <th>Quantity</th>
                                         <th>Unit</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.components.map(c => `
+                                    ${loadSheet.components.map((c, idx) => `
                                         <tr>
+                                            <td><input type="checkbox" class="load-sheet-checkbox" id="comp-${idx}"></td>
                                             <td><strong>${c.name}</strong></td>
                                             <td>${parseFloat(c.quantity).toFixed(2)}</td>
                                             <td>${c.unit}</td>
@@ -690,14 +729,16 @@
                             <table class="table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 50px;">✓</th>
                                         <th>Built Item</th>
                                         <th>Quantity</th>
                                         <th>Unit</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.built_items.map(bi => `
+                                    ${loadSheet.built_items.map((bi, idx) => `
                                         <tr>
+                                            <td><input type="checkbox" class="load-sheet-checkbox" id="built-${idx}"></td>
                                             <td><strong>${bi.name}</strong></td>
                                             <td>${parseFloat(bi.quantity).toFixed(2)}</td>
                                             <td>${bi.unit}</td>
@@ -712,29 +753,23 @@
                             <table class="table">
                                 <thead>
                                     <tr>
+                                        <th style="width: 50px;">✓</th>
                                         <th>Material</th>
                                         <th>Quantity</th>
                                         <th>Unit</th>
-                                        <th>Available</th>
-                                        <th>Location</th>
-                                        <th>Cost (GBP)</th>
+                                        ${loadSheet.raw_materials.some(rm => rm.location) ? '<th>Location</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.raw_materials.map(rm => {
-                                        const shortfall = Math.max(0, parseFloat(rm.quantity) - parseFloat(rm.available || 0));
-                                        const statusClass = shortfall > 0 ? 'badge-danger' : 'badge-success';
-                                        return `
-                                            <tr>
-                                                <td><strong>${rm.name}</strong></td>
-                                                <td>${parseFloat(rm.quantity).toFixed(2)}</td>
-                                                <td>${rm.unit}</td>
-                                                <td>${parseFloat(rm.available || 0).toFixed(2)}</td>
-                                                <td>${rm.location || '-'}</td>
-                                                <td>${formatCurrency(rm.total_cost || 0)}</td>
-                                            </tr>
-                                        `;
-                                    }).join('')}
+                                    ${loadSheet.raw_materials.map((rm, idx) => `
+                                        <tr>
+                                            <td><input type="checkbox" class="load-sheet-checkbox" id="raw-${idx}"></td>
+                                            <td><strong>${rm.name}</strong></td>
+                                            <td>${parseFloat(rm.quantity).toFixed(2)}</td>
+                                            <td>${rm.unit}</td>
+                                            ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                        </tr>
+                                    `).join('')}
                                 </tbody>
                             </table>
                             ` : '<p>No raw materials required</p>'}
@@ -744,6 +779,127 @@
                 document.body.appendChild(modal);
             } catch (error) {
                 showAlert('Error loading load sheet: ' + error.message, 'error');
+            }
+        }
+        
+        async function printLoadSheetPDF(orderId) {
+            try {
+                const result = await apiCall(`/orders/${orderId}/load-sheet`);
+                const loadSheet = result.load_sheet;
+                
+                // Get current checkbox states
+                const checkboxStates = {};
+                document.querySelectorAll('#loadSheetContent input[type="checkbox"]').forEach(cb => {
+                    checkboxStates[cb.id] = cb.checked;
+                });
+                
+                // Create print-friendly HTML
+                const printHTML = `
+                    <div class="load-sheet-print-area">
+                        <h3>Load Sheet - ${loadSheet.product_name} (Quantity: ${loadSheet.quantity})</h3>
+                        <p><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                        
+                        ${loadSheet.components.length > 0 ? `
+                        <h4>Components Required</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Component</th>
+                                    <th>Quantity</th>
+                                    <th>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.components.map((c, idx) => `
+                                    <tr>
+                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`comp-${idx}`] ? '☑' : '☐'}</td>
+                                        <td><strong>${c.name}</strong></td>
+                                        <td>${parseFloat(c.quantity).toFixed(2)}</td>
+                                        <td>${c.unit}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
+                        
+                        ${loadSheet.built_items.length > 0 ? `
+                        <h4>Built Items Required</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Built Item</th>
+                                    <th>Quantity</th>
+                                    <th>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.built_items.map((bi, idx) => `
+                                    <tr>
+                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`built-${idx}`] ? '☑' : '☐'}</td>
+                                        <td><strong>${bi.name}</strong></td>
+                                        <td>${parseFloat(bi.quantity).toFixed(2)}</td>
+                                        <td>${bi.unit}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
+                        
+                        ${loadSheet.raw_materials.length > 0 ? `
+                        <h4>Raw Materials Required</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Material</th>
+                                    <th>Quantity</th>
+                                    <th>Unit</th>
+                                    ${loadSheet.raw_materials.some(rm => rm.location) ? '<th>Location</th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.raw_materials.map((rm, idx) => `
+                                    <tr>
+                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`raw-${idx}`] ? '☑' : '☐'}</td>
+                                        <td><strong>${rm.name}</strong></td>
+                                        <td>${parseFloat(rm.quantity).toFixed(2)}</td>
+                                        <td>${rm.unit}</td>
+                                        ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
+                    </div>
+                `;
+                
+                // Create temporary element for PDF generation
+                const printDiv = document.createElement('div');
+                printDiv.innerHTML = printHTML;
+                printDiv.style.position = 'absolute';
+                printDiv.style.left = '-9999px';
+                document.body.appendChild(printDiv);
+                
+                // Generate PDF
+                const opt = {
+                    margin: [10, 10, 10, 10],
+                    filename: `LoadSheet_Order_${orderId}_${loadSheet.product_name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2 },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                };
+                
+                await html2pdf().set(opt).from(printDiv).save();
+                
+                // Clean up
+                document.body.removeChild(printDiv);
+                
+                showAlert('PDF generated successfully');
+            } catch (error) {
+                console.error('PDF generation error:', error);
+                showAlert('Error generating PDF: ' + error.message, 'error');
             }
         }
         
