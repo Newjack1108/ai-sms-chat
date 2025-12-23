@@ -1301,36 +1301,64 @@
                     </div>
                 `;
                 
+                // Check if html2pdf is loaded
+                if (typeof html2pdf === 'undefined') {
+                    throw new Error('PDF library not loaded. Please refresh the page.');
+                }
+                
                 // Create temporary element for PDF generation
                 const printDiv = document.createElement('div');
                 printDiv.innerHTML = printHTML;
                 printDiv.className = 'load-sheet-print-area';
-                // Position off-screen but with proper dimensions for html2canvas
-                printDiv.style.position = 'absolute';
-                printDiv.style.left = '0';
-                printDiv.style.top = '0';
+                
+                // Style for proper rendering
                 printDiv.style.width = '210mm';
-                printDiv.style.minHeight = '297mm'; // A4 height
+                printDiv.style.maxWidth = '210mm';
+                printDiv.style.padding = '20px';
                 printDiv.style.backgroundColor = 'white';
                 printDiv.style.color = 'black';
-                // Add to a container that's off-screen
+                printDiv.style.fontFamily = 'Arial, sans-serif';
+                printDiv.style.fontSize = '12px';
+                printDiv.style.lineHeight = '1.4';
+                
+                // Create a visible container (html2canvas needs element in viewport)
                 const container = document.createElement('div');
-                container.style.position = 'absolute';
-                container.style.left = '-10000px';
+                container.style.position = 'fixed';
                 container.style.top = '0';
+                container.style.left = '0';
                 container.style.width = '210mm';
+                container.style.maxWidth = '100vw';
+                container.style.height = 'auto';
+                container.style.overflow = 'auto';
+                container.style.backgroundColor = 'white';
+                container.style.zIndex = '99999';
+                container.style.padding = '0';
+                container.style.margin = '0';
                 container.appendChild(printDiv);
                 document.body.appendChild(container);
                 
-                // Wait for element to render
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // Scroll to top to ensure element is in viewport
+                window.scrollTo(0, 0);
+                container.scrollTop = 0;
+                
+                // Wait for element to fully render
+                await new Promise(resolve => setTimeout(resolve, 800));
+                
+                // Force a reflow to ensure rendering
+                void printDiv.offsetHeight;
                 
                 // Verify content exists
                 if (!printDiv.innerHTML || printDiv.innerHTML.trim().length < 100) {
+                    document.body.removeChild(container);
                     throw new Error('Load sheet content is empty or too short');
                 }
                 
-                // Generate PDF
+                console.log('Generating PDF from element:', printDiv);
+                console.log('Element content length:', printDiv.innerHTML.length);
+                console.log('Element dimensions:', printDiv.offsetWidth, 'x', printDiv.offsetHeight);
+                console.log('Container dimensions:', container.offsetWidth, 'x', container.offsetHeight);
+                
+                // Generate PDF with improved options
                 const opt = {
                     margin: [10, 10, 10, 10],
                     filename: `LoadSheet_Order_${orderId}_${(loadSheet.product_name || 'Order').replace(/[^a-z0-9]/gi, '_')}.pdf`,
@@ -1338,21 +1366,25 @@
                     html2canvas: { 
                         scale: 2,
                         useCORS: true,
-                        logging: true,
-                        windowWidth: printDiv.scrollWidth || 800,
-                        windowHeight: printDiv.scrollHeight || 1200
+                        logging: false,
+                        letterRendering: true,
+                        allowTaint: false,
+                        backgroundColor: '#ffffff'
                     },
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
                 };
                 
-                console.log('Generating PDF from element:', printDiv);
-                console.log('Element content length:', printDiv.innerHTML.length);
-                console.log('Element dimensions:', printDiv.scrollWidth, 'x', printDiv.scrollHeight);
-                
-                await html2pdf().set(opt).from(printDiv).save();
-                
-                // Clean up
-                document.body.removeChild(container);
+                try {
+                    await html2pdf().set(opt).from(printDiv).save();
+                } finally {
+                    // Clean up - remove container after a short delay to ensure PDF generation completes
+                    setTimeout(() => {
+                        if (container.parentNode) {
+                            document.body.removeChild(container);
+                        }
+                    }, 1000);
+                }
                 
                 showAlert('PDF generated successfully');
             } catch (error) {
