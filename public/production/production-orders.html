@@ -52,11 +52,30 @@
             margin-top: 20px;
             margin-bottom: 10px;
             color: black;
+            page-break-after: avoid;
         }
         .load-sheet-print-area h5 {
             margin-top: 15px;
             margin-bottom: 8px;
             color: black;
+            page-break-after: avoid;
+        }
+        .load-sheet-print-area .table-section {
+            page-break-inside: avoid;
+            margin-bottom: 20px;
+        }
+        .load-sheet-print-area table {
+            page-break-inside: auto;
+        }
+        .load-sheet-print-area table thead {
+            display: table-header-group;
+        }
+        .load-sheet-print-area table tbody {
+            display: table-row-group;
+        }
+        .load-sheet-print-area table tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
         }
         .load-sheet-print-area p {
             color: black;
@@ -1097,6 +1116,7 @@
                         </div>
                         
                         ${loadSheet.components.length > 0 ? `
+                        <div class="table-section">
                         <h4>Components Required</h4>
                         <table>
                             <thead>
@@ -1134,9 +1154,11 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         
                         ${loadSheet.built_items.length > 0 ? `
+                        <div class="table-section">
                         <h4>Built Items Required</h4>
                         <table>
                             <thead>
@@ -1174,9 +1196,11 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         
                         ${loadSheet.raw_materials.length > 0 ? `
+                        <div class="table-section">
                         <h4>Raw Materials Required</h4>
                         <table>
                             <thead>
@@ -1217,6 +1241,7 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         
                         ${loadSheet.standalone_spares && (
@@ -1226,6 +1251,7 @@
                         ) ? `
                         <h4>Standalone Spares (Not in Main Requirements)</h4>
                         ${loadSheet.standalone_spares.components.length > 0 ? `
+                        <div class="table-section">
                         <h5>Components</h5>
                         <table>
                             <thead>
@@ -1253,8 +1279,10 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         ${loadSheet.standalone_spares.built_items.length > 0 ? `
+                        <div class="table-section">
                         <h5>Built Items</h5>
                         <table>
                             <thead>
@@ -1282,8 +1310,10 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         ${loadSheet.standalone_spares.raw_materials.length > 0 ? `
+                        <div class="table-section">
                         <h5>Raw Materials</h5>
                         <table>
                             <thead>
@@ -1313,6 +1343,7 @@
                                 }).join('')}
                             </tbody>
                         </table>
+                        </div>
                         ` : ''}
                         ` : ''}
                     </div>
@@ -1389,7 +1420,12 @@
                         backgroundColor: '#ffffff'
                     },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                    pagebreak: { 
+                        mode: ['avoid-all', 'css', 'legacy'],
+                        before: '.table-section',
+                        after: '.table-section',
+                        avoid: ['h4', 'h5', '.table-section']
+                    }
                 };
                 
                 try {
