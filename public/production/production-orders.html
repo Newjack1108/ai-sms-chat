@@ -35,14 +35,17 @@
         }
         .load-sheet-print-area table {
             width: 100%;
+            max-width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
+            table-layout: auto;
         }
         .load-sheet-print-area table th,
         .load-sheet-print-area table td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 6px 8px;
             text-align: left;
+            word-wrap: break-word;
         }
         .load-sheet-print-area table th {
             background-color: #f2f2f2;
@@ -1097,8 +1100,15 @@
                     throw new Error('Load sheet data not found');
                 }
                 
-                // PDF always uses blank checkboxes (for fresh picking)
-                // Don't use saved checkbox states for PDF
+                // Get current checkbox states from the displayed load sheet (if modal is open)
+                const checkboxStates = {};
+                const loadSheetModal = document.getElementById('loadSheetModal');
+                if (loadSheetModal) {
+                    const checkboxes = loadSheetModal.querySelectorAll('.load-sheet-checkbox');
+                    checkboxes.forEach(cb => {
+                        checkboxStates[cb.id] = cb.checked;
+                    });
+                }
                 
                 // Create print-friendly HTML
                 const printHTML = `
@@ -1123,9 +1133,11 @@
                             </thead>
                             <tbody>
                                 ${loadSheet.components.map((c, idx) => {
+                                    const checkboxId = `comp-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${c.name}</strong></td>
                                             <td>${parseFloat(c.quantity).toFixed(2)}</td>
                                             <td>${c.unit}</td>
@@ -1135,9 +1147,11 @@
                                         const loaded = parseFloat(spare.quantity_loaded || 0);
                                         const used = parseFloat(spare.quantity_used || 0);
                                         const returned = parseFloat(spare.quantity_returned || 0);
+                                        const spareCheckboxId = `spare-comp-${idx}-${sIdx}`;
+                                        const spareChecked = checkboxStates[spareCheckboxId] || false;
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">☐</td>
+                                                <td style="text-align: center; font-size: 18px;">${spareChecked ? '☑' : '☐'}</td>
                                                 <td><em>Spare: ${c.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${c.unit}</td>
@@ -1165,9 +1179,11 @@
                             </thead>
                             <tbody>
                                 ${loadSheet.built_items.map((bi, idx) => {
+                                    const checkboxId = `built-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${bi.name}</strong></td>
                                             <td>${parseFloat(bi.quantity).toFixed(2)}</td>
                                             <td>${bi.unit}</td>
@@ -1177,9 +1193,11 @@
                                         const loaded = parseFloat(spare.quantity_loaded || 0);
                                         const used = parseFloat(spare.quantity_used || 0);
                                         const returned = parseFloat(spare.quantity_returned || 0);
+                                        const spareCheckboxId = `spare-built-${idx}-${sIdx}`;
+                                        const spareChecked = checkboxStates[spareCheckboxId] || false;
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">☐</td>
+                                                <td style="text-align: center; font-size: 18px;">${spareChecked ? '☑' : '☐'}</td>
                                                 <td><em>Spare: ${bi.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${bi.unit}</td>
@@ -1208,9 +1226,11 @@
                             </thead>
                             <tbody>
                                 ${loadSheet.raw_materials.map((rm, idx) => {
+                                    const checkboxId = `raw-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${rm.name}</strong></td>
                                             <td>${parseFloat(rm.quantity).toFixed(2)}</td>
                                             <td>${rm.unit}</td>
@@ -1221,9 +1241,11 @@
                                         const loaded = parseFloat(spare.quantity_loaded || 0);
                                         const used = parseFloat(spare.quantity_used || 0);
                                         const returned = parseFloat(spare.quantity_returned || 0);
+                                        const spareCheckboxId = `spare-raw-${idx}-${sIdx}`;
+                                        const spareChecked = checkboxStates[spareCheckboxId] || false;
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">☐</td>
+                                                <td style="text-align: center; font-size: 18px;">${spareChecked ? '☑' : '☐'}</td>
                                                 <td><em>Spare: ${rm.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${rm.unit}</td>
@@ -1262,9 +1284,11 @@
                                     const loaded = parseFloat(spare.quantity_loaded || 0);
                                     const used = parseFloat(spare.quantity_used || 0);
                                     const returned = parseFloat(spare.quantity_returned || 0);
+                                    const checkboxId = `standalone-comp-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${c.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${c.unit}</td>
@@ -1293,9 +1317,11 @@
                                     const loaded = parseFloat(spare.quantity_loaded || 0);
                                     const used = parseFloat(spare.quantity_used || 0);
                                     const returned = parseFloat(spare.quantity_returned || 0);
+                                    const checkboxId = `standalone-built-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${bi.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${bi.unit}</td>
@@ -1325,9 +1351,11 @@
                                     const loaded = parseFloat(spare.quantity_loaded || 0);
                                     const used = parseFloat(spare.quantity_used || 0);
                                     const returned = parseFloat(spare.quantity_returned || 0);
+                                    const checkboxId = `standalone-raw-${idx}`;
+                                    const isChecked = checkboxStates[checkboxId] || false;
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">☐</td>
+                                            <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${rm.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${rm.unit}</td>
@@ -1356,12 +1384,13 @@
                 // Style for proper rendering
                 printDiv.style.width = '210mm';
                 printDiv.style.maxWidth = '210mm';
-                printDiv.style.padding = '20px';
+                printDiv.style.padding = '15px';
                 printDiv.style.backgroundColor = 'white';
                 printDiv.style.color = 'black';
                 printDiv.style.fontFamily = 'Arial, sans-serif';
                 printDiv.style.fontSize = '12px';
                 printDiv.style.lineHeight = '1.4';
+                printDiv.style.boxSizing = 'border-box';
                 
                 // Create a visible container (html2canvas needs element in viewport)
                 const container = document.createElement('div');
