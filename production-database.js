@@ -193,6 +193,23 @@ function initializeSQLite() {
         )
     `);
     
+    // Order spares table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS order_spares (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            item_type TEXT NOT NULL CHECK(item_type IN ('component', 'built_item', 'raw_material')),
+            item_id INTEGER NOT NULL,
+            quantity_needed REAL NOT NULL,
+            quantity_loaded REAL DEFAULT 0,
+            quantity_used REAL DEFAULT 0,
+            quantity_returned REAL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES product_orders(id) ON DELETE CASCADE
+        )
+    `);
+    
     // Migrate finished_products to add category column
     try {
         const tableInfo = db.prepare(`PRAGMA table_info(finished_products)`).all();
@@ -203,6 +220,17 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Finished products category migration check skipped:', error.message);
+    }
+    
+    // Migrate order_spares table (check if exists)
+    try {
+        const tableInfo = db.prepare(`PRAGMA table_info(order_spares)`).all();
+        if (tableInfo.length === 0) {
+            // Table doesn't exist, it will be created by CREATE TABLE IF NOT EXISTS above
+            console.log('✅ Order spares table will be created');
+        }
+    } catch (error) {
+        console.log('⚠️ Order spares migration check skipped:', error.message);
     }
     
     // Stock movements table
@@ -889,6 +917,22 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Order spares table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS order_spares (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
+                item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('component', 'built_item', 'raw_material')),
+                item_id INTEGER NOT NULL,
+                quantity_needed DECIMAL(10,2) NOT NULL,
+                quantity_loaded DECIMAL(10,2) DEFAULT 0,
+                quantity_used DECIMAL(10,2) DEFAULT 0,
+                quantity_returned DECIMAL(10,2) DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
         // Migrate finished_products to add category column
         try {
             const columnCheck = await pool.query(`
@@ -902,6 +946,21 @@ async function initializePostgreSQL() {
             }
         } catch (error) {
             console.log('⚠️ Finished products category migration check skipped:', error.message);
+        }
+        
+        // Migrate order_spares table (check if exists)
+        try {
+            const tableCheck = await pool.query(`
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_name = 'order_spares'
+            `);
+            if (tableCheck.rows.length === 0) {
+                // Table doesn't exist, it will be created by CREATE TABLE IF NOT EXISTS above
+                console.log('✅ Order spares table will be created');
+            }
+        } catch (error) {
+            console.log('⚠️ Order spares migration check skipped:', error.message);
         }
         
         // Stock movements
@@ -4054,6 +4113,19 @@ class ProductionDatabase {
         // Get direct product components (no drilling down into nested materials)
         const productComponents = await this.getProductComponents(productId);
         
+        // Get spares for this order
+        const spares = await this.getOrderSpares(orderId);
+        
+        // Create a map of spares by item_type and item_id for quick lookup
+        const sparesMap = {};
+        spares.forEach(spare => {
+            const key = `${spare.item_type}_${spare.item_id}`;
+            if (!sparesMap[key]) {
+                sparesMap[key] = [];
+            }
+            sparesMap[key].push(spare);
+        });
+        
         const components = [];
         const builtItems = [];
         const rawMaterials = [];
@@ -4065,8 +4137,22 @@ class ProductionDatabase {
                 name: comp.component_name || 'Unknown',
                 quantity: quantity,
                 unit: comp.unit || 'unit',
-                component_type: comp.component_type
+                component_type: comp.component_type,
+                spares: []
             };
+            
+            // Add matching spares
+            const key = `${comp.component_type}_${comp.component_id}`;
+            if (sparesMap[key]) {
+                item.spares = sparesMap[key].map(spare => ({
+                    id: spare.id,
+                    quantity_needed: parseFloat(spare.quantity_needed || 0),
+                    quantity_loaded: parseFloat(spare.quantity_loaded || 0),
+                    quantity_used: parseFloat(spare.quantity_used || 0),
+                    quantity_returned: parseFloat(spare.quantity_returned || 0),
+                    notes: spare.notes || ''
+                }));
+            }
             
             if (comp.component_type === 'component') {
                 components.push(item);
@@ -4076,12 +4162,53 @@ class ProductionDatabase {
                 // Get stock item details for raw materials
                 const stockItem = await this.getStockItemById(comp.component_id);
                 if (stockItem) {
-                    item.available = parseFloat(stockItem.current_quantity || 0);
                     item.location = stockItem.location || '';
-                    item.cost_per_unit = parseFloat(stockItem.cost_per_unit_gbp || 0);
-                    item.total_cost = quantity * item.cost_per_unit;
                 }
                 rawMaterials.push(item);
+            }
+        }
+        
+        // Add spares that don't match any product component (standalone spares)
+        const standaloneSpares = {
+            components: [],
+            built_items: [],
+            raw_materials: []
+        };
+        
+        for (const spare of spares) {
+            const key = `${spare.item_type}_${spare.item_id}`;
+            const foundInComponents = productComponents.some(comp => 
+                comp.component_type === spare.item_type && comp.component_id === spare.item_id
+            );
+            
+            if (!foundInComponents) {
+                const spareItem = {
+                    id: spare.item_id,
+                    name: spare.item_name || 'Unknown',
+                    quantity: 0, // Not part of main requirements
+                    unit: 'unit',
+                    component_type: spare.item_type,
+                    spares: [{
+                        id: spare.id,
+                        quantity_needed: parseFloat(spare.quantity_needed || 0),
+                        quantity_loaded: parseFloat(spare.quantity_loaded || 0),
+                        quantity_used: parseFloat(spare.quantity_used || 0),
+                        quantity_returned: parseFloat(spare.quantity_returned || 0),
+                        notes: spare.notes || ''
+                    }]
+                };
+                
+                if (spare.item_type === 'component') {
+                    standaloneSpares.components.push(spareItem);
+                } else if (spare.item_type === 'built_item') {
+                    standaloneSpares.built_items.push(spareItem);
+                } else if (spare.item_type === 'raw_material') {
+                    const stockItem = await this.getStockItemById(spare.item_id);
+                    if (stockItem) {
+                        spareItem.location = stockItem.location || '';
+                    }
+                    standaloneSpares.raw_materials.push(spareItem);
+                }
             }
         }
         
@@ -4092,7 +4219,8 @@ class ProductionDatabase {
             quantity: orderQuantity,
             components,
             built_items: builtItems,
-            raw_materials: rawMaterials
+            raw_materials: rawMaterials,
+            standalone_spares: standaloneSpares
         };
     }
     
@@ -4301,6 +4429,204 @@ class ProductionDatabase {
             db.prepare(`DELETE FROM product_orders WHERE id = ?`).run(id);
             return order;
         }
+    }
+    
+    // ============ ORDER SPARES OPERATIONS ============
+    
+    static async createOrderSpare(orderId, data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO order_spares (order_id, item_type, item_id, quantity_needed, notes)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [orderId, data.item_type, data.item_id, parseFloat(data.quantity_needed), data.notes || null]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT INTO order_spares (order_id, item_type, item_id, quantity_needed, notes)
+                 VALUES (?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(orderId, data.item_type, data.item_id, parseFloat(data.quantity_needed), data.notes || null);
+            return this.getOrderSpareById(info.lastInsertRowid);
+        }
+    }
+    
+    static async getOrderSpareById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT os.*,
+                 CASE 
+                     WHEN os.item_type = 'raw_material' THEN si.name
+                     WHEN os.item_type = 'component' THEN c.name
+                     WHEN os.item_type = 'built_item' THEN p.name
+                 END as item_name
+                 FROM order_spares os
+                 LEFT JOIN stock_items si ON os.item_type = 'raw_material' AND os.item_id = si.id
+                 LEFT JOIN components c ON os.item_type = 'component' AND os.item_id = c.id
+                 LEFT JOIN panels p ON os.item_type = 'built_item' AND os.item_id = p.id
+                 WHERE os.id = $1`,
+                [id]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT os.*,
+                 CASE 
+                     WHEN os.item_type = 'raw_material' THEN si.name
+                     WHEN os.item_type = 'component' THEN c.name
+                     WHEN os.item_type = 'built_item' THEN p.name
+                 END as item_name
+                 FROM order_spares os
+                 LEFT JOIN stock_items si ON os.item_type = 'raw_material' AND os.item_id = si.id
+                 LEFT JOIN components c ON os.item_type = 'component' AND os.item_id = c.id
+                 LEFT JOIN panels p ON os.item_type = 'built_item' AND os.item_id = p.id
+                 WHERE os.id = ?`
+            ).get(id) || null;
+        }
+    }
+    
+    static async getOrderSpares(orderId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT os.*,
+                 CASE 
+                     WHEN os.item_type = 'raw_material' THEN si.name
+                     WHEN os.item_type = 'component' THEN c.name
+                     WHEN os.item_type = 'built_item' THEN p.name
+                 END as item_name
+                 FROM order_spares os
+                 LEFT JOIN stock_items si ON os.item_type = 'raw_material' AND os.item_id = si.id
+                 LEFT JOIN components c ON os.item_type = 'component' AND os.item_id = c.id
+                 LEFT JOIN panels p ON os.item_type = 'built_item' AND os.item_id = p.id
+                 WHERE os.order_id = $1 ORDER BY os.item_type, item_name`,
+                [orderId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT os.*,
+                 CASE 
+                     WHEN os.item_type = 'raw_material' THEN si.name
+                     WHEN os.item_type = 'component' THEN c.name
+                     WHEN os.item_type = 'built_item' THEN p.name
+                 END as item_name
+                 FROM order_spares os
+                 LEFT JOIN stock_items si ON os.item_type = 'raw_material' AND os.item_id = si.id
+                 LEFT JOIN components c ON os.item_type = 'component' AND os.item_id = c.id
+                 LEFT JOIN panels p ON os.item_type = 'built_item' AND os.item_id = p.id
+                 WHERE os.order_id = ? ORDER BY os.item_type, item_name`
+            ).all(orderId);
+        }
+    }
+    
+    static async updateOrderSpare(spareId, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.quantity_needed !== undefined) {
+            updates.push(`quantity_needed = $${paramIndex}`);
+            values.push(parseFloat(data.quantity_needed));
+            paramIndex++;
+        }
+        if (data.quantity_loaded !== undefined) {
+            updates.push(`quantity_loaded = $${paramIndex}`);
+            values.push(parseFloat(data.quantity_loaded));
+            paramIndex++;
+        }
+        if (data.quantity_used !== undefined) {
+            updates.push(`quantity_used = $${paramIndex}`);
+            values.push(parseFloat(data.quantity_used));
+            paramIndex++;
+        }
+        if (data.quantity_returned !== undefined) {
+            updates.push(`quantity_returned = $${paramIndex}`);
+            values.push(parseFloat(data.quantity_returned));
+            paramIndex++;
+        }
+        if (data.notes !== undefined) {
+            updates.push(`notes = $${paramIndex}`);
+            values.push(data.notes);
+            paramIndex++;
+        }
+        
+        if (updates.length === 0) {
+            return this.getOrderSpareById(spareId);
+        }
+        
+        values.push(spareId);
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE order_spares SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+                values
+            );
+            return result.rows[0];
+        } else {
+            const setClause = updates.map((update, idx) => {
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE order_spares SET ${setClause} WHERE id = ?`).run(...values);
+            return this.getOrderSpareById(spareId);
+        }
+    }
+    
+    static async deleteOrderSpare(spareId) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM order_spares WHERE id = $1`, [spareId]);
+        } else {
+            db.prepare(`DELETE FROM order_spares WHERE id = ?`).run(spareId);
+        }
+    }
+    
+    static async returnSpareToStock(spareId, quantity, userId) {
+        const spare = await this.getOrderSpareById(spareId);
+        if (!spare) {
+            throw new Error('Spare not found');
+        }
+        
+        const quantityToReturn = parseFloat(quantity);
+        const currentReturned = parseFloat(spare.quantity_returned || 0);
+        const availableToReturn = parseFloat(spare.quantity_loaded || 0) - parseFloat(spare.quantity_used || 0) - currentReturned;
+        
+        if (quantityToReturn > availableToReturn) {
+            throw new Error(`Cannot return ${quantityToReturn}. Only ${availableToReturn} available to return.`);
+        }
+        
+        // Update spare quantity_returned
+        const newReturned = currentReturned + quantityToReturn;
+        await this.updateOrderSpare(spareId, { quantity_returned: newReturned });
+        
+        // Create stock movement based on item type
+        if (spare.item_type === 'raw_material') {
+            await this.recordStockMovement({
+                stock_item_id: spare.item_id,
+                movement_type: 'in',
+                quantity: quantityToReturn,
+                reference: `Spare return - Order #${spare.order_id}`,
+                user_id: userId,
+                cost_gbp: 0
+            });
+        } else if (spare.item_type === 'component') {
+            await this.recordComponentMovement({
+                component_id: spare.item_id,
+                movement_type: 'build',
+                quantity: quantityToReturn,
+                reference: `Spare return - Order #${spare.order_id}`,
+                user_id: userId
+            });
+        } else if (spare.item_type === 'built_item') {
+            await this.recordPanelMovement({
+                panel_id: spare.item_id,
+                movement_type: 'build',
+                quantity: quantityToReturn,
+                reference: `Spare return - Order #${spare.order_id}`,
+                user_id: userId
+            });
+        }
+        
+        return this.getOrderSpareById(spareId);
     }
     
     // ============ TIMESHEET OPERATIONS ============

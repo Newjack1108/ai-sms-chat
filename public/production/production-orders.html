@@ -197,6 +197,19 @@
         </div>
     </div>
     
+    <!-- Manage Spares Modal -->
+    <div id="sparesModal" class="modal">
+        <div class="modal-content" style="max-width: 1000px;">
+            <div class="modal-header">
+                <h3 id="sparesModalTitle">Manage Spares</h3>
+                <button class="modal-close" onclick="hideModal('sparesModal')">&times;</button>
+            </div>
+            <div id="sparesContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
     <!-- Update Status Modal -->
     <div id="updateStatusModal" class="modal">
         <div class="modal-content">
@@ -229,6 +242,10 @@
         let products = [];
         let orders = [];
         let quotes = [];
+        let components = [];
+        let panels = [];
+        let stockItems = [];
+        let currentOrderId = null;
         
         async function init() {
             // Redirect staff users
@@ -237,9 +254,36 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
-            await loadProducts();
+            await Promise.all([loadProducts(), loadComponents(), loadPanels(), loadStockItems()]);
             loadQuotes();
             loadOrders();
+        }
+        
+        async function loadComponents() {
+            try {
+                const data = await apiCall('/components');
+                components = data.components || [];
+            } catch (error) {
+                console.error('Error loading components:', error);
+            }
+        }
+        
+        async function loadPanels() {
+            try {
+                const data = await apiCall('/panels');
+                panels = data.panels || [];
+            } catch (error) {
+                console.error('Error loading panels:', error);
+            }
+        }
+        
+        async function loadStockItems() {
+            try {
+                const data = await apiCall('/stock');
+                stockItems = data.items || [];
+            } catch (error) {
+                console.error('Error loading stock items:', error);
+            }
         }
         
         async function loadProducts() {
@@ -344,6 +388,7 @@
                                     <td>
                                         <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View Requirements</button>
                                         <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
+                                        <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Manage Spares</button>
                                         <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Update Status</button>
                                         <button onclick="showEditOrderModal(${order.id})" class="btn btn-info btn-sm">Edit</button>
                                         <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
@@ -709,17 +754,36 @@
                                         <th>Component</th>
                                         <th>Quantity</th>
                                         <th>Unit</th>
+                                        ${loadSheet.components.some(c => c.spares && c.spares.length > 0) ? '<th>Spares</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.components.map((c, idx) => `
-                                        <tr>
-                                            <td><input type="checkbox" class="load-sheet-checkbox" id="comp-${idx}"></td>
-                                            <td><strong>${c.name}</strong></td>
-                                            <td>${parseFloat(c.quantity).toFixed(2)}</td>
-                                            <td>${c.unit}</td>
-                                        </tr>
-                                    `).join('')}
+                                    ${loadSheet.components.map((c, idx) => {
+                                        const spareRows = c.spares && c.spares.length > 0 ? c.spares.map((spare, sIdx) => {
+                                            const loaded = parseFloat(spare.quantity_loaded || 0);
+                                            const used = parseFloat(spare.quantity_used || 0);
+                                            const returned = parseFloat(spare.quantity_returned || 0);
+                                            return `
+                                                <tr style="background: #fff3cd;">
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-comp-${idx}-${sIdx}"></td>
+                                                    <td><em>Spare: ${c.name}</em></td>
+                                                    <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                    <td>${c.unit}</td>
+                                                    ${loadSheet.components.some(comp => comp.spares && comp.spares.length > 0) ? '<td></td>' : ''}
+                                                </tr>
+                                            `;
+                                        }).join('') : '';
+                                        return `
+                                            <tr>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="comp-${idx}"></td>
+                                                <td><strong>${c.name}</strong></td>
+                                                <td>${parseFloat(c.quantity).toFixed(2)}</td>
+                                                <td>${c.unit}</td>
+                                                ${loadSheet.components.some(comp => comp.spares && comp.spares.length > 0) ? '<td></td>' : ''}
+                                            </tr>
+                                            ${spareRows}
+                                        `;
+                                    }).join('')}
                                 </tbody>
                             </table>
                             ` : ''}
@@ -733,17 +797,36 @@
                                         <th>Built Item</th>
                                         <th>Quantity</th>
                                         <th>Unit</th>
+                                        ${loadSheet.built_items.some(bi => bi.spares && bi.spares.length > 0) ? '<th>Spares</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.built_items.map((bi, idx) => `
-                                        <tr>
-                                            <td><input type="checkbox" class="load-sheet-checkbox" id="built-${idx}"></td>
-                                            <td><strong>${bi.name}</strong></td>
-                                            <td>${parseFloat(bi.quantity).toFixed(2)}</td>
-                                            <td>${bi.unit}</td>
-                                        </tr>
-                                    `).join('')}
+                                    ${loadSheet.built_items.map((bi, idx) => {
+                                        const spareRows = bi.spares && bi.spares.length > 0 ? bi.spares.map((spare, sIdx) => {
+                                            const loaded = parseFloat(spare.quantity_loaded || 0);
+                                            const used = parseFloat(spare.quantity_used || 0);
+                                            const returned = parseFloat(spare.quantity_returned || 0);
+                                            return `
+                                                <tr style="background: #fff3cd;">
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-built-${idx}-${sIdx}"></td>
+                                                    <td><em>Spare: ${bi.name}</em></td>
+                                                    <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                    <td>${bi.unit}</td>
+                                                    ${loadSheet.built_items.some(item => item.spares && item.spares.length > 0) ? '<td></td>' : ''}
+                                                </tr>
+                                            `;
+                                        }).join('') : '';
+                                        return `
+                                            <tr>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="built-${idx}"></td>
+                                                <td><strong>${bi.name}</strong></td>
+                                                <td>${parseFloat(bi.quantity).toFixed(2)}</td>
+                                                <td>${bi.unit}</td>
+                                                ${loadSheet.built_items.some(item => item.spares && item.spares.length > 0) ? '<td></td>' : ''}
+                                            </tr>
+                                            ${spareRows}
+                                        `;
+                                    }).join('')}
                                 </tbody>
                             </table>
                             ` : ''}
@@ -758,21 +841,138 @@
                                         <th>Quantity</th>
                                         <th>Unit</th>
                                         ${loadSheet.raw_materials.some(rm => rm.location) ? '<th>Location</th>' : ''}
+                                        ${loadSheet.raw_materials.some(rm => rm.spares && rm.spares.length > 0) ? '<th>Spares</th>' : ''}
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.raw_materials.map((rm, idx) => `
-                                        <tr>
-                                            <td><input type="checkbox" class="load-sheet-checkbox" id="raw-${idx}"></td>
-                                            <td><strong>${rm.name}</strong></td>
-                                            <td>${parseFloat(rm.quantity).toFixed(2)}</td>
-                                            <td>${rm.unit}</td>
-                                            ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
-                                        </tr>
-                                    `).join('')}
+                                    ${loadSheet.raw_materials.map((rm, idx) => {
+                                        const spareRows = rm.spares && rm.spares.length > 0 ? rm.spares.map((spare, sIdx) => {
+                                            const loaded = parseFloat(spare.quantity_loaded || 0);
+                                            const used = parseFloat(spare.quantity_used || 0);
+                                            const returned = parseFloat(spare.quantity_returned || 0);
+                                            return `
+                                                <tr style="background: #fff3cd;">
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-raw-${idx}-${sIdx}"></td>
+                                                    <td><em>Spare: ${rm.name}</em></td>
+                                                    <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                    <td>${rm.unit}</td>
+                                                    ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                                    ${loadSheet.raw_materials.some(mat => mat.spares && mat.spares.length > 0) ? '<td></td>' : ''}
+                                                </tr>
+                                            `;
+                                        }).join('') : '';
+                                        return `
+                                            <tr>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="raw-${idx}"></td>
+                                                <td><strong>${rm.name}</strong></td>
+                                                <td>${parseFloat(rm.quantity).toFixed(2)}</td>
+                                                <td>${rm.unit}</td>
+                                                ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                                ${loadSheet.raw_materials.some(mat => mat.spares && mat.spares.length > 0) ? '<td></td>' : ''}
+                                            </tr>
+                                            ${spareRows}
+                                        `;
+                                    }).join('')}
                                 </tbody>
                             </table>
                             ` : '<p>No raw materials required</p>'}
+                            
+                            ${loadSheet.standalone_spares && (
+                                loadSheet.standalone_spares.components.length > 0 ||
+                                loadSheet.standalone_spares.built_items.length > 0 ||
+                                loadSheet.standalone_spares.raw_materials.length > 0
+                            ) ? `
+                            <h4>Standalone Spares (Not in Main Requirements)</h4>
+                            ${loadSheet.standalone_spares.components.length > 0 ? `
+                            <h5>Components</h5>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">✓</th>
+                                        <th>Component</th>
+                                        <th>Spare Quantity</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.standalone_spares.components.map((c, idx) => {
+                                        const spare = c.spares[0];
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-comp-${idx}"></td>
+                                                <td><strong>${c.name}</strong></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${c.unit}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            ${loadSheet.standalone_spares.built_items.length > 0 ? `
+                            <h5>Built Items</h5>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">✓</th>
+                                        <th>Built Item</th>
+                                        <th>Spare Quantity</th>
+                                        <th>Unit</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.standalone_spares.built_items.map((bi, idx) => {
+                                        const spare = bi.spares[0];
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-built-${idx}"></td>
+                                                <td><strong>${bi.name}</strong></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${bi.unit}</td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            ${loadSheet.standalone_spares.raw_materials.length > 0 ? `
+                            <h5>Raw Materials</h5>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">✓</th>
+                                        <th>Material</th>
+                                        <th>Spare Quantity</th>
+                                        <th>Unit</th>
+                                        ${loadSheet.standalone_spares.raw_materials.some(rm => rm.location) ? '<th>Location</th>' : ''}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${loadSheet.standalone_spares.raw_materials.map((rm, idx) => {
+                                        const spare = rm.spares[0];
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-raw-${idx}"></td>
+                                                <td><strong>${rm.name}</strong></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${rm.unit}</td>
+                                                ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                            ` : ''}
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -811,14 +1011,30 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                ${loadSheet.components.map((c, idx) => `
-                                    <tr>
-                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`comp-${idx}`] ? '☑' : '☐'}</td>
-                                        <td><strong>${c.name}</strong></td>
-                                        <td>${parseFloat(c.quantity).toFixed(2)}</td>
-                                        <td>${c.unit}</td>
-                                    </tr>
-                                `).join('')}
+                                ${loadSheet.components.map((c, idx) => {
+                                    const mainRow = `
+                                        <tr>
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`comp-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${c.name}</strong></td>
+                                            <td>${parseFloat(c.quantity).toFixed(2)}</td>
+                                            <td>${c.unit}</td>
+                                        </tr>
+                                    `;
+                                    const spareRows = c.spares && c.spares.length > 0 ? c.spares.map((spare, sIdx) => {
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-comp-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td><em>Spare: ${c.name}</em></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${c.unit}</td>
+                                            </tr>
+                                        `;
+                                    }).join('') : '';
+                                    return mainRow + spareRows;
+                                }).join('')}
                             </tbody>
                         </table>
                         ` : ''}
@@ -835,14 +1051,30 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                ${loadSheet.built_items.map((bi, idx) => `
-                                    <tr>
-                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`built-${idx}`] ? '☑' : '☐'}</td>
-                                        <td><strong>${bi.name}</strong></td>
-                                        <td>${parseFloat(bi.quantity).toFixed(2)}</td>
-                                        <td>${bi.unit}</td>
-                                    </tr>
-                                `).join('')}
+                                ${loadSheet.built_items.map((bi, idx) => {
+                                    const mainRow = `
+                                        <tr>
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`built-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${bi.name}</strong></td>
+                                            <td>${parseFloat(bi.quantity).toFixed(2)}</td>
+                                            <td>${bi.unit}</td>
+                                        </tr>
+                                    `;
+                                    const spareRows = bi.spares && bi.spares.length > 0 ? bi.spares.map((spare, sIdx) => {
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-built-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td><em>Spare: ${bi.name}</em></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${bi.unit}</td>
+                                            </tr>
+                                        `;
+                                    }).join('') : '';
+                                    return mainRow + spareRows;
+                                }).join('')}
                             </tbody>
                         </table>
                         ` : ''}
@@ -860,17 +1092,131 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                ${loadSheet.raw_materials.map((rm, idx) => `
-                                    <tr>
-                                        <td style="text-align: center; font-size: 18px;">${checkboxStates[`raw-${idx}`] ? '☑' : '☐'}</td>
-                                        <td><strong>${rm.name}</strong></td>
-                                        <td>${parseFloat(rm.quantity).toFixed(2)}</td>
-                                        <td>${rm.unit}</td>
-                                        ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
-                                    </tr>
-                                `).join('')}
+                                ${loadSheet.raw_materials.map((rm, idx) => {
+                                    const mainRow = `
+                                        <tr>
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`raw-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${rm.name}</strong></td>
+                                            <td>${parseFloat(rm.quantity).toFixed(2)}</td>
+                                            <td>${rm.unit}</td>
+                                            ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                        </tr>
+                                    `;
+                                    const spareRows = rm.spares && rm.spares.length > 0 ? rm.spares.map((spare, sIdx) => {
+                                        const loaded = parseFloat(spare.quantity_loaded || 0);
+                                        const used = parseFloat(spare.quantity_used || 0);
+                                        const returned = parseFloat(spare.quantity_returned || 0);
+                                        return `
+                                            <tr style="background: #fff3cd;">
+                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-raw-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td><em>Spare: ${rm.name}</em></td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                                <td>${rm.unit}</td>
+                                                ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                            </tr>
+                                        `;
+                                    }).join('') : '';
+                                    return mainRow + spareRows;
+                                }).join('')}
                             </tbody>
                         </table>
+                        ` : ''}
+                        
+                        ${loadSheet.standalone_spares && (
+                            loadSheet.standalone_spares.components.length > 0 ||
+                            loadSheet.standalone_spares.built_items.length > 0 ||
+                            loadSheet.standalone_spares.raw_materials.length > 0
+                        ) ? `
+                        <h4>Standalone Spares (Not in Main Requirements)</h4>
+                        ${loadSheet.standalone_spares.components.length > 0 ? `
+                        <h5>Components</h5>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Component</th>
+                                    <th>Spare Quantity</th>
+                                    <th>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.standalone_spares.components.map((c, idx) => {
+                                    const spare = c.spares[0];
+                                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                                    const used = parseFloat(spare.quantity_used || 0);
+                                    const returned = parseFloat(spare.quantity_returned || 0);
+                                    return `
+                                        <tr style="background: #fff3cd;">
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-comp-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${c.name}</strong></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                            <td>${c.unit}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
+                        ${loadSheet.standalone_spares.built_items.length > 0 ? `
+                        <h5>Built Items</h5>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Built Item</th>
+                                    <th>Spare Quantity</th>
+                                    <th>Unit</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.standalone_spares.built_items.map((bi, idx) => {
+                                    const spare = bi.spares[0];
+                                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                                    const used = parseFloat(spare.quantity_used || 0);
+                                    const returned = parseFloat(spare.quantity_returned || 0);
+                                    return `
+                                        <tr style="background: #fff3cd;">
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-built-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${bi.name}</strong></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                            <td>${bi.unit}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
+                        ${loadSheet.standalone_spares.raw_materials.length > 0 ? `
+                        <h5>Raw Materials</h5>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;">✓</th>
+                                    <th>Material</th>
+                                    <th>Spare Quantity</th>
+                                    <th>Unit</th>
+                                    ${loadSheet.standalone_spares.raw_materials.some(rm => rm.location) ? '<th>Location</th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${loadSheet.standalone_spares.raw_materials.map((rm, idx) => {
+                                    const spare = rm.spares[0];
+                                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                                    const used = parseFloat(spare.quantity_used || 0);
+                                    const returned = parseFloat(spare.quantity_returned || 0);
+                                    return `
+                                        <tr style="background: #fff3cd;">
+                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-raw-${idx}`] ? '☑' : '☐'}</td>
+                                            <td><strong>${rm.name}</strong></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                            <td>${rm.unit}</td>
+                                            ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                        ` : ''}
                         ` : ''}
                     </div>
                 `;
@@ -900,6 +1246,249 @@
             } catch (error) {
                 console.error('PDF generation error:', error);
                 showAlert('Error generating PDF: ' + error.message, 'error');
+            }
+        }
+        
+        async function manageSpares(orderId) {
+            currentOrderId = orderId;
+            try {
+                const order = orders.find(o => o.id === orderId);
+                const sparesData = await apiCall(`/orders/${orderId}/spares`);
+                const spares = sparesData.spares || [];
+                
+                document.getElementById('sparesModalTitle').textContent = `Manage Spares - Order #${orderId} (${order?.product_name || 'Unknown'})`;
+                
+                const sparesContent = document.getElementById('sparesContent');
+                sparesContent.innerHTML = `
+                    <div style="margin-bottom: 20px;">
+                        <button onclick="showAddSpareForm()" class="btn btn-primary">Add Spare</button>
+                    </div>
+                    <div id="sparesList">
+                        ${spares.length === 0 ? '<p>No spares added yet</p>' : `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Item Type</th>
+                                    <th>Item Name</th>
+                                    <th>Needed</th>
+                                    <th>Loaded</th>
+                                    <th>Used</th>
+                                    <th>Returned</th>
+                                    <th>Remaining</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${spares.map(spare => {
+                                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                                    const used = parseFloat(spare.quantity_used || 0);
+                                    const returned = parseFloat(spare.quantity_returned || 0);
+                                    const remaining = loaded - used - returned;
+                                    return `
+                                        <tr>
+                                            <td><span class="badge badge-info">${spare.item_type === 'component' ? 'Component' : spare.item_type === 'built_item' ? 'Built Item' : 'Raw Material'}</span></td>
+                                            <td><strong>${spare.item_name || 'Unknown'}</strong></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)}</td>
+                                            <td>${loaded.toFixed(2)}</td>
+                                            <td>${used.toFixed(2)}</td>
+                                            <td>${returned.toFixed(2)}</td>
+                                            <td><span class="badge ${remaining > 0 ? 'badge-warning' : 'badge-success'}">${remaining.toFixed(2)}</span></td>
+                                            <td>
+                                                <button onclick="updateSpareStatus(${spare.id}, 'loaded')" class="btn btn-sm btn-secondary">Mark Loaded</button>
+                                                <button onclick="updateSpareStatus(${spare.id}, 'used')" class="btn btn-sm btn-warning">Mark Used</button>
+                                                ${remaining > 0 ? `<button onclick="returnSpareToStock(${spare.id})" class="btn btn-sm btn-success">Return to Stock</button>` : ''}
+                                                <button onclick="deleteSpare(${spare.id})" class="btn btn-sm btn-danger">Delete</button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                        `}
+                    </div>
+                    <div id="addSpareForm" style="display: none; margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                        <h4>Add Spare</h4>
+                        <form id="spareForm">
+                            <div class="form-group">
+                                <label class="form-label">Item Type *</label>
+                                <select id="spareItemType" class="form-select" required onchange="updateSpareItemOptions()">
+                                    <option value="">Select type</option>
+                                    <option value="component">Component</option>
+                                    <option value="built_item">Built Item</option>
+                                    <option value="raw_material">Raw Material</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Item *</label>
+                                <select id="spareItemId" class="form-select" required>
+                                    <option value="">Select item</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Quantity Needed *</label>
+                                <input type="number" step="0.01" id="spareQuantity" class="form-input" required min="0.01">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Notes</label>
+                                <textarea id="spareNotes" class="form-textarea"></textarea>
+                            </div>
+                            <div class="text-right">
+                                <button type="button" onclick="hideAddSpareForm()" class="btn btn-secondary">Cancel</button>
+                                <button type="submit" class="btn btn-primary">Add Spare</button>
+                            </div>
+                        </form>
+                    </div>
+                `;
+                
+                document.getElementById('spareForm').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    try {
+                        await apiCall(`/orders/${orderId}/spares`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                item_type: document.getElementById('spareItemType').value,
+                                item_id: document.getElementById('spareItemId').value,
+                                quantity_needed: document.getElementById('spareQuantity').value,
+                                notes: document.getElementById('spareNotes').value || null
+                            })
+                        });
+                        showAlert('Spare added successfully');
+                        manageSpares(orderId);
+                    } catch (error) {
+                        showAlert(error.message || 'Failed to add spare', 'error');
+                    }
+                });
+                
+                showModal('sparesModal');
+            } catch (error) {
+                showAlert('Error loading spares: ' + error.message, 'error');
+            }
+        }
+        
+        function showAddSpareForm() {
+            document.getElementById('addSpareForm').style.display = 'block';
+            document.getElementById('spareForm').reset();
+            document.getElementById('spareItemId').innerHTML = '<option value="">Select item</option>';
+        }
+        
+        function hideAddSpareForm() {
+            document.getElementById('addSpareForm').style.display = 'none';
+        }
+        
+        function updateSpareItemOptions() {
+            const type = document.getElementById('spareItemType').value;
+            const select = document.getElementById('spareItemId');
+            select.innerHTML = '<option value="">Select item</option>';
+            
+            if (type === 'component') {
+                components.forEach(comp => {
+                    select.innerHTML += `<option value="${comp.id}">${comp.name}</option>`;
+                });
+            } else if (type === 'built_item') {
+                panels.forEach(panel => {
+                    select.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
+                });
+            } else if (type === 'raw_material') {
+                stockItems.forEach(item => {
+                    select.innerHTML += `<option value="${item.id}">${item.name} (${item.unit})</option>`;
+                });
+            }
+        }
+        
+        async function updateSpareStatus(spareId, status) {
+            try {
+                const spare = await apiCall(`/orders/${currentOrderId}/spares`).then(r => r.spares.find(s => s.id === spareId));
+                if (!spare) {
+                    showAlert('Spare not found', 'error');
+                    return;
+                }
+                
+                let quantity = 0;
+                let promptText = '';
+                
+                if (status === 'loaded') {
+                    promptText = `Enter quantity loaded (max: ${parseFloat(spare.quantity_needed || 0).toFixed(2)}):`;
+                    quantity = parseFloat(prompt(promptText) || '0');
+                    if (quantity <= 0 || quantity > parseFloat(spare.quantity_needed)) {
+                        showAlert('Invalid quantity', 'error');
+                        return;
+                    }
+                    await apiCall(`/orders/${currentOrderId}/spares/${spareId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ quantity_loaded: quantity })
+                    });
+                } else if (status === 'used') {
+                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                    const alreadyUsed = parseFloat(spare.quantity_used || 0);
+                    const available = loaded - alreadyUsed;
+                    promptText = `Enter quantity used (max: ${available.toFixed(2)}):`;
+                    quantity = parseFloat(prompt(promptText) || '0');
+                    if (quantity <= 0 || quantity > available) {
+                        showAlert('Invalid quantity', 'error');
+                        return;
+                    }
+                    await apiCall(`/orders/${currentOrderId}/spares/${spareId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ quantity_used: alreadyUsed + quantity })
+                    });
+                }
+                
+                showAlert('Spare status updated successfully');
+                manageSpares(currentOrderId);
+            } catch (error) {
+                showAlert(error.message || 'Failed to update spare status', 'error');
+            }
+        }
+        
+        async function returnSpareToStock(spareId) {
+            try {
+                const spare = await apiCall(`/orders/${currentOrderId}/spares`).then(r => r.spares.find(s => s.id === spareId));
+                if (!spare) {
+                    showAlert('Spare not found', 'error');
+                    return;
+                }
+                
+                const loaded = parseFloat(spare.quantity_loaded || 0);
+                const used = parseFloat(spare.quantity_used || 0);
+                const returned = parseFloat(spare.quantity_returned || 0);
+                const available = loaded - used - returned;
+                
+                if (available <= 0) {
+                    showAlert('No spares available to return', 'error');
+                    return;
+                }
+                
+                const quantity = parseFloat(prompt(`Enter quantity to return to stock (max: ${available.toFixed(2)}):`) || '0');
+                if (quantity <= 0 || quantity > available) {
+                    showAlert('Invalid quantity', 'error');
+                    return;
+                }
+                
+                if (!confirm(`Return ${quantity.toFixed(2)} to stock? This will update stock levels automatically.`)) {
+                    return;
+                }
+                
+                await apiCall(`/orders/${currentOrderId}/spares/${spareId}/return`, {
+                    method: 'POST',
+                    body: JSON.stringify({ quantity })
+                });
+                
+                showAlert('Spare returned to stock successfully');
+                manageSpares(currentOrderId);
+            } catch (error) {
+                showAlert(error.message || 'Failed to return spare to stock', 'error');
+            }
+        }
+        
+        async function deleteSpare(spareId) {
+            if (!confirm('Are you sure you want to delete this spare?')) return;
+            
+            try {
+                await apiCall(`/orders/${currentOrderId}/spares/${spareId}`, { method: 'DELETE' });
+                showAlert('Spare deleted successfully');
+                manageSpares(currentOrderId);
+            } catch (error) {
+                showAlert(error.message || 'Failed to delete spare', 'error');
             }
         }
         

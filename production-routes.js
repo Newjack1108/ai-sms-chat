@@ -1085,6 +1085,94 @@ router.get('/orders/:id/load-sheet', requireProductionAuth, async (req, res) => 
     }
 });
 
+// ============ ORDER SPARES ROUTES ============
+
+router.get('/orders/:id/spares', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const spares = await ProductionDatabase.getOrderSpares(orderId);
+        res.json({ success: true, spares });
+    } catch (error) {
+        console.error('Get order spares error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get order spares' });
+    }
+});
+
+router.post('/orders/:id/spares', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const { item_type, item_id, quantity_needed, notes } = req.body;
+        
+        if (!item_type || !item_id || !quantity_needed) {
+            return res.status(400).json({ success: false, error: 'Item type, item ID, and quantity needed are required' });
+        }
+        
+        if (!['component', 'built_item', 'raw_material'].includes(item_type)) {
+            return res.status(400).json({ success: false, error: 'Invalid item type. Must be component, built_item, or raw_material' });
+        }
+        
+        const spare = await ProductionDatabase.createOrderSpare(orderId, {
+            item_type,
+            item_id: parseInt(item_id),
+            quantity_needed: parseFloat(quantity_needed),
+            notes: notes || null
+        });
+        res.json({ success: true, spare });
+    } catch (error) {
+        console.error('Create order spare error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create order spare' });
+    }
+});
+
+router.put('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const spareId = parseInt(req.params.spareId);
+        const { quantity_needed, quantity_loaded, quantity_used, quantity_returned, notes } = req.body;
+        
+        const updateData = {};
+        if (quantity_needed !== undefined) updateData.quantity_needed = quantity_needed;
+        if (quantity_loaded !== undefined) updateData.quantity_loaded = quantity_loaded;
+        if (quantity_used !== undefined) updateData.quantity_used = quantity_used;
+        if (quantity_returned !== undefined) updateData.quantity_returned = quantity_returned;
+        if (notes !== undefined) updateData.notes = notes;
+        
+        const spare = await ProductionDatabase.updateOrderSpare(spareId, updateData);
+        res.json({ success: true, spare });
+    } catch (error) {
+        console.error('Update order spare error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update order spare' });
+    }
+});
+
+router.post('/orders/:id/spares/:spareId/return', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const spareId = parseInt(req.params.spareId);
+        const { quantity } = req.body;
+        
+        if (!quantity || parseFloat(quantity) <= 0) {
+            return res.status(400).json({ success: false, error: 'Valid quantity is required' });
+        }
+        
+        const userId = req.session.production_user ? req.session.production_user.id : null;
+        const spare = await ProductionDatabase.returnSpareToStock(spareId, parseFloat(quantity), userId);
+        res.json({ success: true, spare, message: 'Spare returned to stock successfully' });
+    } catch (error) {
+        console.error('Return spare to stock error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to return spare to stock' });
+    }
+});
+
+router.delete('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const spareId = parseInt(req.params.spareId);
+        await ProductionDatabase.deleteOrderSpare(spareId);
+        res.json({ success: true, message: 'Spare deleted successfully' });
+    } catch (error) {
+        console.error('Delete order spare error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete order spare' });
+    }
+});
+
 // ============ QUOTES ROUTES ============
 
 router.get('/quotes', requireProductionAuth, async (req, res) => {
