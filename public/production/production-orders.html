@@ -21,6 +21,10 @@
         }
         .load-sheet-print-area {
             padding: 20px;
+            background: white;
+            color: black;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
         }
         .load-sheet-print-area h3 {
             margin-bottom: 20px;
@@ -44,6 +48,16 @@
         }
         .load-sheet-print-area h4 {
             margin-top: 20px;
+            margin-bottom: 10px;
+            color: black;
+        }
+        .load-sheet-print-area h5 {
+            margin-top: 15px;
+            margin-bottom: 8px;
+            color: black;
+        }
+        .load-sheet-print-area p {
+            color: black;
             margin-bottom: 10px;
         }
     </style>
@@ -1286,16 +1300,40 @@
                 // Create temporary element for PDF generation
                 const printDiv = document.createElement('div');
                 printDiv.innerHTML = printHTML;
-                printDiv.style.position = 'absolute';
-                printDiv.style.left = '-9999px';
+                printDiv.className = 'load-sheet-print-area';
+                printDiv.style.position = 'fixed';
+                printDiv.style.top = '0';
+                printDiv.style.left = '0';
+                printDiv.style.width = '210mm'; // A4 width
+                printDiv.style.padding = '20px';
+                printDiv.style.backgroundColor = 'white';
+                printDiv.style.zIndex = '9999';
+                printDiv.style.visibility = 'hidden';
+                printDiv.style.opacity = '0';
                 document.body.appendChild(printDiv);
+                
+                // Wait for element to render
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Make it visible for html2canvas
+                printDiv.style.visibility = 'visible';
+                printDiv.style.opacity = '1';
+                
+                // Wait a bit more for rendering
+                await new Promise(resolve => setTimeout(resolve, 200));
                 
                 // Generate PDF
                 const opt = {
                     margin: [10, 10, 10, 10],
                     filename: `LoadSheet_Order_${orderId}_${loadSheet.product_name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2 },
+                    html2canvas: { 
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        windowWidth: printDiv.scrollWidth,
+                        windowHeight: printDiv.scrollHeight
+                    },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 };
                 
