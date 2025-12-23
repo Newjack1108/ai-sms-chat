@@ -1301,26 +1301,15 @@
                 const printDiv = document.createElement('div');
                 printDiv.innerHTML = printHTML;
                 printDiv.className = 'load-sheet-print-area';
-                printDiv.style.position = 'fixed';
+                printDiv.style.position = 'absolute';
+                printDiv.style.left = '-9999px';
                 printDiv.style.top = '0';
-                printDiv.style.left = '0';
                 printDiv.style.width = '210mm'; // A4 width
-                printDiv.style.padding = '20px';
                 printDiv.style.backgroundColor = 'white';
-                printDiv.style.zIndex = '9999';
-                printDiv.style.visibility = 'hidden';
-                printDiv.style.opacity = '0';
                 document.body.appendChild(printDiv);
                 
                 // Wait for element to render
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // Make it visible for html2canvas
-                printDiv.style.visibility = 'visible';
-                printDiv.style.opacity = '1';
-                
-                // Wait a bit more for rendering
-                await new Promise(resolve => setTimeout(resolve, 200));
+                await new Promise(resolve => setTimeout(resolve, 300));
                 
                 // Generate PDF
                 const opt = {
