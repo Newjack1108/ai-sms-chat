@@ -1305,15 +1305,18 @@
                 const printDiv = document.createElement('div');
                 printDiv.innerHTML = printHTML;
                 printDiv.className = 'load-sheet-print-area';
-                printDiv.style.position = 'absolute';
-                printDiv.style.left = '-9999px';
+                printDiv.style.position = 'fixed';
                 printDiv.style.top = '0';
-                printDiv.style.width = '210mm'; // A4 width
+                printDiv.style.left = '0';
+                printDiv.style.width = '210mm';
+                printDiv.style.maxWidth = '210mm';
                 printDiv.style.backgroundColor = 'white';
+                printDiv.style.zIndex = '10000';
+                printDiv.style.overflow = 'visible';
                 document.body.appendChild(printDiv);
                 
-                // Wait for element to render
-                await new Promise(resolve => setTimeout(resolve, 300));
+                // Wait for element to render and be visible
+                await new Promise(resolve => setTimeout(resolve, 500));
                 
                 // Verify content exists
                 if (!printDiv.innerHTML || printDiv.innerHTML.trim().length < 100) {
