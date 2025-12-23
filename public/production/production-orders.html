@@ -784,6 +784,20 @@
             localStorage.setItem(`loadSheet_${orderId}_checkboxes`, JSON.stringify(states));
         }
         
+        function saveAndCloseLoadSheet(orderId) {
+            // Save checkbox states
+            saveLoadSheetCheckboxes(orderId);
+            
+            // Show confirmation
+            showAlert('Load sheet status saved', 'success');
+            
+            // Close the modal
+            const modal = document.getElementById('loadSheetModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+        
         function loadLoadSheetCheckboxes(orderId) {
             try {
                 const saved = localStorage.getItem(`loadSheet_${orderId}_checkboxes`);
@@ -1076,6 +1090,9 @@
                             </table>
                             ` : ''}
                             ` : ''}
+                        </div>
+                        <div style="padding: 15px; border-top: 2px solid #E8F5E9; margin-top: 20px; text-align: center;">
+                            <button onclick="saveAndCloseLoadSheet(${orderId})" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">Save & Close</button>
                         </div>
                     </div>
                 `;
