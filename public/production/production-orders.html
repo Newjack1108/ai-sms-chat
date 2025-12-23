@@ -727,10 +727,47 @@
             }
         }
         
+        function saveLoadSheetCheckboxes(orderId) {
+            const checkboxes = document.querySelectorAll(`#loadSheetModal .load-sheet-checkbox`);
+            const states = {};
+            checkboxes.forEach(cb => {
+                states[cb.id] = cb.checked;
+            });
+            localStorage.setItem(`loadSheet_${orderId}_checkboxes`, JSON.stringify(states));
+        }
+        
+        function loadLoadSheetCheckboxes(orderId) {
+            try {
+                const saved = localStorage.getItem(`loadSheet_${orderId}_checkboxes`);
+                if (saved) {
+                    const states = JSON.parse(saved);
+                    Object.keys(states).forEach(id => {
+                        const checkbox = document.getElementById(id);
+                        if (checkbox) {
+                            checkbox.checked = states[id];
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading checkbox states:', error);
+            }
+        }
+        
         async function viewLoadSheet(orderId) {
             try {
                 const result = await apiCall(`/orders/${orderId}/load-sheet`);
                 const loadSheet = result.load_sheet;
+                
+                // Load saved checkbox states
+                const savedStates = {};
+                try {
+                    const saved = localStorage.getItem(`loadSheet_${orderId}_checkboxes`);
+                    if (saved) {
+                        Object.assign(savedStates, JSON.parse(saved));
+                    }
+                } catch (error) {
+                    console.error('Error loading saved checkbox states:', error);
+                }
                 
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
@@ -763,9 +800,11 @@
                                             const loaded = parseFloat(spare.quantity_loaded || 0);
                                             const used = parseFloat(spare.quantity_used || 0);
                                             const returned = parseFloat(spare.quantity_returned || 0);
+                                            const checkboxId = `spare-comp-${idx}-${sIdx}`;
+                                            const isChecked = savedStates[checkboxId] || false;
                                             return `
                                                 <tr style="background: #fff3cd;">
-                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-comp-${idx}-${sIdx}"></td>
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                     <td><em>Spare: ${c.name}</em></td>
                                                     <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                     <td>${c.unit}</td>
@@ -773,9 +812,11 @@
                                                 </tr>
                                             `;
                                         }).join('') : '';
+                                        const checkboxId = `comp-${idx}`;
+                                        const isChecked = savedStates[checkboxId] || false;
                                         return `
                                             <tr>
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="comp-${idx}"></td>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${c.name}</strong></td>
                                                 <td>${parseFloat(c.quantity).toFixed(2)}</td>
                                                 <td>${c.unit}</td>
@@ -806,9 +847,11 @@
                                             const loaded = parseFloat(spare.quantity_loaded || 0);
                                             const used = parseFloat(spare.quantity_used || 0);
                                             const returned = parseFloat(spare.quantity_returned || 0);
+                                            const checkboxId = `spare-built-${idx}-${sIdx}`;
+                                            const isChecked = savedStates[checkboxId] || false;
                                             return `
                                                 <tr style="background: #fff3cd;">
-                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-built-${idx}-${sIdx}"></td>
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                     <td><em>Spare: ${bi.name}</em></td>
                                                     <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                     <td>${bi.unit}</td>
@@ -816,9 +859,11 @@
                                                 </tr>
                                             `;
                                         }).join('') : '';
+                                        const checkboxId = `built-${idx}`;
+                                        const isChecked = savedStates[checkboxId] || false;
                                         return `
                                             <tr>
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="built-${idx}"></td>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${bi.name}</strong></td>
                                                 <td>${parseFloat(bi.quantity).toFixed(2)}</td>
                                                 <td>${bi.unit}</td>
@@ -850,9 +895,11 @@
                                             const loaded = parseFloat(spare.quantity_loaded || 0);
                                             const used = parseFloat(spare.quantity_used || 0);
                                             const returned = parseFloat(spare.quantity_returned || 0);
+                                            const checkboxId = `spare-raw-${idx}-${sIdx}`;
+                                            const isChecked = savedStates[checkboxId] || false;
                                             return `
                                                 <tr style="background: #fff3cd;">
-                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="spare-raw-${idx}-${sIdx}"></td>
+                                                    <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                     <td><em>Spare: ${rm.name}</em></td>
                                                     <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                     <td>${rm.unit}</td>
@@ -861,9 +908,11 @@
                                                 </tr>
                                             `;
                                         }).join('') : '';
+                                        const checkboxId = `raw-${idx}`;
+                                        const isChecked = savedStates[checkboxId] || false;
                                         return `
                                             <tr>
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="raw-${idx}"></td>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${rm.name}</strong></td>
                                                 <td>${parseFloat(rm.quantity).toFixed(2)}</td>
                                                 <td>${rm.unit}</td>
@@ -900,9 +949,11 @@
                                         const loaded = parseFloat(spare.quantity_loaded || 0);
                                         const used = parseFloat(spare.quantity_used || 0);
                                         const returned = parseFloat(spare.quantity_returned || 0);
+                                        const checkboxId = `standalone-comp-${idx}`;
+                                        const isChecked = savedStates[checkboxId] || false;
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-comp-${idx}"></td>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${c.name}</strong></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${c.unit}</td>
@@ -929,9 +980,11 @@
                                         const loaded = parseFloat(spare.quantity_loaded || 0);
                                         const used = parseFloat(spare.quantity_used || 0);
                                         const returned = parseFloat(spare.quantity_returned || 0);
+                                        const checkboxId = `standalone-built-${idx}`;
+                                        const isChecked = savedStates[checkboxId] || false;
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-built-${idx}"></td>
+                                                <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${bi.name}</strong></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${bi.unit}</td>
@@ -954,21 +1007,23 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${loadSheet.standalone_spares.raw_materials.map((rm, idx) => {
-                                        const spare = rm.spares[0];
-                                        const loaded = parseFloat(spare.quantity_loaded || 0);
-                                        const used = parseFloat(spare.quantity_used || 0);
-                                        const returned = parseFloat(spare.quantity_returned || 0);
-                                        return `
-                                            <tr style="background: #fff3cd;">
-                                                <td><input type="checkbox" class="load-sheet-checkbox" id="standalone-raw-${idx}"></td>
-                                                <td><strong>${rm.name}</strong></td>
-                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
-                                                <td>${rm.unit}</td>
-                                                ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
-                                            </tr>
-                                        `;
-                                    }).join('')}
+                                ${loadSheet.standalone_spares.raw_materials.map((rm, idx) => {
+                                    const spare = rm.spares[0];
+                                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                                    const used = parseFloat(spare.quantity_used || 0);
+                                    const returned = parseFloat(spare.quantity_returned || 0);
+                                    const checkboxId = `standalone-raw-${idx}`;
+                                    const isChecked = savedStates[checkboxId] || false;
+                                    return `
+                                        <tr style="background: #fff3cd;">
+                                            <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
+                                            <td><strong>${rm.name}</strong></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+                                            <td>${rm.unit}</td>
+                                            ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
+                                        </tr>
+                                    `;
+                                }).join('')}
                                 </tbody>
                             </table>
                             ` : ''}
@@ -977,6 +1032,16 @@
                     </div>
                 `;
                 document.body.appendChild(modal);
+                
+                // Add event listeners to save checkbox states when changed
+                setTimeout(() => {
+                    const checkboxes = modal.querySelectorAll('.load-sheet-checkbox');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.addEventListener('change', () => {
+                            saveLoadSheetCheckboxes(orderId);
+                        });
+                    });
+                }, 100);
             } catch (error) {
                 showAlert('Error loading load sheet: ' + error.message, 'error');
             }
@@ -987,11 +1052,8 @@
                 const result = await apiCall(`/orders/${orderId}/load-sheet`);
                 const loadSheet = result.load_sheet;
                 
-                // Get current checkbox states
-                const checkboxStates = {};
-                document.querySelectorAll('#loadSheetContent input[type="checkbox"]').forEach(cb => {
-                    checkboxStates[cb.id] = cb.checked;
-                });
+                // PDF always uses blank checkboxes (for fresh picking)
+                // Don't use saved checkbox states for PDF
                 
                 // Create print-friendly HTML
                 const printHTML = `
@@ -1014,7 +1076,7 @@
                                 ${loadSheet.components.map((c, idx) => {
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`comp-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${c.name}</strong></td>
                                             <td>${parseFloat(c.quantity).toFixed(2)}</td>
                                             <td>${c.unit}</td>
@@ -1026,7 +1088,7 @@
                                         const returned = parseFloat(spare.quantity_returned || 0);
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-comp-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td style="text-align: center; font-size: 18px;">☐</td>
                                                 <td><em>Spare: ${c.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${c.unit}</td>
@@ -1054,7 +1116,7 @@
                                 ${loadSheet.built_items.map((bi, idx) => {
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`built-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${bi.name}</strong></td>
                                             <td>${parseFloat(bi.quantity).toFixed(2)}</td>
                                             <td>${bi.unit}</td>
@@ -1066,7 +1128,7 @@
                                         const returned = parseFloat(spare.quantity_returned || 0);
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-built-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td style="text-align: center; font-size: 18px;">☐</td>
                                                 <td><em>Spare: ${bi.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${bi.unit}</td>
@@ -1095,7 +1157,7 @@
                                 ${loadSheet.raw_materials.map((rm, idx) => {
                                     const mainRow = `
                                         <tr>
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`raw-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${rm.name}</strong></td>
                                             <td>${parseFloat(rm.quantity).toFixed(2)}</td>
                                             <td>${rm.unit}</td>
@@ -1108,7 +1170,7 @@
                                         const returned = parseFloat(spare.quantity_returned || 0);
                                         return `
                                             <tr style="background: #fff3cd;">
-                                                <td style="text-align: center; font-size: 18px;">${checkboxStates[`spare-raw-${idx}-${sIdx}`] ? '☑' : '☐'}</td>
+                                                <td style="text-align: center; font-size: 18px;">☐</td>
                                                 <td><em>Spare: ${rm.name}</em></td>
                                                 <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${rm.unit}</td>
@@ -1147,7 +1209,7 @@
                                     const returned = parseFloat(spare.quantity_returned || 0);
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-comp-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${c.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${c.unit}</td>
@@ -1176,7 +1238,7 @@
                                     const returned = parseFloat(spare.quantity_returned || 0);
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-built-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${bi.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${bi.unit}</td>
@@ -1206,7 +1268,7 @@
                                     const returned = parseFloat(spare.quantity_returned || 0);
                                     return `
                                         <tr style="background: #fff3cd;">
-                                            <td style="text-align: center; font-size: 18px;">${checkboxStates[`standalone-raw-${idx}`] ? '☑' : '☐'}</td>
+                                            <td style="text-align: center; font-size: 18px;">☐</td>
                                             <td><strong>${rm.name}</strong></td>
                                             <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${rm.unit}</td>
