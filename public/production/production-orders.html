@@ -1066,6 +1066,10 @@
                 const result = await apiCall(`/orders/${orderId}/load-sheet`);
                 const loadSheet = result.load_sheet;
                 
+                if (!loadSheet) {
+                    throw new Error('Load sheet data not found');
+                }
+                
                 // PDF always uses blank checkboxes (for fresh picking)
                 // Don't use saved checkbox states for PDF
                 
@@ -1311,20 +1315,29 @@
                 // Wait for element to render
                 await new Promise(resolve => setTimeout(resolve, 300));
                 
+                // Verify content exists
+                if (!printDiv.innerHTML || printDiv.innerHTML.trim().length < 100) {
+                    throw new Error('Load sheet content is empty or too short');
+                }
+                
                 // Generate PDF
                 const opt = {
                     margin: [10, 10, 10, 10],
-                    filename: `LoadSheet_Order_${orderId}_${loadSheet.product_name.replace(/[^a-z0-9]/gi, '_')}.pdf`,
+                    filename: `LoadSheet_Order_${orderId}_${(loadSheet.product_name || 'Order').replace(/[^a-z0-9]/gi, '_')}.pdf`,
                     image: { type: 'jpeg', quality: 0.98 },
                     html2canvas: { 
                         scale: 2,
                         useCORS: true,
-                        logging: false,
-                        windowWidth: printDiv.scrollWidth,
-                        windowHeight: printDiv.scrollHeight
+                        logging: true,
+                        windowWidth: printDiv.scrollWidth || 800,
+                        windowHeight: printDiv.scrollHeight || 1200
                     },
                     jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
                 };
+                
+                console.log('Generating PDF from element:', printDiv);
+                console.log('Element content length:', printDiv.innerHTML.length);
+                console.log('Element dimensions:', printDiv.scrollWidth, 'x', printDiv.scrollHeight);
                 
                 await html2pdf().set(opt).from(printDiv).save();
                 
