@@ -584,6 +584,61 @@ body.dashboard-page {
         width: 100%;
         justify-content: space-between;
     }
+    
+    /* Mobile navbar improvements */
+    .navbar {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 12px 15px;
+        gap: 0;
+    }
+    
+    /* Hide logo on mobile */
+    .navbar-logo img {
+        display: none;
+    }
+    
+    /* Reorganize navbar for mobile - navbar-right first, then title */
+    .navbar-logo {
+        order: 2;
+        width: 100%;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 2px solid #E8F5E9;
+    }
+    
+    .navbar-right {
+        order: 1;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    /* User name on its own line at top for better visibility */
+    .navbar-user {
+        width: 100%;
+        padding: 6px 0;
+        font-size: 13px;
+        font-weight: 500;
+        color: #495057;
+        margin-bottom: 4px;
+    }
+    
+    /* Button row below user name - flex wrap for multiple buttons */
+    .navbar-right > .btn,
+    .navbar-right > a.btn {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    /* Make h1 (page title) look like a header below nav buttons */
+    .navbar-logo h1 {
+        font-size: 18px;
+        margin: 0;
+        padding: 0;
+        color: #2E7A0F;
+    }
 }
 
 /* Footer */
