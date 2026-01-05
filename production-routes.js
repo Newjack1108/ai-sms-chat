@@ -1627,7 +1627,17 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const status = await ProductionDatabase.getCurrentClockStatus(userId);
-        res.json({ success: true, status });
+        
+        // Check if user has already completed a clock in/out cycle today
+        const today = new Date().toISOString().split('T')[0];
+        const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
+        const hasCompletedToday = completedEntriesCount >= 1;
+        
+        res.json({ 
+            success: true, 
+            status,
+            hasCompletedToday: hasCompletedToday
+        });
     } catch (error) {
         console.error('Get clock status error:', error);
         res.status(500).json({ success: false, error: 'Failed to get clock status' });

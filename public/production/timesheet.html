@@ -575,6 +575,7 @@
         let currentStatus = null;
         let jobs = [];
         let currentLocation = null;
+        let hasCompletedToday = false;
         let locationError = false;
         
         async function init() {
@@ -718,6 +719,9 @@
                     currentStatus = data.status;
                     const newStatus = currentStatus ? currentStatus.id : null;
                     
+                    // Store whether user has completed today (already clocked out)
+                    hasCompletedToday = data.hasCompletedToday || false;
+                    
                     // Log status changes for debugging
                     const statusChanged = previousStatus !== newStatus;
                     if (statusChanged) {
@@ -774,7 +778,17 @@
                 // Not clocked in
                 clockStatus.className = 'clock-status';
                 clockStatus.querySelector('.clock-status-text').textContent = 'You are not clocked in';
-                clockDetails.textContent = 'Select a job/site and clock in to start';
+                
+                // Check if user has already completed today (clocked out)
+                if (hasCompletedToday) {
+                    clockDetails.textContent = 'You have already clocked in and out today. Only one clock in/out per day is allowed.';
+                    clockInBtn.disabled = true;
+                    clockInBtn.style.opacity = '0.6';
+                } else {
+                    clockDetails.textContent = 'Select a job/site and clock in to start';
+                    clockInBtn.disabled = false;
+                    clockInBtn.style.opacity = '1';
+                }
                 
                 jobSelectGroup.style.display = 'block';
                 clockInBtn.style.display = 'block';
