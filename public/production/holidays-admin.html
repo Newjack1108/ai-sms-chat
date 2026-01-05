@@ -116,12 +116,13 @@
         </div>
     </div>
     
-    <!-- Add Shutdown Period Modal -->
+    <!-- Add/Edit Shutdown Period Modal -->
     <div id="shutdownModal" class="modal" style="display: none;">
         <div class="modal-content">
             <span class="close" onclick="closeModal('shutdownModal')">&times;</span>
-            <h2>Add Company Shutdown Period</h2>
+            <h2 id="shutdownModalTitle">Add Company Shutdown Period</h2>
             <form id="shutdownForm" onsubmit="saveShutdownPeriod(event)">
+                <input type="hidden" id="shutdownPeriodId" value="">
                 <div class="form-group">
                     <label>Year:</label>
                     <input type="number" id="shutdownYear" class="form-input" min="2020" max="2100" required>
@@ -562,6 +563,8 @@
                     <td>${period.description || '-'}</td>
                     <td>${period.created_by_name || 'Unknown'}</td>
                     <td>
+                        <button onclick="editShutdownPeriod(${period.id})" class="btn btn-sm btn-secondary">Edit</button>
+                        <button onclick="deleteShutdownPeriod(${period.id})" class="btn btn-sm btn-danger">Delete</button>
                         <button onclick="applyShutdown(${period.id})" class="btn btn-sm btn-primary">Apply to All Users</button>
                     </td>
                 </tr>`;
@@ -572,13 +575,70 @@
         }
         
         function showAddShutdownModal() {
+            document.getElementById('shutdownModalTitle').textContent = 'Add Company Shutdown Period';
             document.getElementById('shutdownForm').reset();
+            document.getElementById('shutdownPeriodId').value = '';
             document.getElementById('shutdownYear').value = currentYear;
             document.getElementById('shutdownModal').style.display = 'block';
         }
         
+        async function editShutdownPeriod(periodId) {
+            try {
+                // Fetch all shutdown periods to find the one we want to edit
+                const response = await apiCall('/holidays/shutdown-periods');
+                if (!response || !response.success) {
+                    alert('Error loading shutdown periods');
+                    return;
+                }
+                
+                const period = response.periods.find(p => p.id === periodId);
+                if (!period) {
+                    alert('Shutdown period not found');
+                    return;
+                }
+                
+                populateEditModal(period);
+            } catch (error) {
+                console.error('Error loading shutdown period:', error);
+                alert('Error loading shutdown period: ' + (error.message || 'Unknown error'));
+            }
+        }
+        
+        function populateEditModal(period) {
+            document.getElementById('shutdownModalTitle').textContent = 'Edit Company Shutdown Period';
+            document.getElementById('shutdownPeriodId').value = period.id;
+            document.getElementById('shutdownYear').value = period.year;
+            document.getElementById('shutdownStartDate').value = period.start_date.split('T')[0];
+            document.getElementById('shutdownEndDate').value = period.end_date.split('T')[0];
+            document.getElementById('shutdownDescription').value = period.description || '';
+            document.getElementById('shutdownModal').style.display = 'block';
+        }
+        
+        async function deleteShutdownPeriod(periodId) {
+            if (!confirm('Are you sure you want to delete this shutdown period? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await apiCall(`/holidays/shutdown-periods/${periodId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response && response.success) {
+                    alert('Shutdown period deleted successfully');
+                    await loadShutdownPeriods();
+                } else {
+                    alert('Error deleting shutdown period: ' + (response?.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error deleting shutdown period:', error);
+                alert('Error deleting shutdown period: ' + (error.message || 'Unknown error'));
+            }
+        }
+        
         async function saveShutdownPeriod(event) {
             event.preventDefault();
+            const periodId = document.getElementById('shutdownPeriodId').value;
             const year = parseInt(document.getElementById('shutdownYear').value);
             const startDate = document.getElementById('shutdownStartDate').value;
             const endDate = document.getElementById('shutdownEndDate').value;
@@ -589,10 +649,14 @@
                 return;
             }
             
+            const isEdit = periodId && periodId !== '';
+            const url = isEdit ? `/holidays/shutdown-periods/${periodId}` : '/holidays/shutdown-periods';
+            const method = isEdit ? 'PUT' : 'POST';
+            
             try {
-                console.log('Saving shutdown period:', { year, startDate, endDate, description });
-                const response = await apiCall('/holidays/shutdown-periods', {
-                    method: 'POST',
+                console.log(isEdit ? 'Updating' : 'Creating', 'shutdown period:', { periodId, year, startDate, endDate, description });
+                const response = await apiCall(url, {
+                    method: method,
                     body: JSON.stringify({
                         year: year,
                         start_date: startDate,
@@ -605,17 +669,17 @@
                 
                 if (response && response.success) {
                     closeModal('shutdownModal');
-                    alert('Shutdown period created successfully');
+                    alert(isEdit ? 'Shutdown period updated successfully' : 'Shutdown period created successfully');
                     // Small delay to ensure database update is complete
                     setTimeout(async () => {
                         await loadShutdownPeriods();
                     }, 200);
                 } else {
-                    alert('Error creating shutdown period: ' + (response?.error || 'Unknown error'));
+                    alert(`Error ${isEdit ? 'updating' : 'creating'} shutdown period: ` + (response?.error || 'Unknown error'));
                 }
             } catch (error) {
-                console.error('Error saving shutdown period:', error);
-                alert('Error creating shutdown period: ' + (error.message || 'Unknown error'));
+                console.error(`Error ${isEdit ? 'updating' : 'creating'} shutdown period:`, error);
+                alert(`Error ${isEdit ? 'updating' : 'creating'} shutdown period: ` + (error.message || 'Unknown error'));
             }
         }
         
@@ -645,6 +709,11 @@
                 form.querySelectorAll('input, select').forEach(field => {
                     field.disabled = false;
                 });
+            }
+            // Reset edit state for shutdown modal
+            if (modalId === 'shutdownModal') {
+                document.getElementById('shutdownPeriodId').value = '';
+                document.getElementById('shutdownModalTitle').textContent = 'Add Company Shutdown Period';
             }
         }
         

@@ -8400,19 +8400,114 @@ class ProductionDatabase {
         }
     }
     
-    static async applyShutdownToEntitlements(year, startDate, endDate) {
-        const weekdays = this.calculateWorkingDays(startDate, endDate);
+    static async updateCompanyShutdownPeriod(id, data) {
+        const { year, start_date, end_date, description, is_active } = data;
         
-        // Get all users with entitlements for this year
-        const entitlements = await this.getAllHolidayEntitlements();
-        const yearEntitlements = entitlements.filter(e => e.year === year);
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `UPDATE company_shutdown_periods 
+                     SET year = $1, start_date = $2, end_date = $3, description = $4, is_active = $5
+                     WHERE id = $6
+                     RETURNING *`,
+                    [year, start_date, end_date, description || null, is_active !== undefined ? is_active : true, id]
+                );
+                if (result.rows.length === 0) {
+                    return null;
+                }
+                const updated = await this.getCompanyShutdownPeriodById(id);
+                return updated;
+            } else {
+                const stmt = db.prepare(
+                    `UPDATE company_shutdown_periods 
+                     SET year = ?, start_date = ?, end_date = ?, description = ?, is_active = ?
+                     WHERE id = ?`
+                );
+                stmt.run(year, start_date, end_date, description || null, is_active !== undefined ? (is_active ? 1 : 0) : 1, id);
+                return await this.getCompanyShutdownPeriodById(id);
+            }
+        } catch (error) {
+            console.error('Error in updateCompanyShutdownPeriod:', error);
+            throw error;
+        }
+    }
+    
+    static async deleteCompanyShutdownPeriod(id) {
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `DELETE FROM company_shutdown_periods WHERE id = $1 RETURNING *`,
+                    [id]
+                );
+                return result.rows.length > 0;
+            } else {
+                const stmt = db.prepare(`DELETE FROM company_shutdown_periods WHERE id = ?`);
+                const info = stmt.run(id);
+                return info.changes > 0;
+            }
+        } catch (error) {
+            console.error('Error in deleteCompanyShutdownPeriod:', error);
+            throw error;
+        }
+    }
+    
+    static async applyShutdownToEntitlements(startDate, endDate) {
+        // Calculate which years the shutdown period spans
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const startYear = start.getFullYear();
+        const endYear = end.getFullYear();
         
-        // Deduct weekdays from each user's entitlement
-        for (const entitlement of yearEntitlements) {
-            await this.deductHolidayDays(entitlement.user_id, year, weekdays);
+        const yearAllocations = {};
+        
+        // If it's a single year, process it normally
+        if (startYear === endYear) {
+            const weekdays = this.calculateWorkingDays(startDate, endDate);
+            yearAllocations[startYear] = weekdays;
+        } else {
+            // Cross-year shutdown: calculate weekdays for each year separately
+            // First year: from start_date to end of that year
+            const firstYearEnd = new Date(startYear, 11, 31).toISOString().split('T')[0];
+            const firstYearWeekdays = this.calculateWorkingDays(startDate, firstYearEnd);
+            if (firstYearWeekdays > 0) {
+                yearAllocations[startYear] = firstYearWeekdays;
+            }
+            
+            // Last year: from start of that year to end_date
+            const lastYearStart = new Date(endYear, 0, 1).toISOString().split('T')[0];
+            const lastYearWeekdays = this.calculateWorkingDays(lastYearStart, endDate);
+            if (lastYearWeekdays > 0) {
+                yearAllocations[endYear] = lastYearWeekdays;
+            }
+            
+            // If there are years in between, count full year weekdays
+            for (let year = startYear + 1; year < endYear; year++) {
+                const yearStart = new Date(year, 0, 1).toISOString().split('T')[0];
+                const yearEnd = new Date(year, 11, 31).toISOString().split('T')[0];
+                const yearWeekdays = this.calculateWorkingDays(yearStart, yearEnd);
+                if (yearWeekdays > 0) {
+                    yearAllocations[year] = yearWeekdays;
+                }
+            }
         }
         
-        return weekdays;
+        // Get all entitlements
+        const entitlements = await this.getAllHolidayEntitlements();
+        
+        // Deduct weekdays from each year's entitlements
+        for (const [year, weekdays] of Object.entries(yearAllocations)) {
+            const yearNum = parseInt(year);
+            const yearEntitlements = entitlements.filter(e => e.year === yearNum);
+            
+            for (const entitlement of yearEntitlements) {
+                await this.deductHolidayDays(entitlement.user_id, yearNum, weekdays);
+            }
+        }
+        
+        return {
+            totalWeekdays: Object.values(yearAllocations).reduce((sum, days) => sum + days, 0),
+            yearBreakdown: yearAllocations
+        };
     }
     
     // Timesheet Integration Methods

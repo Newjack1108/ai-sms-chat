@@ -3499,23 +3499,43 @@ router.put('/holidays/shutdown-periods/:id', requireProductionAuth, requireAdmin
         const periodId = parseInt(req.params.id);
         const { year, start_date, end_date, description, is_active } = req.body;
         
-        // This would require an update method in the database class
-        // For now, we'll just return an error
-        res.status(501).json({ success: false, error: 'Update shutdown period not yet implemented' });
+        if (!year || !start_date || !end_date) {
+            return res.status(400).json({ success: false, error: 'Year, start date, and end date are required' });
+        }
+        
+        const period = await ProductionDatabase.updateCompanyShutdownPeriod(periodId, {
+            year: parseInt(year),
+            start_date,
+            end_date,
+            description: description || null,
+            is_active: is_active !== undefined ? is_active : true
+        });
+        
+        if (!period) {
+            return res.status(404).json({ success: false, error: 'Shutdown period not found' });
+        }
+        
+        res.json({ success: true, period });
     } catch (error) {
         console.error('Update shutdown period error:', error);
-        res.status(500).json({ success: false, error: 'Failed to update shutdown period' });
+        res.status(500).json({ success: false, error: 'Failed to update shutdown period: ' + error.message });
     }
 });
 
 router.delete('/holidays/shutdown-periods/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        // This would require a delete method in the database class
-        // For now, we'll just return an error
-        res.status(501).json({ success: false, error: 'Delete shutdown period not yet implemented' });
+        const periodId = parseInt(req.params.id);
+        
+        const deleted = await ProductionDatabase.deleteCompanyShutdownPeriod(periodId);
+        
+        if (!deleted) {
+            return res.status(404).json({ success: false, error: 'Shutdown period not found' });
+        }
+        
+        res.json({ success: true, message: 'Shutdown period deleted successfully' });
     } catch (error) {
         console.error('Delete shutdown period error:', error);
-        res.status(500).json({ success: false, error: 'Failed to delete shutdown period' });
+        res.status(500).json({ success: false, error: 'Failed to delete shutdown period: ' + error.message });
     }
 });
 
@@ -3528,20 +3548,25 @@ router.post('/holidays/shutdown-periods/:id/apply', requireProductionAuth, requi
             return res.status(404).json({ success: false, error: 'Shutdown period not found' });
         }
         
-        // Apply shutdown to all user entitlements
-        const weekdaysDeducted = await ProductionDatabase.applyShutdownToEntitlements(
-            period.year,
+        // Apply shutdown to all user entitlements (now handles cross-year automatically)
+        const result = await ProductionDatabase.applyShutdownToEntitlements(
             period.start_date,
             period.end_date
         );
         
+        // Build message based on year breakdown
+        const yearMessages = Object.entries(result.yearBreakdown)
+            .map(([year, days]) => `${days} days from ${year}`)
+            .join(', ');
+        
         res.json({ 
             success: true, 
-            message: `Shutdown applied. ${weekdaysDeducted} weekdays deducted from all user entitlements.` 
+            message: `Shutdown applied. ${result.totalWeekdays} weekdays deducted from all user entitlements (${yearMessages}).`,
+            breakdown: result.yearBreakdown
         });
     } catch (error) {
         console.error('Apply shutdown period error:', error);
-        res.status(500).json({ success: false, error: 'Failed to apply shutdown period' });
+        res.status(500).json({ success: false, error: 'Failed to apply shutdown period: ' + error.message });
     }
 });
 
