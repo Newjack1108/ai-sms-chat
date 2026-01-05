@@ -511,12 +511,12 @@
                         <div id="originalClockOut" style="padding: 8px; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px;"></div>
                     </div>
                     <div class="form-group">
-                        <label for="amendedClockIn">New Clock In Time *</label>
-                        <input type="datetime-local" id="amendedClockIn" class="form-control" required>
+                        <label for="amendedClockIn">New Clock In Time</label>
+                        <input type="datetime-local" id="amendedClockIn" class="form-control">
                     </div>
                     <div class="form-group">
-                        <label for="amendedClockOut">New Clock Out Time *</label>
-                        <input type="datetime-local" id="amendedClockOut" class="form-control" required>
+                        <label for="amendedClockOut">New Clock Out Time</label>
+                        <input type="datetime-local" id="amendedClockOut" class="form-control">
                     </div>
                     <div class="form-group">
                         <label for="amendmentReason">Reason for Amendment *</label>
@@ -1889,19 +1889,32 @@
             const amendedClockOut = document.getElementById('amendedClockOut').value;
             const reason = document.getElementById('amendmentReason').value;
             
-            // Convert local datetime to ISO string
-            const clockInISO = new Date(amendedClockIn).toISOString();
-            const clockOutISO = new Date(amendedClockOut).toISOString();
+            // Validate at least one time is provided
+            if (!amendedClockIn && !amendedClockOut) {
+                showAlert('Please provide at least one time (clock in or clock out)', 'error');
+                return;
+            }
+            
+            // Convert only filled dates to ISO string, send null for empty ones
+            const clockInISO = amendedClockIn ? new Date(amendedClockIn).toISOString() : null;
+            const clockOutISO = amendedClockOut ? new Date(amendedClockOut).toISOString() : null;
             
             // Check if this looks like an auto-clock-out scenario (clock out at midnight)
-            const clockOutDate = new Date(clockOutISO);
-            const isMidnightClockOut = clockOutDate.getHours() === 0 && clockOutDate.getMinutes() === 0 && clockOutDate.getSeconds() === 0;
-            const clockInDate = new Date(clockInISO);
-            const clockOutDateOnly = new Date(clockOutDate);
-            clockOutDateOnly.setHours(0, 0, 0, 0);
-            const clockInDateOnly = new Date(clockInDate);
-            clockInDateOnly.setHours(0, 0, 0, 0);
-            const isCrossDay = clockInDateOnly.getTime() !== clockOutDateOnly.getTime();
+            // Only check if clock out time is provided
+            let isMidnightClockOut = false;
+            let isCrossDay = false;
+            if (clockOutISO) {
+                const clockOutDate = new Date(clockOutISO);
+                isMidnightClockOut = clockOutDate.getHours() === 0 && clockOutDate.getMinutes() === 0 && clockOutDate.getSeconds() === 0;
+                if (clockInISO) {
+                    const clockInDate = new Date(clockInISO);
+                    const clockOutDateOnly = new Date(clockOutDate);
+                    clockOutDateOnly.setHours(0, 0, 0, 0);
+                    const clockInDateOnly = new Date(clockInDate);
+                    clockInDateOnly.setHours(0, 0, 0, 0);
+                    isCrossDay = clockInDateOnly.getTime() !== clockOutDateOnly.getTime();
+                }
+            }
             
             try {
                 await apiCall('/clock/amendments', {

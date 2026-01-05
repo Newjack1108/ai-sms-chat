@@ -2034,8 +2034,11 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
         const userId = req.session.production_user.id;
         const { entry_id, amended_clock_in_time, amended_clock_out_time, reason } = req.body;
         
-        if (!entry_id || !amended_clock_in_time || !reason) {
-            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        if (!entry_id || (!amended_clock_in_time && !amended_clock_out_time) || !reason) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'At least one time (clock in or clock out) and a reason are required' 
+            });
         }
         
         // Check if amendment is within allowed time window (up to 10 days back)
@@ -2075,14 +2078,16 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Check if amended times are in the future
-        const amendedClockInDate = new Date(amended_clock_in_time);
-        amendedClockInDate.setHours(0, 0, 0, 0);
-        if (amendedClockInDate > today) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Amended clock in time cannot be in the future. Please use a past date.' 
-            });
+        // Check if amended times are in the future (only validate if provided)
+        if (amended_clock_in_time) {
+            const amendedClockInDate = new Date(amended_clock_in_time);
+            amendedClockInDate.setHours(0, 0, 0, 0);
+            if (amendedClockInDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Amended clock in time cannot be in the future. Please use a past date.' 
+                });
+            }
         }
         
         if (amended_clock_out_time) {
@@ -2100,8 +2105,9 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
         const isAutoClockedOut = ProductionDatabase.isAutoClockedOutEntry(entry);
         
         // Check for duplicate or overlapping times (excluding the current entry being amended)
-        // But skip duplicate check for auto-clocked-out entries (they should always be amendable)
-        if (amended_clock_out_time && !isAutoClockedOut) {
+        // Only run duplicate check if both times are provided (need both for comparison)
+        // Skip duplicate check for auto-clocked-out entries (they should always be amendable)
+        if (amended_clock_in_time && amended_clock_out_time && !isAutoClockedOut) {
             const duplicates = await ProductionDatabase.checkDuplicateTimes(
                 userId, 
                 amended_clock_in_time, 
