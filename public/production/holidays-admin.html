@@ -627,6 +627,7 @@
                 if (response && response.success) {
                     alert('Shutdown period deleted successfully');
                     await loadShutdownPeriods();
+                    await loadEntitlements();
                 } else {
                     alert('Error deleting shutdown period: ' + (response?.error || 'Unknown error'));
                 }
@@ -673,6 +674,7 @@
                     // Small delay to ensure database update is complete
                     setTimeout(async () => {
                         await loadShutdownPeriods();
+                        await loadEntitlements();
                     }, 200);
                 } else {
                     alert(`Error ${isEdit ? 'updating' : 'creating'} shutdown period: ` + (response?.error || 'Unknown error'));
