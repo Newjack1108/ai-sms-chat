@@ -179,20 +179,6 @@
                         ${daysUsed > totalDays ? '<br><small style="color: #dc3545;">(Includes shutdown periods)</small>' : ''}
                     </div>
                 </div>
-                ${allEntitlements.length > 1 ? `
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-                        <strong>Other Years:</strong>
-                        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
-                            ${allEntitlements.filter(e => parseInt(e.year) !== year).map(e => {
-                                const otherYear = parseInt(e.year);
-                                const otherRemaining = parseFloat(e.days_remaining || 0);
-                                return `<span style="padding: 5px 10px; background: #f5f5f5; border-radius: 4px;">
-                                    ${otherYear}: ${otherRemaining.toFixed(1)} days remaining
-                                </span>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                ` : ''}
             `;
         }
         
