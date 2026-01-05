@@ -590,7 +590,7 @@ body.dashboard-page {
         flex-direction: column;
         align-items: flex-start;
         padding: 12px 15px;
-        gap: 0;
+        gap: 10px;
     }
     
     /* Hide logo on mobile */
@@ -598,46 +598,69 @@ body.dashboard-page {
         display: none;
     }
     
-    /* Reorganize navbar for mobile - navbar-right first, then title */
-    .navbar-logo {
-        order: 2;
-        width: 100%;
-        margin-top: 10px;
-        padding-top: 10px;
-        border-top: 2px solid #E8F5E9;
-    }
-    
+    /* Navigation row: buttons horizontally scrollable on left, user/logout on right */
     .navbar-right {
         order: 1;
         width: 100%;
         display: flex;
-        flex-direction: column;
-        gap: 8px;
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 5px;
     }
     
-    /* User name on its own line at top for better visibility */
+    /* Navigation buttons scrollable horizontal row - don't shrink, appear first */
+    .navbar-right > .btn:not(.btn-danger),
+    .navbar-right > a.btn:not(.btn-danger),
+    .navbar-right > .navbar-dropdown {
+        flex-shrink: 0;
+        white-space: nowrap;
+        padding: 8px 12px;
+        font-size: 12px;
+        order: 1;
+    }
+    
+    /* User name - appears after buttons, pushed to right */
     .navbar-user {
-        width: 100%;
-        padding: 6px 0;
+        margin-left: auto;
+        order: 998;
+        flex-shrink: 0;
+        padding: 0;
         font-size: 13px;
         font-weight: 500;
         color: #495057;
-        margin-bottom: 4px;
+        white-space: nowrap;
     }
     
-    /* Button row below user name - flex wrap for multiple buttons */
-    .navbar-right > .btn,
-    .navbar-right > a.btn {
+    /* Logout button - appears after user name, on the right */
+    .navbar-right > .btn-danger,
+    .navbar-right > button.btn-danger {
+        order: 999;
+        flex-shrink: 0;
         padding: 8px 12px;
         font-size: 12px;
     }
     
-    /* Make h1 (page title) look like a header below nav buttons */
+    /* Header row - centered below navigation */
+    .navbar-logo {
+        order: 2;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 0;
+        margin-top: 5px;
+    }
+    
+    /* Make h1 (page title) centered */
     .navbar-logo h1 {
         font-size: 18px;
         margin: 0;
         padding: 0;
         color: #2E7A0F;
+        text-align: center;
     }
 }
 
