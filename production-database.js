@@ -8510,6 +8510,109 @@ class ProductionDatabase {
         };
     }
     
+    static async recalculateAllEntitlements() {
+        // Get all entitlements, active shutdown periods, and approved holiday requests
+        const entitlements = await this.getAllHolidayEntitlements();
+        const shutdownPeriods = await this.getActiveShutdownPeriods();
+        const approvedRequests = await this.getAllHolidayRequests();
+        const approvedRequestsList = approvedRequests.filter(req => req.status === 'approved');
+        
+        // Build a map of shutdown periods by year for quick lookup
+        const shutdownByYear = {};
+        for (const period of shutdownPeriods) {
+            const start = new Date(period.start_date);
+            const end = new Date(period.end_date);
+            const startYear = start.getFullYear();
+            const endYear = end.getFullYear();
+            
+            // Calculate weekday allocation for this shutdown period
+            if (startYear === endYear) {
+                const weekdays = this.calculateWorkingDays(period.start_date, period.end_date);
+                if (!shutdownByYear[startYear]) shutdownByYear[startYear] = 0;
+                shutdownByYear[startYear] += weekdays;
+            } else {
+                // Cross-year shutdown
+                const firstYearEnd = new Date(startYear, 11, 31).toISOString().split('T')[0];
+                const firstYearWeekdays = this.calculateWorkingDays(period.start_date, firstYearEnd);
+                if (firstYearWeekdays > 0) {
+                    if (!shutdownByYear[startYear]) shutdownByYear[startYear] = 0;
+                    shutdownByYear[startYear] += firstYearWeekdays;
+                }
+                
+                const lastYearStart = new Date(endYear, 0, 1).toISOString().split('T')[0];
+                const lastYearWeekdays = this.calculateWorkingDays(lastYearStart, period.end_date);
+                if (lastYearWeekdays > 0) {
+                    if (!shutdownByYear[endYear]) shutdownByYear[endYear] = 0;
+                    shutdownByYear[endYear] += lastYearWeekdays;
+                }
+                
+                // Years in between
+                for (let year = startYear + 1; year < endYear; year++) {
+                    const yearStart = new Date(year, 0, 1).toISOString().split('T')[0];
+                    const yearEnd = new Date(year, 11, 31).toISOString().split('T')[0];
+                    const yearWeekdays = this.calculateWorkingDays(yearStart, yearEnd);
+                    if (yearWeekdays > 0) {
+                        if (!shutdownByYear[year]) shutdownByYear[year] = 0;
+                        shutdownByYear[year] += yearWeekdays;
+                    }
+                }
+            }
+        }
+        
+        // Build a map of approved requests by user_id and year
+        const requestsByUserAndYear = {};
+        for (const request of approvedRequestsList) {
+            const userId = parseInt(request.user_id);
+            const year = new Date(request.start_date).getFullYear();
+            const key = `${userId}_${year}`;
+            if (!requestsByUserAndYear[key]) {
+                requestsByUserAndYear[key] = 0;
+            }
+            requestsByUserAndYear[key] += parseFloat(request.days_requested || 0);
+        }
+        
+        // Recalculate each entitlement
+        let updatedCount = 0;
+        for (const entitlement of entitlements) {
+            const userId = parseInt(entitlement.user_id);
+            const year = parseInt(entitlement.year);
+            
+            // Start with approved holiday requests
+            const requestKey = `${userId}_${year}`;
+            let daysUsed = requestsByUserAndYear[requestKey] || 0;
+            
+            // Add shutdown period days for this year
+            if (shutdownByYear[year]) {
+                daysUsed += shutdownByYear[year];
+            }
+            
+            // Update the entitlement
+            if (isPostgreSQL) {
+                await pool.query(
+                    `UPDATE holiday_entitlements 
+                     SET days_used = $1, updated_at = CURRENT_TIMESTAMP
+                     WHERE user_id = $2 AND year = $3`,
+                    [daysUsed, userId, year]
+                );
+            } else {
+                db.prepare(
+                    `UPDATE holiday_entitlements 
+                     SET days_used = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE user_id = ? AND year = ?`
+                ).run(daysUsed, userId, year);
+            }
+            
+            updatedCount++;
+        }
+        
+        return {
+            updated: updatedCount,
+            totalEntitlements: entitlements.length,
+            shutdownPeriodsCount: shutdownPeriods.length,
+            approvedRequestsCount: approvedRequestsList.length
+        };
+    }
+    
     // Timesheet Integration Methods
     static async populateHolidayTimesheetEntry(userId, date, holidayRequestId) {
         // Verify the holiday request is approved before populating timesheet

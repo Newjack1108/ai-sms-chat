@@ -3123,6 +3123,22 @@ router.get('/holidays/entitlements/:userId/:year', requireProductionAuth, async 
     }
 });
 
+router.post('/holidays/entitlements/recalculate', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        console.log('Recalculating all holiday entitlements...');
+        const result = await ProductionDatabase.recalculateAllEntitlements();
+        
+        res.json({
+            success: true,
+            message: `Recalculated ${result.updated} entitlements based on ${result.shutdownPeriodsCount} shutdown periods and ${result.approvedRequestsCount} approved requests.`,
+            result
+        });
+    } catch (error) {
+        console.error('Recalculate entitlements error:', error);
+        res.status(500).json({ success: false, error: 'Failed to recalculate entitlements: ' + error.message });
+    }
+});
+
 router.post('/holidays/entitlements', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { user_id, year, total_days } = req.body;

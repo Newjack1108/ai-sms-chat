@@ -35,7 +35,10 @@
             <div class="card">
                 <div class="card-header">
                     <h2>Holiday Entitlements</h2>
-                    <button onclick="showAddEntitlementModal()" class="btn btn-primary">Add/Update Entitlement</button>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="recalculateEntitlements()" class="btn btn-secondary">Recalculate Entitlements</button>
+                        <button onclick="showAddEntitlementModal()" class="btn btn-primary">Add/Update Entitlement</button>
+                    </div>
                 </div>
                 <div id="entitlementsList">
                     <div class="loading">Loading...</div>
@@ -373,6 +376,35 @@
             document.getElementById('entitlementUserId').disabled = true;
             document.getElementById('entitlementYear').disabled = true;
             document.getElementById('entitlementModal').style.display = 'block';
+        }
+        
+        async function recalculateEntitlements() {
+            if (!confirm('Recalculate all holiday entitlements? This will recalculate days_used for all users based on approved holiday requests and active shutdown periods. This action may take a moment.')) {
+                return;
+            }
+            
+            try {
+                console.log('Recalculating entitlements...');
+                const response = await apiCall('/holidays/entitlements/recalculate', {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                
+                console.log('Recalculate response:', response);
+                
+                if (response && response.success) {
+                    alert(response.message || 'Entitlements recalculated successfully');
+                    // Refresh the entitlements list
+                    setTimeout(async () => {
+                        await loadEntitlements();
+                    }, 200);
+                } else {
+                    alert('Error recalculating entitlements: ' + (response?.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error recalculating entitlements:', error);
+                alert('Error recalculating entitlements: ' + (error.message || 'Unknown error'));
+            }
         }
         
         async function saveEntitlement(event) {
