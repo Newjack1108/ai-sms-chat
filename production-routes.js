@@ -3456,6 +3456,78 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
     }
 });
 
+// Admin endpoint to add approved holiday for a user
+router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { user_id, start_date, end_date, review_notes } = req.body;
+        const adminUser = req.session.production_user;
+        
+        if (!user_id || !start_date || !end_date) {
+            return res.status(400).json({ success: false, error: 'User ID, start date, and end date are required' });
+        }
+        
+        // Calculate weekdays
+        const weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        if (weekdays <= 0) {
+            return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
+        }
+        
+        // Check entitlement
+        const currentYear = new Date(start_date).getFullYear();
+        const userId = parseInt(user_id);
+        const entitlement = await ProductionDatabase.getHolidayEntitlement(userId, currentYear);
+        
+        if (!entitlement) {
+            return res.status(400).json({ 
+                success: false, 
+                error: `No holiday entitlement found for user for year ${currentYear}` 
+            });
+        }
+        
+        // Calculate days remaining (can be negative if shutdown periods have been applied)
+        await ProductionDatabase.recalculateHolidayDaysUsed(userId, currentYear);
+        const updatedEntitlement = await ProductionDatabase.getHolidayEntitlement(userId, currentYear);
+        const daysRemaining = parseFloat(updatedEntitlement.total_days || 0) - parseFloat(updatedEntitlement.days_used || 0);
+        
+        // Allow negative balances - shutdown periods can cause this
+        // Just log a warning if going negative
+        if (daysRemaining < weekdays) {
+            console.log(`Warning: Adding holiday that will result in negative entitlement. User will have ${(daysRemaining - weekdays).toFixed(1)} days remaining`);
+        }
+        
+        // Create holiday request with status 'approved'
+        const request = await ProductionDatabase.createHolidayRequest({
+            user_id: userId,
+            start_date,
+            end_date,
+            requested_by_user_id: adminUser.id,
+            is_company_shutdown: false,
+            status: 'approved',
+            reviewed_by_user_id: adminUser.id,
+            review_notes: review_notes || null
+        });
+        
+        // Recalculate days_used to include the newly created approved request
+        await ProductionDatabase.recalculateHolidayDaysUsed(userId, currentYear);
+        
+        // Populate timesheet entries for approved holidays
+        const start = new Date(start_date);
+        const end = new Date(end_date);
+        const current = new Date(start);
+        
+        while (current <= end) {
+            const dateStr = current.toISOString().split('T')[0];
+            await ProductionDatabase.populateHolidayTimesheetEntry(userId, dateStr, request.id);
+            current.setDate(current.getDate() + 1);
+        }
+        
+        res.json({ success: true, request, message: 'Holiday added and approved successfully' });
+    } catch (error) {
+        console.error('Add holiday error:', error);
+        res.status(500).json({ success: false, error: 'Failed to add holiday: ' + (error.message || 'Unknown error') });
+    }
+});
+
 router.put('/holidays/requests/:id/reject', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const requestId = parseInt(req.params.id);

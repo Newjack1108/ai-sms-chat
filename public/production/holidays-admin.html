@@ -37,6 +37,7 @@
                     <h2>Holiday Entitlements</h2>
                     <div style="display: flex; gap: 10px;">
                         <button onclick="recalculateEntitlements()" class="btn btn-secondary">Recalculate Entitlements</button>
+                        <button onclick="showAddHolidayModal()" class="btn btn-primary">Add Holiday for User</button>
                         <button onclick="showAddEntitlementModal()" class="btn btn-primary">Add/Update Entitlement</button>
                     </div>
                 </div>
@@ -114,6 +115,43 @@
                 <div class="form-actions">
                     <button type="button" onclick="closeModal('entitlementModal')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Add Holiday for User Modal -->
+    <div id="addHolidayModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('addHolidayModal')">&times;</span>
+            <h2>Add Holiday for User</h2>
+            <form id="addHolidayForm" onsubmit="saveHoliday(event)">
+                <div class="form-group">
+                    <label>User: *</label>
+                    <select id="addHolidayUserId" class="form-select" required>
+                        <option value="">Select User</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Start Date: *</label>
+                    <input type="date" id="addHolidayStartDate" class="form-input" required onchange="updateAddHolidayDaysPreview()" oninput="updateAddHolidayDaysPreview()">
+                </div>
+                <div class="form-group">
+                    <label>End Date: *</label>
+                    <input type="date" id="addHolidayEndDate" class="form-input" required onchange="updateAddHolidayDaysPreview()" oninput="updateAddHolidayDaysPreview()">
+                </div>
+                <div class="form-group">
+                    <label>Notes (optional):</label>
+                    <textarea id="addHolidayNotes" class="form-input" rows="3" placeholder="Optional notes about this holiday"></textarea>
+                </div>
+                <div class="form-group">
+                    <div id="addHolidayDaysPreview" style="padding: 10px; background: #f5f5f5; border-radius: 4px; margin-top: 10px;">
+                        <strong>Days: </strong><span id="addHolidayDaysCount">-</span> weekdays
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" onclick="closeModal('addHolidayModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Holiday</button>
                 </div>
             </form>
         </div>
@@ -359,6 +397,94 @@
             
             html += '</tbody></table></div>';
             container.innerHTML = html;
+        }
+        
+        function showAddHolidayModal() {
+            document.getElementById('addHolidayForm').reset();
+            document.getElementById('addHolidayDaysCount').textContent = '-';
+            // Populate user dropdown if not already populated
+            const select = document.getElementById('addHolidayUserId');
+            if (select.options.length <= 1 && users.length > 0) {
+                select.innerHTML = '<option value="">Select User</option>';
+                users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.username;
+                    select.appendChild(option);
+                });
+            }
+            document.getElementById('addHolidayModal').style.display = 'block';
+        }
+        
+        function updateAddHolidayDaysPreview() {
+            const startDate = document.getElementById('addHolidayStartDate').value;
+            const endDate = document.getElementById('addHolidayEndDate').value;
+            const daysCountSpan = document.getElementById('addHolidayDaysCount');
+            
+            if (startDate && endDate) {
+                if (new Date(startDate) > new Date(endDate)) {
+                    daysCountSpan.textContent = 'Invalid (end date must be after start date)';
+                    daysCountSpan.style.color = 'red';
+                } else {
+                    const weekdays = calculateWorkingDays(startDate, endDate);
+                    daysCountSpan.textContent = weekdays;
+                    daysCountSpan.style.color = '';
+                }
+            } else {
+                daysCountSpan.textContent = '-';
+                daysCountSpan.style.color = '';
+            }
+        }
+        
+        async function saveHoliday(event) {
+            event.preventDefault();
+            const userId = parseInt(document.getElementById('addHolidayUserId').value);
+            const startDate = document.getElementById('addHolidayStartDate').value;
+            const endDate = document.getElementById('addHolidayEndDate').value;
+            const notes = document.getElementById('addHolidayNotes').value;
+            
+            if (!userId || !startDate || !endDate) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('End date must be after start date');
+                return;
+            }
+            
+            const weekdays = calculateWorkingDays(startDate, endDate);
+            if (weekdays <= 0) {
+                alert('Date range must include at least one weekday');
+                return;
+            }
+            
+            try {
+                const response = await apiCall('/holidays/add', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_id: userId,
+                        start_date: startDate,
+                        end_date: endDate,
+                        review_notes: notes || null
+                    })
+                });
+                
+                if (response && response.success) {
+                    closeModal('addHolidayModal');
+                    alert('Holiday added successfully');
+                    // Refresh entitlements and pending requests
+                    setTimeout(async () => {
+                        await loadEntitlements();
+                        await loadPendingRequests();
+                    }, 200);
+                } else {
+                    alert('Error adding holiday: ' + (response?.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error adding holiday:', error);
+                alert('Error adding holiday: ' + (error.message || 'Unknown error'));
+            }
         }
         
         function showAddEntitlementModal() {

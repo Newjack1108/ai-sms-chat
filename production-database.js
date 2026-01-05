@@ -8077,32 +8077,32 @@ class ProductionDatabase {
     
     // Holiday Request Methods
     static async createHolidayRequest(data) {
-        const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown } = data;
+        const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown, status, reviewed_by_user_id, review_notes } = data;
         const weekdays = this.calculateWorkingDays(start_date, end_date);
+        const requestStatus = status || 'pending';
+        const now = requestStatus === 'approved' ? new Date().toISOString() : null;
         
-        console.log('Creating holiday request with status="pending":', { user_id, start_date, end_date, weekdays });
+        console.log(`Creating holiday request with status="${requestStatus}":`, { user_id, start_date, end_date, weekdays });
         
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO holiday_requests 
-                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status)
-                 VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status, reviewed_by_user_id, reviewed_at, review_notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING *`,
-                [user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown || false]
+                [user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown || false, requestStatus, reviewed_by_user_id || null, now, review_notes || null]
             );
-            console.log('Created holiday request (PostgreSQL):', result.rows[0]);
-            console.log('Request status:', result.rows[0]?.status);
+            console.log(`Created holiday request (PostgreSQL) with status="${requestStatus}":`, result.rows[0]);
             return result.rows[0];
         } else {
             const stmt = db.prepare(
                 `INSERT INTO holiday_requests 
-                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status)
-                 VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+                 (user_id, start_date, end_date, days_requested, requested_by_user_id, is_company_shutdown, status, reviewed_by_user_id, reviewed_at, review_notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown ? 1 : 0);
+            const info = stmt.run(user_id, start_date, end_date, weekdays, requested_by_user_id, is_company_shutdown ? 1 : 0, requestStatus, reviewed_by_user_id || null, now, review_notes || null);
             const created = await this.getHolidayRequestById(info.lastInsertRowid);
-            console.log('Created holiday request (SQLite):', created);
-            console.log('Request status:', created?.status);
+            console.log(`Created holiday request (SQLite) with status="${requestStatus}":`, created);
             return created;
         }
     }
