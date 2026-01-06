@@ -1091,6 +1091,17 @@
                             ` : ''}
                             ` : ''}
                         </div>
+                        ${(loadSheet.estimated_load_time && loadSheet.estimated_load_time > 0) || (loadSheet.estimated_install_time && loadSheet.estimated_install_time > 0) ? `
+                        <div style="padding: 15px; margin-top: 20px; background: #f0f7ff; border: 2px solid #4a90e2; border-radius: 8px;">
+                            <h4 style="margin: 0 0 10px 0; color: #2c5aa0;">Estimated Times</h4>
+                            ${loadSheet.estimated_load_time && loadSheet.estimated_load_time > 0 ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Load Time:</strong> ${parseFloat(loadSheet.estimated_load_time).toFixed(2)} hours</p>
+                            ` : ''}
+                            ${loadSheet.estimated_install_time && loadSheet.estimated_install_time > 0 ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Install Time:</strong> ${parseFloat(loadSheet.estimated_install_time).toFixed(2)} hours <em style="color: #666;">(for reference only)</em></p>
+                            ` : ''}
+                        </div>
+                        ` : ''}
                         <div style="padding: 15px; border-top: 2px solid #E8F5E9; margin-top: 20px; text-align: center;">
                             <button onclick="saveAndCloseLoadSheet(${orderId})" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">Save & Close</button>
                         </div>
@@ -1388,6 +1399,17 @@
                         </table>
                         </div>
                         ` : ''}
+                        ` : ''}
+                        ${(loadSheet.estimated_load_time && loadSheet.estimated_load_time > 0) || (loadSheet.estimated_install_time && loadSheet.estimated_install_time > 0) ? `
+                        <div class="table-section" style="margin-top: 30px; padding: 15px; background: #f0f7ff; border: 2px solid #4a90e2; border-radius: 8px;">
+                            <h4 style="margin: 0 0 10px 0; color: #2c5aa0;">Estimated Times</h4>
+                            ${loadSheet.estimated_load_time && loadSheet.estimated_load_time > 0 ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Load Time:</strong> ${parseFloat(loadSheet.estimated_load_time).toFixed(2)} hours</p>
+                            ` : ''}
+                            ${loadSheet.estimated_install_time && loadSheet.estimated_install_time > 0 ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Install Time:</strong> ${parseFloat(loadSheet.estimated_install_time).toFixed(2)} hours <em style="color: #666;">(for reference only)</em></p>
+                            ` : ''}
+                        </div>
                         ` : ''}
                     </div>
                 `;

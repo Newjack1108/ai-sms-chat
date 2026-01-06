@@ -842,18 +842,20 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, category, status } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
         
-        // Cost is calculated automatically from components (panels + materials)
+        // Cost is calculated automatically from components (panels + materials) + load time labour
         const product = await ProductionDatabase.createProduct({
             name,
             description,
             product_type,
             category,
-            status
+            status,
+            estimated_load_time,
+            estimated_install_time
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -865,15 +867,17 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, category, status } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time } = req.body;
         
-        // Cost is calculated automatically from components
+        // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
             product_type,
             category,
-            status
+            status,
+            estimated_load_time,
+            estimated_install_time
         });
         res.json({ success: true, product });
     } catch (error) {
