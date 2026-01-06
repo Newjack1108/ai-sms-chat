@@ -85,6 +85,11 @@
                     <input type="number" step="0.01" min="0" id="productInstallTime" class="form-input" value="0">
                     <small style="color: #6c757d;">For reference only - shown on load sheets</small>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Estimated Travel Time (hours)</label>
+                    <input type="number" step="0.01" min="0" id="productTravelTime" class="form-input" value="0">
+                    <small style="color: #6c757d;">For reference only - shown on load sheets</small>
+                </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
@@ -277,6 +282,7 @@
                 document.getElementById('productCategory').value = product.category || 'Other';
                 document.getElementById('productLoadTime').value = product.estimated_load_time || 0;
                 document.getElementById('productInstallTime').value = product.estimated_install_time || 0;
+                document.getElementById('productTravelTime').value = product.estimated_travel_time || 0;
                 // Load calculated cost
                 const costData = await apiCall(`/products/${product.id}/cost`);
                 document.getElementById('productCost').value = costData.cost.toFixed(2);
@@ -438,7 +444,8 @@
                 category: document.getElementById('productCategory').value,
                 status: 'active',
                 estimated_load_time: parseFloat(document.getElementById('productLoadTime').value) || 0,
-                estimated_install_time: parseFloat(document.getElementById('productInstallTime').value) || 0
+                estimated_install_time: parseFloat(document.getElementById('productInstallTime').value) || 0,
+                estimated_travel_time: parseFloat(document.getElementById('productTravelTime').value) || 0
             };
             
             try {
