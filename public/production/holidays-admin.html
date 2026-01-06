@@ -35,7 +35,10 @@
             <div class="card">
                 <div class="card-header">
                     <h2>Holiday Entitlements</h2>
-                    <div style="display: flex; gap: 10px;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="yearFilter" onchange="filterByYear(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                            <option value="">All Years</option>
+                        </select>
                         <button onclick="recalculateEntitlements()" class="btn btn-secondary">Recalculate Entitlements</button>
                         <button onclick="showAddHolidayModal()" class="btn btn-primary">Add Holiday for User</button>
                         <button onclick="showAddEntitlementModal()" class="btn btn-primary">Add/Update Entitlement</button>
@@ -286,6 +289,8 @@
         let users = [];
         let calendarMonth = new Date().getMonth();
         let calendarYear = new Date().getFullYear();
+        let selectedYearFilter = null;
+        let allEntitlements = [];
         
         async function init() {
             await checkAuth();
@@ -352,9 +357,15 @@
                 console.log('Entitlements response:', response);
                 
                 if (response && response.success) {
-                    const entitlements = response.entitlements || [];
-                    console.log('Entitlements data:', entitlements);
-                    displayEntitlements(entitlements);
+                    allEntitlements = response.entitlements || [];
+                    console.log('Entitlements data:', allEntitlements);
+                    
+                    // Populate year filter dropdown
+                    populateYearFilter(allEntitlements);
+                    
+                    // Apply current filter (or show all if no filter)
+                    const filterSelect = document.getElementById('yearFilter');
+                    filterByYear(filterSelect.value || '');
                 } else {
                     console.error('Failed to load entitlements:', response);
                     document.getElementById('entitlementsList').innerHTML = '<div class="error">Error loading entitlements: ' + (response?.error || 'Unknown error') + '</div>';
@@ -365,11 +376,52 @@
             }
         }
         
+        function populateYearFilter(entitlements) {
+            const filterSelect = document.getElementById('yearFilter');
+            const currentValue = filterSelect.value; // Preserve current selection
+            
+            // Extract unique years
+            const years = [...new Set(entitlements.map(e => parseInt(e.year)))];
+            years.sort((a, b) => b - a); // Sort descending (newest first)
+            
+            // Clear existing options except "All Years"
+            filterSelect.innerHTML = '<option value="">All Years</option>';
+            
+            // Add year options
+            years.forEach(year => {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                filterSelect.appendChild(option);
+            });
+            
+            // Restore selection if it still exists
+            if (currentValue) {
+                filterSelect.value = currentValue;
+            }
+        }
+        
+        function filterByYear(year) {
+            selectedYearFilter = year === '' ? null : parseInt(year);
+            
+            let filteredEntitlements = allEntitlements;
+            
+            // Filter by year if a specific year is selected
+            if (selectedYearFilter !== null) {
+                filteredEntitlements = allEntitlements.filter(e => parseInt(e.year) === selectedYearFilter);
+            }
+            
+            displayEntitlements(filteredEntitlements);
+        }
+        
         function displayEntitlements(entitlements) {
             const container = document.getElementById('entitlementsList');
             
             if (!entitlements || entitlements.length === 0) {
-                container.innerHTML = '<div class="info">No entitlements found. Add an entitlement to get started.</div>';
+                const message = selectedYearFilter !== null 
+                    ? `No entitlements found for year ${selectedYearFilter}.` 
+                    : 'No entitlements found. Add an entitlement to get started.';
+                container.innerHTML = `<div class="info">${message}</div>`;
                 return;
             }
             
