@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= typeof title !== 'undefined' && title ? title + ' - ' : '' %>Box Control Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-title">Box Control Dashboard</h1>
+            <ul class="nav-links">
+                <li><a href="/dashboard" class="<%= typeof currentPage !== 'undefined' && currentPage === 'dashboard' ? 'active' : '' %>">Dashboard</a></li>
+                <li><a href="/sales" class="<%= typeof currentPage !== 'undefined' && currentPage === 'sales' ? 'active' : '' %>">Sales</a></li>
+                <li><a href="/production" class="<%= typeof currentPage !== 'undefined' && currentPage === 'production' ? 'active' : '' %>">Production</a></li>
+            </ul>
+        </div>
+    </nav>
+    
+    <main class="main-content">
+

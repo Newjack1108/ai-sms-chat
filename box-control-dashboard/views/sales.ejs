@@ -1,0 +1,94 @@
+<% 
+var title = 'Sales';
+var currentPage = 'sales';
+%>
+<%- include('partials/header') %>
+<div class="form-page">
+    <h1>Sales Data Entry</h1>
+    
+    <% if (typeof error !== 'undefined' && error) { %>
+        <div class="error-message"><%= error %></div>
+    <% } %>
+    
+    <% if (typeof warning !== 'undefined' && warning) { %>
+        <div class="warning-message"><%= warning %></div>
+    <% } %>
+    
+    <form method="POST" action="/sales" class="data-form">
+        <div class="form-group">
+            <label for="week_commencing">Week Commencing (Monday):</label>
+            <input type="date" id="week_commencing" name="week_commencing" 
+                   value="<%= existingData ? existingData.week_commencing : (typeof weekCommencing !== 'undefined' && weekCommencing ? weekCommencing : '') %>" 
+                   required>
+        </div>
+        
+        <div class="form-group">
+            <label for="boxes_sold">Boxes Sold:</label>
+            <input type="number" id="boxes_sold" name="boxes_sold" 
+                   value="<%= existingData ? existingData.boxes_sold : '' %>" 
+                   min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="installs_sold">Installs Sold:</label>
+            <input type="number" id="installs_sold" name="installs_sold" 
+                   value="<%= existingData ? existingData.installs_sold : '' %>" 
+                   min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="box_revenue">Box Revenue (ex-VAT):</label>
+            <input type="number" id="box_revenue" name="box_revenue" 
+                   value="<%= existingData ? existingData.box_revenue : '' %>" 
+                   step="0.01" min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="extras_revenue">Extras Revenue (ex-VAT):</label>
+            <input type="number" id="extras_revenue" name="extras_revenue" 
+                   value="<%= existingData ? existingData.extras_revenue : '' %>" 
+                   step="0.01" min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="install_revenue">Install Revenue (ex-VAT):</label>
+            <input type="number" id="install_revenue" name="install_revenue" 
+                   value="<%= existingData ? existingData.install_revenue : '' %>" 
+                   step="0.01" min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="notes">Notes:</label>
+            <textarea id="notes" name="notes" rows="4"><%= existingData ? existingData.notes || '' : '' %></textarea>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Save Sales Data</button>
+    </form>
+    
+    <% if (allWeeks && allWeeks.length > 0) { %>
+        <div class="recent-weeks">
+            <h2>Recent Weeks</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Week Commencing</th>
+                        <th>Boxes Sold</th>
+                        <th>Installs Sold</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% allWeeks.forEach(week => { %>
+                        <tr>
+                            <td><%= new Date(week.week_commencing).toLocaleDateString('en-GB') %></td>
+                            <td><%= week.boxes_sold %></td>
+                            <td><%= week.installs_sold %></td>
+                            <td><a href="/sales?week_commencing=<%= week.week_commencing %>" class="btn-link">Edit</a></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    <% } %>
+</div>
+<%- include('partials/footer') %>

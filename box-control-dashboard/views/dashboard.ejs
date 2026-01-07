@@ -1,0 +1,232 @@
+<% 
+var title = 'Dashboard';
+var currentPage = 'dashboard';
+%>
+<%- include('partials/header') %>
+<div class="dashboard">
+    <h1>Dashboard</h1>
+    
+    <!-- Section 1: Safety Status -->
+    <section class="dashboard-section">
+        <h2>Safety Status</h2>
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>Contribution MTD</h3>
+                <span class="rag-badge rag-<%= contributionRAG %>"><%= contributionRAG.toUpperCase() %></span>
+            </div>
+            <div class="metric-value">£<%= contributionMTD.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></div>
+            <div class="metric-details">
+                <p>Target: £<%= parseFloat(settings.monthly_contribution_target).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></p>
+                <p>Survival: £<%= parseFloat(settings.survival_contribution).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></p>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Section 2: Box Flow -->
+    <section class="dashboard-section">
+        <h2>Box Flow</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <h3>Boxes Sold MTD</h3>
+                <div class="metric-value"><%= salesMTD.boxes_sold %></div>
+            </div>
+            <div class="metric-card">
+                <h3>Boxes Produced MTD</h3>
+                <div class="metric-value"><%= productionMTD.boxes_produced %></div>
+            </div>
+            <div class="metric-card">
+                <h3>Average Boxes/Week (Last 4 Weeks)</h3>
+                <div class="metric-value"><%= avgBoxesPerWeek.toFixed(1) %></div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Section 3: Install & Extras Mix -->
+    <section class="dashboard-section">
+        <h2>Install & Extras Mix</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-header">
+                    <h3>Install %</h3>
+                    <span class="rag-badge rag-<%= installRAG %>"><%= installRAG.toUpperCase() %></span>
+                </div>
+                <div class="metric-value"><%= installPct.toFixed(1) %>%</div>
+                <div class="metric-details">
+                    <p>Target: <%= (parseFloat(settings.target_install_pct) * 100).toFixed(1) %>%</p>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-header">
+                    <h3>Extras %</h3>
+                    <span class="rag-badge rag-<%= extrasRAG %>"><%= extrasRAG.toUpperCase() %></span>
+                </div>
+                <div class="metric-value"><%= extrasPct.toFixed(1) %>%</div>
+                <div class="metric-details">
+                    <p>Target: <%= (parseFloat(settings.target_extras_pct) * 100).toFixed(1) %>%</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Section 4: Contribution per Box -->
+    <section class="dashboard-section">
+        <h2>Contribution per Box</h2>
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>MTD Contribution per Box</h3>
+                <span class="rag-badge rag-<%= contributionPerBoxRAG %>"><%= contributionPerBoxRAG.toUpperCase() %></span>
+            </div>
+            <div class="metric-value">£<%= contributionPerBox.toFixed(2) %></div>
+            <div class="metric-details">
+                <p>Target: £<%= parseFloat(settings.contribution_per_box).toFixed(2) %></p>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Section 5: Production Guardrails -->
+    <section class="dashboard-section">
+        <h2>Production Guardrails</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="metric-header">
+                    <h3>Cost Compliance</h3>
+                    <span class="rag-badge rag-<%= costComplianceRAG %>"><%= costComplianceRAG.toUpperCase() %></span>
+                </div>
+                <div class="metric-value"><%= costCompliancePct.toFixed(1) %>%</div>
+                <div class="metric-details">
+                    <p>Target: <%= (parseFloat(settings.cost_compliance_target) * 100).toFixed(1) %>%</p>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-header">
+                    <h3>Rework per Box</h3>
+                    <span class="rag-badge rag-<%= reworkRAG %>"><%= reworkRAG.toUpperCase() %></span>
+                </div>
+                <div class="metric-value"><%= reworkPerBox.toFixed(2) %> hrs</div>
+                <div class="metric-details">
+                    <p>Target: ≤ 0.25 hrs</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Section 6: Forward Look -->
+    <section class="dashboard-section">
+        <h2>Forward Look (Next 4 Weeks)</h2>
+        <% if (forwardLook && forwardLook.length > 0) { %>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Week Commencing</th>
+                        <th>Boxes Sold</th>
+                        <th>Installs Capacity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% forwardLook.forEach(week => { %>
+                        <tr>
+                            <td><%= new Date(week.week_commencing).toLocaleDateString('en-GB') %></td>
+                            <td><%= week.boxes_sold || 0 %></td>
+                            <td><%= Math.round((week.boxes_sold || 0) * parseFloat(settings.target_install_pct)) %></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        <% } else { %>
+            <p class="no-data">No forward look data available</p>
+        <% } %>
+    </section>
+    
+    <!-- Settings Panel (Protected) -->
+    <% if (isAuthenticated) { %>
+    <section class="dashboard-section">
+        <h2>Settings <button class="btn-toggle" onclick="toggleSettings()">Show/Hide</button></h2>
+        <div id="settings-panel" style="display: none;">
+            <form id="settings-form" onsubmit="updateSettings(event)">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="monthly_contribution_target">Monthly Contribution Target:</label>
+                        <input type="number" id="monthly_contribution_target" name="monthly_contribution_target" 
+                               value="<%= settings.monthly_contribution_target %>" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="survival_contribution">Survival Contribution:</label>
+                        <input type="number" id="survival_contribution" name="survival_contribution" 
+                               value="<%= settings.survival_contribution %>" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="target_boxes_per_month">Target Boxes per Month:</label>
+                        <input type="number" id="target_boxes_per_month" name="target_boxes_per_month" 
+                               value="<%= settings.target_boxes_per_month %>" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="target_boxes_per_week">Target Boxes per Week:</label>
+                        <input type="number" id="target_boxes_per_week" name="target_boxes_per_week" 
+                               value="<%= settings.target_boxes_per_week %>" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="target_install_pct">Target Install %:</label>
+                        <input type="number" id="target_install_pct" name="target_install_pct" 
+                               value="<%= settings.target_install_pct %>" step="0.01" min="0" max="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="target_extras_pct">Target Extras %:</label>
+                        <input type="number" id="target_extras_pct" name="target_extras_pct" 
+                               value="<%= settings.target_extras_pct %>" step="0.01" min="0" max="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="contribution_per_box">Contribution per Box:</label>
+                        <input type="number" id="contribution_per_box" name="contribution_per_box" 
+                               value="<%= settings.contribution_per_box %>" step="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="cost_compliance_target">Cost Compliance Target:</label>
+                        <input type="number" id="cost_compliance_target" name="cost_compliance_target" 
+                               value="<%= settings.cost_compliance_target %>" step="0.01" min="0" max="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="right_first_time_target">Right First Time Target:</label>
+                        <input type="number" id="right_first_time_target" name="right_first_time_target" 
+                               value="<%= settings.right_first_time_target %>" step="0.01" min="0" max="1" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Settings</button>
+            </form>
+        </div>
+    </section>
+    <% } %>
+</div>
+
+<script>
+function toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function updateSettings(event) {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const data = Object.fromEntries(formData);
+    
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            alert('Settings updated successfully');
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert('Error updating settings: ' + error.error);
+        }
+    } catch (error) {
+        alert('Error updating settings: ' + error.message);
+    }
+}
+</script>
+<%- include('partials/footer') %>

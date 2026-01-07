@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Box Control Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>Box Control Dashboard</h1>
+            <h2>Enter Passcode</h2>
+            <% if (typeof error !== 'undefined' && error) { %>
+                <div class="error-message"><%= error %></div>
+            <% } %>
+            <form method="POST" action="/login">
+                <input type="hidden" name="redirect" value="<%= typeof redirect !== 'undefined' ? redirect : '/dashboard' %>">
+                <div class="form-group">
+                    <label for="passcode">Passcode:</label>
+                    <input type="password" id="passcode" name="passcode" required autofocus>
+                </div>
+                <button type="submit" class="btn btn-primary">Login</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
+

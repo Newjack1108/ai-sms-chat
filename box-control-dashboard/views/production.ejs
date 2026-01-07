@@ -1,0 +1,90 @@
+<% 
+var title = 'Production';
+var currentPage = 'production';
+%>
+<%- include('partials/header') %>
+<div class="form-page">
+    <h1>Production Data Entry</h1>
+    
+    <% if (typeof error !== 'undefined' && error) { %>
+        <div class="error-message"><%= error %></div>
+    <% } %>
+    
+    <form method="POST" action="/production" class="data-form">
+        <div class="form-group">
+            <label for="week_commencing">Week Commencing (Monday):</label>
+            <input type="date" id="week_commencing" name="week_commencing" 
+                   value="<%= existingData ? existingData.week_commencing : (typeof weekCommencing !== 'undefined' && weekCommencing ? weekCommencing : '') %>" 
+                   required>
+        </div>
+        
+        <div class="form-group">
+            <label for="boxes_produced">Boxes Produced:</label>
+            <input type="number" id="boxes_produced" name="boxes_produced" 
+                   value="<%= existingData ? existingData.boxes_produced : '' %>" 
+                   min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="installs_completed">Installs Completed:</label>
+            <input type="number" id="installs_completed" name="installs_completed" 
+                   value="<%= existingData ? existingData.installs_completed : '' %>" 
+                   min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="boxes_over_cost">Boxes Over Cost:</label>
+            <input type="number" id="boxes_over_cost" name="boxes_over_cost" 
+                   value="<%= existingData ? existingData.boxes_over_cost : '' %>" 
+                   min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="rework_hours">Rework Hours:</label>
+            <input type="number" id="rework_hours" name="rework_hours" 
+                   value="<%= existingData ? existingData.rework_hours : '' %>" 
+                   step="0.01" min="0" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="right_first_time_pct">Right First Time % (optional):</label>
+            <input type="number" id="right_first_time_pct" name="right_first_time_pct" 
+                   value="<%= existingData && existingData.right_first_time_pct ? existingData.right_first_time_pct : '' %>" 
+                   step="0.01" min="0" max="1">
+        </div>
+        
+        <div class="form-group">
+            <label for="notes">Notes:</label>
+            <textarea id="notes" name="notes" rows="4"><%= existingData ? existingData.notes || '' : '' %></textarea>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Save Production Data</button>
+    </form>
+    
+    <% if (allWeeks && allWeeks.length > 0) { %>
+        <div class="recent-weeks">
+            <h2>Recent Weeks</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Week Commencing</th>
+                        <th>Boxes Produced</th>
+                        <th>Installs Completed</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% allWeeks.forEach(week => { %>
+                        <tr>
+                            <td><%= new Date(week.week_commencing).toLocaleDateString('en-GB') %></td>
+                            <td><%= week.boxes_produced %></td>
+                            <td><%= week.installs_completed %></td>
+                            <td><a href="/production?week_commencing=<%= week.week_commencing %>" class="btn-link">Edit</a></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    <% } %>
+</div>
+<%- include('partials/footer') %>

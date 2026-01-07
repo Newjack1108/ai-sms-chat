@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error - Box Control Dashboard</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="error-container">
+        <h1>Error</h1>
+        <p class="error-message"><%= typeof message !== 'undefined' ? message : 'An error occurred' %></p>
+        <% if (typeof error !== 'undefined' && error) { %>
+            <pre class="error-details"><%= error.stack || error %></pre>
+        <% } %>
+        <a href="/dashboard" class="btn btn-primary">Return to Dashboard</a>
+    </div>
+</body>
+</html>
+
