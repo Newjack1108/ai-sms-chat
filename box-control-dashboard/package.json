@@ -1,7 +1,7 @@
 {
   "name": "box-control-dashboard",
   "version": "1.0.0",
-  "description": "Production-ready Box Control Dashboard for UK manufacturing business - Railway deployment ready",
+  "description": "Production-ready Box Control Dashboard for UK manufacturing business",
   "main": "src/server.js",
   "engines": {
     "node": ">=20.0.0"
