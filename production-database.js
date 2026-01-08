@@ -5087,12 +5087,38 @@ class ProductionDatabase {
     }
     
     static async getInstallationById(id) {
+        // Check if new columns exist
+        let hasStartDate = false;
+        let hasEndDate = false;
+        
+        if (isPostgreSQL) {
+            try {
+                const colCheck = await pool.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date')
+                `);
+                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
+                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
+            } catch (error) {
+                // If check fails, assume columns don't exist
+            }
+        } else {
+            try {
+                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+                hasStartDate = tableInfo.some(col => col.name === 'start_date');
+                hasEndDate = tableInfo.some(col => col.name === 'end_date');
+            } catch (error) {
+                // If check fails, assume columns don't exist
+            }
+        }
+        
         if (isPostgreSQL) {
             // Support both old and new column names for backward compatibility
             const result = await pool.query(
                 `SELECT i.*, 
-                 COALESCE(i.start_date, i.installation_date) as start_date,
-                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
+                 ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
                  po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                  fp.name as product_name,
                  u.username as created_by_name
@@ -5112,8 +5138,8 @@ class ProductionDatabase {
         } else {
             const installation = db.prepare(
                 `SELECT i.*, 
-                 COALESCE(i.start_date, i.installation_date) as start_date,
-                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
+                 ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
                  po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                  fp.name as product_name,
                  u.username as created_by_name
@@ -5132,9 +5158,36 @@ class ProductionDatabase {
     }
     
     static async getAllInstallations(startDate = null, endDate = null) {
+        // Check if new columns exist
+        let hasStartDate = false;
+        let hasEndDate = false;
+        
+        if (isPostgreSQL) {
+            try {
+                const colCheck = await pool.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date')
+                `);
+                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
+                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
+            } catch (error) {
+                // If check fails, assume columns don't exist
+                console.log('Column check failed, assuming old schema:', error.message);
+            }
+        } else {
+            try {
+                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+                hasStartDate = tableInfo.some(col => col.name === 'start_date');
+                hasEndDate = tableInfo.some(col => col.name === 'end_date');
+            } catch (error) {
+                console.log('Column check failed, assuming old schema:', error.message);
+            }
+        }
+        
         let query = `SELECT i.*, 
-                     COALESCE(i.start_date, i.installation_date) as start_date,
-                     COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                     ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
+                     ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
                      po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                      fp.name as product_name,
                      u.username as created_by_name
@@ -5148,9 +5201,21 @@ class ProductionDatabase {
         
         if (startDate) {
             if (isPostgreSQL) {
-                conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
+                if (hasEndDate) {
+                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
+                } else if (hasStartDate) {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) >= $${paramIndex})`);
+                } else {
+                    conditions.push(`(i.installation_date >= $${paramIndex})`);
+                }
             } else {
-                conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= ?)`);
+                if (hasEndDate) {
+                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= ?)`);
+                } else if (hasStartDate) {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) >= ?)`);
+                } else {
+                    conditions.push(`(i.installation_date >= ?)`);
+                }
             }
             params.push(startDate);
             paramIndex++;
@@ -5158,9 +5223,17 @@ class ProductionDatabase {
         
         if (endDate) {
             if (isPostgreSQL) {
-                conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
+                if (hasStartDate) {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
+                } else {
+                    conditions.push(`(i.installation_date <= $${paramIndex})`);
+                }
             } else {
-                conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
+                if (hasStartDate) {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
+                } else {
+                    conditions.push(`(i.installation_date <= ?)`);
+                }
             }
             params.push(endDate);
             paramIndex++;
@@ -5170,7 +5243,8 @@ class ProductionDatabase {
             query += ` WHERE ${conditions.join(' AND ')}`;
         }
         
-        query += ` ORDER BY COALESCE(i.start_date, i.installation_date), i.start_time`;
+        const orderBy = hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date';
+        query += ` ORDER BY ${orderBy}, i.start_time`;
         
         if (isPostgreSQL) {
             const result = await pool.query(query, params);
