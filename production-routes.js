@@ -3240,7 +3240,7 @@ router.get('/holidays/requests/pending', requireProductionAuth, requireAdminOrOf
 
 router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
     try {
-        const { start_date, end_date, is_company_shutdown } = req.body;
+        const { start_date, end_date, day_type, is_company_shutdown } = req.body;
         const user = req.session.production_user;
         
         if (!user || !user.id) {
@@ -3252,10 +3252,26 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Start date and end date are required' });
         }
         
+        // Validate day_type (default to 'full' if not provided for backward compatibility)
+        const dayType = day_type || 'full';
+        if (dayType !== 'half' && dayType !== 'full') {
+            return res.status(400).json({ success: false, error: 'day_type must be either "half" or "full"' });
+        }
+        
+        // For half day, start and end dates must be the same
+        if (dayType === 'half' && start_date !== end_date) {
+            return res.status(400).json({ success: false, error: 'For half day, start date and end date must be the same' });
+        }
+        
         // Calculate weekdays
-        const weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        let weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
         if (weekdays <= 0) {
             return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
+        }
+        
+        // For half day, it's 0.5 days
+        if (dayType === 'half') {
+            weekdays = 0.5;
         }
         
         // Check entitlement
@@ -3307,7 +3323,8 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             start_date,
             end_date,
             requested_by_user_id: user.id,
-            is_company_shutdown: is_company_shutdown || false
+            is_company_shutdown: is_company_shutdown || false,
+            days_requested: weekdays // Override calculated weekdays with actual days (0.5 for half day)
         });
         
         console.log('Created holiday request:', request);

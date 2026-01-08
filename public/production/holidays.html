@@ -50,8 +50,15 @@
                     <input type="date" id="requestEndDate" class="form-input" required>
                 </div>
                 <div class="form-group">
+                    <label>Day Type:</label>
+                    <select id="requestDayType" class="form-input" required onchange="updateRequestSummary()">
+                        <option value="full">Full Day</option>
+                        <option value="half">Half Day</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <div id="requestSummary" style="padding: 10px; background: #f5f5f5; border-radius: 4px; margin-bottom: 10px;">
-                        <p><strong>Days requested:</strong> <span id="daysRequested">0</span> weekdays</p>
+                        <p><strong>Days requested:</strong> <span id="daysRequested">0</span> days</p>
                         <p id="entitlementCheck" style="margin: 5px 0;"></p>
                     </div>
                 </div>
@@ -201,12 +208,21 @@
         function updateRequestSummary() {
             const startDate = document.getElementById('requestStartDate').value;
             const endDate = document.getElementById('requestEndDate').value;
+            const dayType = document.getElementById('requestDayType').value;
             
             if (!startDate || !endDate) {
                 document.getElementById('daysRequested').textContent = '0';
                 document.getElementById('entitlementCheck').textContent = '';
                 // Show current year's entitlement when no dates selected
                 updateEntitlementForYear(currentYear);
+                return;
+            }
+            
+            // For half day, start and end dates must be the same
+            if (dayType === 'half' && startDate !== endDate) {
+                document.getElementById('daysRequested').textContent = '0';
+                document.getElementById('entitlementCheck').innerHTML = '<span style="color: red;">For half day, start date and end date must be the same</span>';
+                document.getElementById('submitBtn').disabled = true;
                 return;
             }
             
@@ -229,8 +245,20 @@
                 return eYear === requestYear;
             });
             
-            const weekdays = calculateWorkingDays(startDate, endDate);
-            document.getElementById('daysRequested').textContent = weekdays;
+            let weekdays = calculateWorkingDays(startDate, endDate);
+            
+            // For half day, it's 0.5 days
+            if (dayType === 'half') {
+                if (weekdays === 0) {
+                    document.getElementById('daysRequested').textContent = '0';
+                    document.getElementById('entitlementCheck').innerHTML = '<span style="color: red;">Half day must be on a weekday</span>';
+                    document.getElementById('submitBtn').disabled = true;
+                    return;
+                }
+                weekdays = 0.5;
+            }
+            
+            document.getElementById('daysRequested').textContent = weekdays.toFixed(1);
             
             if (entitlement) {
                 const daysRemaining = entitlement.days_remaining !== undefined 
@@ -258,9 +286,16 @@
             event.preventDefault();
             const startDate = document.getElementById('requestStartDate').value;
             const endDate = document.getElementById('requestEndDate').value;
+            const dayType = document.getElementById('requestDayType').value;
             
-            if (!startDate || !endDate) {
-                alert('Please select both start and end dates');
+            if (!startDate || !endDate || !dayType) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            // For half day, start and end dates must be the same
+            if (dayType === 'half' && startDate !== endDate) {
+                alert('For half day, start date and end date must be the same');
                 return;
             }
             
@@ -272,6 +307,12 @@
             const weekdays = calculateWorkingDays(startDate, endDate);
             if (weekdays === 0) {
                 alert('Please select a date range that includes at least one weekday');
+                return;
+            }
+            
+            // For half day, validate it's a weekday
+            if (dayType === 'half' && weekdays === 0) {
+                alert('Half day must be on a weekday');
                 return;
             }
             
@@ -296,7 +337,8 @@
                     method: 'POST',
                     body: JSON.stringify({
                         start_date: startDate,
-                        end_date: endDate
+                        end_date: endDate,
+                        day_type: dayType
                     })
                 });
                 
@@ -312,6 +354,7 @@
                     
                     alert('Holiday request submitted successfully. Status: ' + (response.request?.status || 'unknown'));
                     document.getElementById('requestForm').reset();
+                    document.getElementById('requestDayType').value = 'full'; // Reset to full day
                     document.getElementById('daysRequested').textContent = '0';
                     document.getElementById('entitlementCheck').textContent = '';
                     await loadMyRequests();
