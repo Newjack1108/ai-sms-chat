@@ -5235,7 +5235,11 @@ class ProductionDatabase {
                 // Get assignments and days for each installation
                 for (const installation of installations) {
                     installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                    try {
+                        installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                    } catch (error) {
+                        installation.installation_days = []; // Days table might not exist
+                    }
                 }
                 return installations;
             } else {
@@ -5243,7 +5247,11 @@ class ProductionDatabase {
                 // Get assignments and days for each installation
                 for (const installation of installations) {
                     installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                    try {
+                        installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                    } catch (error) {
+                        installation.installation_days = []; // Days table might not exist
+                    }
                 }
                 return installations;
             }
@@ -5572,20 +5580,26 @@ class ProductionDatabase {
     }
     
     static async getInstallationDays(installationId) {
-        if (isPostgreSQL) {
-            const result = await pool.query(
-                `SELECT * FROM installation_days
-                 WHERE installation_id = $1
-                 ORDER BY day_date`,
-                [installationId]
-            );
-            return result.rows;
-        } else {
-            return db.prepare(
-                `SELECT * FROM installation_days
-                 WHERE installation_id = ?
-                 ORDER BY day_date`
-            ).all(installationId);
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT * FROM installation_days
+                     WHERE installation_id = $1
+                     ORDER BY day_date`,
+                    [installationId]
+                );
+                return result.rows;
+            } else {
+                return db.prepare(
+                    `SELECT * FROM installation_days
+                     WHERE installation_id = ?
+                     ORDER BY day_date`
+                ).all(installationId);
+            }
+        } catch (error) {
+            // Table might not exist yet, return empty array
+            console.log('installation_days table not found, returning empty array:', error.message);
+            return [];
         }
     }
     

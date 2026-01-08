@@ -694,12 +694,18 @@
         function showAddInstallationModal() {
             editingInstallationId = null;
             assignedUsers = [];
+            dayOverrides = [];
             document.getElementById('installationModalTitle').textContent = 'Add Installation';
             document.getElementById('installationForm').reset();
             document.getElementById('installationId').value = '';
-            document.getElementById('installationDate').value = currentDate.toISOString().split('T')[0];
+            const today = currentDate.toISOString().split('T')[0];
+            document.getElementById('installationStartDate').value = today;
+            document.getElementById('installationEndDate').value = today;
             document.getElementById('assignedUsersList').innerHTML = '';
             document.getElementById('availabilityCheck').innerHTML = '';
+            document.getElementById('enablePerDaySettings').checked = false;
+            document.getElementById('perDaySettings').style.display = 'none';
+            document.getElementById('perDayTable').innerHTML = '';
             showModal('installationModal');
         }
         
