@@ -252,24 +252,46 @@
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">Installation Date *</label>
-                    <input type="date" id="installationDate" class="form-input" required>
+                    <label class="form-label">Start Date *</label>
+                    <input type="date" id="installationStartDate" class="form-input" required>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">Start Time *</label>
+                    <label class="form-label">End Date *</label>
+                    <input type="date" id="installationEndDate" class="form-input" required>
+                    <small>For single-day installations, set same as start date</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Start Time (Default) *</label>
                     <input type="time" id="installationStartTime" class="form-input" required>
+                    <small>Default start time for all days (can be overridden per day below)</small>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">Duration (hours) *</label>
+                    <label class="form-label">Duration (hours, Default) *</label>
                     <input type="number" id="installationDuration" class="form-input" step="0.5" min="0.5" required>
+                    <small>Default duration for all days (can be overridden per day below)</small>
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">End Time</label>
+                    <label class="form-label">End Time (Default)</label>
                     <input type="time" id="installationEndTime" class="form-input">
                     <small>Leave empty to auto-calculate from duration</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">
+                        <input type="checkbox" id="enablePerDaySettings" onchange="togglePerDaySettings()">
+                        Enable Per-Day Settings
+                    </label>
+                    <small>Override times and duration for specific days</small>
+                </div>
+                
+                <div id="perDaySettings" style="display: none; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
+                    <h4>Per-Day Settings</h4>
+                    <div id="perDayTable"></div>
+                    <button type="button" onclick="addDayOverride()" class="btn btn-secondary btn-sm" style="margin-top: 10px;">Add Day Override</button>
                 </div>
                 
                 <div class="form-group">
@@ -493,11 +515,35 @@
                 days.push(date);
             }
             
-            // Group installations by day and time
+            // Group installations by day - handle multi-day installations
             const dayInstallations = {};
             days.forEach(day => {
                 const dayStr = day.toISOString().split('T')[0];
-                dayInstallations[dayStr] = installations.filter(inst => inst.installation_date === dayStr);
+                dayInstallations[dayStr] = [];
+                
+                installations.forEach(inst => {
+                    const instStartDate = inst.start_date || inst.installation_date;
+                    const instEndDate = inst.end_date || instStartDate;
+                    
+                    // Check if this day falls within the installation date range
+                    if (dayStr >= instStartDate && dayStr <= instEndDate) {
+                        // Get day-specific times or use defaults
+                        const dayOverride = inst.installation_days?.find(d => d.day_date === dayStr);
+                        const dayStartTime = dayOverride?.start_time || inst.start_time;
+                        const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
+                        const dayEndTime = dayOverride?.end_time || inst.end_time;
+                        
+                        dayInstallations[dayStr].push({
+                            ...inst,
+                            dayStartTime,
+                            dayEndTime,
+                            dayDuration,
+                            isMultiDay: instStartDate !== instEndDate,
+                            isFirstDay: dayStr === instStartDate,
+                            isLastDay: dayStr === instEndDate
+                        });
+                    }
+                });
             });
             
             let html = '<div class="weekly-view">';
@@ -515,14 +561,20 @@
                     const dayStr = day.toISOString().split('T')[0];
                     const dayInsts = dayInstallations[dayStr] || [];
                     const hourInsts = dayInsts.filter(inst => {
-                        const instHour = parseInt(inst.start_time.split(':')[0]);
+                        const instHour = parseInt(inst.dayStartTime.split(':')[0]);
                         return instHour === hour;
                     });
                     
                     html += '<div class="weekly-day-cell">';
                     hourInsts.forEach(inst => {
-                        html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${inst.product_name || 'Installation'} - ${inst.start_time}">
-                            ${inst.product_name || 'Installation'} ${inst.start_time}
+                        const instStartDate = inst.start_date || inst.installation_date;
+                        const instEndDate = inst.end_date || instStartDate;
+                        const title = inst.isMultiDay ? 
+                            `${inst.product_name || 'Installation'} (${instStartDate} to ${instEndDate}) - ${inst.dayStartTime}` :
+                            `${inst.product_name || 'Installation'} - ${inst.dayStartTime}`;
+                        html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${title}">
+                            ${inst.product_name || 'Installation'} ${inst.dayStartTime}
+                            ${inst.isMultiDay ? '<span class="user-badge">Multi-day</span>' : ''}
                             ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
                         </div>`;
                     });
@@ -585,7 +637,29 @@
         
         function renderDailyView(container) {
             const dateStr = currentDate.toISOString().split('T')[0];
-            const dayInsts = installations.filter(inst => inst.installation_date === dateStr);
+            
+            // Find installations that include this day
+            const dayInsts = [];
+            installations.forEach(inst => {
+                const instStartDate = inst.start_date || inst.installation_date;
+                const instEndDate = inst.end_date || instStartDate;
+                
+                if (dateStr >= instStartDate && dateStr <= instEndDate) {
+                    // Get day-specific times or use defaults
+                    const dayOverride = inst.installation_days?.find(d => d.day_date === dateStr);
+                    const dayStartTime = dayOverride?.start_time || inst.start_time;
+                    const dayEndTime = dayOverride?.end_time || inst.end_time;
+                    const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
+                    
+                    dayInsts.push({
+                        ...inst,
+                        dayStartTime,
+                        dayEndTime,
+                        dayDuration,
+                        isMultiDay: instStartDate !== instEndDate
+                    });
+                }
+            });
             
             let html = '<div class="daily-view">';
             
@@ -593,14 +667,16 @@
             for (let hour = 8; hour < 18; hour++) {
                 html += `<div class="daily-time-slot">${hour}:00</div>`;
                 const hourInsts = dayInsts.filter(inst => {
-                    const instHour = parseInt(inst.start_time.split(':')[0]);
+                    const instHour = parseInt(inst.dayStartTime.split(':')[0]);
                     return instHour === hour;
                 });
                 
                 html += '<div class="daily-slot-content">';
                 hourInsts.forEach(inst => {
+                    const dateRange = inst.isMultiDay ? 
+                        ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
                     html += `<div class="daily-installation ${inst.status}" onclick="showInstallationDetails(${inst.id})">
-                        <strong>${inst.start_time} - ${inst.end_time || 'N/A'}</strong><br>
+                        <strong>${inst.dayStartTime} - ${inst.dayEndTime || 'N/A'}</strong>${dateRange}<br>
                         ${inst.product_name || 'Installation'}<br>
                         ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
                         ${inst.assigned_users && inst.assigned_users.length > 0 ? 
@@ -636,7 +712,10 @@
                 document.getElementById('installationModalTitle').textContent = 'Edit Installation';
                 document.getElementById('installationId').value = inst.id;
                 document.getElementById('installationWorksOrder').value = inst.works_order_id || '';
-                document.getElementById('installationDate').value = inst.installation_date;
+                const startDate = inst.start_date || inst.installation_date;
+                const endDate = inst.end_date || startDate;
+                document.getElementById('installationStartDate').value = startDate;
+                document.getElementById('installationEndDate').value = endDate;
                 document.getElementById('installationStartTime').value = inst.start_time;
                 document.getElementById('installationDuration').value = inst.duration_hours;
                 document.getElementById('installationEndTime').value = inst.end_time || '';
@@ -653,6 +732,24 @@
                         assignedUsers.push({ user_id: user.user_id, role: user.role || null });
                         addUserToList(user.user_id, user.username, user.role);
                     });
+                }
+                
+                // Populate day overrides
+                dayOverrides = [];
+                if (inst.installation_days && inst.installation_days.length > 0) {
+                    dayOverrides = inst.installation_days.map(day => ({
+                        date: day.day_date,
+                        start_time: day.start_time || null,
+                        end_time: day.end_time || null,
+                        duration_hours: day.duration_hours || null,
+                        notes: day.notes || null
+                    }));
+                    document.getElementById('enablePerDaySettings').checked = true;
+                    togglePerDaySettings();
+                    renderPerDayTable();
+                } else {
+                    document.getElementById('enablePerDaySettings').checked = false;
+                    document.getElementById('perDaySettings').style.display = 'none';
                 }
                 
                 checkAvailability();
@@ -711,49 +808,84 @@
         }
         
         async function checkAvailability() {
-            const date = document.getElementById('installationDate').value;
+            const startDate = document.getElementById('installationStartDate').value;
+            const endDate = document.getElementById('installationEndDate').value;
             const startTime = document.getElementById('installationStartTime').value;
             const duration = parseFloat(document.getElementById('installationDuration').value);
             
-            if (!date || !startTime || !duration || assignedUsers.length === 0) {
+            if (!startDate || !endDate || !startTime || !duration || assignedUsers.length === 0) {
                 document.getElementById('availabilityCheck').innerHTML = '';
                 return;
             }
             
-            const startDateTime = `${date}T${startTime}:00`;
-            const endDateTime = new Date(new Date(startDateTime).getTime() + duration * 60 * 60 * 1000).toISOString();
+            // Check availability for each day in the range
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const current = new Date(start);
+            const allConflicts = {};
             
             try {
                 const userIds = assignedUsers.map(u => u.user_id);
-                const result = await apiCall('/installations/check-availability', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        user_ids: userIds,
-                        start_datetime: startDateTime,
-                        end_datetime: endDateTime
-                    })
-                });
                 
-                const availability = result.availability;
+                while (current <= end) {
+                    const dateStr = current.toISOString().split('T')[0];
+                    
+                    // Get day-specific times or use defaults
+                    const dayOverride = dayOverrides.find(d => d.date === dateStr);
+                    const dayStartTime = dayOverride?.start_time || startTime;
+                    const dayDuration = dayOverride?.duration_hours || duration;
+                    
+                    const startDateTime = `${dateStr}T${dayStartTime}:00`;
+                    const endDateTime = new Date(new Date(startDateTime).getTime() + parseFloat(dayDuration) * 60 * 60 * 1000).toISOString();
+                    
+                    const result = await apiCall('/installations/check-availability', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            user_ids: userIds,
+                            start_datetime: startDateTime,
+                            end_datetime: endDateTime
+                        })
+                    });
+                    
+                    const availability = result.availability;
+                    for (const [userId, status] of Object.entries(availability)) {
+                        if (!allConflicts[userId]) {
+                            allConflicts[userId] = [];
+                        }
+                        if (status.conflicts && status.conflicts.length > 0) {
+                            allConflicts[userId].push({
+                                date: dateStr,
+                                conflicts: status.conflicts
+                            });
+                        }
+                    }
+                    
+                    current.setDate(current.getDate() + 1);
+                }
+                
                 let html = '<div style="margin-top: 10px;"><strong>Availability Check:</strong><br>';
-                
                 let hasConflicts = false;
-                for (const [userId, status] of Object.entries(availability)) {
+                
+                for (const [userId, dayConflicts] of Object.entries(allConflicts)) {
                     const user = users.find(u => u.id === parseInt(userId));
-                    if (status.conflicts && status.conflicts.length > 0) {
+                    if (dayConflicts.length > 0) {
                         hasConflicts = true;
                         html += `<div style="color: #dc3545; margin-top: 5px;">
                             <span class="availability-indicator conflict"></span>
-                            <strong>${user.username}:</strong> ${status.conflicts.length} conflict(s)
+                            <strong>${user.username}:</strong> Conflicts on ${dayConflicts.length} day(s)
                             <ul style="margin: 5px 0 0 20px; font-size: 12px;">`;
-                        status.conflicts.forEach(conflict => {
-                            html += `<li>${conflict.description}</li>`;
+                        dayConflicts.forEach(dayConflict => {
+                            html += `<li><strong>${formatDate(dayConflict.date)}:</strong> `;
+                            dayConflict.conflicts.forEach(conflict => {
+                                html += `${conflict.description}; `;
+                            });
+                            html += '</li>';
                         });
                         html += `</ul></div>`;
                     } else {
                         html += `<div style="color: #28a745; margin-top: 5px;">
                             <span class="availability-indicator available"></span>
-                            <strong>${user.username}:</strong> Available
+                            <strong>${user.username}:</strong> Available for all days
                         </div>`;
                     }
                 }
@@ -770,17 +902,166 @@
             }
         }
         
+        function togglePerDaySettings() {
+            const enabled = document.getElementById('enablePerDaySettings').checked;
+            document.getElementById('perDaySettings').style.display = enabled ? 'block' : 'none';
+            if (enabled) {
+                renderPerDayTable();
+            } else {
+                dayOverrides = [];
+            }
+        }
+        
+        function renderPerDayTable() {
+            const startDate = document.getElementById('installationStartDate').value;
+            const endDate = document.getElementById('installationEndDate').value;
+            
+            if (!startDate || !endDate) {
+                document.getElementById('perDayTable').innerHTML = '<p>Please set start and end dates first</p>';
+                return;
+            }
+            
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const days = [];
+            const current = new Date(start);
+            
+            while (current <= end) {
+                const dateStr = current.toISOString().split('T')[0];
+                const existingOverride = dayOverrides.find(d => d.date === dateStr);
+                days.push({
+                    date: dateStr,
+                    override: existingOverride || null
+                });
+                current.setDate(current.getDate() + 1);
+            }
+            
+            let html = '<table class="table" style="font-size: 12px;">';
+            html += '<thead><tr><th>Date</th><th>Start Time</th><th>End Time</th><th>Duration</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+            
+            days.forEach(day => {
+                const hasOverride = day.override !== null;
+                html += `<tr ${hasOverride ? 'style="background: #fff3cd;"' : ''}>`;
+                html += `<td>${formatDate(day.date)}</td>`;
+                if (hasOverride) {
+                    html += `<td><input type="time" class="form-input" value="${day.override.start_time || ''}" onchange="updateDayOverride('${day.date}', 'start_time', this.value)" style="width: 100px;"></td>`;
+                    html += `<td><input type="time" class="form-input" value="${day.override.end_time || ''}" onchange="updateDayOverride('${day.date}', 'end_time', this.value)" style="width: 100px;"></td>`;
+                    html += `<td><input type="number" class="form-input" step="0.5" value="${day.override.duration_hours || ''}" onchange="updateDayOverride('${day.date}', 'duration_hours', this.value)" style="width: 80px;"></td>`;
+                    html += `<td><input type="text" class="form-input" value="${day.override.notes || ''}" onchange="updateDayOverride('${day.date}', 'notes', this.value)" style="width: 150px;"></td>`;
+                    html += `<td><button type="button" onclick="removeDayOverride('${day.date}')" class="btn btn-danger btn-sm">Remove</button></td>`;
+                } else {
+                    html += `<td><em>Default</em></td>`;
+                    html += `<td><em>Default</em></td>`;
+                    html += `<td><em>Default</em></td>`;
+                    html += `<td>-</td>`;
+                    html += `<td><button type="button" onclick="addDayOverrideForDate('${day.date}')" class="btn btn-secondary btn-sm">Override</button></td>`;
+                }
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            document.getElementById('perDayTable').innerHTML = html;
+        }
+        
+        function addDayOverride() {
+            const startDate = document.getElementById('installationStartDate').value;
+            const endDate = document.getElementById('installationEndDate').value;
+            
+            if (!startDate || !endDate) {
+                showAlert('Please set start and end dates first', 'error');
+                return;
+            }
+            
+            // Find first day without override
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const current = new Date(start);
+            
+            while (current <= end) {
+                const dateStr = current.toISOString().split('T')[0];
+                if (!dayOverrides.find(d => d.date === dateStr)) {
+                    addDayOverrideForDate(dateStr);
+                    return;
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            
+            showAlert('All days already have overrides', 'info');
+        }
+        
+        function addDayOverrideForDate(dateStr) {
+            if (dayOverrides.find(d => d.date === dateStr)) {
+                return;
+            }
+            
+            dayOverrides.push({
+                date: dateStr,
+                start_time: null,
+                end_time: null,
+                duration_hours: null,
+                notes: null
+            });
+            renderPerDayTable();
+        }
+        
+        function updateDayOverride(dateStr, field, value) {
+            const override = dayOverrides.find(d => d.date === dateStr);
+            if (override) {
+                override[field] = value || null;
+            }
+        }
+        
+        function removeDayOverride(dateStr) {
+            dayOverrides = dayOverrides.filter(d => d.date !== dateStr);
+            renderPerDayTable();
+        }
+        
+        // Auto-update end date when start date changes
+        document.getElementById('installationStartDate').addEventListener('change', function() {
+            const startDate = this.value;
+            const endDate = document.getElementById('installationEndDate').value;
+            if (!endDate || endDate < startDate) {
+                document.getElementById('installationEndDate').value = startDate;
+            }
+            if (document.getElementById('enablePerDaySettings').checked) {
+                renderPerDayTable();
+            }
+            checkAvailability();
+        });
+        
+        document.getElementById('installationEndDate').addEventListener('change', function() {
+            const startDate = document.getElementById('installationStartDate').value;
+            const endDate = this.value;
+            if (endDate < startDate) {
+                showAlert('End date must be greater than or equal to start date', 'error');
+                this.value = startDate;
+                return;
+            }
+            if (document.getElementById('enablePerDaySettings').checked) {
+                renderPerDayTable();
+            }
+            checkAvailability();
+        });
+        
         // Auto-check availability when date/time changes
-        document.getElementById('installationDate').addEventListener('change', checkAvailability);
         document.getElementById('installationStartTime').addEventListener('change', checkAvailability);
         document.getElementById('installationDuration').addEventListener('change', checkAvailability);
         
         document.getElementById('installationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            const startDate = document.getElementById('installationStartDate').value;
+            const endDate = document.getElementById('installationEndDate').value;
+            
+            if (endDate < startDate) {
+                showAlert('End date must be greater than or equal to start date', 'error');
+                return;
+            }
+            
             const formData = {
                 works_order_id: document.getElementById('installationWorksOrder').value || null,
-                installation_date: document.getElementById('installationDate').value,
+                start_date: startDate,
+                end_date: endDate,
                 start_time: document.getElementById('installationStartTime').value,
                 duration_hours: parseFloat(document.getElementById('installationDuration').value),
                 end_time: document.getElementById('installationEndTime').value || null,
@@ -788,7 +1069,8 @@
                 address: document.getElementById('installationAddress').value || null,
                 status: document.getElementById('installationStatus').value,
                 notes: document.getElementById('installationNotes').value || null,
-                assigned_users: assignedUsers
+                assigned_users: assignedUsers,
+                days: document.getElementById('enablePerDaySettings').checked ? dayOverrides : []
             };
             
             try {

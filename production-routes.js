@@ -1400,15 +1400,24 @@ router.get('/installations/:id', requireProductionAuth, async (req, res) => {
 
 router.post('/installations', requireProductionAuth, requireManager, async (req, res) => {
     try {
-        const { works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users } = req.body;
+        const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days } = req.body;
         
-        if (!installation_date || !start_time || !duration_hours) {
-            return res.status(400).json({ success: false, error: 'Installation date, start time, and duration are required' });
+        // Support both old (installation_date) and new (start_date/end_date) formats
+        const startDate = start_date || installation_date;
+        const endDate = end_date || start_date || installation_date;
+        
+        if (!startDate || !start_time || !duration_hours) {
+            return res.status(400).json({ success: false, error: 'Start date, start time, and duration are required' });
+        }
+        
+        if (endDate < startDate) {
+            return res.status(400).json({ success: false, error: 'End date must be greater than or equal to start date' });
         }
         
         const installation = await ProductionDatabase.createInstallation({
             works_order_id: works_order_id || null,
-            installation_date,
+            start_date: startDate,
+            end_date: endDate,
             start_time,
             end_time,
             duration_hours,
@@ -1417,6 +1426,7 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
             notes,
             status,
             assigned_users: assigned_users || [],
+            days: days || [],
             created_by: req.session.production_user.id
         });
         
@@ -1430,11 +1440,19 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
 router.put('/installations/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id);
-        const { works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users } = req.body;
+        const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days } = req.body;
         
         const updateData = {};
         if (works_order_id !== undefined) updateData.works_order_id = works_order_id;
-        if (installation_date !== undefined) updateData.installation_date = installation_date;
+        if (start_date !== undefined) updateData.start_date = start_date;
+        if (end_date !== undefined) updateData.end_date = end_date;
+        // Support old field name for backward compatibility
+        if (installation_date !== undefined && start_date === undefined) {
+            updateData.start_date = installation_date;
+            if (end_date === undefined) {
+                updateData.end_date = installation_date;
+            }
+        }
         if (start_time !== undefined) updateData.start_time = start_time;
         if (end_time !== undefined) updateData.end_time = end_time;
         if (duration_hours !== undefined) updateData.duration_hours = duration_hours;
@@ -1443,6 +1461,12 @@ router.put('/installations/:id', requireProductionAuth, requireManager, async (r
         if (notes !== undefined) updateData.notes = notes;
         if (status !== undefined) updateData.status = status;
         if (assigned_users !== undefined) updateData.assigned_users = assigned_users;
+        if (days !== undefined) updateData.days = days;
+        
+        // Validate date range if both dates are provided
+        if (updateData.start_date && updateData.end_date && updateData.end_date < updateData.start_date) {
+            return res.status(400).json({ success: false, error: 'End date must be greater than or equal to start date' });
+        }
         
         const installation = await ProductionDatabase.updateInstallation(installationId, updateData);
         res.json({ success: true, installation });
@@ -1528,29 +1552,109 @@ router.get('/installations/:id/conflicts', requireProductionAuth, async (req, re
             return res.json({ success: true, conflicts: {} });
         }
         
-        // Build datetime strings
-        const startDateTime = `${installation.installation_date}T${installation.start_time}:00`;
-        let endDateTime;
-        if (installation.end_time) {
-            endDateTime = `${installation.installation_date}T${installation.end_time}:00`;
-        } else {
-            // Calculate from duration
-            const start = new Date(startDateTime);
-            const end = new Date(start.getTime() + parseFloat(installation.duration_hours) * 60 * 60 * 1000);
-            endDateTime = end.toISOString();
-        }
-        
         const conflicts = {};
-        for (const assignment of installation.assigned_users) {
-            const userConflicts = await ProductionDatabase.getUserConflicts(assignment.user_id, startDateTime, endDateTime);
-            // Filter out conflicts with this installation itself
-            conflicts[assignment.user_id] = userConflicts.filter(c => c.type !== 'installation' || c.id !== installationId);
+        const startDate = installation.start_date || installation.installation_date;
+        const endDate = installation.end_date || startDate;
+        
+        // Check conflicts for each day in the date range
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const current = new Date(start);
+        
+        while (current <= end) {
+            const dateStr = current.toISOString().split('T')[0];
+            
+            // Get day-specific times or use defaults
+            const dayOverride = installation.installation_days?.find(d => d.day_date === dateStr);
+            const dayStartTime = dayOverride?.start_time || installation.start_time;
+            const dayEndTime = dayOverride?.end_time || installation.end_time;
+            const dayDuration = dayOverride?.duration_hours || installation.duration_hours;
+            
+            const startDateTime = `${dateStr}T${dayStartTime}:00`;
+            let endDateTime;
+            if (dayEndTime) {
+                endDateTime = `${dateStr}T${dayEndTime}:00`;
+            } else {
+                const start = new Date(startDateTime);
+                const end = new Date(start.getTime() + parseFloat(dayDuration) * 60 * 60 * 1000);
+                endDateTime = end.toISOString();
+            }
+            
+            for (const assignment of installation.assigned_users) {
+                if (!conflicts[assignment.user_id]) {
+                    conflicts[assignment.user_id] = {};
+                }
+                const userConflicts = await ProductionDatabase.getUserConflicts(assignment.user_id, startDateTime, endDateTime);
+                // Filter out conflicts with this installation itself
+                conflicts[assignment.user_id][dateStr] = userConflicts.filter(c => c.type !== 'installation' || c.id !== installationId);
+            }
+            
+            current.setDate(current.getDate() + 1);
         }
         
         res.json({ success: true, conflicts });
     } catch (error) {
         console.error('Get conflicts error:', error);
         res.status(500).json({ success: false, error: 'Failed to get conflicts' });
+    }
+});
+
+// Installation days routes
+router.post('/installations/:id/days', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const { date, start_time, end_time, duration_hours, notes } = req.body;
+        
+        if (!date) {
+            return res.status(400).json({ success: false, error: 'Date is required' });
+        }
+        
+        const day = await ProductionDatabase.createInstallationDay(installationId, {
+            date,
+            start_time,
+            end_time,
+            duration_hours,
+            notes
+        });
+        
+        res.json({ success: true, day });
+    } catch (error) {
+        console.error('Create installation day error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create installation day' });
+    }
+});
+
+router.put('/installations/:id/days/:date', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const dayDate = req.params.date;
+        const { start_time, end_time, duration_hours, notes } = req.body;
+        
+        const day = await ProductionDatabase.createInstallationDay(installationId, {
+            date: dayDate,
+            start_time,
+            end_time,
+            duration_hours,
+            notes
+        });
+        
+        res.json({ success: true, day });
+    } catch (error) {
+        console.error('Update installation day error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update installation day' });
+    }
+});
+
+router.delete('/installations/:id/days/:date', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const dayDate = req.params.date;
+        
+        await ProductionDatabase.deleteInstallationDay(installationId, dayDate);
+        res.json({ success: true, message: 'Installation day deleted successfully' });
+    } catch (error) {
+        console.error('Delete installation day error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete installation day' });
     }
 });
 

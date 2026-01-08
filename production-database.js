@@ -845,6 +845,49 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id);
     `);
     
+    // Installation days table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_days (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            day_date TEXT NOT NULL,
+            start_time TEXT,
+            end_time TEXT,
+            duration_hours REAL,
+            notes TEXT,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            UNIQUE(installation_id, day_date)
+        )
+    `);
+    
+    // Migrate installations table to support multi-day
+    try {
+        const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+        const hasStartDate = tableInfo.some(col => col.name === 'start_date');
+        const hasEndDate = tableInfo.some(col => col.name === 'end_date');
+        
+        if (!hasStartDate) {
+            // Rename installation_date to start_date
+            db.exec('ALTER TABLE installations RENAME COLUMN installation_date TO start_date');
+            console.log('✅ Renamed installation_date to start_date in installations table');
+        }
+        
+        if (!hasEndDate) {
+            // Add end_date column and set it to start_date for existing records
+            db.exec('ALTER TABLE installations ADD COLUMN end_date TEXT');
+            db.exec('UPDATE installations SET end_date = start_date WHERE end_date IS NULL');
+            console.log('✅ Added end_date column to installations table');
+        }
+    } catch (error) {
+        console.log('⚠️ Installations migration check skipped:', error.message);
+    }
+    
+    // Create indexes for installation_days
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id);
+        CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date);
+    `);
+    
     console.log('✅ Production SQLite database initialized');
 }
 
@@ -1813,6 +1856,53 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id)`);
+        
+        // Installation days table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_days (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                day_date DATE NOT NULL,
+                start_time TIME,
+                end_time TIME,
+                duration_hours DECIMAL(10,2),
+                notes TEXT,
+                UNIQUE(installation_id, day_date)
+            )
+        `);
+        
+        // Migrate installations table to support multi-day
+        try {
+            const startDateCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'installations' AND column_name = 'start_date'
+            `);
+            const endDateCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'installations' AND column_name = 'end_date'
+            `);
+            
+            if (startDateCheck.rows.length === 0) {
+                // Rename installation_date to start_date
+                await pool.query(`ALTER TABLE installations RENAME COLUMN installation_date TO start_date`);
+                console.log('✅ Renamed installation_date to start_date in installations table');
+            }
+            
+            if (endDateCheck.rows.length === 0) {
+                // Add end_date column and set it to start_date for existing records
+                await pool.query(`ALTER TABLE installations ADD COLUMN end_date DATE`);
+                await pool.query(`UPDATE installations SET end_date = start_date WHERE end_date IS NULL`);
+                console.log('✅ Added end_date column to installations table');
+            }
+        } catch (error) {
+            console.log('⚠️ Installations migration check skipped:', error.message);
+        }
+        
+        // Create indexes for installation_days
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date)`);
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -4870,6 +4960,10 @@ class ProductionDatabase {
     // ============ INSTALLATION OPERATIONS ============
     
     static async createInstallation(data) {
+        // Support both old (installation_date) and new (start_date/end_date) formats for backward compatibility
+        const startDate = data.start_date || data.installation_date;
+        const endDate = data.end_date || data.start_date || data.installation_date;
+        
         if (isPostgreSQL) {
             // Calculate end_time if not provided
             let endTime = data.end_time;
@@ -4880,11 +4974,12 @@ class ProductionDatabase {
             }
             
             const result = await pool.query(
-                `INSERT INTO installations (works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
                 [
                     data.works_order_id || null,
-                    data.installation_date,
+                    startDate,
+                    endDate,
                     data.start_time,
                     endTime || null,
                     parseFloat(data.duration_hours),
@@ -4908,6 +5003,26 @@ class ProductionDatabase {
                 }
             }
             
+            // Add installation_days if provided
+            if (data.days && Array.isArray(data.days) && data.days.length > 0) {
+                for (const day of data.days) {
+                    await pool.query(
+                        `INSERT INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (installation_id, day_date) DO UPDATE SET
+                         start_time = $3, end_time = $4, duration_hours = $5, notes = $6`,
+                        [
+                            installation.id,
+                            day.date,
+                            day.start_time || null,
+                            day.end_time || null,
+                            day.duration_hours ? parseFloat(day.duration_hours) : null,
+                            day.notes || null
+                        ]
+                    );
+                }
+            }
+            
             return this.getInstallationById(installation.id);
         } else {
             // Calculate end_time if not provided
@@ -4919,12 +5034,13 @@ class ProductionDatabase {
             }
             
             const stmt = db.prepare(
-                `INSERT INTO installations (works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 data.works_order_id || null,
-                data.installation_date,
+                startDate,
+                endDate,
                 data.start_time,
                 endTime || null,
                 parseFloat(data.duration_hours),
@@ -4948,14 +5064,35 @@ class ProductionDatabase {
                 }
             }
             
+            // Add installation_days if provided
+            if (data.days && Array.isArray(data.days) && data.days.length > 0) {
+                const dayStmt = db.prepare(
+                    `INSERT OR REPLACE INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                     VALUES (?, ?, ?, ?, ?, ?)`
+                );
+                for (const day of data.days) {
+                    dayStmt.run(
+                        installationId,
+                        day.date,
+                        day.start_time || null,
+                        day.end_time || null,
+                        day.duration_hours ? parseFloat(day.duration_hours) : null,
+                        day.notes || null
+                    );
+                }
+            }
+            
             return this.getInstallationById(installationId);
         }
     }
     
     static async getInstallationById(id) {
         if (isPostgreSQL) {
+            // Support both old and new column names for backward compatibility
             const result = await pool.query(
                 `SELECT i.*, 
+                 COALESCE(i.start_date, i.installation_date) as start_date,
+                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
                  po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                  fp.name as product_name,
                  u.username as created_by_name
@@ -4969,11 +5106,14 @@ class ProductionDatabase {
             const installation = result.rows[0] || null;
             if (installation) {
                 installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                installation.installation_days = await this.getInstallationDays(id) || [];
             }
             return installation;
         } else {
             const installation = db.prepare(
                 `SELECT i.*, 
+                 COALESCE(i.start_date, i.installation_date) as start_date,
+                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
                  po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                  fp.name as product_name,
                  u.username as created_by_name
@@ -4985,6 +5125,7 @@ class ProductionDatabase {
             ).get(id);
             if (installation) {
                 installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                installation.installation_days = await this.getInstallationDays(id) || [];
             }
             return installation;
         }
@@ -4992,6 +5133,8 @@ class ProductionDatabase {
     
     static async getAllInstallations(startDate = null, endDate = null) {
         let query = `SELECT i.*, 
+                     COALESCE(i.start_date, i.installation_date) as start_date,
+                     COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
                      po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                      fp.name as product_name,
                      u.username as created_by_name
@@ -5005,9 +5148,9 @@ class ProductionDatabase {
         
         if (startDate) {
             if (isPostgreSQL) {
-                conditions.push(`i.installation_date >= $${paramIndex}`);
+                conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
             } else {
-                conditions.push(`i.installation_date >= ?`);
+                conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= ?)`);
             }
             params.push(startDate);
             paramIndex++;
@@ -5015,9 +5158,9 @@ class ProductionDatabase {
         
         if (endDate) {
             if (isPostgreSQL) {
-                conditions.push(`i.installation_date <= $${paramIndex}`);
+                conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
             } else {
-                conditions.push(`i.installation_date <= ?`);
+                conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
             }
             params.push(endDate);
             paramIndex++;
@@ -5027,21 +5170,23 @@ class ProductionDatabase {
             query += ` WHERE ${conditions.join(' AND ')}`;
         }
         
-        query += ` ORDER BY i.installation_date, i.start_time`;
+        query += ` ORDER BY COALESCE(i.start_date, i.installation_date), i.start_time`;
         
         if (isPostgreSQL) {
             const result = await pool.query(query, params);
             const installations = result.rows;
-            // Get assignments for each installation
+            // Get assignments and days for each installation
             for (const installation of installations) {
                 installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                installation.installation_days = await this.getInstallationDays(installation.id) || [];
             }
             return installations;
         } else {
             const installations = db.prepare(query).all(...params);
-            // Get assignments for each installation
+            // Get assignments and days for each installation
             for (const installation of installations) {
                 installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                installation.installation_days = await this.getInstallationDays(installation.id) || [];
             }
             return installations;
         }
@@ -5061,10 +5206,27 @@ class ProductionDatabase {
             values.push(data.works_order_id || null);
             paramIndex++;
         }
-        if (data.installation_date !== undefined) {
-            updates.push(`installation_date = $${paramIndex}`);
+        if (data.start_date !== undefined) {
+            updates.push(`start_date = $${paramIndex}`);
+            values.push(data.start_date);
+            paramIndex++;
+        }
+        if (data.end_date !== undefined) {
+            updates.push(`end_date = $${paramIndex}`);
+            values.push(data.end_date);
+            paramIndex++;
+        }
+        // Support old field name for backward compatibility
+        if (data.installation_date !== undefined && data.start_date === undefined) {
+            updates.push(`start_date = $${paramIndex}`);
             values.push(data.installation_date);
             paramIndex++;
+            // Also set end_date if not provided
+            if (data.end_date === undefined) {
+                updates.push(`end_date = $${paramIndex}`);
+                values.push(data.installation_date);
+                paramIndex++;
+            }
         }
         if (data.start_time !== undefined) {
             updates.push(`start_time = $${paramIndex}`);
@@ -5166,6 +5328,67 @@ class ProductionDatabase {
             }
         }
         
+        // Update installation_days if provided
+        if (data.days !== undefined) {
+            // Get current installation to check date range
+            const currentInstallation = await this.getInstallationById(id);
+            if (currentInstallation) {
+                const newStartDate = data.start_date || currentInstallation.start_date;
+                const newEndDate = data.end_date || currentInstallation.end_date;
+                
+                // Delete days outside the new date range
+                if (isPostgreSQL) {
+                    await pool.query(
+                        `DELETE FROM installation_days 
+                         WHERE installation_id = $1 AND (day_date < $2 OR day_date > $3)`,
+                        [id, newStartDate, newEndDate]
+                    );
+                } else {
+                    db.prepare(
+                        `DELETE FROM installation_days 
+                         WHERE installation_id = ? AND (day_date < ? OR day_date > ?)`
+                    ).run(id, newStartDate, newEndDate);
+                }
+                
+                // Add/update days
+                if (Array.isArray(data.days) && data.days.length > 0) {
+                    if (isPostgreSQL) {
+                        for (const day of data.days) {
+                            await pool.query(
+                                `INSERT INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                                 VALUES ($1, $2, $3, $4, $5, $6)
+                                 ON CONFLICT (installation_id, day_date) DO UPDATE SET
+                                 start_time = $3, end_time = $4, duration_hours = $5, notes = $6`,
+                                [
+                                    id,
+                                    day.date,
+                                    day.start_time || null,
+                                    day.end_time || null,
+                                    day.duration_hours ? parseFloat(day.duration_hours) : null,
+                                    day.notes || null
+                                ]
+                            );
+                        }
+                    } else {
+                        const dayStmt = db.prepare(
+                            `INSERT OR REPLACE INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                             VALUES (?, ?, ?, ?, ?, ?)`
+                        );
+                        for (const day of data.days) {
+                            dayStmt.run(
+                                id,
+                                day.date,
+                                day.start_time || null,
+                                day.end_time || null,
+                                day.duration_hours ? parseFloat(day.duration_hours) : null,
+                                day.notes || null
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
         return this.getInstallationById(id);
     }
     
@@ -5226,6 +5449,98 @@ class ProductionDatabase {
                  WHERE ia.installation_id = ?
                  ORDER BY ia.assigned_at`
             ).all(installationId);
+        }
+    }
+    
+    static async getInstallationDays(installationId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM installation_days
+                 WHERE installation_id = $1
+                 ORDER BY day_date`,
+                [installationId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT * FROM installation_days
+                 WHERE installation_id = ?
+                 ORDER BY day_date`
+            ).all(installationId);
+        }
+    }
+    
+    static async createInstallationDay(installationId, dayData) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (installation_id, day_date) DO UPDATE SET
+                 start_time = $3, end_time = $4, duration_hours = $5, notes = $6
+                 RETURNING *`,
+                [
+                    installationId,
+                    dayData.date,
+                    dayData.start_time || null,
+                    dayData.end_time || null,
+                    dayData.duration_hours ? parseFloat(dayData.duration_hours) : null,
+                    dayData.notes || null
+                ]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(
+                `INSERT OR REPLACE INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                 VALUES (?, ?, ?, ?, ?, ?)`
+            );
+            stmt.run(
+                installationId,
+                dayData.date,
+                dayData.start_time || null,
+                dayData.end_time || null,
+                dayData.duration_hours ? parseFloat(dayData.duration_hours) : null,
+                dayData.notes || null
+            );
+            return db.prepare(
+                `SELECT * FROM installation_days WHERE installation_id = ? AND day_date = ?`
+            ).get(installationId, dayData.date);
+        }
+    }
+    
+    static async deleteInstallationDay(installationId, dayDate) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `DELETE FROM installation_days WHERE installation_id = $1 AND day_date = $2`,
+                [installationId, dayDate]
+            );
+        } else {
+            db.prepare(
+                `DELETE FROM installation_days WHERE installation_id = ? AND day_date = ?`
+            ).run(installationId, dayDate);
+        }
+    }
+    
+    static async getInstallationDaysByDateRange(startDate, endDate) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT id.*, i.start_time as default_start_time, i.end_time as default_end_time, 
+                 i.duration_hours as default_duration_hours
+                 FROM installation_days id
+                 JOIN installations i ON id.installation_id = i.id
+                 WHERE id.day_date >= $1 AND id.day_date <= $2
+                 ORDER BY id.day_date, id.start_time`,
+                [startDate, endDate]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT id.*, i.start_time as default_start_time, i.end_time as default_end_time, 
+                 i.duration_hours as default_duration_hours
+                 FROM installation_days id
+                 JOIN installations i ON id.installation_id = i.id
+                 WHERE id.day_date >= ? AND id.day_date <= ?
+                 ORDER BY id.day_date, id.start_time`
+            ).all(startDate, endDate);
         }
     }
     
@@ -5297,29 +5612,63 @@ class ProductionDatabase {
                 });
             }
             
-            // Check existing installations
+            // Check existing installations - handle multi-day installations
+            const checkDate = start.toISOString().split('T')[0];
             const installationResult = await pool.query(
-                `SELECT i.id, i.installation_date, i.start_time, i.end_time
+                `SELECT i.id, 
+                 COALESCE(i.start_date, i.installation_date) as start_date,
+                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 i.start_time, i.end_time, i.duration_hours
                  FROM installations i
                  JOIN installation_assignments ia ON i.id = ia.installation_id
                  WHERE ia.user_id = $1
                  AND i.status NOT IN ('cancelled', 'completed')
-                 AND i.installation_date = $2::date
-                 AND (
-                     (i.start_time <= $3::time AND (i.end_time IS NULL OR i.end_time >= $3::time)) OR
-                     (i.start_time <= $4::time AND (i.end_time IS NULL OR i.end_time >= $4::time)) OR
-                     (i.start_time >= $3::time AND (i.end_time IS NULL OR i.end_time <= $4::time))
-                 )`,
-                [userId, start.toISOString().split('T')[0], start.toTimeString().slice(0, 5), end.toTimeString().slice(0, 5)]
+                 AND $2::date >= COALESCE(i.start_date, i.installation_date)
+                 AND $2::date <= COALESCE(i.end_date, i.start_date, i.installation_date)`,
+                [userId, checkDate]
             );
+            
             for (const inst of installationResult.rows) {
-                conflicts.push({
-                    type: 'installation',
-                    id: inst.id,
-                    start: `${inst.installation_date} ${inst.start_time}`,
-                    end: inst.end_time ? `${inst.installation_date} ${inst.end_time}` : null,
-                    description: `Installation #${inst.id}`
-                });
+                // Get day-specific times if override exists
+                const dayOverrideResult = await pool.query(
+                    `SELECT start_time, end_time, duration_hours
+                     FROM installation_days
+                     WHERE installation_id = $1 AND day_date = $2`,
+                    [inst.id, checkDate]
+                );
+                
+                const dayOverride = dayOverrideResult.rows[0];
+                const dayStartTime = dayOverride?.start_time || inst.start_time;
+                const dayEndTime = dayOverride?.end_time || inst.end_time;
+                const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
+                
+                // Check if times overlap
+                const instStartDateTime = `${checkDate}T${dayStartTime}:00`;
+                let instEndDateTime;
+                if (dayEndTime) {
+                    instEndDateTime = `${checkDate}T${dayEndTime}:00`;
+                } else {
+                    const instStart = new Date(instStartDateTime);
+                    instEndDateTime = new Date(instStart.getTime() + parseFloat(dayDuration) * 60 * 60 * 1000).toISOString();
+                }
+                
+                const checkStart = new Date(startDateTime);
+                const checkEnd = new Date(endDateTime);
+                const instStart = new Date(instStartDateTime);
+                const instEnd = new Date(instEndDateTime);
+                
+                // Check for overlap
+                if ((instStart <= checkStart && instEnd >= checkStart) ||
+                    (instStart <= checkEnd && instEnd >= checkEnd) ||
+                    (instStart >= checkStart && instEnd <= checkEnd)) {
+                    conflicts.push({
+                        type: 'installation',
+                        id: inst.id,
+                        start: instStartDateTime,
+                        end: instEndDateTime,
+                        description: `Installation #${inst.id}${inst.start_date !== inst.end_date ? ' (multi-day)' : ''}`
+                    });
+                }
             }
         } else {
             // SQLite version
@@ -5374,29 +5723,59 @@ class ProductionDatabase {
                 });
             }
             
-            // Check existing installations
+            // Check existing installations - handle multi-day installations
             const installations = db.prepare(
-                `SELECT i.id, i.installation_date, i.start_time, i.end_time
+                `SELECT i.id, 
+                 COALESCE(i.start_date, i.installation_date) as start_date,
+                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 i.start_time, i.end_time, i.duration_hours
                  FROM installations i
                  JOIN installation_assignments ia ON i.id = ia.installation_id
                  WHERE ia.user_id = ?
                  AND i.status NOT IN ('cancelled', 'completed')
-                 AND i.installation_date = ?
-                 AND (
-                     (i.start_time <= ? AND (i.end_time IS NULL OR i.end_time >= ?)) OR
-                     (i.start_time <= ? AND (i.end_time IS NULL OR i.end_time >= ?)) OR
-                     (i.start_time >= ? AND (i.end_time IS NULL OR i.end_time <= ?))
-                 )`
-            ).all(userId, startDateStr, startTimeStr, startTimeStr, endTimeStr, endTimeStr, startTimeStr, endTimeStr);
+                 AND ? >= COALESCE(i.start_date, i.installation_date)
+                 AND ? <= COALESCE(i.end_date, i.start_date, i.installation_date)`
+            ).all(userId, startDateStr, startDateStr);
             
             for (const inst of installations) {
-                conflicts.push({
-                    type: 'installation',
-                    id: inst.id,
-                    start: `${inst.installation_date} ${inst.start_time}`,
-                    end: inst.end_time ? `${inst.installation_date} ${inst.end_time}` : null,
-                    description: `Installation #${inst.id}`
-                });
+                // Get day-specific times if override exists
+                const dayOverride = db.prepare(
+                    `SELECT start_time, end_time, duration_hours
+                     FROM installation_days
+                     WHERE installation_id = ? AND day_date = ?`
+                ).get(inst.id, startDateStr);
+                
+                const dayStartTime = dayOverride?.start_time || inst.start_time;
+                const dayEndTime = dayOverride?.end_time || inst.end_time;
+                const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
+                
+                // Check if times overlap
+                const instStartDateTime = `${startDateStr}T${dayStartTime}:00`;
+                let instEndDateTime;
+                if (dayEndTime) {
+                    instEndDateTime = `${startDateStr}T${dayEndTime}:00`;
+                } else {
+                    const instStart = new Date(instStartDateTime);
+                    instEndDateTime = new Date(instStart.getTime() + parseFloat(dayDuration) * 60 * 60 * 1000).toISOString();
+                }
+                
+                const checkStart = new Date(startDateTime);
+                const checkEnd = new Date(endDateTime);
+                const instStart = new Date(instStartDateTime);
+                const instEnd = new Date(instEndDateTime);
+                
+                // Check for overlap
+                if ((instStart <= checkStart && instEnd >= checkStart) ||
+                    (instStart <= checkEnd && instEnd >= checkEnd) ||
+                    (instStart >= checkStart && instEnd <= checkEnd)) {
+                    conflicts.push({
+                        type: 'installation',
+                        id: inst.id,
+                        start: instStartDateTime,
+                        end: instEndDateTime,
+                        description: `Installation #${inst.id}${inst.start_date !== inst.end_date ? ' (multi-day)' : ''}`
+                    });
+                }
             }
         }
         
