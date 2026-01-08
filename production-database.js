@@ -5279,7 +5279,12 @@ class ProductionDatabase {
                 const installations = result.rows;
                 // Get assignments and days for each installation
                 for (const installation of installations) {
-                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    try {
+                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    } catch (error) {
+                        console.log('Error getting installation assignments:', error.message);
+                        installation.assigned_users = [];
+                    }
                     try {
                         installation.installation_days = await this.getInstallationDays(installation.id) || [];
                     } catch (error) {
@@ -5292,7 +5297,12 @@ class ProductionDatabase {
                 const installations = db.prepare(query).all(...params);
                 // Get assignments and days for each installation
                 for (const installation of installations) {
-                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    try {
+                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    } catch (error) {
+                        console.log('Error getting installation assignments:', error.message);
+                        installation.assigned_users = [];
+                    }
                     try {
                         installation.installation_days = await this.getInstallationDays(installation.id) || [];
                     } catch (error) {

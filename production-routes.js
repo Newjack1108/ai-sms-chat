@@ -1376,10 +1376,13 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
         const endDate = req.query.end_date || null;
+        console.log('Getting installations with start_date:', startDate, 'end_date:', endDate);
         const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        console.log('Successfully retrieved', installations.length, 'installations');
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
+        console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
         res.status(500).json({ success: false, error: 'Failed to get installations', details: error.message });
     }
