@@ -1850,13 +1850,6 @@ async function initializePostgreSQL() {
             )
         `);
         
-        // Create indexes for installations
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_date ON installations(installation_date)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_order ON installations(works_order_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id)`);
-        
         // Installation days table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS installation_days (
@@ -1885,6 +1878,12 @@ async function initializePostgreSQL() {
             `);
             
             if (startDateCheck.rows.length === 0) {
+                // Drop old index if it exists
+                try {
+                    await pool.query(`DROP INDEX IF EXISTS idx_installations_date`);
+                } catch (error) {
+                    // Index might not exist, ignore
+                }
                 // Rename installation_date to start_date
                 await pool.query(`ALTER TABLE installations RENAME COLUMN installation_date TO start_date`);
                 console.log('✅ Renamed installation_date to start_date in installations table');
@@ -1898,6 +1897,26 @@ async function initializePostgreSQL() {
             }
         } catch (error) {
             console.log('⚠️ Installations migration check skipped:', error.message);
+        }
+        
+        // Create indexes for installations (after migration)
+        try {
+            // Check which date column exists
+            const dateColCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'installations' AND column_name IN ('start_date', 'installation_date')
+            `);
+            const hasStartDate = dateColCheck.rows.some(r => r.column_name === 'start_date');
+            const dateColumn = hasStartDate ? 'start_date' : 'installation_date';
+            
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_date ON installations(${dateColumn})`);
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_order ON installations(works_order_id)`);
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status)`);
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id)`);
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id)`);
+        } catch (error) {
+            console.log('⚠️ Could not create installation indexes:', error.message);
         }
         
         // Create indexes for installation_days
