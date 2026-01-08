@@ -5229,11 +5229,61 @@ class ProductionDatabase {
     }
     
     static async getAllInstallations(startDate = null, endDate = null) {
-        // Try new schema first, fall back to old schema if it fails
+        // Check which columns exist and use appropriate query
+        let hasStartDate = false;
+        let hasEndDate = false;
+        let hasInstallationDate = false;
+        
+        if (isPostgreSQL) {
+            try {
+                const colCheck = await pool.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date', 'installation_date')
+                `);
+                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
+                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
+                hasInstallationDate = colCheck.rows.some(r => r.column_name === 'installation_date');
+            } catch (error) {
+                console.log('Column check failed, assuming new schema:', error.message);
+                // Assume new schema if check fails
+                hasStartDate = true;
+                hasEndDate = true;
+            }
+        } else {
+            try {
+                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+                hasStartDate = tableInfo.some(col => col.name === 'start_date');
+                hasEndDate = tableInfo.some(col => col.name === 'end_date');
+                hasInstallationDate = tableInfo.some(col => col.name === 'installation_date');
+            } catch (error) {
+                console.log('Column check failed, assuming new schema:', error.message);
+                hasStartDate = true;
+                hasEndDate = true;
+            }
+        }
+        
+        // Build query based on which columns exist
+        let dateSelect = '';
+        let dateOrderBy = '';
+        
+        if (hasStartDate && hasEndDate) {
+            // New schema - use start_date and end_date
+            dateSelect = 'i.start_date as start_date, i.end_date as end_date';
+            dateOrderBy = 'i.start_date';
+        } else if (hasInstallationDate) {
+            // Old schema - use installation_date
+            dateSelect = 'i.installation_date as start_date, i.installation_date as end_date';
+            dateOrderBy = 'i.installation_date';
+        } else {
+            // Fallback - try to use what exists
+            dateSelect = 'i.start_date as start_date, COALESCE(i.end_date, i.start_date) as end_date';
+            dateOrderBy = 'i.start_date';
+        }
+        
         try {
             let query = `SELECT i.*, 
-                         COALESCE(i.start_date, i.installation_date) as start_date,
-                         COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                         ${dateSelect},
                          po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                          fp.name as product_name,
                          u.username as created_by_name
@@ -5246,20 +5296,47 @@ class ProductionDatabase {
             let paramIndex = 1;
             
             if (startDate) {
-                if (isPostgreSQL) {
-                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
+                if (hasStartDate && hasEndDate) {
+                    // New schema
+                    if (isPostgreSQL) {
+                        conditions.push(`(COALESCE(i.end_date, i.start_date) >= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(COALESCE(i.end_date, i.start_date) >= ?)`);
+                    }
+                } else if (hasInstallationDate) {
+                    // Old schema
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.installation_date >= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.installation_date >= ?)`);
+                    }
                 } else {
-                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= ?)`);
+                    // Fallback
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.start_date >= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.start_date >= ?)`);
+                    }
                 }
                 params.push(startDate);
                 paramIndex++;
             }
             
             if (endDate) {
-                if (isPostgreSQL) {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
-                } else {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
+                if (hasStartDate) {
+                    // New schema or fallback
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.start_date <= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.start_date <= ?)`);
+                    }
+                } else if (hasInstallationDate) {
+                    // Old schema
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.installation_date <= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.installation_date <= ?)`);
+                    }
                 }
                 params.push(endDate);
                 paramIndex++;
@@ -5269,7 +5346,7 @@ class ProductionDatabase {
                 query += ` WHERE ${conditions.join(' AND ')}`;
             }
             
-            query += ` ORDER BY COALESCE(i.start_date, i.installation_date), i.start_time`;
+            query += ` ORDER BY ${dateOrderBy}, i.start_time`;
             
             console.log('Executing query:', query);
             console.log('With params:', params);
