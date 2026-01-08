@@ -3347,6 +3347,9 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
             
             // If cancelling an approved request, restore the days to entitlement
             if (request.status === 'approved') {
+                // Delete associated timesheet entries first
+                await ProductionDatabase.deleteTimesheetEntriesByHolidayRequest(requestId);
+                
                 const currentYear = new Date(request.start_date).getFullYear();
                 // Recalculate days_used to ensure accuracy (includes all approved requests)
                 await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
@@ -3465,17 +3468,33 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
 // Admin endpoint to add approved holiday for a user
 router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { user_id, start_date, end_date, review_notes } = req.body;
+        const { user_id, start_date, end_date, day_type, review_notes } = req.body;
         const adminUser = req.session.production_user;
         
         if (!user_id || !start_date || !end_date) {
             return res.status(400).json({ success: false, error: 'User ID, start date, and end date are required' });
         }
         
+        // Validate day_type (default to 'full' if not provided for backward compatibility)
+        const dayType = day_type || 'full';
+        if (dayType !== 'half' && dayType !== 'full') {
+            return res.status(400).json({ success: false, error: 'day_type must be either "half" or "full"' });
+        }
+        
+        // For half day, start and end dates must be the same
+        if (dayType === 'half' && start_date !== end_date) {
+            return res.status(400).json({ success: false, error: 'For half day, start date and end date must be the same' });
+        }
+        
         // Calculate weekdays
-        const weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        let weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
         if (weekdays <= 0) {
             return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
+        }
+        
+        // For half day, it's 0.5 days
+        if (dayType === 'half') {
+            weekdays = 0.5;
         }
         
         // Check entitlement
@@ -3510,13 +3529,15 @@ router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async 
             is_company_shutdown: false,
             status: 'approved',
             reviewed_by_user_id: adminUser.id,
-            review_notes: review_notes || null
+            review_notes: review_notes || null,
+            days_requested: weekdays // Override calculated weekdays with actual days (0.5 for half day)
         });
         
         // Recalculate days_used to include the newly created approved request
         await ProductionDatabase.recalculateHolidayDaysUsed(userId, currentYear);
         
         // Populate timesheet entries for approved holidays
+        // For half day, only populate the single date
         const start = new Date(start_date);
         const end = new Date(end_date);
         const current = new Date(start);
@@ -3550,6 +3571,36 @@ router.put('/holidays/requests/:id/reject', requireProductionAuth, requireAdminO
     } catch (error) {
         console.error('Reject holiday request error:', error);
         res.status(500).json({ success: false, error: 'Failed to reject holiday request' });
+    }
+});
+
+// Admin endpoint to delete a holiday request
+router.delete('/holidays/requests/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const requestId = parseInt(req.params.id);
+        
+        const request = await ProductionDatabase.getHolidayRequestById(requestId);
+        if (!request) {
+            return res.status(404).json({ success: false, error: 'Holiday request not found' });
+        }
+        
+        // If the request was approved, we need to clean up timesheet entries and recalculate entitlement
+        if (request.status === 'approved') {
+            // Delete associated timesheet entries
+            await ProductionDatabase.deleteTimesheetEntriesByHolidayRequest(requestId);
+            
+            // Recalculate entitlement to return the days
+            const currentYear = new Date(request.start_date).getFullYear();
+            await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
+        }
+        
+        // Delete the holiday request
+        const deleted = await ProductionDatabase.deleteHolidayRequest(requestId);
+        
+        res.json({ success: true, request: deleted, message: 'Holiday request deleted successfully' });
+    } catch (error) {
+        console.error('Delete holiday request error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete holiday request: ' + (error.message || 'Unknown error') });
     }
 });
 

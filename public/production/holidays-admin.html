@@ -26,6 +26,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="showTab('entitlements')">Entitlements</button>
             <button class="tab-btn" onclick="showTab('requests')">Pending Requests</button>
+            <button class="tab-btn" onclick="showTab('all-requests')">All Requests</button>
             <button class="tab-btn" onclick="showTab('calendar')">Calendar</button>
             <button class="tab-btn" onclick="showTab('shutdown')">Shutdown Periods</button>
         </div>
@@ -58,6 +59,31 @@
                     <button onclick="loadPendingRequests()" class="btn btn-secondary btn-sm">Refresh</button>
                 </div>
                 <div id="pendingRequestsList">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- All Requests Tab -->
+        <div id="all-requests-tab" class="tab-content" style="display: none;">
+            <div class="card">
+                <div class="card-header">
+                    <h2>All Holiday Requests</h2>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <select id="allRequestsYearFilter" onchange="filterAllRequestsByYear(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                            <option value="">All Years</option>
+                        </select>
+                        <select id="allRequestsStatusFilter" onchange="filterAllRequestsByStatus(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                            <option value="">All Statuses</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                        <button onclick="loadAllRequests()" class="btn btn-secondary btn-sm">Refresh</button>
+                    </div>
+                </div>
+                <div id="allRequestsList">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -142,6 +168,13 @@
                 <div class="form-group">
                     <label>End Date: *</label>
                     <input type="date" id="addHolidayEndDate" class="form-input" required onchange="updateAddHolidayDaysPreview()" oninput="updateAddHolidayDaysPreview()">
+                </div>
+                <div class="form-group">
+                    <label>Day Type: *</label>
+                    <select id="addHolidayDayType" class="form-select" required onchange="updateAddHolidayDaysPreview()">
+                        <option value="full">Full Day</option>
+                        <option value="half">Half Day</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>Notes (optional):</label>
@@ -297,6 +330,7 @@
             await loadUsers();
             await loadEntitlements();
             await loadPendingRequests();
+            await loadAllRequests();
             await loadShutdownPeriods();
         }
         
@@ -318,6 +352,7 @@
                 document.querySelectorAll('.tab-btn').forEach(btn => {
                     if ((tabName === 'entitlements' && btn.textContent.includes('Entitlements')) ||
                         (tabName === 'requests' && btn.textContent.includes('Pending')) ||
+                        (tabName === 'all-requests' && btn.textContent.includes('All Requests')) ||
                         (tabName === 'calendar' && btn.textContent.includes('Calendar')) ||
                         (tabName === 'shutdown' && btn.textContent.includes('Shutdown'))) {
                         btn.classList.add('active');
@@ -328,6 +363,11 @@
             // Load calendar if calendar tab is selected
             if (tabName === 'calendar') {
                 loadCalendar();
+            }
+            
+            // Load all requests if all-requests tab is selected
+            if (tabName === 'all-requests') {
+                loadAllRequests();
             }
         }
         
@@ -453,6 +493,7 @@
         
         function showAddHolidayModal() {
             document.getElementById('addHolidayForm').reset();
+            document.getElementById('addHolidayDayType').value = 'full'; // Reset to full day
             document.getElementById('addHolidayDaysCount').textContent = '-';
             // Populate user dropdown if not already populated
             const select = document.getElementById('addHolidayUserId');
@@ -471,6 +512,7 @@
         function updateAddHolidayDaysPreview() {
             const startDate = document.getElementById('addHolidayStartDate').value;
             const endDate = document.getElementById('addHolidayEndDate').value;
+            const dayType = document.getElementById('addHolidayDayType').value;
             const daysCountSpan = document.getElementById('addHolidayDaysCount');
             
             if (startDate && endDate) {
@@ -478,8 +520,26 @@
                     daysCountSpan.textContent = 'Invalid (end date must be after start date)';
                     daysCountSpan.style.color = 'red';
                 } else {
-                    const weekdays = calculateWorkingDays(startDate, endDate);
-                    daysCountSpan.textContent = weekdays;
+                    let weekdays = calculateWorkingDays(startDate, endDate);
+                    
+                    // For half day, ensure start and end dates are the same and calculate 0.5 days
+                    if (dayType === 'half') {
+                        if (startDate !== endDate) {
+                            daysCountSpan.textContent = 'Invalid (half day requires same start and end date)';
+                            daysCountSpan.style.color = 'red';
+                            return;
+                        }
+                        // For half day, it's 0.5 days if it's a weekday
+                        if (weekdays > 0) {
+                            weekdays = 0.5;
+                        } else {
+                            daysCountSpan.textContent = 'Invalid (half day must be on a weekday)';
+                            daysCountSpan.style.color = 'red';
+                            return;
+                        }
+                    }
+                    
+                    daysCountSpan.textContent = weekdays.toFixed(1);
                     daysCountSpan.style.color = '';
                 }
             } else {
@@ -493,10 +553,17 @@
             const userId = parseInt(document.getElementById('addHolidayUserId').value);
             const startDate = document.getElementById('addHolidayStartDate').value;
             const endDate = document.getElementById('addHolidayEndDate').value;
+            const dayType = document.getElementById('addHolidayDayType').value;
             const notes = document.getElementById('addHolidayNotes').value;
             
-            if (!userId || !startDate || !endDate) {
+            if (!userId || !startDate || !endDate || !dayType) {
                 alert('Please fill in all required fields');
+                return;
+            }
+            
+            // For half day, start and end dates must be the same
+            if (dayType === 'half' && startDate !== endDate) {
+                alert('For half day, start date and end date must be the same');
                 return;
             }
             
@@ -511,6 +578,12 @@
                 return;
             }
             
+            // For half day, validate it's a weekday
+            if (dayType === 'half' && weekdays === 0) {
+                alert('Half day must be on a weekday');
+                return;
+            }
+            
             try {
                 const response = await apiCall('/holidays/add', {
                     method: 'POST',
@@ -518,6 +591,7 @@
                         user_id: userId,
                         start_date: startDate,
                         end_date: endDate,
+                        day_type: dayType,
                         review_notes: notes || null
                     })
                 });
@@ -728,6 +802,152 @@
         function viewRequestDetails(requestId) {
             // Could open a modal with more details
             alert('Request details view coming soon');
+        }
+        
+        let allRequestsData = [];
+        let allRequestsYearFilter = null;
+        let allRequestsStatusFilter = null;
+        
+        async function loadAllRequests() {
+            try {
+                console.log('Loading all requests...');
+                const response = await apiCall('/holidays/requests');
+                console.log('All requests response:', response);
+                
+                if (response && response.success) {
+                    allRequestsData = response.requests || [];
+                    console.log('All requests data:', allRequestsData);
+                    
+                    // Populate year filter
+                    populateAllRequestsYearFilter(allRequestsData);
+                    
+                    // Apply current filters
+                    filterAllRequests();
+                } else {
+                    console.error('Failed to load all requests:', response);
+                    document.getElementById('allRequestsList').innerHTML = '<div class="error">Error loading requests: ' + (response?.error || 'Unknown error') + '</div>';
+                }
+            } catch (error) {
+                console.error('Error loading all requests:', error);
+                document.getElementById('allRequestsList').innerHTML = '<div class="error">Error loading requests: ' + (error.message || 'Unknown error') + '</div>';
+            }
+        }
+        
+        function populateAllRequestsYearFilter(requests) {
+            const filterSelect = document.getElementById('allRequestsYearFilter');
+            const currentValue = filterSelect.value;
+            
+            // Extract unique years
+            const years = [...new Set(requests.map(r => new Date(r.start_date).getFullYear()))];
+            years.sort((a, b) => b - a);
+            
+            filterSelect.innerHTML = '<option value="">All Years</option>';
+            years.forEach(year => {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                filterSelect.appendChild(option);
+            });
+            
+            if (currentValue) {
+                filterSelect.value = currentValue;
+            }
+        }
+        
+        function filterAllRequestsByYear(year) {
+            allRequestsYearFilter = year === '' ? null : parseInt(year);
+            filterAllRequests();
+        }
+        
+        function filterAllRequestsByStatus(status) {
+            allRequestsStatusFilter = status === '' ? null : status;
+            filterAllRequests();
+        }
+        
+        function filterAllRequests() {
+            let filtered = allRequestsData;
+            
+            if (allRequestsYearFilter !== null) {
+                filtered = filtered.filter(r => new Date(r.start_date).getFullYear() === allRequestsYearFilter);
+            }
+            
+            if (allRequestsStatusFilter !== null) {
+                filtered = filtered.filter(r => r.status === allRequestsStatusFilter);
+            }
+            
+            displayAllRequests(filtered);
+        }
+        
+        function displayAllRequests(requests) {
+            const container = document.getElementById('allRequestsList');
+            
+            if (!requests || requests.length === 0) {
+                container.innerHTML = '<div class="info">No holiday requests found</div>';
+                return;
+            }
+            
+            // Sort by start date (most recent first)
+            requests.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+            
+            let html = '<div class="table-wrapper"><table class="data-table"><thead><tr><th>User</th><th>Start Date</th><th>End Date</th><th>Days</th><th>Status</th><th>Requested</th><th>Reviewed</th><th>Actions</th></tr></thead><tbody>';
+            
+            requests.forEach(req => {
+                const startDate = new Date(req.start_date).toLocaleDateString();
+                const endDate = new Date(req.end_date).toLocaleDateString();
+                const requestedAt = req.requested_at ? new Date(req.requested_at).toLocaleDateString() : '-';
+                const reviewedAt = req.reviewed_at ? new Date(req.reviewed_at).toLocaleDateString() : '-';
+                
+                let statusClass = 'info';
+                if (req.status === 'approved') statusClass = 'success';
+                else if (req.status === 'rejected') statusClass = 'danger';
+                else if (req.status === 'pending') statusClass = 'warning';
+                else if (req.status === 'cancelled') statusClass = 'secondary';
+                
+                html += `<tr>
+                    <td>${req.user_name || 'Unknown'}</td>
+                    <td>${startDate}</td>
+                    <td>${endDate}</td>
+                    <td><strong>${parseFloat(req.days_requested).toFixed(1)}</strong> days</td>
+                    <td><span class="badge badge-${statusClass}">${req.status.toUpperCase()}</span></td>
+                    <td>${requestedAt}</td>
+                    <td>${reviewedAt}</td>
+                    <td>
+                        <button onclick="deleteHolidayRequest(${req.id})" class="btn btn-sm btn-danger">Delete</button>
+                    </td>
+                </tr>`;
+            });
+            
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+        
+        async function deleteHolidayRequest(requestId) {
+            if (!confirm('Are you sure you want to delete this holiday request? This action cannot be undone and will return the entitlement if the request was approved.')) {
+                return;
+            }
+            
+            try {
+                console.log('Deleting holiday request:', requestId);
+                const response = await apiCall(`/holidays/requests/${requestId}`, {
+                    method: 'DELETE'
+                });
+                console.log('Delete response:', response);
+                
+                if (response && response.success) {
+                    alert('Holiday request deleted successfully');
+                    // Refresh all lists
+                    setTimeout(async () => {
+                        await loadAllRequests();
+                        await loadPendingRequests();
+                        await loadEntitlements();
+                    }, 200);
+                } else {
+                    alert('Error deleting holiday request: ' + (response?.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error deleting holiday request:', error);
+                alert('Error deleting holiday request: ' + (error.message || 'Unknown error'));
+            }
         }
         
         async function loadShutdownPeriods() {
@@ -958,6 +1178,28 @@
         // Use this for shutdown periods display
         const ProductionDatabase = { calculateWorkingDays };
         
+        // Helper function to parse date string (YYYY-MM-DD) as local date, not UTC
+        function parseLocalDate(dateString) {
+            // dateString is in format "YYYY-MM-DD"
+            const parts = dateString.split('-');
+            if (parts.length !== 3) {
+                // Fallback to standard Date parsing if format is unexpected
+                return new Date(dateString);
+            }
+            const year = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+            const day = parseInt(parts[2], 10);
+            return new Date(year, month, day);
+        }
+        
+        // Helper function to format date as YYYY-MM-DD without timezone conversion
+        function formatDateString(year, month, day) {
+            // month is 0-indexed in JavaScript Date, but we pass it as-is (0-11)
+            const monthStr = String(month + 1).padStart(2, '0');
+            const dayStr = String(day).padStart(2, '0');
+            return `${year}-${monthStr}-${dayStr}`;
+        }
+        
         // Calendar functions
         async function loadCalendar() {
             const container = document.getElementById('calendarContainer');
@@ -1055,12 +1297,14 @@
             // Create a map of dates to holidays
             const holidaysByDate = {};
             requests.forEach(req => {
-                const start = new Date(req.start_date);
-                const end = new Date(req.end_date);
+                // Parse dates as local dates to avoid timezone conversion issues
+                const start = parseLocalDate(req.start_date);
+                const end = parseLocalDate(req.end_date);
                 const current = new Date(start);
                 
                 while (current <= end) {
-                    const dateKey = current.toISOString().split('T')[0];
+                    // Use formatDateString to avoid timezone conversion
+                    const dateKey = formatDateString(current.getFullYear(), current.getMonth(), current.getDate());
                     if (!holidaysByDate[dateKey]) {
                         holidaysByDate[dateKey] = [];
                     }
@@ -1081,12 +1325,14 @@
             // Create shutdown map
             const shutdownsByDate = {};
             shutdowns.forEach(shutdown => {
-                const start = new Date(shutdown.start_date);
-                const end = new Date(shutdown.end_date);
+                // Parse dates as local dates to avoid timezone conversion issues
+                const start = parseLocalDate(shutdown.start_date);
+                const end = parseLocalDate(shutdown.end_date);
                 const current = new Date(start);
                 
                 while (current <= end) {
-                    const dateKey = current.toISOString().split('T')[0];
+                    // Use formatDateString to avoid timezone conversion
+                    const dateKey = formatDateString(current.getFullYear(), current.getMonth(), current.getDate());
                     if (current.getMonth() === month && current.getFullYear() === year) {
                         shutdownsByDate[dateKey] = shutdown.description || 'Company Shutdown';
                     }
@@ -1117,7 +1363,8 @@
             const today = new Date();
             for (let day = 1; day <= daysInMonth; day++) {
                 const date = new Date(year, month, day);
-                const dateKey = date.toISOString().split('T')[0];
+                // Use formatDateString to avoid timezone conversion
+                const dateKey = formatDateString(year, month, day);
                 const dayOfWeek = date.getDay();
                 const isToday = date.toDateString() === today.toDateString();
                 const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;

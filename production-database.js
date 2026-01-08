@@ -8159,12 +8159,13 @@ class ProductionDatabase {
     
     // Holiday Request Methods
     static async createHolidayRequest(data) {
-        const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown, status, reviewed_by_user_id, review_notes } = data;
-        const weekdays = this.calculateWorkingDays(start_date, end_date);
+        const { user_id, start_date, end_date, requested_by_user_id, is_company_shutdown, status, reviewed_by_user_id, review_notes, days_requested } = data;
+        // Use provided days_requested if available (e.g., for half days), otherwise calculate
+        const weekdays = days_requested !== undefined ? parseFloat(days_requested) : this.calculateWorkingDays(start_date, end_date);
         const requestStatus = status || 'pending';
         const now = requestStatus === 'approved' ? new Date().toISOString() : null;
         
-        console.log(`Creating holiday request with status="${requestStatus}":`, { user_id, start_date, end_date, weekdays });
+        console.log(`Creating holiday request with status="${requestStatus}":`, { user_id, start_date, end_date, weekdays, days_requested_provided: days_requested !== undefined });
         
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -8354,6 +8355,68 @@ class ProductionDatabase {
             ).run(status, reviewedBy, now, reviewNotes, id);
             return this.getHolidayRequestById(id);
         }
+    }
+    
+    // Delete timesheet entries associated with a holiday request
+    static async deleteTimesheetEntriesByHolidayRequest(holidayRequestId) {
+        const requestId = parseInt(holidayRequestId);
+        
+        if (isPostgreSQL) {
+            // First, get the daily entries to find any associated amendments
+            const dailyEntries = await pool.query(
+                `SELECT id FROM timesheet_daily_entries WHERE holiday_request_id = $1`,
+                [requestId]
+            );
+            
+            // Delete amendments for any timesheet entries linked to these daily entries
+            // (Note: amendments are linked to timesheet_entry_id, not daily entries directly)
+            // But we need to check if daily entries have timesheet_entry_id references
+            
+            // Delete the daily entries
+            await pool.query(
+                `DELETE FROM timesheet_daily_entries WHERE holiday_request_id = $1`,
+                [requestId]
+            );
+            
+            return { deletedCount: dailyEntries.rows.length };
+        } else {
+            // Get daily entries first
+            const dailyEntries = db.prepare(
+                `SELECT id FROM timesheet_daily_entries WHERE holiday_request_id = ?`
+            ).all(requestId);
+            
+            // Delete the daily entries
+            db.prepare(
+                `DELETE FROM timesheet_daily_entries WHERE holiday_request_id = ?`
+            ).run(requestId);
+            
+            return { deletedCount: dailyEntries.length };
+        }
+    }
+    
+    // Delete a holiday request
+    static async deleteHolidayRequest(id) {
+        const requestId = parseInt(id);
+        
+        // First get the request to return it
+        const request = await this.getHolidayRequestById(requestId);
+        if (!request) {
+            return null;
+        }
+        
+        if (isPostgreSQL) {
+            // Delete the holiday request
+            await pool.query(
+                `DELETE FROM holiday_requests WHERE id = $1`,
+                [requestId]
+            );
+        } else {
+            db.prepare(
+                `DELETE FROM holiday_requests WHERE id = ?`
+            ).run(requestId);
+        }
+        
+        return request;
     }
     
     static async getApprovedHolidaysInDateRange(startDate, endDate, userId = null) {
