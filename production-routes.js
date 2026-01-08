@@ -1380,7 +1380,8 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get installations' });
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to get installations', details: error.message });
     }
 });
 

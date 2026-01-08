@@ -5229,6 +5229,9 @@ class ProductionDatabase {
             
             query += ` ORDER BY COALESCE(i.start_date, i.installation_date), i.start_time`;
             
+            console.log('Executing query:', query);
+            console.log('With params:', params);
+            
             if (isPostgreSQL) {
                 const result = await pool.query(query, params);
                 const installations = result.rows;
@@ -5238,6 +5241,7 @@ class ProductionDatabase {
                     try {
                         installation.installation_days = await this.getInstallationDays(installation.id) || [];
                     } catch (error) {
+                        console.log('Error getting installation days:', error.message);
                         installation.installation_days = []; // Days table might not exist
                     }
                 }
@@ -5250,6 +5254,7 @@ class ProductionDatabase {
                     try {
                         installation.installation_days = await this.getInstallationDays(installation.id) || [];
                     } catch (error) {
+                        console.log('Error getting installation days:', error.message);
                         installation.installation_days = []; // Days table might not exist
                     }
                 }
@@ -5257,64 +5262,71 @@ class ProductionDatabase {
             }
         } catch (error) {
             // Fall back to old schema if new columns don't exist
-            console.log('New schema query failed, falling back to old schema:', error.message);
-            let query = `SELECT i.*, 
-                         i.installation_date as start_date,
-                         i.installation_date as end_date,
-                         po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
-                         fp.name as product_name,
-                         u.username as created_by_name
-                         FROM installations i
-                         LEFT JOIN product_orders po ON i.works_order_id = po.id
-                         LEFT JOIN finished_products fp ON po.product_id = fp.id
-                         LEFT JOIN production_users u ON i.created_by = u.id`;
-            const conditions = [];
-            const params = [];
-            let paramIndex = 1;
-            
-            if (startDate) {
+            console.error('New schema query failed, falling back to old schema:', error.message);
+            console.error('Error stack:', error.stack);
+            try {
+                let query = `SELECT i.*, 
+                             i.installation_date as start_date,
+                             i.installation_date as end_date,
+                             po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                             fp.name as product_name,
+                             u.username as created_by_name
+                             FROM installations i
+                             LEFT JOIN product_orders po ON i.works_order_id = po.id
+                             LEFT JOIN finished_products fp ON po.product_id = fp.id
+                             LEFT JOIN production_users u ON i.created_by = u.id`;
+                const conditions = [];
+                const params = [];
+                let paramIndex = 1;
+                
+                if (startDate) {
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.installation_date >= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.installation_date >= ?)`);
+                    }
+                    params.push(startDate);
+                    paramIndex++;
+                }
+                
+                if (endDate) {
+                    if (isPostgreSQL) {
+                        conditions.push(`(i.installation_date <= $${paramIndex})`);
+                    } else {
+                        conditions.push(`(i.installation_date <= ?)`);
+                    }
+                    params.push(endDate);
+                    paramIndex++;
+                }
+                
+                if (conditions.length > 0) {
+                    query += ` WHERE ${conditions.join(' AND ')}`;
+                }
+                
+                query += ` ORDER BY i.installation_date, i.start_time`;
+                
                 if (isPostgreSQL) {
-                    conditions.push(`(i.installation_date >= $${paramIndex})`);
+                    const result = await pool.query(query, params);
+                    const installations = result.rows;
+                    // Get assignments for each installation
+                    for (const installation of installations) {
+                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                        installation.installation_days = []; // No days table in old schema
+                    }
+                    return installations;
                 } else {
-                    conditions.push(`(i.installation_date >= ?)`);
+                    const installations = db.prepare(query).all(...params);
+                    // Get assignments for each installation
+                    for (const installation of installations) {
+                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                        installation.installation_days = []; // No days table in old schema
+                    }
+                    return installations;
                 }
-                params.push(startDate);
-                paramIndex++;
-            }
-            
-            if (endDate) {
-                if (isPostgreSQL) {
-                    conditions.push(`(i.installation_date <= $${paramIndex})`);
-                } else {
-                    conditions.push(`(i.installation_date <= ?)`);
-                }
-                params.push(endDate);
-                paramIndex++;
-            }
-            
-            if (conditions.length > 0) {
-                query += ` WHERE ${conditions.join(' AND ')}`;
-            }
-            
-            query += ` ORDER BY i.installation_date, i.start_time`;
-            
-            if (isPostgreSQL) {
-                const result = await pool.query(query, params);
-                const installations = result.rows;
-                // Get assignments for each installation
-                for (const installation of installations) {
-                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    installation.installation_days = []; // No days table in old schema
-                }
-                return installations;
-            } else {
-                const installations = db.prepare(query).all(...params);
-                // Get assignments for each installation
-                for (const installation of installations) {
-                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    installation.installation_days = []; // No days table in old schema
-                }
-                return installations;
+            } catch (fallbackError) {
+                console.error('Fallback query also failed:', fallbackError.message);
+                console.error('Fallback error stack:', fallbackError.stack);
+                throw fallbackError;
             }
         }
     }
