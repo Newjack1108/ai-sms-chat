@@ -1255,7 +1255,7 @@ router.get('/orders', requireProductionAuth, async (req, res) => {
 
 router.post('/orders', requireProductionAuth, requireManager, async (req, res) => {
     try {
-        const { product_id, quantity, order_date, status } = req.body;
+        const { product_id, quantity, order_date, status, customer_name } = req.body;
         if (!product_id || !quantity) {
             return res.status(400).json({ success: false, error: 'Product ID and quantity are required' });
         }
@@ -1268,6 +1268,7 @@ router.post('/orders', requireProductionAuth, requireManager, async (req, res) =
             quantity: parseInt(quantity),
             order_date,
             status: orderStatus,
+            customer_name: customer_name || null,
             created_by: req.session.production_user.id
         });
         res.json({ success: true, order });
@@ -1294,13 +1295,14 @@ router.get('/orders/:id', requireProductionAuth, async (req, res) => {
 router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id);
-        const { product_id, quantity, order_date, status } = req.body;
+        const { product_id, quantity, order_date, status, customer_name } = req.body;
         
         const updateData = {};
         if (product_id !== undefined) updateData.product_id = parseInt(product_id);
         if (quantity !== undefined) updateData.quantity = parseInt(quantity);
         if (order_date !== undefined) updateData.order_date = order_date;
         if (status !== undefined) updateData.status = status;
+        if (customer_name !== undefined) updateData.customer_name = customer_name;
         
         const order = await ProductionDatabase.updateProductOrder(orderId, updateData);
         res.json({ success: true, order });
@@ -1321,6 +1323,234 @@ router.delete('/orders/:id', requireProductionAuth, requireManager, async (req, 
     } catch (error) {
         console.error('Delete order error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete order' });
+    }
+});
+
+// Get installations linked to a works order
+router.get('/orders/:id/installations', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const installations = await ProductionDatabase.getAllInstallations();
+        const orderInstallations = installations.filter(inst => inst.works_order_id === orderId);
+        res.json({ success: true, installations: orderInstallations });
+    } catch (error) {
+        console.error('Get order installations error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get installations' });
+    }
+});
+
+// Create installation from works order
+router.post('/orders/:id/installations', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const { installation_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users } = req.body;
+        
+        if (!installation_date || !start_time || !duration_hours) {
+            return res.status(400).json({ success: false, error: 'Installation date, start time, and duration are required' });
+        }
+        
+        const installation = await ProductionDatabase.createInstallation({
+            works_order_id: orderId,
+            installation_date,
+            start_time,
+            end_time,
+            duration_hours,
+            location,
+            address,
+            notes,
+            status,
+            assigned_users: assigned_users || [],
+            created_by: req.session.production_user.id
+        });
+        
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Create installation from order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create installation' });
+    }
+});
+
+// ============ INSTALLATION ROUTES ============
+
+router.get('/installations', requireProductionAuth, async (req, res) => {
+    try {
+        const startDate = req.query.start_date || null;
+        const endDate = req.query.end_date || null;
+        const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        res.json({ success: true, installations });
+    } catch (error) {
+        console.error('Get installations error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get installations' });
+    }
+});
+
+router.get('/installations/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Get installation error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get installation' });
+    }
+});
+
+router.post('/installations', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const { works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users } = req.body;
+        
+        if (!installation_date || !start_time || !duration_hours) {
+            return res.status(400).json({ success: false, error: 'Installation date, start time, and duration are required' });
+        }
+        
+        const installation = await ProductionDatabase.createInstallation({
+            works_order_id: works_order_id || null,
+            installation_date,
+            start_time,
+            end_time,
+            duration_hours,
+            location,
+            address,
+            notes,
+            status,
+            assigned_users: assigned_users || [],
+            created_by: req.session.production_user.id
+        });
+        
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Create installation error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create installation' });
+    }
+});
+
+router.put('/installations/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const { works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users } = req.body;
+        
+        const updateData = {};
+        if (works_order_id !== undefined) updateData.works_order_id = works_order_id;
+        if (installation_date !== undefined) updateData.installation_date = installation_date;
+        if (start_time !== undefined) updateData.start_time = start_time;
+        if (end_time !== undefined) updateData.end_time = end_time;
+        if (duration_hours !== undefined) updateData.duration_hours = duration_hours;
+        if (location !== undefined) updateData.location = location;
+        if (address !== undefined) updateData.address = address;
+        if (notes !== undefined) updateData.notes = notes;
+        if (status !== undefined) updateData.status = status;
+        if (assigned_users !== undefined) updateData.assigned_users = assigned_users;
+        
+        const installation = await ProductionDatabase.updateInstallation(installationId, updateData);
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Update installation error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update installation' });
+    }
+});
+
+router.delete('/installations/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        await ProductionDatabase.deleteInstallation(installationId);
+        res.json({ success: true, message: 'Installation deleted successfully' });
+    } catch (error) {
+        console.error('Delete installation error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete installation' });
+    }
+});
+
+// Assignment routes
+router.post('/installations/:id/assign', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const { user_id, role } = req.body;
+        
+        if (!user_id) {
+            return res.status(400).json({ success: false, error: 'User ID is required' });
+        }
+        
+        await ProductionDatabase.assignUserToInstallation(installationId, user_id, role || null);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Assign user error:', error);
+        res.status(500).json({ success: false, error: 'Failed to assign user' });
+    }
+});
+
+router.delete('/installations/:id/assign/:userId', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const userId = parseInt(req.params.userId);
+        await ProductionDatabase.removeUserFromInstallation(installationId, userId);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        res.json({ success: true, installation });
+    } catch (error) {
+        console.error('Remove user assignment error:', error);
+        res.status(500).json({ success: false, error: 'Failed to remove user assignment' });
+    }
+});
+
+// Availability routes
+router.post('/installations/check-availability', requireProductionAuth, async (req, res) => {
+    try {
+        const { user_ids, start_datetime, end_datetime } = req.body;
+        
+        if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+            return res.status(400).json({ success: false, error: 'User IDs array is required' });
+        }
+        if (!start_datetime || !end_datetime) {
+            return res.status(400).json({ success: false, error: 'Start and end datetime are required' });
+        }
+        
+        const availability = await ProductionDatabase.checkMultipleUsersAvailability(user_ids, start_datetime, end_datetime);
+        res.json({ success: true, availability });
+    } catch (error) {
+        console.error('Check availability error:', error);
+        res.status(500).json({ success: false, error: 'Failed to check availability' });
+    }
+});
+
+router.get('/installations/:id/conflicts', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        
+        if (!installation.assigned_users || installation.assigned_users.length === 0) {
+            return res.json({ success: true, conflicts: {} });
+        }
+        
+        // Build datetime strings
+        const startDateTime = `${installation.installation_date}T${installation.start_time}:00`;
+        let endDateTime;
+        if (installation.end_time) {
+            endDateTime = `${installation.installation_date}T${installation.end_time}:00`;
+        } else {
+            // Calculate from duration
+            const start = new Date(startDateTime);
+            const end = new Date(start.getTime() + parseFloat(installation.duration_hours) * 60 * 60 * 1000);
+            endDateTime = end.toISOString();
+        }
+        
+        const conflicts = {};
+        for (const assignment of installation.assigned_users) {
+            const userConflicts = await ProductionDatabase.getUserConflicts(assignment.user_id, startDateTime, endDateTime);
+            // Filter out conflicts with this installation itself
+            conflicts[assignment.user_id] = userConflicts.filter(c => c.type !== 'installation' || c.id !== installationId);
+        }
+        
+        res.json({ success: true, conflicts });
+    } catch (error) {
+        console.error('Get conflicts error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get conflicts' });
     }
 });
 

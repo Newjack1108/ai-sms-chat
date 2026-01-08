@@ -237,6 +237,18 @@ function initializeSQLite() {
         console.log('⚠️ Finished products migration check skipped:', error.message);
     }
     
+    // Migrate product_orders to add customer_name column
+    try {
+        const tableInfo = db.prepare(`PRAGMA table_info(product_orders)`).all();
+        const hasCustomerName = tableInfo.some(col => col.name === 'customer_name');
+        if (!hasCustomerName) {
+            db.exec('ALTER TABLE product_orders ADD COLUMN customer_name TEXT');
+            console.log('✅ Added customer_name column to product_orders table');
+        }
+    } catch (error) {
+        console.log('⚠️ Product orders migration check skipped:', error.message);
+    }
+    
     // Migrate order_spares table (check if exists)
     try {
         const tableInfo = db.prepare(`PRAGMA table_info(order_spares)`).all();
@@ -789,6 +801,50 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_shutdown_periods_year ON company_shutdown_periods(year);
     `);
     
+    // Installations table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            works_order_id INTEGER,
+            installation_date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT,
+            duration_hours REAL NOT NULL,
+            location TEXT,
+            address TEXT,
+            notes TEXT,
+            status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'in_progress', 'completed', 'cancelled')),
+            created_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (works_order_id) REFERENCES product_orders(id),
+            FOREIGN KEY (created_by) REFERENCES production_users(id)
+        )
+    `);
+    
+    // Installation assignments table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            role TEXT,
+            assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            UNIQUE(installation_id, user_id)
+        )
+    `);
+    
+    // Create indexes for installations
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_installations_date ON installations(installation_date);
+        CREATE INDEX IF NOT EXISTS idx_installations_order ON installations(works_order_id);
+        CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status);
+        CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id);
+        CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id);
+    `);
+    
     console.log('✅ Production SQLite database initialized');
 }
 
@@ -988,6 +1044,21 @@ async function initializePostgreSQL() {
             }
         } catch (error) {
             console.log('⚠️ Finished products migration check skipped:', error.message);
+        }
+        
+        // Migrate product_orders to add customer_name column
+        try {
+            const columnCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'product_orders' AND column_name = 'customer_name'
+            `);
+            if (columnCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE product_orders ADD COLUMN customer_name VARCHAR(255)`);
+                console.log('✅ Added customer_name column to product_orders table');
+            }
+        } catch (error) {
+            console.log('⚠️ Product orders migration check skipped:', error.message);
         }
         
         // Migrate order_spares table (check if exists)
@@ -1704,6 +1775,44 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_requests_status ON holiday_requests(status)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_holiday_requests_dates ON holiday_requests(start_date, end_date)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_shutdown_periods_year ON company_shutdown_periods(year)`);
+        
+        // Installations table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installations (
+                id SERIAL PRIMARY KEY,
+                works_order_id INTEGER REFERENCES product_orders(id),
+                installation_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME,
+                duration_hours DECIMAL(10,2) NOT NULL,
+                location VARCHAR(255),
+                address TEXT,
+                notes TEXT,
+                status VARCHAR(50) DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'in_progress', 'completed', 'cancelled')),
+                created_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Installation assignments table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_assignments (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                role VARCHAR(50),
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(installation_id, user_id)
+            )
+        `);
+        
+        // Create indexes for installations
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_date ON installations(installation_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_order ON installations(works_order_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id)`);
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -4353,17 +4462,17 @@ class ProductionDatabase {
     static async createProductOrder(data) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by]
+                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+                [data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by)
-                 VALUES (?, ?, ?, ?, ?)`
+                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
+                 VALUES (?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by);
+            const info = stmt.run(data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null);
             return this.getProductOrderById(info.lastInsertRowid);
         }
     }
@@ -4478,6 +4587,11 @@ class ProductionDatabase {
         if (data.status !== undefined) {
             updates.push(`status = $${paramIndex}`);
             values.push(data.status);
+            paramIndex++;
+        }
+        if (data.customer_name !== undefined) {
+            updates.push(`customer_name = $${paramIndex}`);
+            values.push(data.customer_name || null);
             paramIndex++;
         }
         
@@ -4751,6 +4865,542 @@ class ProductionDatabase {
         }
         
         return this.getOrderSpareById(spareId);
+    }
+    
+    // ============ INSTALLATION OPERATIONS ============
+    
+    static async createInstallation(data) {
+        if (isPostgreSQL) {
+            // Calculate end_time if not provided
+            let endTime = data.end_time;
+            if (!endTime && data.start_time && data.duration_hours) {
+                const start = new Date(`2000-01-01 ${data.start_time}`);
+                const end = new Date(start.getTime() + parseFloat(data.duration_hours) * 60 * 60 * 1000);
+                endTime = end.toTimeString().slice(0, 5);
+            }
+            
+            const result = await pool.query(
+                `INSERT INTO installations (works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+                [
+                    data.works_order_id || null,
+                    data.installation_date,
+                    data.start_time,
+                    endTime || null,
+                    parseFloat(data.duration_hours),
+                    data.location || null,
+                    data.address || null,
+                    data.notes || null,
+                    data.status || 'scheduled',
+                    data.created_by
+                ]
+            );
+            const installation = result.rows[0];
+            
+            // Add user assignments if provided
+            if (data.assigned_users && Array.isArray(data.assigned_users) && data.assigned_users.length > 0) {
+                for (const assignment of data.assigned_users) {
+                    await pool.query(
+                        `INSERT INTO installation_assignments (installation_id, user_id, role)
+                         VALUES ($1, $2, $3)`,
+                        [installation.id, assignment.user_id, assignment.role || null]
+                    );
+                }
+            }
+            
+            return this.getInstallationById(installation.id);
+        } else {
+            // Calculate end_time if not provided
+            let endTime = data.end_time;
+            if (!endTime && data.start_time && data.duration_hours) {
+                const start = new Date(`2000-01-01 ${data.start_time}`);
+                const end = new Date(start.getTime() + parseFloat(data.duration_hours) * 60 * 60 * 1000);
+                endTime = end.toTimeString().slice(0, 5);
+            }
+            
+            const stmt = db.prepare(
+                `INSERT INTO installations (works_order_id, installation_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            const info = stmt.run(
+                data.works_order_id || null,
+                data.installation_date,
+                data.start_time,
+                endTime || null,
+                parseFloat(data.duration_hours),
+                data.location || null,
+                data.address || null,
+                data.notes || null,
+                data.status || 'scheduled',
+                data.created_by
+            );
+            
+            const installationId = info.lastInsertRowid;
+            
+            // Add user assignments if provided
+            if (data.assigned_users && Array.isArray(data.assigned_users) && data.assigned_users.length > 0) {
+                const assignStmt = db.prepare(
+                    `INSERT INTO installation_assignments (installation_id, user_id, role)
+                     VALUES (?, ?, ?)`
+                );
+                for (const assignment of data.assigned_users) {
+                    assignStmt.run(installationId, assignment.user_id, assignment.role || null);
+                }
+            }
+            
+            return this.getInstallationById(installationId);
+        }
+    }
+    
+    static async getInstallationById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT i.*, 
+                 po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                 fp.name as product_name,
+                 u.username as created_by_name
+                 FROM installations i
+                 LEFT JOIN product_orders po ON i.works_order_id = po.id
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 LEFT JOIN production_users u ON i.created_by = u.id
+                 WHERE i.id = $1`,
+                [id]
+            );
+            const installation = result.rows[0] || null;
+            if (installation) {
+                installation.assigned_users = await this.getInstallationAssignments(id) || [];
+            }
+            return installation;
+        } else {
+            const installation = db.prepare(
+                `SELECT i.*, 
+                 po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                 fp.name as product_name,
+                 u.username as created_by_name
+                 FROM installations i
+                 LEFT JOIN product_orders po ON i.works_order_id = po.id
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 LEFT JOIN production_users u ON i.created_by = u.id
+                 WHERE i.id = ?`
+            ).get(id);
+            if (installation) {
+                installation.assigned_users = await this.getInstallationAssignments(id) || [];
+            }
+            return installation;
+        }
+    }
+    
+    static async getAllInstallations(startDate = null, endDate = null) {
+        let query = `SELECT i.*, 
+                     po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                     fp.name as product_name,
+                     u.username as created_by_name
+                     FROM installations i
+                     LEFT JOIN product_orders po ON i.works_order_id = po.id
+                     LEFT JOIN finished_products fp ON po.product_id = fp.id
+                     LEFT JOIN production_users u ON i.created_by = u.id`;
+        const conditions = [];
+        const params = [];
+        let paramIndex = 1;
+        
+        if (startDate) {
+            if (isPostgreSQL) {
+                conditions.push(`i.installation_date >= $${paramIndex}`);
+            } else {
+                conditions.push(`i.installation_date >= ?`);
+            }
+            params.push(startDate);
+            paramIndex++;
+        }
+        
+        if (endDate) {
+            if (isPostgreSQL) {
+                conditions.push(`i.installation_date <= $${paramIndex}`);
+            } else {
+                conditions.push(`i.installation_date <= ?`);
+            }
+            params.push(endDate);
+            paramIndex++;
+        }
+        
+        if (conditions.length > 0) {
+            query += ` WHERE ${conditions.join(' AND ')}`;
+        }
+        
+        query += ` ORDER BY i.installation_date, i.start_time`;
+        
+        if (isPostgreSQL) {
+            const result = await pool.query(query, params);
+            const installations = result.rows;
+            // Get assignments for each installation
+            for (const installation of installations) {
+                installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+            }
+            return installations;
+        } else {
+            const installations = db.prepare(query).all(...params);
+            // Get assignments for each installation
+            for (const installation of installations) {
+                installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+            }
+            return installations;
+        }
+    }
+    
+    static async getInstallationsByDateRange(startDate, endDate) {
+        return this.getAllInstallations(startDate, endDate);
+    }
+    
+    static async updateInstallation(id, data) {
+        const updates = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (data.works_order_id !== undefined) {
+            updates.push(`works_order_id = $${paramIndex}`);
+            values.push(data.works_order_id || null);
+            paramIndex++;
+        }
+        if (data.installation_date !== undefined) {
+            updates.push(`installation_date = $${paramIndex}`);
+            values.push(data.installation_date);
+            paramIndex++;
+        }
+        if (data.start_time !== undefined) {
+            updates.push(`start_time = $${paramIndex}`);
+            values.push(data.start_time);
+            paramIndex++;
+        }
+        if (data.end_time !== undefined) {
+            updates.push(`end_time = $${paramIndex}`);
+            values.push(data.end_time || null);
+            paramIndex++;
+        }
+        if (data.duration_hours !== undefined) {
+            updates.push(`duration_hours = $${paramIndex}`);
+            values.push(parseFloat(data.duration_hours));
+            paramIndex++;
+        }
+        if (data.location !== undefined) {
+            updates.push(`location = $${paramIndex}`);
+            values.push(data.location || null);
+            paramIndex++;
+        }
+        if (data.address !== undefined) {
+            updates.push(`address = $${paramIndex}`);
+            values.push(data.address || null);
+            paramIndex++;
+        }
+        if (data.notes !== undefined) {
+            updates.push(`notes = $${paramIndex}`);
+            values.push(data.notes || null);
+            paramIndex++;
+        }
+        if (data.status !== undefined) {
+            updates.push(`status = $${paramIndex}`);
+            values.push(data.status);
+            paramIndex++;
+        }
+        
+        // Always update updated_at
+        if (isPostgreSQL) {
+            updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        } else {
+            updates.push(`updated_at = datetime('now')`);
+        }
+        
+        if (updates.length === 0) {
+            return this.getInstallationById(id);
+        }
+        
+        values.push(id);
+        
+        if (isPostgreSQL) {
+            const setClause = updates.map((update, idx) => {
+                if (update.includes('CURRENT_TIMESTAMP')) {
+                    return update;
+                }
+                const field = update.split(' = ')[0];
+                return `${field} = $${idx + 1}`;
+            }).join(', ');
+            await pool.query(`UPDATE installations SET ${setClause} WHERE id = $${paramIndex}`, values);
+        } else {
+            const setClause = updates.map((update, idx) => {
+                if (update.includes("datetime('now')")) {
+                    return update;
+                }
+                const field = update.split(' = ')[0];
+                return `${field} = ?`;
+            }).join(', ');
+            db.prepare(`UPDATE installations SET ${setClause} WHERE id = ?`).run(...values);
+        }
+        
+        // Update user assignments if provided
+        if (data.assigned_users !== undefined) {
+            // Delete existing assignments
+            if (isPostgreSQL) {
+                await pool.query(`DELETE FROM installation_assignments WHERE installation_id = $1`, [id]);
+            } else {
+                db.prepare(`DELETE FROM installation_assignments WHERE installation_id = ?`).run(id);
+            }
+            
+            // Add new assignments
+            if (Array.isArray(data.assigned_users) && data.assigned_users.length > 0) {
+                if (isPostgreSQL) {
+                    for (const assignment of data.assigned_users) {
+                        await pool.query(
+                            `INSERT INTO installation_assignments (installation_id, user_id, role)
+                             VALUES ($1, $2, $3)`,
+                            [id, assignment.user_id, assignment.role || null]
+                        );
+                    }
+                } else {
+                    const assignStmt = db.prepare(
+                        `INSERT INTO installation_assignments (installation_id, user_id, role)
+                         VALUES (?, ?, ?)`
+                    );
+                    for (const assignment of data.assigned_users) {
+                        assignStmt.run(id, assignment.user_id, assignment.role || null);
+                    }
+                }
+            }
+        }
+        
+        return this.getInstallationById(id);
+    }
+    
+    static async deleteInstallation(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM installations WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM installations WHERE id = ?`).run(id);
+        }
+    }
+    
+    static async assignUserToInstallation(installationId, userId, role = null) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO installation_assignments (installation_id, user_id, role)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (installation_id, user_id) DO UPDATE SET role = $3`,
+                [installationId, userId, role]
+            );
+        } else {
+            db.prepare(
+                `INSERT OR REPLACE INTO installation_assignments (installation_id, user_id, role)
+                 VALUES (?, ?, ?)`
+            ).run(installationId, userId, role);
+        }
+        return this.getInstallationAssignments(installationId);
+    }
+    
+    static async removeUserFromInstallation(installationId, userId) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `DELETE FROM installation_assignments WHERE installation_id = $1 AND user_id = $2`,
+                [installationId, userId]
+            );
+        } else {
+            db.prepare(
+                `DELETE FROM installation_assignments WHERE installation_id = ? AND user_id = ?`
+            ).run(installationId, userId);
+        }
+    }
+    
+    static async getInstallationAssignments(installationId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT ia.*, u.username, u.role as user_role
+                 FROM installation_assignments ia
+                 JOIN production_users u ON ia.user_id = u.id
+                 WHERE ia.installation_id = $1
+                 ORDER BY ia.assigned_at`,
+                [installationId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT ia.*, u.username, u.role as user_role
+                 FROM installation_assignments ia
+                 JOIN production_users u ON ia.user_id = u.id
+                 WHERE ia.installation_id = ?
+                 ORDER BY ia.assigned_at`
+            ).all(installationId);
+        }
+    }
+    
+    static async checkUserAvailability(userId, startDateTime, endDateTime) {
+        const conflicts = await this.getUserConflicts(userId, startDateTime, endDateTime);
+        return {
+            available: conflicts.length === 0,
+            conflicts: conflicts
+        };
+    }
+    
+    static async checkMultipleUsersAvailability(userIds, startDateTime, endDateTime) {
+        const results = {};
+        for (const userId of userIds) {
+            results[userId] = await this.checkUserAvailability(userId, startDateTime, endDateTime);
+        }
+        return results;
+    }
+    
+    static async getUserConflicts(userId, startDateTime, endDateTime) {
+        const conflicts = [];
+        const start = new Date(startDateTime);
+        const end = new Date(endDateTime);
+        
+        // Check timesheet entries
+        if (isPostgreSQL) {
+            const timesheetResult = await pool.query(
+                `SELECT id, clock_in_time, clock_out_time, job_id
+                 FROM timesheet_entries
+                 WHERE user_id = $1 
+                 AND clock_out_time IS NOT NULL
+                 AND (
+                     (clock_in_time <= $2 AND clock_out_time >= $2) OR
+                     (clock_in_time <= $3 AND clock_out_time >= $3) OR
+                     (clock_in_time >= $2 AND clock_out_time <= $3)
+                 )`,
+                [userId, startDateTime, endDateTime]
+            );
+            for (const entry of timesheetResult.rows) {
+                conflicts.push({
+                    type: 'timesheet',
+                    id: entry.id,
+                    start: entry.clock_in_time,
+                    end: entry.clock_out_time,
+                    description: `Timesheet entry (Job ID: ${entry.job_id})`
+                });
+            }
+            
+            // Check holiday requests
+            const holidayResult = await pool.query(
+                `SELECT id, start_date, end_date, status
+                 FROM holiday_requests
+                 WHERE user_id = $1
+                 AND status = 'approved'
+                 AND (
+                     (start_date <= $2::date AND end_date >= $2::date) OR
+                     (start_date <= $3::date AND end_date >= $3::date) OR
+                     (start_date >= $2::date AND end_date <= $3::date)
+                 )`,
+                [userId, start.toISOString().split('T')[0], end.toISOString().split('T')[0]]
+            );
+            for (const holiday of holidayResult.rows) {
+                conflicts.push({
+                    type: 'holiday',
+                    id: holiday.id,
+                    start: holiday.start_date,
+                    end: holiday.end_date,
+                    description: `Approved holiday`
+                });
+            }
+            
+            // Check existing installations
+            const installationResult = await pool.query(
+                `SELECT i.id, i.installation_date, i.start_time, i.end_time
+                 FROM installations i
+                 JOIN installation_assignments ia ON i.id = ia.installation_id
+                 WHERE ia.user_id = $1
+                 AND i.status NOT IN ('cancelled', 'completed')
+                 AND i.installation_date = $2::date
+                 AND (
+                     (i.start_time <= $3::time AND (i.end_time IS NULL OR i.end_time >= $3::time)) OR
+                     (i.start_time <= $4::time AND (i.end_time IS NULL OR i.end_time >= $4::time)) OR
+                     (i.start_time >= $3::time AND (i.end_time IS NULL OR i.end_time <= $4::time))
+                 )`,
+                [userId, start.toISOString().split('T')[0], start.toTimeString().slice(0, 5), end.toTimeString().slice(0, 5)]
+            );
+            for (const inst of installationResult.rows) {
+                conflicts.push({
+                    type: 'installation',
+                    id: inst.id,
+                    start: `${inst.installation_date} ${inst.start_time}`,
+                    end: inst.end_time ? `${inst.installation_date} ${inst.end_time}` : null,
+                    description: `Installation #${inst.id}`
+                });
+            }
+        } else {
+            // SQLite version
+            const startDateStr = start.toISOString().split('T')[0];
+            const endDateStr = end.toISOString().split('T')[0];
+            const startTimeStr = start.toTimeString().slice(0, 5);
+            const endTimeStr = end.toTimeString().slice(0, 5);
+            
+            // Check timesheet entries
+            const timesheetEntries = db.prepare(
+                `SELECT id, clock_in_time, clock_out_time, job_id
+                 FROM timesheet_entries
+                 WHERE user_id = ? 
+                 AND clock_out_time IS NOT NULL
+                 AND (
+                     (clock_in_time <= ? AND clock_out_time >= ?) OR
+                     (clock_in_time <= ? AND clock_out_time >= ?) OR
+                     (clock_in_time >= ? AND clock_out_time <= ?)
+                 )`
+            ).all(userId, startDateTime, startDateTime, endDateTime, endDateTime, startDateTime, endDateTime);
+            
+            for (const entry of timesheetEntries) {
+                conflicts.push({
+                    type: 'timesheet',
+                    id: entry.id,
+                    start: entry.clock_in_time,
+                    end: entry.clock_out_time,
+                    description: `Timesheet entry (Job ID: ${entry.job_id})`
+                });
+            }
+            
+            // Check holiday requests
+            const holidays = db.prepare(
+                `SELECT id, start_date, end_date, status
+                 FROM holiday_requests
+                 WHERE user_id = ?
+                 AND status = 'approved'
+                 AND (
+                     (start_date <= ? AND end_date >= ?) OR
+                     (start_date <= ? AND end_date >= ?) OR
+                     (start_date >= ? AND end_date <= ?)
+                 )`
+            ).all(userId, startDateStr, startDateStr, endDateStr, endDateStr, startDateStr, endDateStr);
+            
+            for (const holiday of holidays) {
+                conflicts.push({
+                    type: 'holiday',
+                    id: holiday.id,
+                    start: holiday.start_date,
+                    end: holiday.end_date,
+                    description: `Approved holiday`
+                });
+            }
+            
+            // Check existing installations
+            const installations = db.prepare(
+                `SELECT i.id, i.installation_date, i.start_time, i.end_time
+                 FROM installations i
+                 JOIN installation_assignments ia ON i.id = ia.installation_id
+                 WHERE ia.user_id = ?
+                 AND i.status NOT IN ('cancelled', 'completed')
+                 AND i.installation_date = ?
+                 AND (
+                     (i.start_time <= ? AND (i.end_time IS NULL OR i.end_time >= ?)) OR
+                     (i.start_time <= ? AND (i.end_time IS NULL OR i.end_time >= ?)) OR
+                     (i.start_time >= ? AND (i.end_time IS NULL OR i.end_time <= ?))
+                 )`
+            ).all(userId, startDateStr, startTimeStr, startTimeStr, endTimeStr, endTimeStr, startTimeStr, endTimeStr);
+            
+            for (const inst of installations) {
+                conflicts.push({
+                    type: 'installation',
+                    id: inst.id,
+                    start: `${inst.installation_date} ${inst.start_time}`,
+                    end: inst.end_time ? `${inst.installation_date} ${inst.end_time}` : null,
+                    description: `Installation #${inst.id}`
+                });
+            }
+        }
+        
+        return conflicts;
     }
     
     // ============ TIMESHEET OPERATIONS ============

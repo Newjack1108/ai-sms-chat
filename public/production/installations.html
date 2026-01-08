@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Installation Calendar - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .calendar-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .view-switcher {
+            display: flex;
+            gap: 5px;
+        }
+        .view-switcher button {
+            padding: 8px 16px;
+        }
+        .view-switcher button.active {
+            background: #007bff;
+            color: white;
+        }
+        .calendar-nav {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .calendar-nav button {
+            padding: 8px 16px;
+        }
+        .calendar-nav .current-date {
+            font-weight: bold;
+            min-width: 200px;
+            text-align: center;
+        }
+        
+        /* Weekly View */
+        .weekly-view {
+            display: grid;
+            grid-template-columns: 80px repeat(7, 1fr);
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+        }
+        .weekly-header {
+            background: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            border-bottom: 2px solid #007bff;
+        }
+        .weekly-day-header {
+            background: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .weekly-time-slot {
+            background: white;
+            padding: 5px;
+            min-height: 60px;
+            border-right: 1px solid #ddd;
+        }
+        .weekly-day-cell {
+            background: white;
+            padding: 5px;
+            min-height: 60px;
+            position: relative;
+        }
+        .installation-block {
+            background: #007bff;
+            color: white;
+            padding: 5px 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .installation-block.scheduled { background: #007bff; }
+        .installation-block.in_progress { background: #ffc107; color: #000; }
+        .installation-block.completed { background: #28a745; }
+        .installation-block.cancelled { background: #6c757d; }
+        
+        /* Monthly View */
+        .monthly-view {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+        }
+        .monthly-day {
+            background: white;
+            padding: 10px;
+            min-height: 100px;
+            position: relative;
+        }
+        .monthly-day.other-month {
+            background: #f8f9fa;
+            color: #999;
+        }
+        .monthly-day.today {
+            background: #e7f3ff;
+            border: 2px solid #007bff;
+        }
+        .monthly-day-number {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .monthly-installation-count {
+            font-size: 11px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .monthly-installation-item {
+            font-size: 11px;
+            padding: 2px 4px;
+            margin: 2px 0;
+            background: #007bff;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        /* Daily View */
+        .daily-view {
+            display: grid;
+            grid-template-columns: 80px 1fr;
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+        }
+        .daily-time-slot {
+            background: #f8f9fa;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            border-right: 1px solid #ddd;
+        }
+        .daily-slot-content {
+            background: white;
+            padding: 10px;
+            min-height: 80px;
+            position: relative;
+        }
+        .daily-installation {
+            background: #007bff;
+            color: white;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .user-badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        
+        .availability-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .availability-indicator.available { background: #28a745; }
+        .availability-indicator.partial { background: #ffc107; }
+        .availability-indicator.conflict { background: #dc3545; }
+        
+        .conflict-warning {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .conflict-warning strong {
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            <h1>Installation Calendar</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Installations</h2>
+                <button onclick="showAddInstallationModal()" class="btn btn-primary">Add Installation</button>
+            </div>
+            
+            <div class="calendar-controls">
+                <div class="view-switcher">
+                    <button onclick="switchView('weekly')" id="viewWeekly" class="btn btn-secondary active">Weekly</button>
+                    <button onclick="switchView('monthly')" id="viewMonthly" class="btn btn-secondary">Monthly</button>
+                    <button onclick="switchView('daily')" id="viewDaily" class="btn btn-secondary">Daily</button>
+                </div>
+                <div class="calendar-nav">
+                    <button onclick="previousPeriod()" class="btn btn-secondary">← Previous</button>
+                    <span class="current-date" id="currentDate"></span>
+                    <button onclick="nextPeriod()" class="btn btn-secondary">Next →</button>
+                    <button onclick="goToToday()" class="btn btn-secondary">Today</button>
+                </div>
+            </div>
+            
+            <div id="calendarContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Installation Modal -->
+    <div id="installationModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3 id="installationModalTitle">Add Installation</h3>
+                <button class="modal-close" onclick="hideModal('installationModal')">&times;</button>
+            </div>
+            <form id="installationForm">
+                <input type="hidden" id="installationId">
+                
+                <div class="form-group">
+                    <label class="form-label">Works Order (Optional)</label>
+                    <select id="installationWorksOrder" class="form-select">
+                        <option value="">None</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Installation Date *</label>
+                    <input type="date" id="installationDate" class="form-input" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Start Time *</label>
+                    <input type="time" id="installationStartTime" class="form-input" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Duration (hours) *</label>
+                    <input type="number" id="installationDuration" class="form-input" step="0.5" min="0.5" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">End Time</label>
+                    <input type="time" id="installationEndTime" class="form-input">
+                    <small>Leave empty to auto-calculate from duration</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Location</label>
+                    <input type="text" id="installationLocation" class="form-input" placeholder="e.g., Site Name">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Address</label>
+                    <textarea id="installationAddress" class="form-input" rows="3" placeholder="Full address"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Status</label>
+                    <select id="installationStatus" class="form-select">
+                        <option value="scheduled">Scheduled</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea id="installationNotes" class="form-input" rows="3"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Assigned Users</label>
+                    <div id="userAssignmentContainer">
+                        <div id="assignedUsersList"></div>
+                        <div style="margin-top: 10px;">
+                            <select id="addUserSelect" class="form-select" style="display: inline-block; width: auto;">
+                                <option value="">Select user...</option>
+                            </select>
+                            <input type="text" id="addUserRole" class="form-input" placeholder="Role (optional)" style="display: inline-block; width: auto; margin-left: 10px;">
+                            <button type="button" onclick="addUserAssignment()" class="btn btn-secondary btn-sm">Add User</button>
+                        </div>
+                        <div id="availabilityCheck" style="margin-top: 10px;"></div>
+                    </div>
+                </div>
+                
+                <div class="text-right">
+                    <button type="button" onclick="hideModal('installationModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Installation</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Installation Details Modal -->
+    <div id="installationDetailsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Installation Details</h3>
+                <button class="modal-close" onclick="hideModal('installationDetailsModal')">&times;</button>
+            </div>
+            <div id="installationDetailsContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        let currentView = 'weekly';
+        let currentDate = new Date();
+        let installations = [];
+        let worksOrders = [];
+        let users = [];
+        let editingInstallationId = null;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadData();
+            renderCalendar();
+            
+            // Check if order_id is in URL params
+            const urlParams = new URLSearchParams(window.location.search);
+            const orderId = urlParams.get('order_id');
+            if (orderId) {
+                // Pre-fill the form with the works order
+                setTimeout(() => {
+                    document.getElementById('installationWorksOrder').value = orderId;
+                    showAddInstallationModal();
+                }, 500);
+            }
+        });
+        
+        async function loadData() {
+            try {
+                // Load installations
+                const startDate = getStartOfPeriod();
+                const endDate = getEndOfPeriod();
+                const instResult = await apiCall(`/installations?start_date=${startDate}&end_date=${endDate}`);
+                installations = instResult.installations || [];
+                
+                // Load works orders
+                const ordersResult = await apiCall('/orders');
+                worksOrders = ordersResult.orders || [];
+                
+                // Load users
+                const usersResult = await apiCall('/users');
+                users = usersResult.users || [];
+                
+                // Populate works order dropdown
+                const worksOrderSelect = document.getElementById('installationWorksOrder');
+                worksOrderSelect.innerHTML = '<option value="">None</option>';
+                worksOrders.forEach(order => {
+                    const option = document.createElement('option');
+                    option.value = order.id;
+                    option.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${order.quantity})`;
+                    worksOrderSelect.appendChild(option);
+                });
+                
+                // Populate user dropdown
+                const userSelect = document.getElementById('addUserSelect');
+                userSelect.innerHTML = '<option value="">Select user...</option>';
+                users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.username;
+                    userSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading data:', error);
+                showAlert('Error loading data: ' + error.message, 'error');
+            }
+        }
+        
+        function getStartOfPeriod() {
+            const date = new Date(currentDate);
+            if (currentView === 'weekly') {
+                const day = date.getDay();
+                const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+                date.setDate(diff);
+            } else if (currentView === 'monthly') {
+                date.setDate(1);
+            } else {
+                // daily
+            }
+            return date.toISOString().split('T')[0];
+        }
+        
+        function getEndOfPeriod() {
+            const date = new Date(currentDate);
+            if (currentView === 'weekly') {
+                const day = date.getDay();
+                const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+                date.setDate(diff + 6);
+            } else if (currentView === 'monthly') {
+                date.setMonth(date.getMonth() + 1);
+                date.setDate(0);
+            } else {
+                // daily
+            }
+            return date.toISOString().split('T')[0];
+        }
+        
+        function switchView(view) {
+            currentView = view;
+            document.querySelectorAll('.view-switcher button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`view${view.charAt(0).toUpperCase() + view.slice(1)}`).classList.add('active');
+            renderCalendar();
+        }
+        
+        function previousPeriod() {
+            if (currentView === 'weekly') {
+                currentDate.setDate(currentDate.getDate() - 7);
+            } else if (currentView === 'monthly') {
+                currentDate.setMonth(currentDate.getMonth() - 1);
+            } else {
+                currentDate.setDate(currentDate.getDate() - 1);
+            }
+            loadData().then(() => renderCalendar());
+        }
+        
+        function nextPeriod() {
+            if (currentView === 'weekly') {
+                currentDate.setDate(currentDate.getDate() + 7);
+            } else if (currentView === 'monthly') {
+                currentDate.setMonth(currentDate.getMonth() + 1);
+            } else {
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+            loadData().then(() => renderCalendar());
+        }
+        
+        function goToToday() {
+            currentDate = new Date();
+            loadData().then(() => renderCalendar());
+        }
+        
+        function renderCalendar() {
+            const content = document.getElementById('calendarContent');
+            const dateDisplay = document.getElementById('currentDate');
+            
+            if (currentView === 'weekly') {
+                renderWeeklyView(content);
+                const start = getStartOfPeriod();
+                const end = getEndOfPeriod();
+                const startDate = new Date(start);
+                const endDate = new Date(end);
+                dateDisplay.textContent = `${formatDate(start)} - ${formatDate(end)}`;
+            } else if (currentView === 'monthly') {
+                renderMonthlyView(content);
+                dateDisplay.textContent = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            } else {
+                renderDailyView(content);
+                dateDisplay.textContent = formatDate(currentDate.toISOString().split('T')[0]);
+            }
+        }
+        
+        function renderWeeklyView(container) {
+            const start = getStartOfPeriod();
+            const startDate = new Date(start);
+            const days = [];
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(startDate);
+                date.setDate(date.getDate() + i);
+                days.push(date);
+            }
+            
+            // Group installations by day and time
+            const dayInstallations = {};
+            days.forEach(day => {
+                const dayStr = day.toISOString().split('T')[0];
+                dayInstallations[dayStr] = installations.filter(inst => inst.installation_date === dayStr);
+            });
+            
+            let html = '<div class="weekly-view">';
+            
+            // Header row
+            html += '<div class="weekly-header">Time</div>';
+            days.forEach(day => {
+                html += `<div class="weekly-day-header">${day.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })}</div>`;
+            });
+            
+            // Time slots (8 AM to 6 PM)
+            for (let hour = 8; hour < 18; hour++) {
+                html += `<div class="weekly-time-slot">${hour}:00</div>`;
+                days.forEach(day => {
+                    const dayStr = day.toISOString().split('T')[0];
+                    const dayInsts = dayInstallations[dayStr] || [];
+                    const hourInsts = dayInsts.filter(inst => {
+                        const instHour = parseInt(inst.start_time.split(':')[0]);
+                        return instHour === hour;
+                    });
+                    
+                    html += '<div class="weekly-day-cell">';
+                    hourInsts.forEach(inst => {
+                        html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${inst.product_name || 'Installation'} - ${inst.start_time}">
+                            ${inst.product_name || 'Installation'} ${inst.start_time}
+                            ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
+                        </div>`;
+                    });
+                    html += '</div>';
+                });
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function renderMonthlyView(container) {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startDate = new Date(firstDay);
+            startDate.setDate(startDate.getDate() - startDate.getDay());
+            
+            let html = '<div class="monthly-view">';
+            
+            // Day headers
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            dayNames.forEach(day => {
+                html += `<div class="weekly-day-header">${day}</div>`;
+            });
+            
+            // Calendar days
+            const today = new Date();
+            for (let i = 0; i < 42; i++) {
+                const date = new Date(startDate);
+                date.setDate(startDate.getDate() + i);
+                const dateStr = date.toISOString().split('T')[0];
+                const isOtherMonth = date.getMonth() !== month;
+                const isToday = dateStr === today.toISOString().split('T')[0];
+                
+                const dayInsts = installations.filter(inst => inst.installation_date === dateStr);
+                
+                html += `<div class="monthly-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">`;
+                html += `<div class="monthly-day-number">${date.getDate()}</div>`;
+                
+                if (dayInsts.length > 0) {
+                    html += `<div class="monthly-installation-count">${dayInsts.length} installation(s)</div>`;
+                    dayInsts.slice(0, 3).forEach(inst => {
+                        html += `<div class="monthly-installation-item ${inst.status}" onclick="showInstallationDetails(${inst.id})">
+                            ${inst.start_time} - ${inst.product_name || 'Installation'}
+                        </div>`;
+                    });
+                    if (dayInsts.length > 3) {
+                        html += `<div style="font-size: 10px; color: #666; margin-top: 2px;">+${dayInsts.length - 3} more</div>`;
+                    }
+                }
+                
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function renderDailyView(container) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            const dayInsts = installations.filter(inst => inst.installation_date === dateStr);
+            
+            let html = '<div class="daily-view">';
+            
+            // Time slots
+            for (let hour = 8; hour < 18; hour++) {
+                html += `<div class="daily-time-slot">${hour}:00</div>`;
+                const hourInsts = dayInsts.filter(inst => {
+                    const instHour = parseInt(inst.start_time.split(':')[0]);
+                    return instHour === hour;
+                });
+                
+                html += '<div class="daily-slot-content">';
+                hourInsts.forEach(inst => {
+                    html += `<div class="daily-installation ${inst.status}" onclick="showInstallationDetails(${inst.id})">
+                        <strong>${inst.start_time} - ${inst.end_time || 'N/A'}</strong><br>
+                        ${inst.product_name || 'Installation'}<br>
+                        ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
+                        ${inst.assigned_users && inst.assigned_users.length > 0 ? 
+                            `<small>Assigned: ${inst.assigned_users.map(u => u.username).join(', ')}</small>` : 
+                            '<small>No users assigned</small>'}
+                    </div>`;
+                });
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function showAddInstallationModal() {
+            editingInstallationId = null;
+            assignedUsers = [];
+            document.getElementById('installationModalTitle').textContent = 'Add Installation';
+            document.getElementById('installationForm').reset();
+            document.getElementById('installationId').value = '';
+            document.getElementById('installationDate').value = currentDate.toISOString().split('T')[0];
+            document.getElementById('assignedUsersList').innerHTML = '';
+            document.getElementById('availabilityCheck').innerHTML = '';
+            showModal('installationModal');
+        }
+        
+        async function showEditInstallationModal(id) {
+            try {
+                editingInstallationId = id;
+                const result = await apiCall(`/installations/${id}`);
+                const inst = result.installation;
+                
+                document.getElementById('installationModalTitle').textContent = 'Edit Installation';
+                document.getElementById('installationId').value = inst.id;
+                document.getElementById('installationWorksOrder').value = inst.works_order_id || '';
+                document.getElementById('installationDate').value = inst.installation_date;
+                document.getElementById('installationStartTime').value = inst.start_time;
+                document.getElementById('installationDuration').value = inst.duration_hours;
+                document.getElementById('installationEndTime').value = inst.end_time || '';
+                document.getElementById('installationLocation').value = inst.location || '';
+                document.getElementById('installationAddress').value = inst.address || '';
+                document.getElementById('installationStatus').value = inst.status;
+                document.getElementById('installationNotes').value = inst.notes || '';
+                
+                // Populate assigned users
+                assignedUsers = [];
+                document.getElementById('assignedUsersList').innerHTML = '';
+                if (inst.assigned_users && inst.assigned_users.length > 0) {
+                    inst.assigned_users.forEach(user => {
+                        assignedUsers.push({ user_id: user.user_id, role: user.role || null });
+                        addUserToList(user.user_id, user.username, user.role);
+                    });
+                }
+                
+                checkAvailability();
+                showModal('installationModal');
+            } catch (error) {
+                showAlert('Error loading installation: ' + error.message, 'error');
+            }
+        }
+        
+        let assignedUsers = [];
+        
+        function addUserAssignment() {
+            const select = document.getElementById('addUserSelect');
+            const roleInput = document.getElementById('addUserRole');
+            const userId = parseInt(select.value);
+            
+            if (!userId) {
+                showAlert('Please select a user', 'error');
+                return;
+            }
+            
+            if (assignedUsers.some(u => u.user_id === userId)) {
+                showAlert('User already assigned', 'error');
+                return;
+            }
+            
+            const user = users.find(u => u.id === userId);
+            addUserToList(userId, user.username, roleInput.value);
+            assignedUsers.push({ user_id: userId, role: roleInput.value || null });
+            
+            select.value = '';
+            roleInput.value = '';
+            checkAvailability();
+        }
+        
+        function addUserToList(userId, username, role) {
+            const list = document.getElementById('assignedUsersList');
+            const div = document.createElement('div');
+            div.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #f8f9fa; border-radius: 4px; margin-bottom: 5px;';
+            div.innerHTML = `
+                <span>${username}${role ? ` (${role})` : ''}</span>
+                <button type="button" onclick="removeUserAssignment(${userId})" class="btn btn-danger btn-sm">Remove</button>
+            `;
+            list.appendChild(div);
+        }
+        
+        function removeUserAssignment(userId) {
+            assignedUsers = assignedUsers.filter(u => u.user_id !== userId);
+            const list = document.getElementById('assignedUsersList');
+            Array.from(list.children).forEach(child => {
+                if (child.innerHTML.includes(`removeUserAssignment(${userId})`)) {
+                    child.remove();
+                }
+            });
+            checkAvailability();
+        }
+        
+        async function checkAvailability() {
+            const date = document.getElementById('installationDate').value;
+            const startTime = document.getElementById('installationStartTime').value;
+            const duration = parseFloat(document.getElementById('installationDuration').value);
+            
+            if (!date || !startTime || !duration || assignedUsers.length === 0) {
+                document.getElementById('availabilityCheck').innerHTML = '';
+                return;
+            }
+            
+            const startDateTime = `${date}T${startTime}:00`;
+            const endDateTime = new Date(new Date(startDateTime).getTime() + duration * 60 * 60 * 1000).toISOString();
+            
+            try {
+                const userIds = assignedUsers.map(u => u.user_id);
+                const result = await apiCall('/installations/check-availability', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_ids: userIds,
+                        start_datetime: startDateTime,
+                        end_datetime: endDateTime
+                    })
+                });
+                
+                const availability = result.availability;
+                let html = '<div style="margin-top: 10px;"><strong>Availability Check:</strong><br>';
+                
+                let hasConflicts = false;
+                for (const [userId, status] of Object.entries(availability)) {
+                    const user = users.find(u => u.id === parseInt(userId));
+                    if (status.conflicts && status.conflicts.length > 0) {
+                        hasConflicts = true;
+                        html += `<div style="color: #dc3545; margin-top: 5px;">
+                            <span class="availability-indicator conflict"></span>
+                            <strong>${user.username}:</strong> ${status.conflicts.length} conflict(s)
+                            <ul style="margin: 5px 0 0 20px; font-size: 12px;">`;
+                        status.conflicts.forEach(conflict => {
+                            html += `<li>${conflict.description}</li>`;
+                        });
+                        html += `</ul></div>`;
+                    } else {
+                        html += `<div style="color: #28a745; margin-top: 5px;">
+                            <span class="availability-indicator available"></span>
+                            <strong>${user.username}:</strong> Available
+                        </div>`;
+                    }
+                }
+                
+                html += '</div>';
+                
+                if (hasConflicts) {
+                    html = '<div class="conflict-warning"><strong>Warning:</strong> Some users have scheduling conflicts. ' + html + '</div>';
+                }
+                
+                document.getElementById('availabilityCheck').innerHTML = html;
+            } catch (error) {
+                console.error('Error checking availability:', error);
+            }
+        }
+        
+        // Auto-check availability when date/time changes
+        document.getElementById('installationDate').addEventListener('change', checkAvailability);
+        document.getElementById('installationStartTime').addEventListener('change', checkAvailability);
+        document.getElementById('installationDuration').addEventListener('change', checkAvailability);
+        
+        document.getElementById('installationForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                works_order_id: document.getElementById('installationWorksOrder').value || null,
+                installation_date: document.getElementById('installationDate').value,
+                start_time: document.getElementById('installationStartTime').value,
+                duration_hours: parseFloat(document.getElementById('installationDuration').value),
+                end_time: document.getElementById('installationEndTime').value || null,
+                location: document.getElementById('installationLocation').value || null,
+                address: document.getElementById('installationAddress').value || null,
+                status: document.getElementById('installationStatus').value,
+                notes: document.getElementById('installationNotes').value || null,
+                assigned_users: assignedUsers
+            };
+            
+            try {
+                if (editingInstallationId) {
+                    await apiCall(`/installations/${editingInstallationId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(formData)
+                    });
+                    showAlert('Installation updated successfully');
+                } else {
+                    await apiCall('/installations', {
+                        method: 'POST',
+                        body: JSON.stringify(formData)
+                    });
+                    showAlert('Installation created successfully');
+                }
+                
+                hideModal('installationModal');
+                await loadData();
+                renderCalendar();
+            } catch (error) {
+                showAlert('Error saving installation: ' + error.message, 'error');
+            }
+        });
+        
+        async function showInstallationDetails(id) {
+            try {
+                const result = await apiCall(`/installations/${id}`);
+                const inst = result.installation;
+                
+                let html = `
+                    <div style="padding: 20px;">
+                        <h4>Installation #${inst.id}</h4>
+                        <table class="table">
+                            <tr><th>Works Order:</th><td>${inst.works_order_id ? `Order #${inst.works_order_id} - ${inst.product_name || 'Unknown'}` : 'None'}</td></tr>
+                            <tr><th>Date:</th><td>${formatDate(inst.installation_date)}</td></tr>
+                            <tr><th>Time:</th><td>${inst.start_time} - ${inst.end_time || 'N/A'}</td></tr>
+                            <tr><th>Duration:</th><td>${inst.duration_hours} hours</td></tr>
+                            <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
+                            <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
+                            <tr><th>Status:</th><td><span class="badge badge-info">${inst.status}</span></td></tr>
+                            <tr><th>Notes:</th><td>${inst.notes || '-'}</td></tr>
+                            <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>
+                        </table>
+                        <h5>Assigned Users:</h5>
+                        <ul>
+                            ${inst.assigned_users && inst.assigned_users.length > 0 ? 
+                                inst.assigned_users.map(u => `<li>${u.username}${u.role ? ` (${u.role})` : ''}</li>`).join('') : 
+                                '<li>No users assigned</li>'}
+                        </ul>
+                        <div style="margin-top: 20px;">
+                            <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
+                            <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('installationDetailsContent').innerHTML = html;
+                showModal('installationDetailsModal');
+            } catch (error) {
+                showAlert('Error loading installation details: ' + error.message, 'error');
+            }
+        }
+        
+        async function deleteInstallation(id) {
+            if (!confirm('Are you sure you want to delete this installation?')) {
+                return;
+            }
+            
+            try {
+                await apiCall(`/installations/${id}`, {
+                    method: 'DELETE'
+                });
+                showAlert('Installation deleted successfully');
+                hideModal('installationDetailsModal');
+                await loadData();
+                renderCalendar();
+            } catch (error) {
+                showAlert('Error deleting installation: ' + error.message, 'error');
+            }
+        }
+        
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+    </script>
+</body>
+</html>
+
