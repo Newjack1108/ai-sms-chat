@@ -5087,182 +5087,227 @@ class ProductionDatabase {
     }
     
     static async getInstallationById(id) {
-        // Check if new columns exist
-        let hasStartDate = false;
-        let hasEndDate = false;
-        
-        if (isPostgreSQL) {
-            try {
-                const colCheck = await pool.query(`
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date')
-                `);
-                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
-                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
-            } catch (error) {
-                // If check fails, assume columns don't exist
-            }
-        } else {
-            try {
-                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
-                hasStartDate = tableInfo.some(col => col.name === 'start_date');
-                hasEndDate = tableInfo.some(col => col.name === 'end_date');
-            } catch (error) {
-                // If check fails, assume columns don't exist
-            }
-        }
-        
-        if (isPostgreSQL) {
-            // Support both old and new column names for backward compatibility
-            const result = await pool.query(
-                `SELECT i.*, 
-                 ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
-                 ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
-                 po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
-                 fp.name as product_name,
-                 u.username as created_by_name
-                 FROM installations i
-                 LEFT JOIN product_orders po ON i.works_order_id = po.id
-                 LEFT JOIN finished_products fp ON po.product_id = fp.id
-                 LEFT JOIN production_users u ON i.created_by = u.id
-                 WHERE i.id = $1`,
-                [id]
-            );
-            const installation = result.rows[0] || null;
-            if (installation) {
-                installation.assigned_users = await this.getInstallationAssignments(id) || [];
-                installation.installation_days = await this.getInstallationDays(id) || [];
-            }
-            return installation;
-        } else {
-            const installation = db.prepare(
-                `SELECT i.*, 
-                 ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
-                 ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
-                 po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
-                 fp.name as product_name,
-                 u.username as created_by_name
-                 FROM installations i
-                 LEFT JOIN product_orders po ON i.works_order_id = po.id
-                 LEFT JOIN finished_products fp ON po.product_id = fp.id
-                 LEFT JOIN production_users u ON i.created_by = u.id
-                 WHERE i.id = ?`
-            ).get(id);
-            if (installation) {
-                installation.assigned_users = await this.getInstallationAssignments(id) || [];
-                installation.installation_days = await this.getInstallationDays(id) || [];
-            }
-            return installation;
-        }
-    }
-    
-    static async getAllInstallations(startDate = null, endDate = null) {
-        // Check if new columns exist
-        let hasStartDate = false;
-        let hasEndDate = false;
-        
-        if (isPostgreSQL) {
-            try {
-                const colCheck = await pool.query(`
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date')
-                `);
-                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
-                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
-            } catch (error) {
-                // If check fails, assume columns don't exist
-                console.log('Column check failed, assuming old schema:', error.message);
-            }
-        } else {
-            try {
-                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
-                hasStartDate = tableInfo.some(col => col.name === 'start_date');
-                hasEndDate = tableInfo.some(col => col.name === 'end_date');
-            } catch (error) {
-                console.log('Column check failed, assuming old schema:', error.message);
-            }
-        }
-        
-        let query = `SELECT i.*, 
-                     ${hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as start_date,
-                     ${hasEndDate ? 'COALESCE(i.end_date, i.start_date, i.installation_date)' : hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date'} as end_date,
+        // Try new schema first, fall back to old schema if it fails
+        try {
+            if (isPostgreSQL) {
+                // Support both old and new column names for backward compatibility
+                const result = await pool.query(
+                    `SELECT i.*, 
+                     COALESCE(i.start_date, i.installation_date) as start_date,
+                     COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
                      po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                      fp.name as product_name,
                      u.username as created_by_name
                      FROM installations i
                      LEFT JOIN product_orders po ON i.works_order_id = po.id
                      LEFT JOIN finished_products fp ON po.product_id = fp.id
-                     LEFT JOIN production_users u ON i.created_by = u.id`;
-        const conditions = [];
-        const params = [];
-        let paramIndex = 1;
-        
-        if (startDate) {
-            if (isPostgreSQL) {
-                if (hasEndDate) {
-                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
-                } else if (hasStartDate) {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) >= $${paramIndex})`);
-                } else {
-                    conditions.push(`(i.installation_date >= $${paramIndex})`);
+                     LEFT JOIN production_users u ON i.created_by = u.id
+                     WHERE i.id = $1`,
+                    [id]
+                );
+                const installation = result.rows[0] || null;
+                if (installation) {
+                    installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                    try {
+                        installation.installation_days = await this.getInstallationDays(id) || [];
+                    } catch (error) {
+                        installation.installation_days = []; // Days table might not exist
+                    }
                 }
+                return installation;
             } else {
-                if (hasEndDate) {
+                const installation = db.prepare(
+                    `SELECT i.*, 
+                     COALESCE(i.start_date, i.installation_date) as start_date,
+                     COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                     po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                     fp.name as product_name,
+                     u.username as created_by_name
+                     FROM installations i
+                     LEFT JOIN product_orders po ON i.works_order_id = po.id
+                     LEFT JOIN finished_products fp ON po.product_id = fp.id
+                     LEFT JOIN production_users u ON i.created_by = u.id
+                     WHERE i.id = ?`
+                ).get(id);
+                if (installation) {
+                    installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                    try {
+                        installation.installation_days = await this.getInstallationDays(id) || [];
+                    } catch (error) {
+                        installation.installation_days = []; // Days table might not exist
+                    }
+                }
+                return installation;
+            }
+        } catch (error) {
+            // Fall back to old schema if new columns don't exist
+            console.log('New schema query failed, falling back to old schema:', error.message);
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT i.*, 
+                     i.installation_date as start_date,
+                     i.installation_date as end_date,
+                     po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                     fp.name as product_name,
+                     u.username as created_by_name
+                     FROM installations i
+                     LEFT JOIN product_orders po ON i.works_order_id = po.id
+                     LEFT JOIN finished_products fp ON po.product_id = fp.id
+                     LEFT JOIN production_users u ON i.created_by = u.id
+                     WHERE i.id = $1`,
+                    [id]
+                );
+                const installation = result.rows[0] || null;
+                if (installation) {
+                    installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                    installation.installation_days = [];
+                }
+                return installation;
+            } else {
+                const installation = db.prepare(
+                    `SELECT i.*, 
+                     i.installation_date as start_date,
+                     i.installation_date as end_date,
+                     po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                     fp.name as product_name,
+                     u.username as created_by_name
+                     FROM installations i
+                     LEFT JOIN product_orders po ON i.works_order_id = po.id
+                     LEFT JOIN finished_products fp ON po.product_id = fp.id
+                     LEFT JOIN production_users u ON i.created_by = u.id
+                     WHERE i.id = ?`
+                ).get(id);
+                if (installation) {
+                    installation.assigned_users = await this.getInstallationAssignments(id) || [];
+                    installation.installation_days = [];
+                }
+                return installation;
+            }
+        }
+    }
+    
+    static async getAllInstallations(startDate = null, endDate = null) {
+        // Try new schema first, fall back to old schema if it fails
+        try {
+            let query = `SELECT i.*, 
+                         COALESCE(i.start_date, i.installation_date) as start_date,
+                         COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                         po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                         fp.name as product_name,
+                         u.username as created_by_name
+                         FROM installations i
+                         LEFT JOIN product_orders po ON i.works_order_id = po.id
+                         LEFT JOIN finished_products fp ON po.product_id = fp.id
+                         LEFT JOIN production_users u ON i.created_by = u.id`;
+            const conditions = [];
+            const params = [];
+            let paramIndex = 1;
+            
+            if (startDate) {
+                if (isPostgreSQL) {
+                    conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= $${paramIndex})`);
+                } else {
                     conditions.push(`(COALESCE(i.end_date, i.start_date, i.installation_date) >= ?)`);
-                } else if (hasStartDate) {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) >= ?)`);
+                }
+                params.push(startDate);
+                paramIndex++;
+            }
+            
+            if (endDate) {
+                if (isPostgreSQL) {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
+                } else {
+                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
+                }
+                params.push(endDate);
+                paramIndex++;
+            }
+            
+            if (conditions.length > 0) {
+                query += ` WHERE ${conditions.join(' AND ')}`;
+            }
+            
+            query += ` ORDER BY COALESCE(i.start_date, i.installation_date), i.start_time`;
+            
+            if (isPostgreSQL) {
+                const result = await pool.query(query, params);
+                const installations = result.rows;
+                // Get assignments and days for each installation
+                for (const installation of installations) {
+                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                }
+                return installations;
+            } else {
+                const installations = db.prepare(query).all(...params);
+                // Get assignments and days for each installation
+                for (const installation of installations) {
+                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    installation.installation_days = await this.getInstallationDays(installation.id) || [];
+                }
+                return installations;
+            }
+        } catch (error) {
+            // Fall back to old schema if new columns don't exist
+            console.log('New schema query failed, falling back to old schema:', error.message);
+            let query = `SELECT i.*, 
+                         i.installation_date as start_date,
+                         i.installation_date as end_date,
+                         po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                         fp.name as product_name,
+                         u.username as created_by_name
+                         FROM installations i
+                         LEFT JOIN product_orders po ON i.works_order_id = po.id
+                         LEFT JOIN finished_products fp ON po.product_id = fp.id
+                         LEFT JOIN production_users u ON i.created_by = u.id`;
+            const conditions = [];
+            const params = [];
+            let paramIndex = 1;
+            
+            if (startDate) {
+                if (isPostgreSQL) {
+                    conditions.push(`(i.installation_date >= $${paramIndex})`);
                 } else {
                     conditions.push(`(i.installation_date >= ?)`);
                 }
+                params.push(startDate);
+                paramIndex++;
             }
-            params.push(startDate);
-            paramIndex++;
-        }
-        
-        if (endDate) {
-            if (isPostgreSQL) {
-                if (hasStartDate) {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= $${paramIndex})`);
-                } else {
+            
+            if (endDate) {
+                if (isPostgreSQL) {
                     conditions.push(`(i.installation_date <= $${paramIndex})`);
-                }
-            } else {
-                if (hasStartDate) {
-                    conditions.push(`(COALESCE(i.start_date, i.installation_date) <= ?)`);
                 } else {
                     conditions.push(`(i.installation_date <= ?)`);
                 }
+                params.push(endDate);
+                paramIndex++;
             }
-            params.push(endDate);
-            paramIndex++;
-        }
-        
-        if (conditions.length > 0) {
-            query += ` WHERE ${conditions.join(' AND ')}`;
-        }
-        
-        const orderBy = hasStartDate ? 'COALESCE(i.start_date, i.installation_date)' : 'i.installation_date';
-        query += ` ORDER BY ${orderBy}, i.start_time`;
-        
-        if (isPostgreSQL) {
-            const result = await pool.query(query, params);
-            const installations = result.rows;
-            // Get assignments and days for each installation
-            for (const installation of installations) {
-                installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                installation.installation_days = await this.getInstallationDays(installation.id) || [];
+            
+            if (conditions.length > 0) {
+                query += ` WHERE ${conditions.join(' AND ')}`;
             }
-            return installations;
-        } else {
-            const installations = db.prepare(query).all(...params);
-            // Get assignments and days for each installation
-            for (const installation of installations) {
-                installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                installation.installation_days = await this.getInstallationDays(installation.id) || [];
+            
+            query += ` ORDER BY i.installation_date, i.start_time`;
+            
+            if (isPostgreSQL) {
+                const result = await pool.query(query, params);
+                const installations = result.rows;
+                // Get assignments for each installation
+                for (const installation of installations) {
+                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    installation.installation_days = []; // No days table in old schema
+                }
+                return installations;
+            } else {
+                const installations = db.prepare(query).all(...params);
+                // Get assignments for each installation
+                for (const installation of installations) {
+                    installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
+                    installation.installation_days = []; // No days table in old schema
+                }
+                return installations;
             }
-            return installations;
         }
     }
     
