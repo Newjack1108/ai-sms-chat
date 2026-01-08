@@ -867,6 +867,12 @@ function initializeSQLite() {
         const hasEndDate = tableInfo.some(col => col.name === 'end_date');
         
         if (!hasStartDate) {
+            // Drop old index if it exists
+            try {
+                db.exec('DROP INDEX IF EXISTS idx_installations_date');
+            } catch (error) {
+                // Index might not exist, ignore
+            }
             // Rename installation_date to start_date
             db.exec('ALTER TABLE installations RENAME COLUMN installation_date TO start_date');
             console.log('✅ Renamed installation_date to start_date in installations table');
@@ -880,6 +886,23 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Installations migration check skipped:', error.message);
+    }
+    
+    // Create indexes for installations (after migration)
+    try {
+        const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+        const hasStartDate = tableInfo.some(col => col.name === 'start_date');
+        const dateColumn = hasStartDate ? 'start_date' : 'installation_date';
+        
+        db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_installations_date ON installations(${dateColumn});
+            CREATE INDEX IF NOT EXISTS idx_installations_order ON installations(works_order_id);
+            CREATE INDEX IF NOT EXISTS idx_installations_status ON installations(status);
+            CREATE INDEX IF NOT EXISTS idx_installation_assignments_installation ON installation_assignments(installation_id);
+            CREATE INDEX IF NOT EXISTS idx_installation_assignments_user ON installation_assignments(user_id);
+        `);
+    } catch (error) {
+        console.log('⚠️ Could not create installation indexes:', error.message);
     }
     
     // Create indexes for installation_days
