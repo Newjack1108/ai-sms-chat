@@ -8064,8 +8064,8 @@ class ProductionDatabase {
         }
     }
     
-    // Recalculate days_used based on all approved holiday requests for a user/year
-    // This ensures accuracy and includes future approved holidays
+    // Recalculate days_used based on all approved holiday requests and shutdown periods for a user/year
+    // This ensures accuracy and includes future approved holidays and shutdown deductions
     static async recalculateHolidayDaysUsed(userId, year) {
         const userIdInt = parseInt(userId);
         const yearInt = parseInt(year);
@@ -8095,6 +8095,52 @@ class ProductionDatabase {
         for (const request of approvedRequests) {
             totalDaysUsed += parseFloat(request.days_requested || 0);
         }
+        
+        // Get active shutdown periods and calculate days for this specific year
+        const shutdownPeriods = await this.getActiveShutdownPeriods();
+        let shutdownDaysForYear = 0;
+        
+        for (const period of shutdownPeriods) {
+            const start = new Date(period.start_date);
+            const end = new Date(period.end_date);
+            const startYear = start.getFullYear();
+            const endYear = end.getFullYear();
+            
+            // Calculate weekdays for this shutdown period in the target year
+            if (startYear === endYear && startYear === yearInt) {
+                // Single year shutdown that matches our target year
+                const weekdays = this.calculateWorkingDays(period.start_date, period.end_date);
+                shutdownDaysForYear += weekdays;
+            } else if (startYear <= yearInt && endYear >= yearInt) {
+                // Cross-year shutdown that includes our target year
+                if (startYear === yearInt) {
+                    // Target year is the start year - calculate from start_date to end of year
+                    const yearEnd = new Date(yearInt, 11, 31).toISOString().split('T')[0];
+                    const weekdays = this.calculateWorkingDays(period.start_date, yearEnd);
+                    if (weekdays > 0) {
+                        shutdownDaysForYear += weekdays;
+                    }
+                } else if (endYear === yearInt) {
+                    // Target year is the end year - calculate from start of year to end_date
+                    const yearStart = new Date(yearInt, 0, 1).toISOString().split('T')[0];
+                    const weekdays = this.calculateWorkingDays(yearStart, period.end_date);
+                    if (weekdays > 0) {
+                        shutdownDaysForYear += weekdays;
+                    }
+                } else if (startYear < yearInt && endYear > yearInt) {
+                    // Target year is in between - calculate full year weekdays
+                    const yearStart = new Date(yearInt, 0, 1).toISOString().split('T')[0];
+                    const yearEnd = new Date(yearInt, 11, 31).toISOString().split('T')[0];
+                    const weekdays = this.calculateWorkingDays(yearStart, yearEnd);
+                    if (weekdays > 0) {
+                        shutdownDaysForYear += weekdays;
+                    }
+                }
+            }
+        }
+        
+        // Add shutdown days to total days used
+        totalDaysUsed += shutdownDaysForYear;
         
         // Update the entitlement with the recalculated value
         if (isPostgreSQL) {
