@@ -5047,21 +5047,26 @@ class ProductionDatabase {
             
             // Add installation_days if provided
             if (data.days && Array.isArray(data.days) && data.days.length > 0) {
-                for (const day of data.days) {
-                    await pool.query(
-                        `INSERT INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
-                         VALUES ($1, $2, $3, $4, $5, $6)
-                         ON CONFLICT (installation_id, day_date) DO UPDATE SET
-                         start_time = $3, end_time = $4, duration_hours = $5, notes = $6`,
-                        [
-                            installation.id,
-                            day.date,
-                            day.start_time || null,
-                            day.end_time || null,
-                            day.duration_hours ? parseFloat(day.duration_hours) : null,
-                            day.notes || null
-                        ]
-                    );
+                try {
+                    for (const day of data.days) {
+                        await pool.query(
+                            `INSERT INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                             VALUES ($1, $2, $3, $4, $5, $6)
+                             ON CONFLICT (installation_id, day_date) DO UPDATE SET
+                             start_time = $3, end_time = $4, duration_hours = $5, notes = $6`,
+                            [
+                                installation.id,
+                                day.date,
+                                day.start_time || null,
+                                day.end_time || null,
+                                day.duration_hours ? parseFloat(day.duration_hours) : null,
+                                day.notes || null
+                            ]
+                        );
+                    }
+                } catch (error) {
+                    console.log('Error adding installation_days (table might not exist):', error.message);
+                    // Continue without days if table doesn't exist
                 }
             }
             
@@ -5108,19 +5113,24 @@ class ProductionDatabase {
             
             // Add installation_days if provided
             if (data.days && Array.isArray(data.days) && data.days.length > 0) {
-                const dayStmt = db.prepare(
-                    `INSERT OR REPLACE INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
-                     VALUES (?, ?, ?, ?, ?, ?)`
-                );
-                for (const day of data.days) {
-                    dayStmt.run(
-                        installationId,
-                        day.date,
-                        day.start_time || null,
-                        day.end_time || null,
-                        day.duration_hours ? parseFloat(day.duration_hours) : null,
-                        day.notes || null
+                try {
+                    const dayStmt = db.prepare(
+                        `INSERT OR REPLACE INTO installation_days (installation_id, day_date, start_time, end_time, duration_hours, notes)
+                         VALUES (?, ?, ?, ?, ?, ?)`
                     );
+                    for (const day of data.days) {
+                        dayStmt.run(
+                            installationId,
+                            day.date,
+                            day.start_time || null,
+                            day.end_time || null,
+                            day.duration_hours ? parseFloat(day.duration_hours) : null,
+                            day.notes || null
+                        );
+                    }
+                } catch (error) {
+                    console.log('Error adding installation_days (table might not exist):', error.message);
+                    // Continue without days if table doesn't exist
                 }
             }
             
@@ -5888,30 +5898,67 @@ class ProductionDatabase {
             
             // Check existing installations - handle multi-day installations
             const checkDate = start.toISOString().split('T')[0];
+            
+            // Check which columns exist
+            let hasStartDate = false;
+            let hasEndDate = false;
+            let hasInstallationDate = false;
+            try {
+                const colCheck = await pool.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'installations' AND column_name IN ('start_date', 'end_date', 'installation_date')
+                `);
+                hasStartDate = colCheck.rows.some(r => r.column_name === 'start_date');
+                hasEndDate = colCheck.rows.some(r => r.column_name === 'end_date');
+                hasInstallationDate = colCheck.rows.some(r => r.column_name === 'installation_date');
+            } catch (error) {
+                console.log('Column check failed in getUserConflicts, assuming new schema:', error.message);
+                hasStartDate = true;
+                hasEndDate = true;
+            }
+            
+            // Build query based on which columns exist
+            let dateSelect = '';
+            let dateWhere = '';
+            if (hasStartDate && hasEndDate) {
+                dateSelect = 'i.start_date as start_date, i.end_date as end_date';
+                dateWhere = `$2::date >= i.start_date AND $2::date <= i.end_date`;
+            } else if (hasInstallationDate) {
+                dateSelect = 'i.installation_date as start_date, i.installation_date as end_date';
+                dateWhere = `$2::date = i.installation_date`;
+            } else {
+                dateSelect = 'i.start_date as start_date, COALESCE(i.end_date, i.start_date) as end_date';
+                dateWhere = `$2::date >= i.start_date AND $2::date <= COALESCE(i.end_date, i.start_date)`;
+            }
+            
             const installationResult = await pool.query(
                 `SELECT i.id, 
-                 COALESCE(i.start_date, i.installation_date) as start_date,
-                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 ${dateSelect},
                  i.start_time, i.end_time, i.duration_hours
                  FROM installations i
                  JOIN installation_assignments ia ON i.id = ia.installation_id
                  WHERE ia.user_id = $1
                  AND i.status NOT IN ('cancelled', 'completed')
-                 AND $2::date >= COALESCE(i.start_date, i.installation_date)
-                 AND $2::date <= COALESCE(i.end_date, i.start_date, i.installation_date)`,
+                 AND ${dateWhere}`,
                 [userId, checkDate]
             );
             
             for (const inst of installationResult.rows) {
                 // Get day-specific times if override exists
-                const dayOverrideResult = await pool.query(
-                    `SELECT start_time, end_time, duration_hours
-                     FROM installation_days
-                     WHERE installation_id = $1 AND day_date = $2`,
-                    [inst.id, checkDate]
-                );
-                
-                const dayOverride = dayOverrideResult.rows[0];
+                let dayOverride = null;
+                try {
+                    const dayOverrideResult = await pool.query(
+                        `SELECT start_time, end_time, duration_hours
+                         FROM installation_days
+                         WHERE installation_id = $1 AND day_date = $2`,
+                        [inst.id, checkDate]
+                    );
+                    dayOverride = dayOverrideResult.rows[0];
+                } catch (error) {
+                    console.log('Error fetching installation_days (table might not exist):', error.message);
+                    // Continue without day override
+                }
                 const dayStartTime = dayOverride?.start_time || inst.start_time;
                 const dayEndTime = dayOverride?.end_time || inst.end_time;
                 const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
@@ -5998,26 +6045,59 @@ class ProductionDatabase {
             }
             
             // Check existing installations - handle multi-day installations
+            // Check which columns exist
+            let hasStartDate = false;
+            let hasEndDate = false;
+            let hasInstallationDate = false;
+            try {
+                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+                hasStartDate = tableInfo.some(col => col.name === 'start_date');
+                hasEndDate = tableInfo.some(col => col.name === 'end_date');
+                hasInstallationDate = tableInfo.some(col => col.name === 'installation_date');
+            } catch (error) {
+                console.log('Column check failed in getUserConflicts (SQLite), assuming new schema:', error.message);
+                hasStartDate = true;
+                hasEndDate = true;
+            }
+            
+            // Build query based on which columns exist
+            let dateSelect = '';
+            let dateWhere = '';
+            if (hasStartDate && hasEndDate) {
+                dateSelect = 'i.start_date as start_date, i.end_date as end_date';
+                dateWhere = `? >= i.start_date AND ? <= i.end_date`;
+            } else if (hasInstallationDate) {
+                dateSelect = 'i.installation_date as start_date, i.installation_date as end_date';
+                dateWhere = `? = i.installation_date`;
+            } else {
+                dateSelect = 'i.start_date as start_date, COALESCE(i.end_date, i.start_date) as end_date';
+                dateWhere = `? >= i.start_date AND ? <= COALESCE(i.end_date, i.start_date)`;
+            }
+            
             const installations = db.prepare(
                 `SELECT i.id, 
-                 COALESCE(i.start_date, i.installation_date) as start_date,
-                 COALESCE(i.end_date, i.start_date, i.installation_date) as end_date,
+                 ${dateSelect},
                  i.start_time, i.end_time, i.duration_hours
                  FROM installations i
                  JOIN installation_assignments ia ON i.id = ia.installation_id
                  WHERE ia.user_id = ?
                  AND i.status NOT IN ('cancelled', 'completed')
-                 AND ? >= COALESCE(i.start_date, i.installation_date)
-                 AND ? <= COALESCE(i.end_date, i.start_date, i.installation_date)`
+                 AND ${dateWhere}`
             ).all(userId, startDateStr, startDateStr);
             
             for (const inst of installations) {
                 // Get day-specific times if override exists
-                const dayOverride = db.prepare(
-                    `SELECT start_time, end_time, duration_hours
-                     FROM installation_days
-                     WHERE installation_id = ? AND day_date = ?`
-                ).get(inst.id, startDateStr);
+                let dayOverride = null;
+                try {
+                    dayOverride = db.prepare(
+                        `SELECT start_time, end_time, duration_hours
+                         FROM installation_days
+                         WHERE installation_id = ? AND day_date = ?`
+                    ).get(inst.id, startDateStr);
+                } catch (error) {
+                    console.log('Error fetching installation_days (table might not exist):', error.message);
+                    // Continue without day override
+                }
                 
                 const dayStartTime = dayOverride?.start_time || inst.start_time;
                 const dayEndTime = dayOverride?.end_time || inst.end_time;

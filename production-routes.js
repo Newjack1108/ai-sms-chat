@@ -1437,7 +1437,9 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
         res.json({ success: true, installation });
     } catch (error) {
         console.error('Create installation error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create installation' });
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to create installation', details: error.message });
     }
 });
 
@@ -1539,7 +1541,9 @@ router.post('/installations/check-availability', requireProductionAuth, async (r
         res.json({ success: true, availability });
     } catch (error) {
         console.error('Check availability error:', error);
-        res.status(500).json({ success: false, error: 'Failed to check availability' });
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        res.status(500).json({ success: false, error: 'Failed to check availability', details: error.message });
     }
 });
 
