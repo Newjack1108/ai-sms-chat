@@ -1410,8 +1410,8 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
         const startDate = start_date || installation_date;
         const endDate = end_date || start_date || installation_date;
         
-        if (!startDate || !start_time || !duration_hours) {
-            return res.status(400).json({ success: false, error: 'Start date, start time, and duration are required' });
+        if (!startDate || !duration_hours) {
+            return res.status(400).json({ success: false, error: 'Start date and duration are required' });
         }
         
         if (endDate < startDate) {

@@ -5007,7 +5007,7 @@ class ProductionDatabase {
         const endDate = data.end_date || data.start_date || data.installation_date;
         
         if (isPostgreSQL) {
-            // Calculate end_time if not provided
+            // Calculate end_time if not provided (only if start_time exists)
             let endTime = data.end_time;
             if (!endTime && data.start_time && data.duration_hours) {
                 const start = new Date(`2000-01-01 ${data.start_time}`);
@@ -5022,7 +5022,7 @@ class ProductionDatabase {
                     data.works_order_id || null,
                     startDate,
                     endDate,
-                    data.start_time,
+                    data.start_time || null,
                     endTime || null,
                     parseFloat(data.duration_hours),
                     data.location || null,
@@ -5088,7 +5088,7 @@ class ProductionDatabase {
                 data.works_order_id || null,
                 startDate,
                 endDate,
-                data.start_time,
+                data.start_time || null,
                 endTime || null,
                 parseFloat(data.duration_hours),
                 data.location || null,

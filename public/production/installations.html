@@ -263,21 +263,9 @@
                 </div>
                 
                 <div class="form-group">
-                    <label class="form-label">Start Time (Default) *</label>
-                    <input type="time" id="installationStartTime" class="form-input" required>
-                    <small>Default start time for all days (can be overridden per day below)</small>
-                </div>
-                
-                <div class="form-group">
                     <label class="form-label">Duration (hours, Default) *</label>
                     <input type="number" id="installationDuration" class="form-input" step="0.5" min="0.5" required>
                     <small>Default duration for all days (can be overridden per day below)</small>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">End Time (Default)</label>
-                    <input type="time" id="installationEndTime" class="form-input">
-                    <small>Leave empty to auto-calculate from duration</small>
                 </div>
                 
                 <div class="form-group">
@@ -529,9 +517,9 @@
                     if (dayStr >= instStartDate && dayStr <= instEndDate) {
                         // Get day-specific times or use defaults
                         const dayOverride = inst.installation_days?.find(d => d.day_date === dayStr);
-                        const dayStartTime = dayOverride?.start_time || inst.start_time;
+                        const dayStartTime = dayOverride?.start_time || inst.start_time || null;
                         const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
-                        const dayEndTime = dayOverride?.end_time || inst.end_time;
+                        const dayEndTime = dayOverride?.end_time || inst.end_time || null;
                         
                         dayInstallations[dayStr].push({
                             ...inst,
@@ -554,33 +542,27 @@
                 html += `<div class="weekly-day-header">${day.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })}</div>`;
             });
             
-            // Time slots (8 AM to 6 PM)
-            for (let hour = 8; hour < 18; hour++) {
-                html += `<div class="weekly-time-slot">${hour}:00</div>`;
-                days.forEach(day => {
-                    const dayStr = day.toISOString().split('T')[0];
-                    const dayInsts = dayInstallations[dayStr] || [];
-                    const hourInsts = dayInsts.filter(inst => {
-                        const instHour = parseInt(inst.dayStartTime.split(':')[0]);
-                        return instHour === hour;
-                    });
-                    
-                    html += '<div class="weekly-day-cell">';
-                    hourInsts.forEach(inst => {
-                        const instStartDate = inst.start_date || inst.installation_date;
-                        const instEndDate = inst.end_date || instStartDate;
-                        const title = inst.isMultiDay ? 
-                            `${inst.product_name || 'Installation'} (${instStartDate} to ${instEndDate}) - ${inst.dayStartTime}` :
-                            `${inst.product_name || 'Installation'} - ${inst.dayStartTime}`;
-                        html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${title}">
-                            ${inst.product_name || 'Installation'} ${inst.dayStartTime}
-                            ${inst.isMultiDay ? '<span class="user-badge">Multi-day</span>' : ''}
-                            ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
-                        </div>`;
-                    });
-                    html += '</div>';
+            // Show all-day installations (no time slots since times are removed)
+            html += '<div class="weekly-time-slot">All Day</div>';
+            days.forEach(day => {
+                const dayStr = day.toISOString().split('T')[0];
+                const dayInsts = dayInstallations[dayStr] || [];
+                
+                html += '<div class="weekly-day-cell">';
+                dayInsts.forEach(inst => {
+                    const instStartDate = inst.start_date || inst.installation_date;
+                    const instEndDate = inst.end_date || instStartDate;
+                    const title = inst.isMultiDay ? 
+                        `${inst.product_name || 'Installation'} (${instStartDate} to ${instEndDate})` :
+                        `${inst.product_name || 'Installation'}`;
+                    html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${title}">
+                        ${inst.product_name || 'Installation'}
+                        ${inst.isMultiDay ? '<span class="user-badge">Multi-day</span>' : ''}
+                        ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
+                    </div>`;
                 });
-            }
+                html += '</div>';
+            });
             
             html += '</div>';
             container.innerHTML = html;
@@ -647,8 +629,8 @@
                 if (dateStr >= instStartDate && dateStr <= instEndDate) {
                     // Get day-specific times or use defaults
                     const dayOverride = inst.installation_days?.find(d => d.day_date === dateStr);
-                    const dayStartTime = dayOverride?.start_time || inst.start_time;
-                    const dayEndTime = dayOverride?.end_time || inst.end_time;
+                    const dayStartTime = dayOverride?.start_time || inst.start_time || null;
+                    const dayEndTime = dayOverride?.end_time || inst.end_time || null;
                     const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
                     
                     dayInsts.push({
@@ -663,29 +645,22 @@
             
             let html = '<div class="daily-view">';
             
-            // Time slots
-            for (let hour = 8; hour < 18; hour++) {
-                html += `<div class="daily-time-slot">${hour}:00</div>`;
-                const hourInsts = dayInsts.filter(inst => {
-                    const instHour = parseInt(inst.dayStartTime.split(':')[0]);
-                    return instHour === hour;
-                });
-                
-                html += '<div class="daily-slot-content">';
-                hourInsts.forEach(inst => {
-                    const dateRange = inst.isMultiDay ? 
-                        ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
-                    html += `<div class="daily-installation ${inst.status}" onclick="showInstallationDetails(${inst.id})">
-                        <strong>${inst.dayStartTime} - ${inst.dayEndTime || 'N/A'}</strong>${dateRange}<br>
-                        ${inst.product_name || 'Installation'}<br>
-                        ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
-                        ${inst.assigned_users && inst.assigned_users.length > 0 ? 
-                            `<small>Assigned: ${inst.assigned_users.map(u => u.username).join(', ')}</small>` : 
-                            '<small>No users assigned</small>'}
-                    </div>`;
-                });
-                html += '</div>';
-            }
+            // Show all installations for the day (no time slots since times are removed)
+            html += '<div class="daily-time-slot">All Day</div>';
+            html += '<div class="daily-slot-content">';
+            dayInsts.forEach(inst => {
+                const dateRange = inst.isMultiDay ? 
+                    ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
+                html += `<div class="daily-installation ${inst.status}" onclick="showInstallationDetails(${inst.id})">
+                    <strong>${inst.product_name || 'Installation'}</strong>${dateRange}<br>
+                    ${inst.duration_hours ? `<small>Duration: ${inst.duration_hours} hours</small><br>` : ''}
+                    ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
+                    ${inst.assigned_users && inst.assigned_users.length > 0 ? 
+                        `<small>Assigned: ${inst.assigned_users.map(u => u.username).join(', ')}</small>` : 
+                        '<small>No users assigned</small>'}
+                </div>`;
+            });
+            html += '</div>';
             
             html += '</div>';
             container.innerHTML = html;
@@ -722,9 +697,7 @@
                 const endDate = inst.end_date || startDate;
                 document.getElementById('installationStartDate').value = startDate;
                 document.getElementById('installationEndDate').value = endDate;
-                document.getElementById('installationStartTime').value = inst.start_time;
                 document.getElementById('installationDuration').value = inst.duration_hours;
-                document.getElementById('installationEndTime').value = inst.end_time || '';
                 document.getElementById('installationLocation').value = inst.location || '';
                 document.getElementById('installationAddress').value = inst.address || '';
                 document.getElementById('installationStatus').value = inst.status;
@@ -745,8 +718,6 @@
                 if (inst.installation_days && inst.installation_days.length > 0) {
                     dayOverrides = inst.installation_days.map(day => ({
                         date: day.day_date,
-                        start_time: day.start_time || null,
-                        end_time: day.end_time || null,
                         duration_hours: day.duration_hours || null,
                         notes: day.notes || null
                     }));
@@ -816,10 +787,9 @@
         async function checkAvailability() {
             const startDate = document.getElementById('installationStartDate').value;
             const endDate = document.getElementById('installationEndDate').value;
-            const startTime = document.getElementById('installationStartTime').value;
             const duration = parseFloat(document.getElementById('installationDuration').value);
             
-            if (!startDate || !endDate || !startTime || !duration || assignedUsers.length === 0) {
+            if (!startDate || !endDate || !duration || assignedUsers.length === 0) {
                 document.getElementById('availabilityCheck').innerHTML = '';
                 return;
             }
@@ -838,10 +808,11 @@
                     
                     // Get day-specific times or use defaults
                     const dayOverride = dayOverrides.find(d => d.date === dateStr);
-                    const dayStartTime = dayOverride?.start_time || startTime;
+                    const dayStartTime = dayOverride?.start_time || null;
                     const dayDuration = dayOverride?.duration_hours || duration;
                     
-                    const startDateTime = `${dateStr}T${dayStartTime}:00`;
+                    // If no start time, use start of day (00:00) and calculate end from duration
+                    const startDateTime = dayStartTime ? `${dateStr}T${dayStartTime}:00` : `${dateStr}T00:00:00`;
                     const endDateTime = new Date(new Date(startDateTime).getTime() + parseFloat(dayDuration) * 60 * 60 * 1000).toISOString();
                     
                     const result = await apiCall('/installations/check-availability', {
@@ -943,21 +914,17 @@
             }
             
             let html = '<table class="table" style="font-size: 12px;">';
-            html += '<thead><tr><th>Date</th><th>Start Time</th><th>End Time</th><th>Duration</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Date</th><th>Duration</th><th>Notes</th><th>Actions</th></tr></thead><tbody>';
             
             days.forEach(day => {
                 const hasOverride = day.override !== null;
                 html += `<tr ${hasOverride ? 'style="background: #fff3cd;"' : ''}>`;
                 html += `<td>${formatDate(day.date)}</td>`;
                 if (hasOverride) {
-                    html += `<td><input type="time" class="form-input" value="${day.override.start_time || ''}" onchange="updateDayOverride('${day.date}', 'start_time', this.value)" style="width: 100px;"></td>`;
-                    html += `<td><input type="time" class="form-input" value="${day.override.end_time || ''}" onchange="updateDayOverride('${day.date}', 'end_time', this.value)" style="width: 100px;"></td>`;
                     html += `<td><input type="number" class="form-input" step="0.5" value="${day.override.duration_hours || ''}" onchange="updateDayOverride('${day.date}', 'duration_hours', this.value)" style="width: 80px;"></td>`;
                     html += `<td><input type="text" class="form-input" value="${day.override.notes || ''}" onchange="updateDayOverride('${day.date}', 'notes', this.value)" style="width: 150px;"></td>`;
                     html += `<td><button type="button" onclick="removeDayOverride('${day.date}')" class="btn btn-danger btn-sm">Remove</button></td>`;
                 } else {
-                    html += `<td><em>Default</em></td>`;
-                    html += `<td><em>Default</em></td>`;
                     html += `<td><em>Default</em></td>`;
                     html += `<td>-</td>`;
                     html += `<td><button type="button" onclick="addDayOverrideForDate('${day.date}')" class="btn btn-secondary btn-sm">Override</button></td>`;
@@ -1002,8 +969,6 @@
             
             dayOverrides.push({
                 date: dateStr,
-                start_time: null,
-                end_time: null,
                 duration_hours: null,
                 notes: null
             });
@@ -1050,7 +1015,6 @@
         });
         
         // Auto-check availability when date/time changes
-        document.getElementById('installationStartTime').addEventListener('change', checkAvailability);
         document.getElementById('installationDuration').addEventListener('change', checkAvailability);
         
         document.getElementById('installationForm').addEventListener('submit', async (e) => {
@@ -1068,9 +1032,9 @@
                 works_order_id: document.getElementById('installationWorksOrder').value || null,
                 start_date: startDate,
                 end_date: endDate,
-                start_time: document.getElementById('installationStartTime').value,
+                start_time: null,
                 duration_hours: parseFloat(document.getElementById('installationDuration').value),
-                end_time: document.getElementById('installationEndTime').value || null,
+                end_time: null,
                 location: document.getElementById('installationLocation').value || null,
                 address: document.getElementById('installationAddress').value || null,
                 status: document.getElementById('installationStatus').value,
@@ -1113,7 +1077,6 @@
                         <table class="table">
                             <tr><th>Works Order:</th><td>${inst.works_order_id ? `Order #${inst.works_order_id} - ${inst.product_name || 'Unknown'}` : 'None'}</td></tr>
                             <tr><th>Date:</th><td>${formatDate(inst.installation_date)}</td></tr>
-                            <tr><th>Time:</th><td>${inst.start_time} - ${inst.end_time || 'N/A'}</td></tr>
                             <tr><th>Duration:</th><td>${inst.duration_hours} hours</td></tr>
                             <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
                             <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
