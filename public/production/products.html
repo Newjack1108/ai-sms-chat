@@ -330,13 +330,18 @@
                                                 data-component-type="${comp.component_type}"
                                                 data-component-id="${comp.component_id}"
                                                 data-unit="${comp.unit}"
-                                                onkeypress="if(event.key === 'Enter') saveComponentQuantity(this)"
-                                                onblur="saveComponentQuantity(this)">
+                                                data-original-value="${comp.quantity_required}"
+                                                onchange="showSaveButton(${comp.id})"
+                                                oninput="showSaveButton(${comp.id})">
                                         ` : comp.quantity_required}
                                     </td>
                                     <td>${comp.unit}</td>
                                     ${currentUser.role === 'admin' ? `
                                         <td>
+                                            <span id="save-buttons-${comp.id}" style="display: none;">
+                                                <button onclick="saveComponentQuantity(${comp.id})" class="btn btn-primary btn-sm" style="margin-right: 5px;">Save</button>
+                                                <button onclick="cancelQuantityEdit(${comp.id})" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Cancel</button>
+                                            </span>
                                             <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
                                         </td>
                                     ` : ''}
@@ -426,28 +431,49 @@
             }
         }
         
-        async function saveComponentQuantity(inputElement) {
-            if (!inputElement) return;
+        function showSaveButton(compId) {
+            const qtyInput = document.getElementById(`qty-${compId}`);
+            const saveButtons = document.getElementById(`save-buttons-${compId}`);
             
-            const compId = inputElement.dataset.compId;
-            const componentType = inputElement.dataset.componentType;
-            const componentId = inputElement.dataset.componentId;
-            const unit = inputElement.dataset.unit;
+            if (!qtyInput || !saveButtons) return;
+            
+            const originalValue = parseFloat(qtyInput.dataset.originalValue);
+            const currentValue = parseFloat(qtyInput.value);
+            
+            // Show save buttons if value has changed
+            if (!isNaN(currentValue) && currentValue !== originalValue) {
+                saveButtons.style.display = 'inline';
+            } else {
+                saveButtons.style.display = 'none';
+            }
+        }
+        
+        async function saveComponentQuantity(compId) {
+            const qtyInput = document.getElementById(`qty-${compId}`);
+            if (!qtyInput) return;
+            
+            const componentType = qtyInput.dataset.componentType;
+            const componentId = qtyInput.dataset.componentId;
+            const unit = qtyInput.dataset.unit;
             
             if (!compId || !componentType || !componentId || !unit) {
                 showAlert('Missing component data', 'error');
                 return;
             }
             
-            const newQuantity = parseFloat(inputElement.value);
+            const newQuantity = parseFloat(qtyInput.value);
             if (isNaN(newQuantity) || newQuantity < 0) {
                 showAlert('Invalid quantity', 'error');
-                viewComponents(currentProductId); // Refresh to reset value
+                cancelQuantityEdit(compId); // Reset to original value
                 return;
             }
             
             // Show loading state
-            inputElement.disabled = true;
+            const saveButtons = document.getElementById(`save-buttons-${compId}`);
+            if (saveButtons) {
+                saveButtons.style.display = 'none';
+            }
+            qtyInput.disabled = true;
             
             try {
                 await apiCall(`/products/${currentProductId}/components/${compId}`, {
@@ -463,7 +489,24 @@
                 viewComponents(currentProductId);
             } catch (error) {
                 showAlert(error.message || 'Failed to update quantity', 'error');
-                viewComponents(currentProductId); // Refresh to reset value
+                qtyInput.disabled = false;
+                showSaveButton(compId); // Show buttons again on error
+            }
+        }
+        
+        function cancelQuantityEdit(compId) {
+            const qtyInput = document.getElementById(`qty-${compId}`);
+            const saveButtons = document.getElementById(`save-buttons-${compId}`);
+            
+            if (!qtyInput) return;
+            
+            // Reset to original value
+            const originalValue = qtyInput.dataset.originalValue;
+            qtyInput.value = originalValue;
+            
+            // Hide save buttons
+            if (saveButtons) {
+                saveButtons.style.display = 'none';
             }
         }
         
