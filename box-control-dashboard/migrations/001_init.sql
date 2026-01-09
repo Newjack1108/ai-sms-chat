@@ -2,8 +2,7 @@
 -- All prices ex-VAT
 
 -- Settings table (single row with all business constants)
--- Note: Using box_control_settings to avoid conflict with ai-sms-chat settings table
-CREATE TABLE IF NOT EXISTS box_control_settings (
+CREATE TABLE IF NOT EXISTS settings (
     id SERIAL PRIMARY KEY,
     monthly_contribution_target NUMERIC NOT NULL DEFAULT 55000,
     survival_contribution NUMERIC NOT NULL DEFAULT 41900,
@@ -69,5 +68,6 @@ SELECT
     640,
     0.95,
     0.95
-WHERE NOT EXISTS (SELECT 1 FROM box_control_settings);
+WHERE NOT EXISTS (SELECT 1 FROM settings);
+
 

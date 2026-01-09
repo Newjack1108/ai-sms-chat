@@ -64,11 +64,11 @@ async function query(text, params) {
 
 // Settings operations
 async function getSettings() {
-    const result = await query('SELECT * FROM box_control_settings LIMIT 1');
+    const result = await query('SELECT * FROM settings LIMIT 1');
     if (result.rows.length === 0) {
         // If no settings exist, initialize with defaults
         await initializeSchema();
-        const result2 = await query('SELECT * FROM box_control_settings LIMIT 1');
+        const result2 = await query('SELECT * FROM settings LIMIT 1');
         return result2.rows[0];
     }
     return result.rows[0];
@@ -104,10 +104,9 @@ async function updateSettings(updates) {
     }
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(1); // Dummy value for paramIndex
 
-    const sql = `UPDATE box_control_settings SET ${fields.join(', ')} WHERE id = 1`;
-    await query(sql, values.slice(0, -1)); // Remove the dummy value
+    const sql = `UPDATE settings SET ${fields.join(', ')} WHERE id = 1`;
+    await query(sql, values);
     return await getSettings();
 }
 
@@ -283,4 +282,5 @@ module.exports = {
     getProductionLast4Weeks,
     getForwardLook
 };
+
 
