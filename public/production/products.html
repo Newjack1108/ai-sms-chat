@@ -316,10 +316,24 @@
                         </thead>
                         <tbody>
                             ${componentsData.components.length === 0 ? '<tr><td colspan="5">No components</td></tr>' : componentsData.components.map(comp => `
-                                <tr>
+                                <tr id="comp-row-${comp.id}">
                                     <td><span class="badge badge-info">${comp.component_type === 'raw_material' ? 'Raw Material' : comp.component_type === 'component' ? 'Component' : 'Built Item'}</span></td>
                                     <td>${comp.component_name || 'Unknown'}</td>
-                                    <td>${comp.quantity_required}</td>
+                                    <td>
+                                        ${currentUser.role === 'admin' ? `
+                                            <input type="number" step="0.01" 
+                                                id="qty-${comp.id}" 
+                                                class="form-input" 
+                                                value="${comp.quantity_required}" 
+                                                style="width: 100px; display: inline-block;"
+                                                data-comp-id="${comp.id}"
+                                                data-component-type="${comp.component_type}"
+                                                data-component-id="${comp.component_id}"
+                                                data-unit="${comp.unit}"
+                                                onkeypress="if(event.key === 'Enter') saveComponentQuantity(this)"
+                                                onblur="saveComponentQuantity(this)">
+                                        ` : comp.quantity_required}
+                                    </td>
                                     <td>${comp.unit}</td>
                                     ${currentUser.role === 'admin' ? `
                                         <td>
@@ -409,6 +423,47 @@
                 panels.forEach(panel => {
                     select.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
                 });
+            }
+        }
+        
+        async function saveComponentQuantity(inputElement) {
+            if (!inputElement) return;
+            
+            const compId = inputElement.dataset.compId;
+            const componentType = inputElement.dataset.componentType;
+            const componentId = inputElement.dataset.componentId;
+            const unit = inputElement.dataset.unit;
+            
+            if (!compId || !componentType || !componentId || !unit) {
+                showAlert('Missing component data', 'error');
+                return;
+            }
+            
+            const newQuantity = parseFloat(inputElement.value);
+            if (isNaN(newQuantity) || newQuantity < 0) {
+                showAlert('Invalid quantity', 'error');
+                viewComponents(currentProductId); // Refresh to reset value
+                return;
+            }
+            
+            // Show loading state
+            inputElement.disabled = true;
+            
+            try {
+                await apiCall(`/products/${currentProductId}/components/${compId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        component_type: componentType,
+                        component_id: parseInt(componentId),
+                        quantity_required: newQuantity,
+                        unit: unit
+                    })
+                });
+                showAlert('Quantity updated');
+                viewComponents(currentProductId);
+            } catch (error) {
+                showAlert(error.message || 'Failed to update quantity', 'error');
+                viewComponents(currentProductId); // Refresh to reset value
             }
         }
         
