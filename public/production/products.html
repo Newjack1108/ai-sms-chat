@@ -297,9 +297,25 @@
             try {
                 const componentsData = await apiCall(`/products/${productId}/components`);
                 
+                // Get product name from allProducts array or fetch from API
+                let productName = null;
+                const product = allProducts.find(p => p.id === productId);
+                if (product) {
+                    productName = product.name;
+                } else {
+                    // Fallback: fetch product from API if not in array
+                    try {
+                        const productData = await apiCall(`/products/${productId}`);
+                        productName = productData.product ? productData.product.name : `Product #${productId}`;
+                    } catch (error) {
+                        productName = `Product #${productId}`;
+                    }
+                }
+                
                 document.getElementById('componentsModalTitle').textContent = 'Product Components';
                 document.getElementById('componentsContent').innerHTML = `
                     <div style="margin-bottom: 20px;">
+                        <h4 style="margin-bottom: 15px; color: #333;">${productName || 'Product Components'}</h4>
                         ${currentUser.role === 'admin' ? `
                             <button onclick="showAddComponent()" class="btn btn-primary">Add Component</button>
                         ` : ''}
