@@ -8286,7 +8286,7 @@ class ProductionDatabase {
     }
     
     // Admin-only: Directly amend timesheet entry (applies immediately, no approval needed)
-    static async adminAmendTimesheetEntry(entryId, adminId, amendedClockIn, amendedClockOut, reason) {
+    static async adminAmendTimesheetEntry(entryId, adminId, amendedClockIn, amendedClockOut, reason, overnightAway) {
         const entry = await this.getTimesheetEntryById(entryId);
         if (!entry) {
             throw new Error('Timesheet entry not found');
@@ -8295,6 +8295,7 @@ class ProductionDatabase {
         console.log(`Admin amending timesheet entry ${entryId}:`, {
             original: { clock_in: entry.clock_in_time, clock_out: entry.clock_out_time },
             amended: { clock_in: amendedClockIn, clock_out: amendedClockOut },
+            overnight_away: overnightAway,
             adminId
         });
         
@@ -8354,11 +8355,6 @@ class ProductionDatabase {
                  amendedClockIn, amendedClockOut, reason || 'Amended by admin', adminId, now);
         }
         
-        // Recalculate hours for this entry
-        const dailyEntry = await this.getDailyEntryByTimesheetEntryId(entryId);
-        const overnightAway = dailyEntry ? dailyEntry.overnight_away : false;
-        await this.calculateTimesheetHours(entryId, overnightAway);
-        
         // Get clock-in date to determine which week
         const clockInDate = new Date(amendedClockIn);
         const clockInDateStr = clockInDate.toISOString().split('T')[0];
@@ -8379,8 +8375,34 @@ class ProductionDatabase {
             dailyEntryRecord = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entryId);
         }
         
+        // Update overnight_away if provided
+        if (overnightAway !== undefined) {
+            await this.updateDailyEntry(dailyEntryRecord.id, {
+                overnight_away: overnightAway
+            });
+        }
+        
+        // Get the current overnight_away value (either from update or existing)
+        const updatedDailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+        const finalOvernightAway = overnightAway !== undefined ? overnightAway : (updatedDailyEntry ? updatedDailyEntry.overnight_away : false);
+        
+        // Recalculate hours for ALL entries for this day with the correct overnight_away value
+        const weekEnd = new Date(monday);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        const allEntries = await this.getTimesheetHistory(entry.user_id, weekStartDate, weekEndStr);
+        const dayEntries = allEntries.filter(te => {
+            const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+            return teDate === clockInDateStr && te.clock_out_time;
+        });
+        
+        // Recalculate hours for each entry on this day
+        for (const dayEntry of dayEntries) {
+            await this.calculateTimesheetHours(dayEntry.id, finalOvernightAway);
+        }
+        
         // Aggregate hours from ALL entries for this day
-        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
+        const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, finalOvernightAway);
         
         // Update daily entry with aggregated hours from all entries
         await this.updateDailyEntry(dailyEntryRecord.id, {
@@ -8531,7 +8553,7 @@ class ProductionDatabase {
             let dailyDataMap = {};
             if (weeklyTimesheet.rows.length > 0) {
                 const dailyDataResult = await pool.query(
-                    `SELECT entry_date, daily_notes, day_type 
+                    `SELECT entry_date, daily_notes, day_type, overnight_away 
                      FROM timesheet_daily_entries 
                      WHERE weekly_timesheet_id = $1 
                      AND entry_date >= $2::date 
@@ -8542,19 +8564,21 @@ class ProductionDatabase {
                 dailyDataResult.rows.forEach(row => {
                     dailyDataMap[row.entry_date] = {
                         daily_notes: row.daily_notes,
-                        day_type: row.day_type
+                        day_type: row.day_type,
+                        overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
                     };
                 });
             }
             
-            // Merge daily notes and day_type into entries
+            // Merge daily notes, day_type, and overnight_away into entries
             const entries = entriesResult.rows.map(entry => {
                 const entryDate = entry.entry_date;
                 const dailyData = dailyDataMap[entryDate] || {};
                 return {
                     ...entry,
                     daily_notes: dailyData.daily_notes || entry.daily_notes || null,
-                    day_type: entry.day_type || dailyData.day_type || null
+                    day_type: entry.day_type || dailyData.day_type || null,
+                    overnight_away: dailyData.overnight_away !== undefined ? dailyData.overnight_away : (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1')
                 };
             });
             
@@ -8606,7 +8630,7 @@ class ProductionDatabase {
             let dailyDataMap = {};
             if (weeklyTimesheet) {
                 const dailyDataResult = db.prepare(
-                    `SELECT entry_date, daily_notes, day_type 
+                    `SELECT entry_date, daily_notes, day_type, overnight_away 
                      FROM timesheet_daily_entries 
                      WHERE weekly_timesheet_id = ? 
                      AND entry_date >= ? 
@@ -8616,19 +8640,21 @@ class ProductionDatabase {
                 dailyDataResult.forEach(row => {
                     dailyDataMap[row.entry_date] = {
                         daily_notes: row.daily_notes,
-                        day_type: row.day_type
+                        day_type: row.day_type,
+                        overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
                     };
                 });
             }
             
-            // Merge daily notes and day_type into entries
+            // Merge daily notes, day_type, and overnight_away into entries
             const entries = entriesResult.map(entry => {
                 const entryDate = entry.entry_date;
                 const dailyData = dailyDataMap[entryDate] || {};
                 return {
                     ...entry,
                     daily_notes: dailyData.daily_notes || entry.daily_notes || null,
-                    day_type: entry.day_type || dailyData.day_type || null
+                    day_type: entry.day_type || dailyData.day_type || null,
+                    overnight_away: dailyData.overnight_away !== undefined ? dailyData.overnight_away : (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1')
                 };
             });
             

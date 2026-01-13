@@ -346,6 +346,14 @@
                         <textarea id="adminEditReason" class="form-control" rows="3" required placeholder="Enter reason for editing this timesheet entry"></textarea>
                     </div>
                     
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="adminEditOvernight" style="width: auto; margin: 0;">
+                            <span>Overnight away from home</span>
+                        </label>
+                        <small style="color: #666; display: block; margin-top: 4px;">When checked, all hours for this day will be calculated as overnight hours (1.25x rate)</small>
+                    </div>
+                    
                     <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #ffc107;">
                         <strong>⚠️ Admin Edit:</strong> This change will be applied immediately and will be marked as "Edited by Admin" on the timesheet.
                     </div>
@@ -1028,7 +1036,7 @@
         }
         
         // Admin edit timesheet entry functions
-        function showAdminEditModal(entryId, clockInTime, clockOutTime, jobName) {
+        function showAdminEditModal(entryId, clockInTime, clockOutTime, jobName, overnightAway) {
             document.getElementById('adminEditEntryId').value = entryId;
             document.getElementById('adminOriginalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
             document.getElementById('adminOriginalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
@@ -1044,6 +1052,12 @@
                 const clockOut = new Date(clockOutTime);
                 const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
                 document.getElementById('adminAmendedClockOut').value = localDateTime;
+            }
+            
+            // Set overnight away checkbox
+            const overnightCheckbox = document.getElementById('adminEditOvernight');
+            if (overnightCheckbox) {
+                overnightCheckbox.checked = overnightAway === true || overnightAway === 1 || overnightAway === '1' || overnightAway === 'true';
             }
             
             // Clear reason
@@ -1074,6 +1088,7 @@
             const amendedClockIn = document.getElementById('adminAmendedClockIn').value;
             const amendedClockOut = document.getElementById('adminAmendedClockOut').value;
             const reason = document.getElementById('adminEditReason').value;
+            const overnightAway = document.getElementById('adminEditOvernight').checked;
             
             if (!amendedClockIn || !amendedClockOut || !reason) {
                 showAlert('Please fill in all fields', 'error');
@@ -1091,7 +1106,8 @@
                         entry_id: entryId,
                         amended_clock_in_time: clockInISO,
                         amended_clock_out_time: clockOutISO,
-                        reason: reason
+                        reason: reason,
+                        overnight_away: overnightAway
                     })
                 });
                 
@@ -1562,16 +1578,20 @@
                             entriesByDate[date] = {
                                 entries: [],
                                 daily_notes: day.daily_notes || null,
-                                day_type: day.day_type || null
+                                day_type: day.day_type || null,
+                                overnight_away: day.overnight_away === true || day.overnight_away === 1 || day.overnight_away === '1' || day.overnight_away === 'true'
                             };
                             }
                             entriesByDate[date].entries.push(day);
-                            // Use the first entry's daily_notes and day_type (they should all be the same for the same date)
+                            // Use the first entry's daily_notes, day_type, and overnight_away (they should all be the same for the same date)
                             if (!entriesByDate[date].daily_notes && day.daily_notes) {
                                 entriesByDate[date].daily_notes = day.daily_notes;
                             }
                             if (!entriesByDate[date].day_type && day.day_type) {
                                 entriesByDate[date].day_type = day.day_type;
+                            }
+                            if (entriesByDate[date].overnight_away === undefined && day.overnight_away !== undefined) {
+                                entriesByDate[date].overnight_away = day.overnight_away === true || day.overnight_away === 1 || day.overnight_away === '1' || day.overnight_away === 'true';
                             }
                         });
                         
@@ -1679,7 +1699,7 @@
                                         <td>${formatHours(overnight)}</td>
                                         <td>${formatHours(total)}</td>
                                         <td>
-                                            <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}')" 
+                                            <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}', ${dayData.overnight_away === true || dayData.overnight_away === 1 || dayData.overnight_away === '1' ? 'true' : 'false'})" 
                                                     class="btn btn-primary btn-sm" 
                                                     style="padding: 4px 8px; font-size: 11px; margin-right: 4px;"
                                                     title="Edit this entry">
