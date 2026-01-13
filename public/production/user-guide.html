@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Guide - Timesheet & Holidays</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .guide-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .guide-section {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .guide-section h2 {
+            color: #4CBB17;
+            font-size: 28px;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #4CBB17;
+            padding-bottom: 10px;
+        }
+        
+        .guide-section h3 {
+            color: #2c3e50;
+            font-size: 22px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        .guide-section h4 {
+            color: #555;
+            font-size: 18px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .step-list {
+            background: #f8f9fa;
+            border-left: 4px solid #4CBB17;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .step-list strong {
+            color: #4CBB17;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .step-list p {
+            margin: 5px 0;
+            line-height: 1.6;
+        }
+        
+        .info-box {
+            background: #e8f5e9;
+            border-left: 4px solid #4CBB17;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .error-box {
+            background: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .success-box {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .rules-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .rules-list li {
+            padding: 10px;
+            margin: 8px 0;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #4CBB17;
+        }
+        
+        .rules-list li.error {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+        
+        .rules-list li.success {
+            border-left-color: #28a745;
+            background: #f0fff4;
+        }
+        
+        .divider {
+            height: 2px;
+            background: linear-gradient(to right, transparent, #4CBB17, transparent);
+            margin: 30px 0;
+        }
+        
+        .tips-box {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .tips-box h4 {
+            color: #2e7d32;
+            margin-top: 0;
+        }
+        
+        .tips-box ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        
+        .tips-box li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+        
+        .help-section {
+            background: linear-gradient(135deg, #4CBB17 0%, #3A9B12 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 30px;
+            text-align: center;
+            margin-top: 40px;
+        }
+        
+        .help-section h3 {
+            color: white;
+            margin-top: 0;
+        }
+        
+        .help-section ol {
+            text-align: left;
+            display: inline-block;
+            margin: 15px 0;
+        }
+        
+        .help-section li {
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        
+        @media (max-width: 768px) {
+            .guide-container {
+                padding: 10px;
+            }
+            
+            .guide-section {
+                padding: 20px;
+            }
+            
+            .guide-section h2 {
+                font-size: 24px;
+            }
+            
+            .guide-section h3 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'">
+            <h1>User Guide</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="timesheet.html" class="btn btn-secondary btn-sm">Timesheet</a>
+            <a href="holidays.html" class="btn btn-secondary btn-sm">Holidays</a>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm manager-only">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+    
+    <div class="container">
+        <div class="guide-container">
+            <div class="guide-section">
+                <h2>📖 Simple Guide: Timesheet & Holidays</h2>
+            </div>
+            
+            <!-- TIMESHEET SECTION -->
+            <div class="guide-section">
+                <h2>⏰ TIMESHEET - Clock In/Out</h2>
+                
+                <h3>🟢 Clock In (Start Work)</h3>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Open Timesheet page
+                    <strong>Step 2:</strong> Pick your job/site from the list
+                    <strong>Step 3:</strong> Click <strong>"Clock In"</strong>
+                    <strong>Step 4:</strong> Allow location access (or click Continue)
+                </div>
+                <div class="success-box">
+                    ✅ <strong>Done!</strong> You'll see green "Clocked In" status
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>🔴 Clock Out (Finish Work)</h3>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Click <strong>"Clock Out"</strong> button
+                    <strong>Step 2:</strong> Done! Your time is saved
+                </div>
+                <div class="warning-box">
+                    ⚠️ <strong>Remember:</strong> Only one clock in/out per day
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>📅 View Your Week</h3>
+                <p><strong>Scroll down</strong> to see your weekly timesheet</p>
+                <p><strong>Use arrows</strong> ← → to see other weeks</p>
+                <p><strong>Each day shows:</strong></p>
+                <ul>
+                    <li>⏰ When you clocked in/out</li>
+                    <li>📊 Your hours (regular, overtime, weekend, overnight)</li>
+                    <li>📝 What you did (activities)</li>
+                    <li>🏷️ Day type (holiday, sick day, etc.)</li>
+                </ul>
+                
+                <div class="divider"></div>
+                
+                <h3>➕ Add Activity (What You Did)</h3>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find the day (current week only)
+                    <strong>Step 2:</strong> Click <strong>"+ Add Activity"</strong>
+                    <strong>Step 3:</strong> Type what you did (e.g., "Installing panels")
+                    <strong>Step 4:</strong> Click <strong>"Save"</strong>
+                </div>
+                <div class="info-box">
+                    💡 You can add many activities per day<br>
+                    ❌ Click × to delete an activity
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>🏠 Overnight Away</h3>
+                <p><strong>If you stayed away from home:</strong></p>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find the day
+                    <strong>Step 2:</strong> Check <strong>"Overnight away from home"</strong> box
+                </div>
+                <div class="success-box">
+                    ✅ This adds extra pay to your timesheet
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>🏷️ Day Type</h3>
+                <p><strong>For days you didn't work:</strong></p>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find the day
+                    <strong>Step 2:</strong> Pick from dropdown:
+                </div>
+                <ul>
+                    <li>Normal Day</li>
+                    <li>Paid Holiday</li>
+                    <li>Unpaid Holiday</li>
+                    <li>Paid Sick Day</li>
+                    <li>Unpaid Sick Day</li>
+                </ul>
+                
+                <div class="divider"></div>
+                
+                <h3>🔧 Fix Mistakes</h3>
+                
+                <h4>❌ Forgot to Clock In/Out?</h4>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find the day
+                    <strong>Step 2:</strong> Click <strong>"Add Missing Times"</strong>
+                    <strong>Step 3:</strong> Pick job/site
+                    <strong>Step 4:</strong> Enter correct times
+                    <strong>Step 5:</strong> Say why you forgot
+                    <strong>Step 6:</strong> Click <strong>"Submit Request"</strong>
+                </div>
+                <div class="info-box">
+                    ⏰ Manager will review it
+                </div>
+                
+                <h4>✏️ Wrong Times?</h4>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find the day
+                    <strong>Step 2:</strong> Click <strong>"Edit Times"</strong>
+                    <strong>Step 3:</strong> Enter correct times
+                    <strong>Step 4:</strong> Say why you're changing it
+                    <strong>Step 5:</strong> Click <strong>"Submit Request"</strong>
+                </div>
+                <div class="info-box">
+                    ⏰ Manager will approve it
+                </div>
+                <div class="warning-box">
+                    ⚠️ <strong>Note:</strong> Can only edit times up to 10 days old
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>⚠️ Important Rules</h3>
+                <ul class="rules-list">
+                    <li class="error">❌ Only clock in/out <strong>once per day</strong></li>
+                    <li class="error">❌ Can only edit times <strong>up to 10 days old</strong></li>
+                    <li class="success">✅ Manager must approve all changes</li>
+                    <li class="success">✅ System calculates pay rates automatically</li>
+                    <li class="success">📍 Your location is saved (for security)</li>
+                </ul>
+            </div>
+            
+            <!-- HOLIDAY REQUESTS SECTION -->
+            <div class="guide-section">
+                <h2>🏖️ HOLIDAY REQUESTS</h2>
+                
+                <h3>👀 Check Your Days</h3>
+                <p><strong>Open Holiday Requests page</strong></p>
+                <p><strong>You'll see:</strong></p>
+                <ul>
+                    <li>📊 <strong>Total Days</strong> - How many you have this year</li>
+                    <li>✅ <strong>Days Used</strong> - How many you've taken</li>
+                    <li>⏳ <strong>Days Left</strong> - How many remaining</li>
+                </ul>
+                
+                <div class="divider"></div>
+                
+                <h3>📝 Request Holiday</h3>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Fill in the form:
+                    <ul style="margin-top: 10px; padding-left: 20px;">
+                        <li>📅 <strong>Start Date</strong> - First day off</li>
+                        <li>📅 <strong>End Date</strong> - Last day off</li>
+                        <li>📋 <strong>Day Type</strong>:
+                            <ul>
+                                <li>Full Day (whole day off)</li>
+                                <li>Half Day (half day - start and end must be same date)</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <strong>Step 2:</strong> System shows:
+                    <ul style="margin-top: 10px; padding-left: 20px;">
+                        <li>How many days you're asking for</li>
+                        <li>How many you'll have left</li>
+                    </ul>
+                    <strong>Step 3:</strong> Click <strong>"Submit Request"</strong>
+                </div>
+                <div class="success-box">
+                    ✅ Manager will review it
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>📋 View Your Requests</h3>
+                <p><strong>Scroll down</strong> to see your requests</p>
+                <p><strong>Status colors:</strong></p>
+                <ul>
+                    <li>🟡 <strong>PENDING</strong> - Waiting for approval</li>
+                    <li>🟢 <strong>APPROVED</strong> - Yes! You got it</li>
+                    <li>🔴 <strong>REJECTED</strong> - Not approved (see reason)</li>
+                    <li>⚪ <strong>CANCELLED</strong> - You cancelled it</li>
+                </ul>
+                
+                <div class="divider"></div>
+                
+                <h3>❌ Cancel Request</h3>
+                <div class="step-list">
+                    <strong>Step 1:</strong> Find your request
+                    <strong>Step 2:</strong> Click <strong>"Cancel"</strong> button
+                    <strong>Step 3:</strong> Confirm
+                </div>
+                <div class="success-box">
+                    ✅ Days go back to your balance
+                </div>
+                
+                <div class="divider"></div>
+                
+                <h3>⚠️ Important Rules</h3>
+                <ul class="rules-list">
+                    <li class="error">❌ Only request <strong>weekdays</strong> (Mon-Fri)</li>
+                    <li class="error">❌ Half day = start and end date <strong>must be same</strong></li>
+                    <li class="error">❌ Need enough days left in your balance</li>
+                    <li class="success">✅ Manager must approve all requests</li>
+                    <li class="success">✅ Approved holidays show in timesheet</li>
+                    <li class="success">✅ System skips weekends automatically</li>
+                </ul>
+                
+                <div class="divider"></div>
+                
+                <div class="tips-box">
+                    <h4>💡 Tips</h4>
+                    <ul>
+                        <li>📅 <strong>Plan early</strong> - Popular dates fill up fast</li>
+                        <li>💰 <strong>Check balance</strong> - Make sure you have enough days</li>
+                        <li>⏰ <strong>Half days</strong> - Save days for longer breaks</li>
+                        <li>👀 <strong>Read notes</strong> - If rejected, see why</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- HELP SECTION -->
+            <div class="help-section">
+                <h3>❓ Need Help?</h3>
+                <ol>
+                    <li>📖 Read this guide</li>
+                    <li>👤 Ask your manager</li>
+                    <li>🛠️ Contact office staff</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+    
+    <script src="common.js"></script>
+    <script>
+        async function init() {
+            const currentUser = await checkAuth();
+            if (!currentUser) {
+                return;
+            }
+            initNavbar();
+            
+            // Hide dashboard link for staff
+            if (currentUser.role === 'staff') {
+                const dashboardLink = document.querySelector('a[href="dashboard.html"]');
+                if (dashboardLink) {
+                    dashboardLink.style.display = 'none';
+                }
+            }
+        }
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+    
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            </div>
+            <div class="footer-info">
+                <p>&copy; <script>document.write(new Date().getFullYear())</script> Production System. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
