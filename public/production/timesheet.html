@@ -559,6 +559,13 @@
                         <label for="missingTimesReason">Reason *</label>
                         <textarea id="missingTimesReason" class="form-control" rows="3" required placeholder="Please explain why you forgot to clock in/out..."></textarea>
                     </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="missingTimesOvernight" style="width: auto; margin: 0;">
+                            <span>Overnight away from home</span>
+                        </label>
+                        <small style="color: #666; display: block; margin-top: 4px;">Check if you stayed away overnight for this day</small>
+                    </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" onclick="closeAddMissingTimesModal()">Cancel</button>
                         <button type="submit" class="btn btn-primary">Submit Request</button>
@@ -1830,6 +1837,7 @@
             const clockIn = document.getElementById('missingTimesClockIn').value;
             const clockOut = document.getElementById('missingTimesClockOut').value;
             const reason = document.getElementById('missingTimesReason').value;
+            const overnightAway = document.getElementById('missingTimesOvernight').checked;
             
             // Convert local datetime to ISO string
             const clockInISO = new Date(clockIn).toISOString();
@@ -1842,7 +1850,8 @@
                         job_id: jobId,
                         clock_in_time: clockInISO,
                         clock_out_time: clockOutISO,
-                        reason: reason
+                        reason: reason,
+                        overnight_away: overnightAway
                     })
                 });
                 

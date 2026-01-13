@@ -2245,7 +2245,7 @@ router.put('/clock/weekly/:weekStart/day/:date/user/:targetUserId', requireProdu
 router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
-        const { job_id, clock_in_time, clock_out_time, reason } = req.body;
+        const { job_id, clock_in_time, clock_out_time, reason, overnight_away } = req.body;
         
         if (!job_id || !clock_in_time || !clock_out_time || !reason) {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
@@ -2373,6 +2373,50 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             clock_out_time,
             reason
         );
+        
+        // Handle overnight_away if provided
+        if (overnight_away !== undefined) {
+            // Get clock-in date to determine which week
+            const clockInDate = new Date(clock_in_time);
+            const clockInDateStr = clockInDate.toISOString().split('T')[0];
+            
+            // Find Monday of that week
+            const dayOfWeek = clockInDate.getDay();
+            const monday = new Date(clockInDate);
+            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+            monday.setHours(0, 0, 0, 0);
+            const weekStartDate = monday.toISOString().split('T')[0];
+            
+            // Get or create weekly timesheet
+            const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+            
+            // Get or create daily entry
+            let dailyEntryRecord = await ProductionDatabase.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+            if (!dailyEntryRecord) {
+                dailyEntryRecord = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, result.entry.id);
+            }
+            
+            // Update overnight_away
+            await ProductionDatabase.updateDailyEntry(dailyEntryRecord.id, {
+                overnight_away: overnight_away
+            });
+            
+            // Recalculate hours for the entry with the correct overnight_away value
+            await ProductionDatabase.calculateTimesheetHours(result.entry.id, overnight_away);
+            
+            // Aggregate hours from all entries for this day
+            const aggregatedHours = await ProductionDatabase.aggregateDailyHours(userId, clockInDateStr, overnight_away);
+            
+            // Update daily entry with aggregated hours
+            await ProductionDatabase.updateDailyEntry(dailyEntryRecord.id, {
+                timesheet_entry_id: result.entry.id,
+                regular_hours: aggregatedHours.regular_hours,
+                overtime_hours: aggregatedHours.overtime_hours,
+                weekend_hours: aggregatedHours.weekend_hours,
+                overnight_hours: aggregatedHours.overnight_hours,
+                total_hours: aggregatedHours.total_hours
+            });
+        }
         
         res.json({ success: true, entry: result.entry, amendment: result.amendment });
     } catch (error) {
