@@ -366,6 +366,21 @@
         </div>
     </div>
     
+    <style>
+        /* Error state styling for form controls */
+        .form-control.error {
+            border: 2px solid #dc3545 !important;
+            background-color: #fff5f5 !important;
+            transition: border-color 0.3s ease, background-color 0.3s ease;
+        }
+        
+        .form-control.error:focus {
+            border-color: #dc3545 !important;
+            outline: none;
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+        }
+    </style>
+    
     <script src="common.js"></script>
     <script>
         let currentUser = null;
@@ -1060,8 +1075,12 @@
                 overnightCheckbox.checked = overnightAway === true || overnightAway === 1 || overnightAway === '1' || overnightAway === 'true';
             }
             
-            // Clear reason
-            document.getElementById('adminEditReason').value = '';
+            // Clear reason and any error styling
+            const reasonField = document.getElementById('adminEditReason');
+            if (reasonField) {
+                reasonField.value = '';
+                reasonField.classList.remove('error');
+            }
             
             const modal = document.getElementById('adminEditModal');
             if (modal) {
@@ -1083,17 +1102,42 @@
             submitAdminEdit();
         });
         
+        // Clear error styling when user types in reason field
+        const adminEditReasonField = document.getElementById('adminEditReason');
+        if (adminEditReasonField) {
+            adminEditReasonField.addEventListener('input', function() {
+                // Remove error styling when user starts typing
+                this.classList.remove('error');
+            });
+        }
+        
         async function submitAdminEdit() {
             const entryId = parseInt(document.getElementById('adminEditEntryId').value);
             const amendedClockIn = document.getElementById('adminAmendedClockIn').value;
             const amendedClockOut = document.getElementById('adminAmendedClockOut').value;
-            const reason = document.getElementById('adminEditReason').value;
+            const reasonField = document.getElementById('adminEditReason');
+            const reason = reasonField.value.trim();
             const overnightAway = document.getElementById('adminEditOvernight').checked;
             
-            if (!amendedClockIn || !amendedClockOut || !reason) {
+            // Validate all required fields
+            if (!amendedClockIn || !amendedClockOut) {
                 showAlert('Please fill in all fields', 'error');
                 return;
             }
+            
+            // Enhanced validation for reason field with prominent error
+            if (!reason) {
+                // Add error styling
+                reasonField.classList.add('error');
+                // Focus the field
+                reasonField.focus();
+                // Show prominent error message
+                showAlert('Reason for edit is required. Please provide a reason before saving.', 'error');
+                return;
+            }
+            
+            // Remove any error styling if reason is provided
+            reasonField.classList.remove('error');
             
             // Convert local datetime to ISO string
             const clockInISO = new Date(amendedClockIn).toISOString();

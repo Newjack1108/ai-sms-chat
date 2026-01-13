@@ -1763,7 +1763,23 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
             });
         }
         
-        const entry = await ProductionDatabase.clockIn(userId, parseInt(job_id), latitude, longitude);
+        // Check if this is a Workshop job and adjust clock-in time to 8am if before 8am
+        let adjustedClockInTime = null;
+        const job = await ProductionDatabase.getJobById(parseInt(job_id));
+        if (job && job.name && job.name.toLowerCase().includes('workshop')) {
+            const now = new Date();
+            const hours = now.getHours();
+            
+            // If before 8am (hours < 8), set to 8am on the same date
+            if (hours < 8) {
+                const clockInTime = new Date(now);
+                clockInTime.setHours(8, 0, 0, 0); // Set to 8:00:00 AM
+                adjustedClockInTime = clockInTime;
+                console.log(`Workshop job detected: Adjusting clock-in time from ${now.toISOString()} to ${clockInTime.toISOString()}`);
+            }
+        }
+        
+        const entry = await ProductionDatabase.clockIn(userId, parseInt(job_id), latitude, longitude, adjustedClockInTime);
         res.json({ success: true, entry });
     } catch (error) {
         console.error('Clock in error:', error);
@@ -1947,7 +1963,23 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             });
         }
         
-        const entry = await ProductionDatabase.clockIn(userId, job_id, latitude, longitude);
+        // Check if this is a Workshop job and adjust clock-in time to 8am if before 8am
+        let adjustedClockInTime = null;
+        const job = await ProductionDatabase.getJobById(job_id);
+        if (job && job.name && job.name.toLowerCase().includes('workshop')) {
+            const now = new Date();
+            const hours = now.getHours();
+            
+            // If before 8am (hours < 8), set to 8am on the same date
+            if (hours < 8) {
+                const clockInTime = new Date(now);
+                clockInTime.setHours(8, 0, 0, 0); // Set to 8:00:00 AM
+                adjustedClockInTime = clockInTime;
+                console.log(`Workshop job detected: Adjusting clock-in time from ${now.toISOString()} to ${clockInTime.toISOString()}`);
+            }
+        }
+        
+        const entry = await ProductionDatabase.clockIn(userId, job_id, latitude, longitude, adjustedClockInTime);
         res.json({ success: true, entry });
     } catch (error) {
         console.error('Clock in error:', error);

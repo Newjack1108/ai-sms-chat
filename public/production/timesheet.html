@@ -1606,6 +1606,16 @@
                 return;
             }
             
+            // Show confirmation dialog when checking the box
+            if (overnightAway) {
+                const confirmed = confirm('Only click this if you stayed away last night. Continue?');
+                if (!confirmed) {
+                    // User cancelled - revert checkbox to unchecked
+                    checkbox.checked = false;
+                    return;
+                }
+            }
+            
             // Store the intended state
             const intendedState = overnightAway;
             checkbox.disabled = true;

@@ -6231,13 +6231,15 @@ class ProductionDatabase {
         }
     }
     
-    static async clockIn(userId, jobId, latitude, longitude) {
-        const clockInTime = new Date().toISOString();
+    static async clockIn(userId, jobId, latitude, longitude, clockInTime = null) {
+        // Use provided clockInTime or default to current time
+        const timeToUse = clockInTime ? (clockInTime instanceof Date ? clockInTime.toISOString() : clockInTime) : new Date().toISOString();
+        
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO timesheet_entries (user_id, job_id, clock_in_time, clock_in_latitude, clock_in_longitude)
                  VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-                [userId, jobId, clockInTime, latitude, longitude]
+                [userId, jobId, timeToUse, latitude, longitude]
             );
             return result.rows[0];
         } else {
@@ -6245,7 +6247,7 @@ class ProductionDatabase {
                 `INSERT INTO timesheet_entries (user_id, job_id, clock_in_time, clock_in_latitude, clock_in_longitude)
                  VALUES (?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(userId, jobId, clockInTime, latitude, longitude);
+            const info = stmt.run(userId, jobId, timeToUse, latitude, longitude);
             return this.getTimesheetEntryById(info.lastInsertRowid);
         }
     }
