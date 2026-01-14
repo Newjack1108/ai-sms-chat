@@ -44,6 +44,17 @@
             </div>
         </div>
         
+        <!-- Staff Currently Off Clock -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Staff Currently Off Clock</h2>
+                <button onclick="loadOffClockStaff()" class="btn btn-secondary btn-sm">Refresh</button>
+            </div>
+            <div id="offClockStaff">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
         <!-- Jobs/Sites Management -->
         <div class="card">
             <div class="card-header">
@@ -407,6 +418,7 @@
             await Promise.all([
                 loadAdminClockStatus(),
                 loadActiveClockIns(),
+                loadOffClockStaff(),
                 loadJobs(),
                 loadNotices(),
                 loadPendingAmendments()
@@ -607,7 +619,7 @@
                                     <tr>
                                         <td><strong>${entry.username || 'Unknown'}</strong></td>
                                         <td>${entry.job_name || 'Unknown'}</td>
-                                        <td>${formatDate(clockInTime)}</td>
+                                        <td>${formatDateTime(clockInTime)}</td>
                                         <td>
                                             <small>${location}</small>
                                             ${hasLocation ? `
@@ -638,6 +650,72 @@
                 document.getElementById('activeClockIns').innerHTML = `
                     <div style="padding: 20px; background: #fee; border: 1px solid #e74c3c; border-radius: 8px;">
                         <p style="color: #e74c3c; font-weight: 600; margin-bottom: 10px;">Error loading active clock ins</p>
+                        <p style="color: #c33; font-size: 14px;">${escapeHtml(errorMsg)}</p>
+                        <p style="color: #999; font-size: 12px; margin-top: 10px;">Check the server console for more details.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        async function loadOffClockStaff() {
+            try {
+                // Fetch all users and active clock ins in parallel
+                const [usersData, activeClockInsData] = await Promise.all([
+                    apiCall('/users'),
+                    apiCall('/timesheet/active')
+                ]);
+                
+                const allUsers = usersData.users || [];
+                const activeClockIns = activeClockInsData.clockIns || [];
+                
+                // Get IDs of users who are currently clocked in
+                const clockedInUserIds = new Set(activeClockIns.map(entry => parseInt(entry.user_id)));
+                
+                // Filter users who are NOT clocked in (only show staff role users)
+                const offClockStaff = allUsers.filter(user => 
+                    !clockedInUserIds.has(parseInt(user.id)) && user.role === 'staff'
+                );
+                
+                const offClockStaffContainer = document.getElementById('offClockStaff');
+                
+                if (offClockStaff.length === 0) {
+                    offClockStaffContainer.innerHTML = '<p>All staff members are currently clocked in</p>';
+                    return;
+                }
+                
+                offClockStaffContainer.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Staff Member</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${offClockStaff.map(user => {
+                                return `
+                                    <tr>
+                                        <td><strong>${escapeHtml(user.username || 'Unknown')}</strong></td>
+                                        <td><span style="color: #6c757d;">Off Clock</span></td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                console.error('Error loading off-clock staff:', error);
+                let errorMsg = 'Unknown error';
+                if (error.message) {
+                    errorMsg = error.message;
+                } else if (error.details) {
+                    errorMsg = error.details;
+                } else if (typeof error === 'string') {
+                    errorMsg = error;
+                }
+                document.getElementById('offClockStaff').innerHTML = `
+                    <div style="padding: 20px; background: #fee; border: 1px solid #e74c3c; border-radius: 8px;">
+                        <p style="color: #e74c3c; font-weight: 600; margin-bottom: 10px;">Error loading off-clock staff</p>
                         <p style="color: #c33; font-size: 14px;">${escapeHtml(errorMsg)}</p>
                         <p style="color: #999; font-size: 12px; margin-top: 10px;">Check the server console for more details.</p>
                     </div>
