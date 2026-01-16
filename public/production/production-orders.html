@@ -184,14 +184,34 @@
             </div>
             <form id="orderForm">
                 <div class="form-group">
-                    <label class="form-label">Product *</label>
-                    <select id="orderProduct" class="form-select" required>
-                        <option value="">Select product</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Quantity *</label>
-                    <input type="number" id="orderQty" class="form-input" required min="1">
+                    <label class="form-label">Products *</label>
+                    <div id="orderProductsTable" style="margin-bottom: 10px;">
+                        <table class="table" style="margin-bottom: 10px;">
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Quantity</th>
+                                    <th style="width: 60px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orderProductsTableBody">
+                                <tr>
+                                    <td>
+                                        <select class="form-select order-product-select" required>
+                                            <option value="">Select product</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        <input type="number" class="form-input order-product-qty" required min="1" value="1" style="width: 100px;">
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-danger btn-sm" onclick="removeOrderProductRow(this)" style="display: none;">Remove</button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="addOrderProductRow()">+ Add Product</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Order Date</label>
@@ -347,19 +367,17 @@
                 const data = await apiCall('/products');
                 products = data.products.filter(p => p.status === 'active');
                 
-                // Populate order product select
-                const orderSelect = document.getElementById('orderProduct');
-                orderSelect.innerHTML = '<option value="">Select product</option>';
-                products.forEach(product => {
-                    orderSelect.innerHTML += `<option value="${product.id}">${product.name}</option>`;
-                });
+                // Populate order product selects in table
+                populateOrderProductSelects();
                 
                 // Populate quote product select
                 const quoteSelect = document.getElementById('quoteProduct');
-                quoteSelect.innerHTML = '<option value="">Select product</option>';
-                products.forEach(product => {
-                    quoteSelect.innerHTML += `<option value="${product.id}">${product.name}</option>`;
-                });
+                if (quoteSelect) {
+                    quoteSelect.innerHTML = '<option value="">Select product</option>';
+                    products.forEach(product => {
+                        quoteSelect.innerHTML += `<option value="${product.id}">${product.name}</option>`;
+                    });
+                }
             } catch (error) {
                 console.error('Error loading products:', error);
             }
@@ -435,11 +453,27 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${orders.map(order => `
+                            ${orders.map(order => {
+                                // Display all products if available, otherwise fallback to old format
+                                let productsDisplay = '';
+                                if (order.products && order.products.length > 0) {
+                                    productsDisplay = order.products.map(p => 
+                                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
+                                    ).join(', ');
+                                } else {
+                                    // Fallback to old format
+                                    productsDisplay = `${order.product_name || 'Unknown'} (x${order.quantity || 1})`;
+                                }
+                                
+                                const totalQuantity = order.products && order.products.length > 0
+                                    ? order.products.reduce((sum, p) => sum + (parseInt(p.quantity) || 0), 0)
+                                    : (order.quantity || 1);
+                                
+                                return `
                                 <tr>
-                                    <td><strong>${order.product_name || 'Unknown'}</strong></td>
+                                    <td><strong>${productsDisplay}</strong></td>
                                     <td>${order.customer_name || '-'}</td>
-                                    <td>${order.quantity}</td>
+                                    <td>${totalQuantity}</td>
                                     <td><span class="badge badge-info">${order.status}</span></td>
                                     <td>${formatDate(order.order_date)}</td>
                                     <td>${order.created_by_name || '-'}</td>
@@ -453,7 +487,8 @@
                                         <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </tbody>
                     </table>
                 `;
@@ -487,6 +522,24 @@
         function showAddOrderModal() {
             document.getElementById('orderForm').reset();
             document.getElementById('orderDate').value = new Date().toISOString().split('T')[0];
+            // Reset products table to single row
+            document.getElementById('orderProductsTableBody').innerHTML = `
+                <tr>
+                    <td>
+                        <select class="form-select order-product-select" required>
+                            <option value="">Select product</option>
+                        </select>
+                    </td>
+                    <td>
+                        <input type="number" class="form-input order-product-qty" required min="1" value="1" style="width: 100px;">
+                    </td>
+                    <td>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="removeOrderProductRow(this)" style="display: none;">Remove</button>
+                    </td>
+                </tr>
+            `;
+            populateOrderProductSelects();
+            updateOrderProductRemoveButtons();
             showModal('orderModal');
         }
         
@@ -842,13 +895,24 @@
                     console.error('Error loading saved checkbox states:', error);
                 }
                 
+                // Build products display
+                let productsDisplay = '';
+                if (loadSheet.products && loadSheet.products.length > 0) {
+                    productsDisplay = loadSheet.products.map(p => 
+                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
+                    ).join(', ');
+                } else {
+                    // Fallback to old format
+                    productsDisplay = `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
+                }
+                
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
                 modal.id = 'loadSheetModal';
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 900px;">
                         <div class="modal-header">
-                            <h3>Load Sheet - ${loadSheet.product_name} (Qty: ${loadSheet.quantity})</h3>
+                            <h3>Load Sheet - ${productsDisplay}</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div style="padding: 15px; border-bottom: 1px solid #dee2e6;">
@@ -1157,12 +1221,23 @@
                     });
                 }
                 
+                // Build products display for print
+                let printProductsDisplay = '';
+                if (loadSheet.products && loadSheet.products.length > 0) {
+                    printProductsDisplay = loadSheet.products.map(p => 
+                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
+                    ).join(', ');
+                } else {
+                    // Fallback to old format
+                    printProductsDisplay = `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
+                }
+                
                 // Create print-friendly HTML
                 const printHTML = `
                     <div class="load-sheet-print-area">
                         <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px;">
                             <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold;">Load Sheet</h1>
-                            <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${loadSheet.product_name}</strong> (Quantity: ${loadSheet.quantity})</p>
+                            <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
                             <p style="margin: 0; font-size: 14px; color: #666;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
                         </div>
                         
@@ -1977,20 +2052,109 @@
             }
         });
         
+        function addOrderProductRow() {
+            const tbody = document.getElementById('orderProductsTableBody');
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>
+                    <select class="form-select order-product-select" required>
+                        <option value="">Select product</option>
+                        ${products.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+                    </select>
+                </td>
+                <td>
+                    <input type="number" class="form-input order-product-qty" required min="1" value="1" style="width: 100px;">
+                </td>
+                <td>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeOrderProductRow(this)">Remove</button>
+                </td>
+            `;
+            tbody.appendChild(row);
+            // Show remove buttons on all rows if more than one
+            updateOrderProductRemoveButtons();
+        }
+        
+        function removeOrderProductRow(button) {
+            const row = button.closest('tr');
+            row.remove();
+            updateOrderProductRemoveButtons();
+        }
+        
+        function updateOrderProductRemoveButtons() {
+            const tbody = document.getElementById('orderProductsTableBody');
+            const rows = tbody.querySelectorAll('tr');
+            rows.forEach(row => {
+                const removeBtn = row.querySelector('button');
+                if (removeBtn) {
+                    removeBtn.style.display = rows.length > 1 ? 'inline-block' : 'none';
+                }
+            });
+        }
+        
+        function populateOrderProductSelects() {
+            const selects = document.querySelectorAll('.order-product-select');
+            selects.forEach(select => {
+                const currentValue = select.value;
+                select.innerHTML = '<option value="">Select product</option>' +
+                    products.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+                if (currentValue) {
+                    select.value = currentValue;
+                }
+            });
+        }
+        
         document.getElementById('orderForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
+                // Collect all products from the table
+                const productRows = document.querySelectorAll('#orderProductsTableBody tr');
+                const productsArray = [];
+                
+                for (const row of productRows) {
+                    const productSelect = row.querySelector('.order-product-select');
+                    const quantityInput = row.querySelector('.order-product-qty');
+                    
+                    if (productSelect.value && quantityInput.value) {
+                        productsArray.push({
+                            product_id: parseInt(productSelect.value),
+                            quantity: parseInt(quantityInput.value)
+                        });
+                    }
+                }
+                
+                if (productsArray.length === 0) {
+                    showAlert('Please add at least one product', 'error');
+                    return;
+                }
+                
                 await apiCall('/orders', {
                     method: 'POST',
                     body: JSON.stringify({
-                        product_id: document.getElementById('orderProduct').value,
-                        quantity: document.getElementById('orderQty').value,
+                        products: productsArray,
                         order_date: document.getElementById('orderDate').value,
                         customer_name: document.getElementById('orderCustomerName').value || null
                     })
                 });
                 showAlert('Order created');
                 hideModal('orderModal');
+                // Reset form
+                document.getElementById('orderForm').reset();
+                document.getElementById('orderProductsTableBody').innerHTML = `
+                    <tr>
+                        <td>
+                            <select class="form-select order-product-select" required>
+                                <option value="">Select product</option>
+                            </select>
+                        </td>
+                        <td>
+                            <input type="number" class="form-input order-product-qty" required min="1" value="1" style="width: 100px;">
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="removeOrderProductRow(this)" style="display: none;">Remove</button>
+                        </td>
+                    </tr>
+                `;
+                populateOrderProductSelects();
                 loadOrders();
             } catch (error) {
                 showAlert(error.message, 'error');

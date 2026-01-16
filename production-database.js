@@ -193,6 +193,19 @@ function initializeSQLite() {
         )
     `);
     
+    // Order products junction table (for multiple products per order)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS order_products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES product_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES finished_products(id)
+        )
+    `);
+    
     // Order spares table
     db.exec(`
         CREATE TABLE IF NOT EXISTS order_spares (
@@ -247,6 +260,37 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Product orders migration check skipped:', error.message);
+    }
+    
+    // Migrate existing orders to order_products table
+    try {
+        const existingOrderProducts = db.prepare(`SELECT COUNT(*) as count FROM order_products`).get();
+        if (existingOrderProducts.count === 0) {
+            // Migrate existing product_orders with product_id to order_products
+            const existingOrders = db.prepare(`
+                SELECT id, product_id, quantity 
+                FROM product_orders 
+                WHERE product_id IS NOT NULL
+            `).all();
+            
+            if (existingOrders.length > 0) {
+                const insertStmt = db.prepare(`
+                    INSERT INTO order_products (order_id, product_id, quantity)
+                    VALUES (?, ?, ?)
+                `);
+                
+                const insertMany = db.transaction((orders) => {
+                    for (const order of orders) {
+                        insertStmt.run(order.id, order.product_id, order.quantity);
+                    }
+                });
+                
+                insertMany(existingOrders);
+                console.log(`✅ Migrated ${existingOrders.length} existing orders to order_products table`);
+            }
+        }
+    } catch (error) {
+        console.log('⚠️ Order products migration check skipped:', error.message);
     }
     
     // Migrate order_spares table (check if exists)
@@ -1054,6 +1098,17 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // Order products junction table (for multiple products per order)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS order_products (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
+                product_id INTEGER NOT NULL REFERENCES finished_products(id),
+                quantity INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
         // Order spares table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS order_spares (
@@ -1125,6 +1180,31 @@ async function initializePostgreSQL() {
             }
         } catch (error) {
             console.log('⚠️ Product orders migration check skipped:', error.message);
+        }
+        
+        // Migrate existing orders to order_products table
+        try {
+            const countResult = await pool.query(`SELECT COUNT(*) as count FROM order_products`);
+            if (parseInt(countResult.rows[0].count) === 0) {
+                // Migrate existing product_orders with product_id to order_products
+                const existingOrders = await pool.query(`
+                    SELECT id, product_id, quantity 
+                    FROM product_orders 
+                    WHERE product_id IS NOT NULL
+                `);
+                
+                if (existingOrders.rows.length > 0) {
+                    for (const order of existingOrders.rows) {
+                        await pool.query(`
+                            INSERT INTO order_products (order_id, product_id, quantity)
+                            VALUES ($1, $2, $3)
+                        `, [order.id, order.product_id, order.quantity]);
+                    }
+                    console.log(`✅ Migrated ${existingOrders.rows.length} existing orders to order_products table`);
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Order products migration check skipped:', error.message);
         }
         
         // Migrate order_spares table (check if exists)
@@ -4418,17 +4498,23 @@ class ProductionDatabase {
     }
     
     static async getLoadSheet(orderId) {
-        // Get the order
+        // Get the order with all products
         const order = await this.getProductOrderById(orderId);
         if (!order) {
             throw new Error('Order not found');
         }
         
-        const productId = order.product_id;
-        const orderQuantity = parseFloat(order.quantity || 1);
+        // Get all products for this order (from order_products table)
+        const orderProducts = order.products || [];
         
-        // Get direct product components (no drilling down into nested materials)
-        const productComponents = await this.getProductComponents(productId);
+        // Fallback to old format if no products in order_products
+        if (orderProducts.length === 0 && order.product_id) {
+            orderProducts.push({
+                product_id: order.product_id,
+                quantity: order.quantity || 1,
+                product_name: order.product_name
+            });
+        }
         
         // Get spares for this order
         const spares = await this.getOrderSpares(orderId);
@@ -4443,46 +4529,102 @@ class ProductionDatabase {
             sparesMap[key].push(spare);
         });
         
-        const components = [];
-        const builtItems = [];
-        const rawMaterials = [];
+        // Aggregate components from all products
+        const componentMap = {}; // key: component_type_component_id
+        const builtItemMap = {};
+        const rawMaterialMap = {};
+        const allProductComponents = []; // Track all components for standalone spare matching
         
-        for (const comp of productComponents) {
-            const quantity = parseFloat(comp.quantity_required || 0) * orderQuantity;
+        // Process each product in the order
+        for (const orderProduct of orderProducts) {
+            const productId = orderProduct.product_id;
+            const productQuantity = parseFloat(orderProduct.quantity || 1);
             
-            // Get unit from source table if product_components.unit is missing or looks like a number
-            let unit = comp.unit || 'unit';
-            if (!comp.unit || !isNaN(parseFloat(comp.unit))) {
-                // Unit is missing or is a number, get from source table
-                if (comp.component_type === 'component') {
-                    const component = await this.getComponentById(comp.component_id);
-                    if (component) {
-                        unit = component.unit || 'unit';
-                    }
-                } else if (comp.component_type === 'built_item') {
-                    const panel = await this.getPanelById(comp.component_id);
-                    if (panel) {
-                        unit = panel.unit || 'piece';
-                    }
-                } else if (comp.component_type === 'raw_material') {
-                    const stockItem = await this.getStockItemById(comp.component_id);
-                    if (stockItem) {
-                        unit = stockItem.unit || 'unit';
+            // Get direct product components (no drilling down into nested materials)
+            const productComponents = await this.getProductComponents(productId);
+            
+            for (const comp of productComponents) {
+                const quantity = parseFloat(comp.quantity_required || 0) * productQuantity;
+                const key = `${comp.component_type}_${comp.component_id}`;
+                
+                // Track for standalone spare matching
+                allProductComponents.push({
+                    component_type: comp.component_type,
+                    component_id: comp.component_id
+                });
+                
+                // Get unit from source table if product_components.unit is missing or looks like a number
+                let unit = comp.unit || 'unit';
+                if (!comp.unit || !isNaN(parseFloat(comp.unit))) {
+                    // Unit is missing or is a number, get from source table
+                    if (comp.component_type === 'component') {
+                        const component = await this.getComponentById(comp.component_id);
+                        if (component) {
+                            unit = component.unit || 'unit';
+                        }
+                    } else if (comp.component_type === 'built_item') {
+                        const panel = await this.getPanelById(comp.component_id);
+                        if (panel) {
+                            unit = panel.unit || 'piece';
+                        }
+                    } else if (comp.component_type === 'raw_material') {
+                        const stockItem = await this.getStockItemById(comp.component_id);
+                        if (stockItem) {
+                            unit = stockItem.unit || 'unit';
+                        }
                     }
                 }
+                
+                // Aggregate quantities for same components
+                if (comp.component_type === 'component') {
+                    if (!componentMap[key]) {
+                        componentMap[key] = {
+                            id: comp.component_id,
+                            name: comp.component_name || 'Unknown',
+                            quantity: 0,
+                            unit: unit,
+                            component_type: comp.component_type,
+                            spares: []
+                        };
+                    }
+                    componentMap[key].quantity += quantity;
+                } else if (comp.component_type === 'built_item') {
+                    if (!builtItemMap[key]) {
+                        builtItemMap[key] = {
+                            id: comp.component_id,
+                            name: comp.component_name || 'Unknown',
+                            quantity: 0,
+                            unit: unit,
+                            component_type: comp.component_type,
+                            spares: []
+                        };
+                    }
+                    builtItemMap[key].quantity += quantity;
+                } else if (comp.component_type === 'raw_material') {
+                    if (!rawMaterialMap[key]) {
+                        const stockItem = await this.getStockItemById(comp.component_id);
+                        rawMaterialMap[key] = {
+                            id: comp.component_id,
+                            name: comp.component_name || 'Unknown',
+                            quantity: 0,
+                            unit: unit,
+                            component_type: comp.component_type,
+                            location: stockItem ? (stockItem.location || '') : '',
+                            spares: []
+                        };
+                    }
+                    rawMaterialMap[key].quantity += quantity;
+                }
             }
-            
-            const item = {
-                id: comp.component_id,
-                name: comp.component_name || 'Unknown',
-                quantity: quantity,
-                unit: unit,
-                component_type: comp.component_type,
-                spares: []
-            };
-            
-            // Add matching spares
-            const key = `${comp.component_type}_${comp.component_id}`;
+        }
+        
+        // Add matching spares to aggregated components
+        const components = Object.values(componentMap);
+        const builtItems = Object.values(builtItemMap);
+        const rawMaterials = Object.values(rawMaterialMap);
+        
+        for (const item of [...components, ...builtItems, ...rawMaterials]) {
+            const key = `${item.component_type}_${item.id}`;
             if (sparesMap[key]) {
                 item.spares = sparesMap[key].map(spare => ({
                     id: spare.id,
@@ -4492,19 +4634,6 @@ class ProductionDatabase {
                     quantity_returned: parseFloat(spare.quantity_returned || 0),
                     notes: spare.notes || ''
                 }));
-            }
-            
-            if (comp.component_type === 'component') {
-                components.push(item);
-            } else if (comp.component_type === 'built_item') {
-                builtItems.push(item);
-            } else if (comp.component_type === 'raw_material') {
-                // Get stock item details for raw materials
-                const stockItem = await this.getStockItemById(comp.component_id);
-                if (stockItem) {
-                    item.location = stockItem.location || '';
-                }
-                rawMaterials.push(item);
             }
         }
         
@@ -4516,8 +4645,7 @@ class ProductionDatabase {
         };
         
         for (const spare of spares) {
-            const key = `${spare.item_type}_${spare.item_id}`;
-            const foundInComponents = productComponents.some(comp => 
+            const foundInComponents = allProductComponents.some(comp => 
                 comp.component_type === spare.item_type && comp.component_id === spare.item_id
             );
             
@@ -4571,45 +4699,153 @@ class ProductionDatabase {
             }
         }
         
-        // Get product details for load/install times
-        const product = await this.getProductById(productId);
+        // Calculate total estimated times from all products
+        let totalLoadTime = 0;
+        let totalInstallTime = 0;
+        let totalTravelTime = 0;
+        
+        for (const orderProduct of orderProducts) {
+            const product = await this.getProductById(orderProduct.product_id);
+            if (product) {
+                totalLoadTime += parseFloat(product.estimated_load_time || 0) * parseFloat(orderProduct.quantity || 1);
+                totalInstallTime += parseFloat(product.estimated_install_time || 0) * parseFloat(orderProduct.quantity || 1);
+                totalTravelTime += parseFloat(product.estimated_travel_time || 0);
+            }
+        }
+        
+        // Build products list for display
+        const productsList = orderProducts.map(op => ({
+            product_id: op.product_id,
+            product_name: op.product_name || 'Unknown',
+            quantity: parseFloat(op.quantity || 1)
+        }));
         
         return {
             order_id: orderId,
-            product_id: productId,
-            product_name: order.product_name || 'Unknown',
-            quantity: orderQuantity,
+            products: productsList,
             components,
             built_items: builtItems,
             raw_materials: rawMaterials,
             standalone_spares: standaloneSpares,
-            estimated_load_time: product ? parseFloat(product.estimated_load_time || 0) : 0,
-            estimated_install_time: product ? parseFloat(product.estimated_install_time || 0) : 0,
-            estimated_travel_time: product ? parseFloat(product.estimated_travel_time || 0) : 0
+            estimated_load_time: totalLoadTime,
+            estimated_install_time: totalInstallTime,
+            estimated_travel_time: totalTravelTime
         };
     }
     
     // ============ PRODUCT ORDERS OPERATIONS ============
     
     static async createProductOrder(data) {
+        // Support both old format (single product_id) and new format (products array)
+        const products = data.products || (data.product_id ? [{ product_id: data.product_id, quantity: data.quantity }] : []);
+        
+        if (products.length === 0) {
+            throw new Error('At least one product is required');
+        }
+        
+        // Use first product's ID for backward compatibility (nullable)
+        const firstProductId = products[0].product_id;
+        const firstQuantity = products[0].quantity;
+        
+        let orderId;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-                [data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null]
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null]
             );
-            return result.rows[0];
+            orderId = result.rows[0].id;
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
                  VALUES (?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.product_id, data.quantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null);
-            return this.getProductOrderById(info.lastInsertRowid);
+            const info = stmt.run(firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null);
+            orderId = info.lastInsertRowid;
+        }
+        
+        // Insert all products into order_products table
+        if (isPostgreSQL) {
+            for (const product of products) {
+                await pool.query(
+                    `INSERT INTO order_products (order_id, product_id, quantity)
+                     VALUES ($1, $2, $3)`,
+                    [orderId, product.product_id, product.quantity]
+                );
+            }
+        } else {
+            const insertStmt = db.prepare(
+                `INSERT INTO order_products (order_id, product_id, quantity)
+                 VALUES (?, ?, ?)`
+            );
+            for (const product of products) {
+                insertStmt.run(orderId, product.product_id, product.quantity);
+            }
+        }
+        
+        return this.getProductOrderById(orderId);
+    }
+    
+    static async getOrderProducts(orderId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT op.*, fp.name as product_name
+                 FROM order_products op
+                 LEFT JOIN finished_products fp ON op.product_id = fp.id
+                 WHERE op.order_id = $1
+                 ORDER BY op.id`,
+                [orderId]
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT op.*, fp.name as product_name
+                 FROM order_products op
+                 LEFT JOIN finished_products fp ON op.product_id = fp.id
+                 WHERE op.order_id = ?
+                 ORDER BY op.id`
+            ).all(orderId);
         }
     }
     
+    static async addProductToOrder(orderId, productId, quantity) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO order_products (order_id, product_id, quantity)
+                 VALUES ($1, $2, $3)`,
+                [orderId, productId, quantity]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO order_products (order_id, product_id, quantity)
+                 VALUES (?, ?, ?)`
+            ).run(orderId, productId, quantity);
+        }
+        return this.getOrderProducts(orderId);
+    }
+    
+    static async removeProductFromOrder(orderId, orderProductId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `DELETE FROM order_products WHERE order_id = $1 AND id = $2`,
+                [orderId, orderProductId]
+            );
+            if (result.rowCount === 0) {
+                throw new Error('Product not found in order');
+            }
+        } else {
+            const result = db.prepare(
+                `DELETE FROM order_products WHERE order_id = ? AND id = ?`
+            ).run(orderId, orderProductId);
+            if (result.changes === 0) {
+                throw new Error('Product not found in order');
+            }
+        }
+        return this.getOrderProducts(orderId);
+    }
+    
     static async getProductOrderById(id) {
+        let order;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
@@ -4619,9 +4855,9 @@ class ProductionDatabase {
                  WHERE po.id = $1`,
                 [id]
             );
-            return result.rows[0] || null;
+            order = result.rows[0] || null;
         } else {
-            return db.prepare(
+            order = db.prepare(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
                  FROM product_orders po
                  LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -4629,9 +4865,17 @@ class ProductionDatabase {
                  WHERE po.id = ?`
             ).get(id) || null;
         }
+        
+        if (order) {
+            // Get all products for this order
+            order.products = await this.getOrderProducts(id);
+        }
+        
+        return order;
     }
     
     static async getAllProductOrders() {
+        let orders;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
@@ -4640,9 +4884,9 @@ class ProductionDatabase {
                  LEFT JOIN production_users u ON po.created_by = u.id
                  ORDER BY po.created_at DESC`
             );
-            return result.rows;
+            orders = result.rows;
         } else {
-            return db.prepare(
+            orders = db.prepare(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
                  FROM product_orders po
                  LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -4650,6 +4894,13 @@ class ProductionDatabase {
                  ORDER BY po.created_at DESC`
             ).all();
         }
+        
+        // Add products array to each order
+        for (const order of orders) {
+            order.products = await this.getOrderProducts(order.id);
+        }
+        
+        return orders;
     }
     
     // Deduct stock for all product components when a product order is completed

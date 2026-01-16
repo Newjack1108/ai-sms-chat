@@ -1091,6 +1091,61 @@ router.get('/orders/:id/load-sheet', requireProductionAuth, async (req, res) => 
     }
 });
 
+// ============ ORDER PRODUCTS ROUTES ============
+
+router.get('/orders/:id/products', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const products = await ProductionDatabase.getOrderProducts(orderId);
+        res.json({ success: true, products });
+    } catch (error) {
+        console.error('Get order products error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get order products' });
+    }
+});
+
+router.post('/orders/:id/products', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const { product_id, quantity } = req.body;
+        
+        if (!product_id || !quantity) {
+            return res.status(400).json({ success: false, error: 'Product ID and quantity are required' });
+        }
+        
+        // Check if order exists
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        
+        const products = await ProductionDatabase.addProductToOrder(orderId, parseInt(product_id), parseInt(quantity));
+        res.json({ success: true, products });
+    } catch (error) {
+        console.error('Add order product error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to add product to order' });
+    }
+});
+
+router.delete('/orders/:id/products/:productId', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id);
+        const orderProductId = parseInt(req.params.productId);
+        
+        // Check if order exists
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        
+        const products = await ProductionDatabase.removeProductFromOrder(orderId, orderProductId);
+        res.json({ success: true, products });
+    } catch (error) {
+        console.error('Delete order product error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to remove product from order' });
+    }
+});
+
 // ============ ORDER SPARES ROUTES ============
 
 router.get('/orders/:id/spares', requireProductionAuth, async (req, res) => {
@@ -1255,17 +1310,34 @@ router.get('/orders', requireProductionAuth, async (req, res) => {
 
 router.post('/orders', requireProductionAuth, requireManager, async (req, res) => {
     try {
-        const { product_id, quantity, order_date, status, customer_name } = req.body;
-        if (!product_id || !quantity) {
-            return res.status(400).json({ success: false, error: 'Product ID and quantity are required' });
+        const { products, product_id, quantity, order_date, status, customer_name } = req.body;
+        
+        // Support both new format (products array) and old format (single product_id)
+        let productsArray = products;
+        if (!productsArray && product_id && quantity) {
+            // Old format - convert to new format
+            productsArray = [{ product_id: parseInt(product_id), quantity: parseInt(quantity) }];
+        }
+        
+        if (!productsArray || productsArray.length === 0) {
+            return res.status(400).json({ success: false, error: 'At least one product is required' });
+        }
+        
+        // Validate products array
+        for (const product of productsArray) {
+            if (!product.product_id || !product.quantity) {
+                return res.status(400).json({ success: false, error: 'Each product must have product_id and quantity' });
+            }
         }
         
         // Ensure we don't create quotes through the orders endpoint
         const orderStatus = status && status !== 'quote' ? status : 'pending';
         
         const order = await ProductionDatabase.createProductOrder({
-            product_id: parseInt(product_id),
-            quantity: parseInt(quantity),
+            products: productsArray.map(p => ({
+                product_id: parseInt(p.product_id),
+                quantity: parseInt(p.quantity)
+            })),
             order_date,
             status: orderStatus,
             customer_name: customer_name || null,
@@ -1274,7 +1346,7 @@ router.post('/orders', requireProductionAuth, requireManager, async (req, res) =
         res.json({ success: true, order });
     } catch (error) {
         console.error('Create order error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create order' });
+        res.status(500).json({ success: false, error: error.message || 'Failed to create order' });
     }
 });
 
