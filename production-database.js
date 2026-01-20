@@ -7882,6 +7882,7 @@ class ProductionDatabase {
         const clockInDate = new Date(clockIn);
         const dayOfWeek = clockInDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
+        const isFriday = dayOfWeek === 5; // Friday
         
         let regularHours = 0;
         let overtimeHours = 0;
@@ -7898,8 +7899,37 @@ class ProductionDatabase {
             // All hours are weekend (1.5x)
             weekendHours = totalHours;
             calculatedTotal = totalHours;
+        } else if (isFriday) {
+            // Friday: Standard hours only between 8am and 3pm (45min break)
+            // Anything outside this window is overtime
+            
+            // Set standard hours window: 8am to 3pm
+            const standardStart = new Date(clockInDate);
+            standardStart.setHours(8, 0, 0, 0); // 8:00 AM
+            const standardEnd = new Date(clockInDate);
+            standardEnd.setHours(15, 0, 0, 0); // 3:00 PM (15:00)
+            
+            // Calculate hours within standard window (8am-3pm)
+            const clockInInWindow = clockIn > standardStart ? clockIn : standardStart;
+            const clockOutInWindow = clockOut < standardEnd ? clockOut : standardEnd;
+            const hoursInWindow = Math.max(0, (clockOutInWindow - clockInInWindow) / (1000 * 60 * 60));
+            
+            // Calculate hours before 8am
+            const hoursBefore8am = clockIn < standardStart ? Math.max(0, (standardStart - clockIn) / (1000 * 60 * 60)) : 0;
+            
+            // Calculate hours after 3pm
+            const hoursAfter3pm = clockOut > standardEnd ? Math.max(0, (clockOut - standardEnd) / (1000 * 60 * 60)) : 0;
+            
+            // Standard hours: time within 8am-3pm window minus 45 minute break
+            regularHours = Math.max(0, hoursInWindow - 0.75); // 45 minutes = 0.75 hours
+            
+            // Overtime: hours before 8am + hours after 3pm
+            overtimeHours = hoursBefore8am + hoursAfter3pm;
+            
+            // Total calculated hours (net of break)
+            calculatedTotal = regularHours + overtimeHours;
         } else {
-            // Monday-Friday: subtract 1 hour break, then calculate
+            // Monday-Thursday: subtract 1 hour break, then calculate
             const netHours = Math.max(0, totalHours - 1);
             if (netHours <= 8) {
                 regularHours = netHours;
