@@ -7875,14 +7875,50 @@ class ProductionDatabase {
             return null;
         }
         
-        const clockIn = new Date(entry.clock_in_time);
-        const clockOut = new Date(entry.clock_out_time);
-        const totalHours = (clockOut - clockIn) / (1000 * 60 * 60); // Convert to hours
+        // Helper functions to round clock times to 15-minute intervals
+        const roundClockInUp = (date) => {
+            const rounded = new Date(date);
+            const minutes = rounded.getMinutes();
+            const remainder = minutes % 15;
+            if (remainder > 0) {
+                rounded.setMinutes(minutes + (15 - remainder));
+                rounded.setSeconds(0);
+                rounded.setMilliseconds(0);
+            } else {
+                rounded.setSeconds(0);
+                rounded.setMilliseconds(0);
+            }
+            return rounded;
+        };
         
+        const roundClockOutDown = (date) => {
+            const rounded = new Date(date);
+            const minutes = rounded.getMinutes();
+            const remainder = minutes % 15;
+            rounded.setMinutes(minutes - remainder);
+            rounded.setSeconds(0);
+            rounded.setMilliseconds(0);
+            return rounded;
+        };
+        
+        let clockIn = new Date(entry.clock_in_time);
+        let clockOut = new Date(entry.clock_out_time);
+        
+        // Determine day of week before rounding
         const clockInDate = new Date(clockIn);
         const dayOfWeek = clockInDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
         const isFriday = dayOfWeek === 5; // Friday
+        
+        // Apply rounding to Friday and weekends
+        if (isFriday || isWeekend) {
+            clockIn = roundClockInUp(clockIn);
+            clockOut = roundClockOutDown(clockOut);
+            // Update clockInDate to use rounded clockIn for consistency
+            clockInDate.setTime(clockIn.getTime());
+        }
+        
+        const totalHours = (clockOut - clockIn) / (1000 * 60 * 60); // Convert to hours
         
         let regularHours = 0;
         let overtimeHours = 0;
