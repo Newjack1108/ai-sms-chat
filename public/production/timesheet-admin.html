@@ -377,6 +377,72 @@
         </div>
     </div>
     
+    <!-- Add Missing Day Modal -->
+    <div id="addMissingDayModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>Add Missing Day</h2>
+                <button class="modal-close" onclick="hideAddMissingDayModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="addMissingDayForm">
+                    <input type="hidden" id="addMissingDayUserId">
+                    <input type="hidden" id="addMissingDayWeekStart">
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayUser">User *</label>
+                        <select id="addMissingDayUser" class="form-control" required>
+                            <option value="">Select a user</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayDate">Date *</label>
+                        <input type="date" id="addMissingDayDate" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayJob">Job/Site *</label>
+                        <select id="addMissingDayJob" class="form-control" required>
+                            <option value="">Select a job/site</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayClockIn">Clock In Time *</label>
+                        <input type="datetime-local" id="addMissingDayClockIn" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayClockOut">Clock Out Time *</label>
+                        <input type="datetime-local" id="addMissingDayClockOut" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayReason">Reason *</label>
+                        <textarea id="addMissingDayReason" class="form-control" rows="3" required placeholder="Enter reason for adding this missing day"></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="addMissingDayOvernight" style="width: auto; margin: 0;">
+                            <span>Overnight away from home</span>
+                        </label>
+                        <small style="color: #666; display: block; margin-top: 4px;">When checked, all hours for this day will be calculated as overnight hours (1.25x rate)</small>
+                    </div>
+                    
+                    <div style="background: #d4edda; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #28a745;">
+                        <strong>✅ Admin Create:</strong> This entry will be created immediately and will be marked as "Created by Admin" on the timesheet.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="hideAddMissingDayModal()" class="btn btn-secondary">Cancel</button>
+                <button type="button" onclick="submitAddMissingDay()" class="btn btn-primary">Create Entry</button>
+            </div>
+        </div>
+    </div>
+    
     <style>
         /* Error state styling for form controls */
         .form-control.error {
@@ -1692,6 +1758,15 @@
                             return;
                         }
                         
+                        // Generate all dates for the week
+                        const weekStartDate = new Date(weekStart);
+                        const weekDates = [];
+                        for (let i = 0; i < 7; i++) {
+                            const date = new Date(weekStartDate);
+                            date.setDate(weekStartDate.getDate() + i);
+                            weekDates.push(date.toISOString().split('T')[0]);
+                        }
+                        
                         // Group entries by date to show daily totals
                         const entriesByDate = {};
                         dailyBreakdown.forEach(day => {
@@ -1719,14 +1794,35 @@
                         
                         let dailyHtml = '<div class="daily-breakdown"><table><thead><tr><th>Date</th><th>Job</th><th>Clock In</th><th>Clock Out</th><th>Location</th><th>Day Type</th><th>Regular</th><th>Overtime</th><th>Weekend</th><th>Overnight</th><th>Total</th><th>Actions</th></tr></thead><tbody>';
                         
-                        // Sort dates
-                        const sortedDates = Object.keys(entriesByDate).sort();
+                        // Iterate through all week dates (not just dates with entries)
+                        const sortedDates = weekDates;
                         
                         sortedDates.forEach(date => {
                             const dayData = entriesByDate[date];
-                            const dayEntries = dayData.entries;
+                            const dayEntries = dayData ? dayData.entries : [];
                             const dateObj = new Date(date);
                             const dateStr = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+                            
+                            // If no entries for this date, show "Add Missing Day" button
+                            if (dayEntries.length === 0) {
+                                dailyHtml += `
+                                    <tr style="border-top: 2px solid #ddd; background: #f8f9fa;">
+                                        <td style="font-weight: 600; padding: 15px;">${dateStr}</td>
+                                        <td colspan="10" style="text-align: center; padding: 15px; color: #666;">
+                                            No timesheet entry for this day
+                                        </td>
+                                        <td style="text-align: center; padding: 15px;">
+                                            <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
+                                                    class="btn btn-primary btn-sm" 
+                                                    style="padding: 6px 12px; font-size: 12px;"
+                                                    title="Add missing day entry">
+                                                ➕ Add Missing Day
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                                return; // Skip to next date
+                            }
                             
                             // Calculate daily totals
                             let dayRegular = 0, dayOvertime = 0, dayWeekend = 0, dayOvernight = 0, dayTotal = 0;
@@ -1973,6 +2069,135 @@
             } catch (error) {
                 console.error('Error deleting timesheet entry:', error);
                 showAlert('Failed to delete timesheet entry: ' + (error.message || 'Unknown error'), 'error');
+            }
+        }
+        
+        // Add Missing Day Modal Functions
+        async function showAddMissingDayModal(userId, weekStart, date) {
+            // Set user ID and week start
+            document.getElementById('addMissingDayUserId').value = userId;
+            document.getElementById('addMissingDayWeekStart').value = weekStart;
+            document.getElementById('addMissingDayDate').value = date;
+            
+            // Load users for dropdown
+            try {
+                const usersData = await apiCall('/users');
+                const users = usersData.users || [];
+                const userSelect = document.getElementById('addMissingDayUser');
+                userSelect.innerHTML = '<option value="">Select a user</option>';
+                users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.username;
+                    option.selected = user.id == userId;
+                    userSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading users:', error);
+                showAlert('Error loading users', 'error');
+            }
+            
+            // Load jobs for dropdown
+            try {
+                const jobsData = await apiCall('/timesheet/jobs?all=true');
+                const jobs = jobsData.jobs || [];
+                const jobSelect = document.getElementById('addMissingDayJob');
+                jobSelect.innerHTML = '<option value="">Select a job/site</option>';
+                jobs.forEach(job => {
+                    const option = document.createElement('option');
+                    option.value = job.id;
+                    option.textContent = job.name + (job.description ? ' - ' + job.description : '');
+                    jobSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading jobs:', error);
+                showAlert('Error loading jobs', 'error');
+            }
+            
+            // Set default times for the date (9 AM to 5 PM)
+            const dateObj = new Date(date);
+            dateObj.setHours(9, 0, 0, 0);
+            const localDateTimeIn = new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            document.getElementById('addMissingDayClockIn').value = localDateTimeIn;
+            
+            dateObj.setHours(17, 0, 0, 0);
+            const localDateTimeOut = new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            document.getElementById('addMissingDayClockOut').value = localDateTimeOut;
+            
+            // Clear reason
+            document.getElementById('addMissingDayReason').value = '';
+            document.getElementById('addMissingDayOvernight').checked = false;
+            
+            // Show modal
+            showModal('addMissingDayModal');
+        }
+        
+        function hideAddMissingDayModal() {
+            hideModal('addMissingDayModal');
+            document.getElementById('addMissingDayForm').reset();
+        }
+        
+        async function submitAddMissingDay() {
+            const userId = parseInt(document.getElementById('addMissingDayUser').value);
+            const date = document.getElementById('addMissingDayDate').value;
+            const jobId = parseInt(document.getElementById('addMissingDayJob').value);
+            const clockIn = document.getElementById('addMissingDayClockIn').value;
+            const clockOut = document.getElementById('addMissingDayClockOut').value;
+            const reason = document.getElementById('addMissingDayReason').value.trim();
+            const overnightAway = document.getElementById('addMissingDayOvernight').checked;
+            const weekStart = document.getElementById('addMissingDayWeekStart').value;
+            
+            // Validation
+            if (!userId || !date || !jobId || !clockIn || !clockOut || !reason) {
+                showAlert('Please fill in all required fields', 'error');
+                return;
+            }
+            
+            // Validate clock out is after clock in
+            if (new Date(clockOut) <= new Date(clockIn)) {
+                showAlert('Clock out time must be after clock in time', 'error');
+                return;
+            }
+            
+            // Convert local datetime to ISO string
+            const clockInISO = new Date(clockIn).toISOString();
+            const clockOutISO = new Date(clockOut).toISOString();
+            
+            try {
+                const response = await apiCall('/clock/entries/admin/create', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        user_id: userId,
+                        job_id: jobId,
+                        clock_in_time: clockInISO,
+                        clock_out_time: clockOutISO,
+                        reason: reason,
+                        overnight_away: overnightAway
+                    })
+                });
+                
+                if (response && response.success) {
+                    showAlert('Timesheet entry created successfully', 'success');
+                    hideAddMissingDayModal();
+                    
+                    // Reload the daily breakdown
+                    const row = document.getElementById(`daily-${userId}`);
+                    if (row && row.style.display !== 'none') {
+                        const content = document.getElementById(`daily-content-${userId}`);
+                        if (content) {
+                            content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
+                        }
+                        await toggleDailyBreakdown(userId, weekStart);
+                    }
+                    
+                    // Reload payroll summary
+                    await loadPayrollSummary();
+                } else {
+                    throw new Error(response?.error || 'Failed to create entry');
+                }
+            } catch (error) {
+                console.error('Error creating timesheet entry:', error);
+                showAlert('Failed to create timesheet entry: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         

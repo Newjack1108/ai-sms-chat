@@ -2709,6 +2709,93 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
     }
 });
 
+// Admin-only: Directly create timesheet entry for a user (applies immediately, no approval needed)
+router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const adminId = req.session.production_user.id;
+        const { user_id, job_id, clock_in_time, clock_out_time, reason, overnight_away } = req.body;
+        
+        if (!user_id || !job_id || !clock_in_time || !clock_out_time || !reason) {
+            return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        // Validate user exists
+        const user = await ProductionDatabase.getUserById(parseInt(user_id));
+        if (!user) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        
+        // Validate job exists
+        const job = await ProductionDatabase.getJobById(parseInt(job_id));
+        if (!job) {
+            return res.status(404).json({ success: false, error: 'Job/Site not found' });
+        }
+        
+        // Check if times are in the past
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const clockInDate = new Date(clock_in_time);
+        clockInDate.setHours(0, 0, 0, 0);
+        if (clockInDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Clock in time cannot be in the future. Please use a past date.' 
+            });
+        }
+        
+        const clockOutDate = new Date(clock_out_time);
+        clockOutDate.setHours(0, 0, 0, 0);
+        if (clockOutDate > today) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Clock out time cannot be in the future. Please use a past date.' 
+            });
+        }
+        
+        // Validate clock out is after clock in
+        if (new Date(clock_out_time) <= new Date(clock_in_time)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Clock out time must be after clock in time.' 
+            });
+        }
+        
+        // Check for duplicate or overlapping times
+        const duplicates = await ProductionDatabase.checkDuplicateTimes(
+            parseInt(user_id), 
+            clock_in_time, 
+            clock_out_time, 
+            null // No entry to exclude (creating new entry)
+        );
+        
+        // Filter out auto-clocked-out entries from duplicates (they can be replaced)
+        const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+        
+        if (realDuplicates && realDuplicates.length > 0) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'The times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+            });
+        }
+        
+        // Create the entry directly
+        const entry = await ProductionDatabase.adminCreateTimesheetEntry(
+            parseInt(user_id),
+            adminId,
+            parseInt(job_id),
+            clock_in_time,
+            clock_out_time,
+            reason,
+            overnight_away !== undefined ? overnight_away : undefined
+        );
+        
+        res.json({ success: true, entry, message: 'Timesheet entry created successfully by admin' });
+    } catch (error) {
+        console.error('Admin create timesheet error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create timesheet entry: ' + error.message });
+    }
+});
+
 router.get('/clock/amendments/pending', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const amendments = await ProductionDatabase.getPendingAmendments();

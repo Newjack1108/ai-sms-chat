@@ -8412,6 +8412,111 @@ class ProductionDatabase {
         }
     }
     
+    // Admin-only: Directly create timesheet entry (applies immediately, no approval needed)
+    static async adminCreateTimesheetEntry(userId, adminId, jobId, clockInTime, clockOutTime, reason, overnightAway) {
+        const now = new Date().toISOString();
+        
+        console.log(`Admin creating timesheet entry for user ${userId}:`, {
+            job_id: jobId,
+            clock_in: clockInTime,
+            clock_out: clockOutTime,
+            overnight_away: overnightAway,
+            adminId
+        });
+        
+        // Create the timesheet entry directly with admin edit tracking
+        let entryId;
+        if (isPostgreSQL) {
+            const entryResult = await pool.query(
+                `INSERT INTO timesheet_entries 
+                 (user_id, job_id, clock_in_time, clock_out_time, clock_in_latitude, clock_in_longitude, 
+                  clock_out_latitude, clock_out_longitude, edited_by_admin_id, edited_by_admin_at, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, NULL, NULL, NULL, NULL, $5, $6, $6, $6) RETURNING id`,
+                [userId, jobId, clockInTime, clockOutTime, adminId, now]
+            );
+            entryId = entryResult.rows[0].id;
+        } else {
+            const entryStmt = db.prepare(
+                `INSERT INTO timesheet_entries 
+                 (user_id, job_id, clock_in_time, clock_out_time, clock_in_latitude, clock_in_longitude, 
+                  clock_out_latitude, clock_out_longitude, edited_by_admin_id, edited_by_admin_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`
+            );
+            const entryInfo = entryStmt.run(userId, jobId, clockInTime, clockOutTime, adminId, now, now, now);
+            entryId = entryInfo.lastInsertRowid;
+        }
+        
+        // Get clock-in date to determine which week
+        const clockInDate = new Date(clockInTime);
+        const clockInDateStr = clockInDate.toISOString().split('T')[0];
+        
+        // Find Monday of that week
+        const dayOfWeek = clockInDate.getDay();
+        const monday = new Date(clockInDate);
+        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+        monday.setHours(0, 0, 0, 0);
+        const weekStartDate = monday.toISOString().split('T')[0];
+        
+        // Get or create weekly timesheet
+        const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
+        
+        // Get or create daily entry
+        let dailyEntryRecord = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+        if (!dailyEntryRecord) {
+            dailyEntryRecord = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entryId);
+        }
+        
+        // Update overnight_away if provided
+        if (overnightAway !== undefined) {
+            await this.updateDailyEntry(dailyEntryRecord.id, {
+                overnight_away: overnightAway
+            });
+        }
+        
+        // Get the current overnight_away value (either from update or existing)
+        const updatedDailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+        const finalOvernightAway = overnightAway !== undefined ? overnightAway : (updatedDailyEntry ? updatedDailyEntry.overnight_away : false);
+        
+        // Calculate hours for the new entry
+        await this.calculateTimesheetHours(entryId, finalOvernightAway);
+        
+        // Aggregate hours from ALL entries for this day
+        const aggregatedHours = await this.aggregateDailyHours(userId, clockInDateStr, finalOvernightAway);
+        
+        // Update daily entry with aggregated hours from all entries
+        await this.updateDailyEntry(dailyEntryRecord.id, {
+            timesheet_entry_id: entryId,
+            regular_hours: aggregatedHours.regular_hours,
+            overtime_hours: aggregatedHours.overtime_hours,
+            weekend_hours: aggregatedHours.weekend_hours,
+            overnight_hours: aggregatedHours.overnight_hours,
+            total_hours: aggregatedHours.total_hours
+        });
+        
+        // Create an amendment record for audit trail (marked as approved/admin)
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason, status, reviewed_by, reviewed_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved', $8, $9)`,
+                [entryId, userId, clockInTime, clockOutTime,
+                 clockInTime, clockOutTime, reason || 'Created by admin', adminId, now]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO timesheet_amendments 
+                 (timesheet_entry_id, user_id, original_clock_in_time, original_clock_out_time,
+                  amended_clock_in_time, amended_clock_out_time, reason, status, reviewed_by, reviewed_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)`
+            ).run(entryId, userId, clockInTime, clockOutTime,
+                 clockInTime, clockOutTime, reason || 'Created by admin', adminId, now);
+        }
+        
+        // Return the created entry
+        return await this.getTimesheetEntryById(entryId);
+    }
+    
     // Amendment operations
     static async requestTimeAmendment(entryId, userId, amendedClockIn, amendedClockOut, reason) {
         const entry = await this.getTimesheetEntryById(entryId);
