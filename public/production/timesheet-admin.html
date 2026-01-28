@@ -1250,7 +1250,7 @@
             } else if (date && userId && weekStart) {
                 // Try to fetch current day_type
                 try {
-                    const dailyData = await apiCall(`/clock/weekly/${weekStart}/user/${userId}/daily`);
+                    const dailyData = await apiCall(`/clock/payroll/${weekStart}/user/${userId}/daily`);
                     const dailyBreakdown = dailyData.dailyBreakdown || [];
                     const entryForDate = dailyBreakdown.find(e => e.entry_date === date);
                     if (entryForDate && entryForDate.day_type) {
@@ -2327,7 +2327,7 @@
             // Try to load current day_type for this date
             try {
                 const weekStartDate = weekStart;
-                const dailyData = await apiCall(`/clock/weekly/${weekStartDate}/user/${userId}/daily`);
+                const dailyData = await apiCall(`/clock/payroll/${weekStartDate}/user/${userId}/daily`);
                 const dailyBreakdown = dailyData.dailyBreakdown || [];
                 const entryForDate = dailyBreakdown.find(e => e.entry_date === date);
                 if (entryForDate && entryForDate.day_type) {

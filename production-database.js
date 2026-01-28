@@ -7880,10 +7880,37 @@ class ProductionDatabase {
     }
     
     // Helper function to calculate hours based on day_type, overriding aggregated hours if needed
+    // Always fetches the latest daily entry from database to ensure day_type is current
     static async calculateHoursForDailyEntry(dailyEntry, aggregatedHours, userId, entryDate) {
+        // Always fetch the latest daily entry from database to ensure we have the most current day_type
+        // This ensures admin-set day_type always overrides any clock entry hours
+        let currentDailyEntry = dailyEntry;
+        try {
+            // Calculate week start date
+            const dateObj = new Date(entryDate);
+            const dayOfWeek = dateObj.getDay();
+            const monday = new Date(dateObj);
+            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+            monday.setHours(0, 0, 0, 0);
+            const weekStartDate = monday.toISOString().split('T')[0];
+            
+            // Get weekly timesheet
+            const weeklyTimesheet = await this.getWeeklyTimesheet(userId, weekStartDate);
+            if (weeklyTimesheet) {
+                // Fetch fresh daily entry from database
+                const freshDailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, entryDate);
+                if (freshDailyEntry) {
+                    currentDailyEntry = freshDailyEntry;
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching fresh daily entry for day_type check:', error);
+            // Fall back to passed-in dailyEntry if fetch fails
+        }
+        
         // If day_type is set, use day_type rules instead of aggregated hours
-        if (dailyEntry.day_type) {
-            if (dailyEntry.day_type === 'holiday_unpaid' || dailyEntry.day_type === 'sick_unpaid') {
+        if (currentDailyEntry && currentDailyEntry.day_type) {
+            if (currentDailyEntry.day_type === 'holiday_unpaid' || currentDailyEntry.day_type === 'sick_unpaid') {
                 // Unpaid days: 0 hours
                 return {
                     regular_hours: 0,
@@ -7892,7 +7919,7 @@ class ProductionDatabase {
                     overnight_hours: 0,
                     total_hours: 0
                 };
-            } else if (dailyEntry.day_type === 'sick_paid') {
+            } else if (currentDailyEntry.day_type === 'sick_paid') {
                 // Paid sick: 8 hours Mon-Thu, 6 hours Friday
                 const dateObj = new Date(entryDate);
                 const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
@@ -7904,7 +7931,7 @@ class ProductionDatabase {
                     overnight_hours: 0,
                     total_hours: hours
                 };
-            } else if (dailyEntry.day_type === 'holiday_paid') {
+            } else if (currentDailyEntry.day_type === 'holiday_paid') {
                 // Paid holiday: try to get from holiday request, default to 8
                 let hours = 8; // Default
                 try {
