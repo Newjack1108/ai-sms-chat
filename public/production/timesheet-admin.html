@@ -1803,24 +1803,85 @@
                             const dateObj = new Date(date);
                             const dateStr = dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
                             
-                            // If no entries for this date, show "Add Missing Day" button
+                            // If no entries for this date, check if there's a day_type
                             if (dayEntries.length === 0) {
-                                dailyHtml += `
-                                    <tr style="border-top: 2px solid #ddd; background: #f8f9fa;">
-                                        <td style="font-weight: 600; padding: 15px;">${dateStr}</td>
-                                        <td colspan="10" style="text-align: center; padding: 15px; color: #666;">
-                                            No timesheet entry for this day
-                                        </td>
-                                        <td style="text-align: center; padding: 15px;">
-                                            <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
-                                                    class="btn btn-primary btn-sm" 
-                                                    style="padding: 6px 12px; font-size: 12px;"
-                                                    title="Add missing day entry">
-                                                ➕ Add Missing Day
-                                            </button>
-                                        </td>
-                                    </tr>
-                                `;
+                                // Check if dayData exists with a day_type (from daily entries without clock entries)
+                                if (dayData && dayData.day_type) {
+                                    // Display day with day_type but no clock entries
+                                    const dayTypeLabel = {
+                                        'holiday_paid': 'Paid Holiday',
+                                        'holiday_unpaid': 'Unpaid Holiday',
+                                        'sick_paid': 'Paid Sick',
+                                        'sick_unpaid': 'Unpaid Sick'
+                                    }[dayData.day_type] || dayData.day_type;
+                                    
+                                    const dayTypeBadge = {
+                                        'holiday_paid': '<span style="background: #28a745; color: white; padding: 2px 4px; border-radius: 3px;">✓ Paid Holiday</span>',
+                                        'holiday_unpaid': '<span style="background: #ffc107; color: #333; padding: 2px 4px; border-radius: 3px;">⚠ Unpaid Holiday</span>',
+                                        'sick_paid': '<span style="background: #007bff; color: white; padding: 2px 4px; border-radius: 3px;">✓ Paid Sick</span>',
+                                        'sick_unpaid': '<span style="background: #fd7e14; color: white; padding: 2px 4px; border-radius: 3px;">⚠ Unpaid Sick</span>'
+                                    }[dayData.day_type] || '';
+                                    
+                                    dailyHtml += `
+                                        <tr style="border-top: 2px solid #4CBB17; background: #f8f9fa;">
+                                            <td style="font-weight: 600; padding: 15px; vertical-align: top;">${dateStr}</td>
+                                            <td>-</td>
+                                            <td>-</td>
+                                            <td>-</td>
+                                            <td>-</td>
+                                            <td style="vertical-align: top; padding: 15px;">
+                                                <select 
+                                                    id="admin-day-type-${userId}-${date}" 
+                                                    class="form-select" 
+                                                    style="width: 100%; padding: 4px; font-size: 11px; min-width: 120px;"
+                                                    onchange="saveAdminDayType('${userId}', '${weekStart}', '${date}', this.value)"
+                                                >
+                                                    <option value="">Normal Day</option>
+                                                    <option value="holiday_paid" ${dayData.day_type === 'holiday_paid' ? 'selected' : ''}>Paid Holiday</option>
+                                                    <option value="holiday_unpaid" ${dayData.day_type === 'holiday_unpaid' ? 'selected' : ''}>Unpaid Holiday</option>
+                                                    <option value="sick_paid" ${dayData.day_type === 'sick_paid' ? 'selected' : ''}>Paid Sick</option>
+                                                    <option value="sick_unpaid" ${dayData.day_type === 'sick_unpaid' ? 'selected' : ''}>Unpaid Sick</option>
+                                                </select>
+                                                ${dayData.day_type ? `
+                                                    <div style="margin-top: 4px; font-size: 10px;">
+                                                        ${dayTypeBadge}
+                                                    </div>
+                                                ` : ''}
+                                            </td>
+                                            <td>0.00</td>
+                                            <td>0.00</td>
+                                            <td>0.00</td>
+                                            <td>0.00</td>
+                                            <td>0.00</td>
+                                            <td style="text-align: center; padding: 15px;">
+                                                <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
+                                                        class="btn btn-primary btn-sm" 
+                                                        style="padding: 6px 12px; font-size: 12px;"
+                                                        title="Add missing day entry">
+                                                    ➕ Add Missing Day
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                } else {
+                                    // No entries and no day_type - show "Add Missing Day" button
+                                    dailyHtml += `
+                                        <tr style="border-top: 2px solid #ddd; background: #f8f9fa;">
+                                            <td style="font-weight: 600; padding: 15px;">${dateStr}</td>
+                                            <td colspan="10" style="text-align: center; padding: 15px; color: #666;">
+                                                No timesheet entry for this day
+                                            </td>
+                                            <td style="text-align: center; padding: 15px;">
+                                                <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
+                                                        class="btn btn-primary btn-sm" 
+                                                        style="padding: 6px 12px; font-size: 12px;"
+                                                        title="Add missing day entry">
+                                                    ➕ Add Missing Day
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }
                                 return; // Skip to next date
                             }
                             
@@ -1917,18 +1978,27 @@
                                         <td>${formatHours(overnight)}</td>
                                         <td>${formatHours(total)}</td>
                                         <td>
-                                            <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}', ${dayData.overnight_away === true || dayData.overnight_away === 1 || dayData.overnight_away === '1' ? 'true' : 'false'})" 
-                                                    class="btn btn-primary btn-sm" 
-                                                    style="padding: 4px 8px; font-size: 11px; margin-right: 4px;"
-                                                    title="Edit this entry">
-                                                ✏️ Edit
-                                            </button>
-                                            <button onclick="deleteTimesheetEntry(${day.id}, ${userId}, '${weekStart}')" 
-                                                    class="btn btn-danger btn-sm" 
-                                                    style="padding: 4px 8px; font-size: 11px;"
-                                                    title="Delete this entry">
-                                                🗑️ Delete
-                                            </button>
+                                            ${day.id ? `
+                                                <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}', ${dayData.overnight_away === true || dayData.overnight_away === 1 || dayData.overnight_away === '1' ? 'true' : 'false'})" 
+                                                        class="btn btn-primary btn-sm" 
+                                                        style="padding: 4px 8px; font-size: 11px; margin-right: 4px;"
+                                                        title="Edit this entry">
+                                                    ✏️ Edit
+                                                </button>
+                                                <button onclick="deleteTimesheetEntry(${day.id}, ${userId}, '${weekStart}')" 
+                                                        class="btn btn-danger btn-sm" 
+                                                        style="padding: 4px 8px; font-size: 11px;"
+                                                        title="Delete this entry">
+                                                    🗑️ Delete
+                                                </button>
+                                            ` : `
+                                                <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
+                                                        class="btn btn-primary btn-sm" 
+                                                        style="padding: 4px 8px; font-size: 11px;"
+                                                        title="Add clock entry for this day">
+                                                    ➕ Add Entry
+                                                </button>
+                                            `}
                                         </td>
                                     </tr>
                                 `;

@@ -9006,10 +9006,48 @@ class ProductionDatabase {
                 };
             });
             
+            // Get all dates that have entries
+            const datesWithEntries = new Set(entries.map(e => e.entry_date));
+            
+            // Add entries for days with day_type but no clock entries
+            if (weeklyTimesheet.rows.length > 0) {
+                Object.keys(dailyDataMap).forEach(date => {
+                    const dailyData = dailyDataMap[date];
+                    // If this date has a day_type but no clock entries, create a synthetic entry
+                    if (dailyData.day_type && !datesWithEntries.has(date)) {
+                        entries.push({
+                            id: null,
+                            entry_date: date,
+                            clock_in_time: null,
+                            clock_out_time: null,
+                            clock_in_latitude: null,
+                            clock_in_longitude: null,
+                            clock_out_latitude: null,
+                            clock_out_longitude: null,
+                            regular_hours: 0,
+                            overtime_hours: 0,
+                            weekend_hours: 0,
+                            overnight_hours: 0,
+                            total_hours: 0,
+                            edited_by_admin_id: null,
+                            edited_by_admin_at: null,
+                            day_type: dailyData.day_type,
+                            job_name: null,
+                            daily_notes: dailyData.daily_notes || null,
+                            overnight_away: dailyData.overnight_away || false
+                        });
+                    }
+                });
+            }
+            
             // Return all entries (no deduplication needed - we want all entries per day)
             return entries.sort((a, b) => {
                 const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
                 if (dateCompare !== 0) return dateCompare;
+                // For entries without clock_in_time, put them first (or handle null)
+                if (!a.clock_in_time && b.clock_in_time) return -1;
+                if (a.clock_in_time && !b.clock_in_time) return 1;
+                if (!a.clock_in_time && !b.clock_in_time) return 0;
                 return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
         } else {
@@ -9082,10 +9120,48 @@ class ProductionDatabase {
                 };
             });
             
+            // Get all dates that have entries
+            const datesWithEntries = new Set(entries.map(e => e.entry_date));
+            
+            // Add entries for days with day_type but no clock entries
+            if (weeklyTimesheet) {
+                Object.keys(dailyDataMap).forEach(date => {
+                    const dailyData = dailyDataMap[date];
+                    // If this date has a day_type but no clock entries, create a synthetic entry
+                    if (dailyData.day_type && !datesWithEntries.has(date)) {
+                        entries.push({
+                            id: null,
+                            entry_date: date,
+                            clock_in_time: null,
+                            clock_out_time: null,
+                            clock_in_latitude: null,
+                            clock_in_longitude: null,
+                            clock_out_latitude: null,
+                            clock_out_longitude: null,
+                            regular_hours: 0,
+                            overtime_hours: 0,
+                            weekend_hours: 0,
+                            overnight_hours: 0,
+                            total_hours: 0,
+                            edited_by_admin_id: null,
+                            edited_by_admin_at: null,
+                            day_type: dailyData.day_type,
+                            job_name: null,
+                            daily_notes: dailyData.daily_notes || null,
+                            overnight_away: dailyData.overnight_away || false
+                        });
+                    }
+                });
+            }
+            
             // Return all entries (no deduplication needed - we want all entries per day)
             return entries.sort((a, b) => {
                 const dateCompare = new Date(a.entry_date) - new Date(b.entry_date);
                 if (dateCompare !== 0) return dateCompare;
+                // For entries without clock_in_time, put them first (or handle null)
+                if (!a.clock_in_time && b.clock_in_time) return -1;
+                if (a.clock_in_time && !b.clock_in_time) return 1;
+                if (!a.clock_in_time && !b.clock_in_time) return 0;
                 return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
         }
