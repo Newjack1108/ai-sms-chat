@@ -1923,10 +1923,32 @@
                                         'sick_unpaid': '<span style="background: #fd7e14; color: white; padding: 2px 4px; border-radius: 3px;">⚠ Unpaid Sick</span>'
                                     }[dayData.day_type] || '';
                                     
-                                    // Set standard day hours (8 hours) for paid holidays and paid sick days
-                                    const isPaidDay = dayData.day_type === 'holiday_paid' || dayData.day_type === 'sick_paid';
-                                    const regularHours = isPaidDay ? 8 : 0;
-                                    const totalHours = isPaidDay ? 8 : 0;
+                                    // Calculate hours based on day_type
+                                    let regularHours = 0;
+                                    let totalHours = 0;
+                                    
+                                    if (dayData.day_type === 'holiday_unpaid' || dayData.day_type === 'sick_unpaid') {
+                                        regularHours = 0;
+                                        totalHours = 0;
+                                    } else if (dayData.day_type === 'sick_paid') {
+                                        // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                                        const dateObj = new Date(date);
+                                        const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                                        if (dayOfWeek === 5) {
+                                            // Friday
+                                            regularHours = 6;
+                                            totalHours = 6;
+                                        } else {
+                                            // Monday to Thursday
+                                            regularHours = 8;
+                                            totalHours = 8;
+                                        }
+                                    } else if (dayData.day_type === 'holiday_paid') {
+                                        // Paid holiday: hours from holiday request (half day = 4, full day = 8) or default 8
+                                        // Note: We can't easily get holiday request here, so default to 8
+                                        regularHours = 8;
+                                        totalHours = 8;
+                                    }
                                     
                                     dailyHtml += `
                                         <tr style="border-top: 2px solid #4CBB17; background: #f8f9fa;">

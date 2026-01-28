@@ -2304,6 +2304,61 @@ router.put('/clock/weekly/:weekStart/day/:date/user/:targetUserId', requireProdu
             }
         }
         
+        // Calculate hours based on day_type
+        if (updateData.day_type !== undefined) {
+            let regularHours = 0;
+            let totalHours = 0;
+            
+            if (updateData.day_type === 'holiday_unpaid' || updateData.day_type === 'sick_unpaid') {
+                regularHours = 0;
+                totalHours = 0;
+            } else if (updateData.day_type === 'sick_paid') {
+                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                const dateObj = new Date(entryDate);
+                const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                if (dayOfWeek === 5) {
+                    // Friday
+                    regularHours = 6;
+                    totalHours = 6;
+                } else {
+                    // Monday to Thursday
+                    regularHours = 8;
+                    totalHours = 8;
+                }
+            } else if (updateData.day_type === 'holiday_paid') {
+                // Try to find approved holiday request for this date and user
+                let holidayRequest = null;
+                const allRequests = await ProductionDatabase.getHolidayRequestsByUser(targetUserId);
+                const dateObj = new Date(entryDate);
+                holidayRequest = allRequests.find(req => {
+                    if (req.status !== 'approved') return false;
+                    const start = new Date(req.start_date);
+                    const end = new Date(req.end_date);
+                    return dateObj >= start && dateObj <= end;
+                });
+                
+                if (holidayRequest && holidayRequest.days_requested) {
+                    // If it's a half day (0.5), set 4 hours, otherwise 8 hours
+                    totalHours = holidayRequest.days_requested === 0.5 ? 4 : 8;
+                    regularHours = totalHours;
+                } else {
+                    // Default to 8 hours for full day
+                    regularHours = 8;
+                    totalHours = 8;
+                }
+            } else if (updateData.day_type === null) {
+                // If day_type is cleared, we should recalculate from timesheet entries if they exist
+                // For now, we'll leave hours as they are (they'll be recalculated if there are entries)
+                // Don't set hours here - let them be recalculated from actual entries
+            }
+            
+            // Only update hours if day_type is set (not null)
+            if (updateData.day_type !== null) {
+                updateData.regular_hours = regularHours;
+                updateData.total_hours = totalHours;
+            }
+        }
+        
         const updated = await ProductionDatabase.updateDailyEntry(dailyEntry.id, updateData);
         
         res.json({ success: true, dailyEntry: updated });
@@ -2762,8 +2817,18 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
                 regularHours = 0;
                 totalHours = 0;
             } else if (day_type === 'sick_paid') {
-                regularHours = 8;
-                totalHours = 8;
+                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                const dateObjForSick = new Date(entryDate);
+                const dayOfWeek = dateObjForSick.getDay(); // 0 = Sunday, 5 = Friday
+                if (dayOfWeek === 5) {
+                    // Friday
+                    regularHours = 6;
+                    totalHours = 6;
+                } else {
+                    // Monday to Thursday
+                    regularHours = 8;
+                    totalHours = 8;
+                }
             } else if (day_type === 'holiday_paid') {
                 // Check for linked holiday request to get hours
                 let holidayRequest = null;
@@ -2949,8 +3014,18 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 regularHours = 0;
                 totalHours = 0;
             } else if (day_type === 'sick_paid') {
-                regularHours = 8;
-                totalHours = 8;
+                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                const dateObjForSick = new Date(entryDate);
+                const dayOfWeek = dateObjForSick.getDay(); // 0 = Sunday, 5 = Friday
+                if (dayOfWeek === 5) {
+                    // Friday
+                    regularHours = 6;
+                    totalHours = 6;
+                } else {
+                    // Monday to Thursday
+                    regularHours = 8;
+                    totalHours = 8;
+                }
             } else if (day_type === 'holiday_paid') {
                 // Try to find approved holiday request for this date and user
                 let holidayRequest = null;

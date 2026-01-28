@@ -9031,10 +9031,33 @@ class ProductionDatabase {
                     const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
                     if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
-                        // Set standard day hours (8 hours) for paid holidays and paid sick days
-                        const isPaidDay = dailyData.day_type === 'holiday_paid' || dailyData.day_type === 'sick_paid';
-                        const regularHours = isPaidDay ? 8 : 0;
-                        const totalHours = isPaidDay ? 8 : 0;
+                        // Calculate hours based on day_type
+                        let regularHours = 0;
+                        let totalHours = 0;
+                        
+                        if (dailyData.day_type === 'holiday_unpaid' || dailyData.day_type === 'sick_unpaid') {
+                            regularHours = 0;
+                            totalHours = 0;
+                        } else if (dailyData.day_type === 'sick_paid') {
+                            // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                            const dateObj = new Date(normalizedDate);
+                            const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                            if (dayOfWeek === 5) {
+                                // Friday
+                                regularHours = 6;
+                                totalHours = 6;
+                            } else {
+                                // Monday to Thursday
+                                regularHours = 8;
+                                totalHours = 8;
+                            }
+                        } else if (dailyData.day_type === 'holiday_paid') {
+                            // Paid holiday: hours from holiday request (half day = 4, full day = 8) or default 8
+                            // Note: We can't easily get holiday request here, so default to 8
+                            // The actual hours should be set when the daily entry is created/updated
+                            regularHours = 8;
+                            totalHours = 8;
+                        }
                         
                         entries.push({
                             id: null,
@@ -9166,10 +9189,33 @@ class ProductionDatabase {
                     const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
                     if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
-                        // Set standard day hours (8 hours) for paid holidays and paid sick days
-                        const isPaidDay = dailyData.day_type === 'holiday_paid' || dailyData.day_type === 'sick_paid';
-                        const regularHours = isPaidDay ? 8 : 0;
-                        const totalHours = isPaidDay ? 8 : 0;
+                        // Calculate hours based on day_type
+                        let regularHours = 0;
+                        let totalHours = 0;
+                        
+                        if (dailyData.day_type === 'holiday_unpaid' || dailyData.day_type === 'sick_unpaid') {
+                            regularHours = 0;
+                            totalHours = 0;
+                        } else if (dailyData.day_type === 'sick_paid') {
+                            // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                            const dateObj = new Date(normalizedDate);
+                            const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                            if (dayOfWeek === 5) {
+                                // Friday
+                                regularHours = 6;
+                                totalHours = 6;
+                            } else {
+                                // Monday to Thursday
+                                regularHours = 8;
+                                totalHours = 8;
+                            }
+                        } else if (dailyData.day_type === 'holiday_paid') {
+                            // Paid holiday: hours from holiday request (half day = 4, full day = 8) or default 8
+                            // Note: We can't easily get holiday request here, so default to 8
+                            // The actual hours should be set when the daily entry is created/updated
+                            regularHours = 8;
+                            totalHours = 8;
+                        }
                         
                         entries.push({
                             id: null,
