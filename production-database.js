@@ -6570,14 +6570,17 @@ class ProductionDatabase {
                     // Aggregate hours from ALL entries for this day
                     const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
                     
-                    // Update daily entry with aggregated hours
+                    // Calculate final hours based on day_type (unpaid days override aggregated hours)
+                    const finalHours = await this.calculateHoursForDailyEntry(dailyEntry, aggregatedHours, entry.user_id, clockInDateStr);
+                    
+                    // Update daily entry with final hours
                     await this.updateDailyEntry(dailyEntry.id, {
                         timesheet_entry_id: entry.id,
-                        regular_hours: aggregatedHours.regular_hours,
-                        overtime_hours: aggregatedHours.overtime_hours,
-                        weekend_hours: aggregatedHours.weekend_hours,
-                        overnight_hours: aggregatedHours.overnight_hours,
-                        total_hours: aggregatedHours.total_hours
+                        regular_hours: finalHours.regular_hours,
+                        overtime_hours: finalHours.overtime_hours,
+                        weekend_hours: finalHours.weekend_hours,
+                        overnight_hours: finalHours.overnight_hours,
+                        total_hours: finalHours.total_hours
                     });
                 } catch (error) {
                     console.error(`Error recalculating hours for auto-clocked-out entry ${entry.id}:`, error);
@@ -7244,14 +7247,17 @@ class ProductionDatabase {
             // Aggregate hours from ALL entries for this day
             const aggregatedHours = await this.aggregateDailyHours(userId, clockInDateStr, overnightAway);
             
-            // Update daily entry with aggregated hours from all entries
+            // Calculate final hours based on day_type (unpaid days override aggregated hours)
+            const finalHours = await this.calculateHoursForDailyEntry(dailyEntry, aggregatedHours, userId, clockInDateStr);
+            
+            // Update daily entry with final hours
             await this.updateDailyEntry(dailyEntry.id, {
                 timesheet_entry_id: updatedEntry.id, // Keep reference to most recent entry
-                regular_hours: aggregatedHours.regular_hours,
-                overtime_hours: aggregatedHours.overtime_hours,
-                weekend_hours: aggregatedHours.weekend_hours,
-                overnight_hours: aggregatedHours.overnight_hours,
-                total_hours: aggregatedHours.total_hours
+                regular_hours: finalHours.regular_hours,
+                overtime_hours: finalHours.overtime_hours,
+                weekend_hours: finalHours.weekend_hours,
+                overnight_hours: finalHours.overnight_hours,
+                total_hours: finalHours.total_hours
             });
         } catch (error) {
             console.error('Error calculating hours or updating daily entry:', error);
@@ -7328,12 +7334,14 @@ class ProductionDatabase {
                     if (dailyEntry) {
                         // Recalculate hours for remaining entries on this day
                         const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, dailyEntry.overnight_away);
+                        // Calculate final hours based on day_type (unpaid days override aggregated hours)
+                        const finalHours = await this.calculateHoursForDailyEntry(dailyEntry, aggregatedHours, entry.user_id, clockInDateStr);
                         await this.updateDailyEntry(dailyEntry.id, {
-                            regular_hours: aggregatedHours.regular_hours,
-                            overtime_hours: aggregatedHours.overtime_hours,
-                            weekend_hours: aggregatedHours.weekend_hours,
-                            overnight_hours: aggregatedHours.overnight_hours,
-                            total_hours: aggregatedHours.total_hours
+                            regular_hours: finalHours.regular_hours,
+                            overtime_hours: finalHours.overtime_hours,
+                            weekend_hours: finalHours.weekend_hours,
+                            overnight_hours: finalHours.overnight_hours,
+                            total_hours: finalHours.total_hours
                         });
                     }
                 }
@@ -7376,12 +7384,14 @@ class ProductionDatabase {
                     if (dailyEntry) {
                         // Recalculate hours for remaining entries on this day
                         const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, dailyEntry.overnight_away);
+                        // Calculate final hours based on day_type (unpaid days override aggregated hours)
+                        const finalHours = await this.calculateHoursForDailyEntry(dailyEntry, aggregatedHours, entry.user_id, clockInDateStr);
                         await this.updateDailyEntry(dailyEntry.id, {
-                            regular_hours: aggregatedHours.regular_hours,
-                            overtime_hours: aggregatedHours.overtime_hours,
-                            weekend_hours: aggregatedHours.weekend_hours,
-                            overnight_hours: aggregatedHours.overnight_hours,
-                            total_hours: aggregatedHours.total_hours
+                            regular_hours: finalHours.regular_hours,
+                            overtime_hours: finalHours.overtime_hours,
+                            weekend_hours: finalHours.weekend_hours,
+                            overnight_hours: finalHours.overnight_hours,
+                            total_hours: finalHours.total_hours
                         });
                     }
                 }
@@ -7867,6 +7877,64 @@ class ProductionDatabase {
                 total_hours: parseFloat(result?.total_hours || 0)
             };
         }
+    }
+    
+    // Helper function to calculate hours based on day_type, overriding aggregated hours if needed
+    static async calculateHoursForDailyEntry(dailyEntry, aggregatedHours, userId, entryDate) {
+        // If day_type is set, use day_type rules instead of aggregated hours
+        if (dailyEntry.day_type) {
+            if (dailyEntry.day_type === 'holiday_unpaid' || dailyEntry.day_type === 'sick_unpaid') {
+                // Unpaid days: 0 hours
+                return {
+                    regular_hours: 0,
+                    overtime_hours: 0,
+                    weekend_hours: 0,
+                    overnight_hours: 0,
+                    total_hours: 0
+                };
+            } else if (dailyEntry.day_type === 'sick_paid') {
+                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
+                const dateObj = new Date(entryDate);
+                const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                const hours = (dayOfWeek === 5) ? 6 : 8; // Friday = 6, Mon-Thu = 8
+                return {
+                    regular_hours: hours,
+                    overtime_hours: 0,
+                    weekend_hours: 0,
+                    overnight_hours: 0,
+                    total_hours: hours
+                };
+            } else if (dailyEntry.day_type === 'holiday_paid') {
+                // Paid holiday: try to get from holiday request, default to 8
+                let hours = 8; // Default
+                try {
+                    const allRequests = await this.getHolidayRequestsByUser(userId);
+                    const dateObj = new Date(entryDate);
+                    const holidayRequest = allRequests.find(req => {
+                        if (req.status !== 'approved') return false;
+                        const start = new Date(req.start_date);
+                        const end = new Date(req.end_date);
+                        return dateObj >= start && dateObj <= end;
+                    });
+                    if (holidayRequest && holidayRequest.days_requested) {
+                        hours = holidayRequest.days_requested === 0.5 ? 4 : 8;
+                    }
+                } catch (error) {
+                    console.error('Error getting holiday request for hours calculation:', error);
+                    // Use default 8 hours
+                }
+                return {
+                    regular_hours: hours,
+                    overtime_hours: 0,
+                    weekend_hours: 0,
+                    overnight_hours: 0,
+                    total_hours: hours
+                };
+            }
+        }
+        
+        // No day_type or day_type is null: use aggregated hours from clock entries
+        return aggregatedHours;
     }
     
     static async calculateTimesheetHours(entryId, overnightAway = false) {
@@ -8483,14 +8551,20 @@ class ProductionDatabase {
         // Aggregate hours from ALL entries for this day
         const aggregatedHours = await this.aggregateDailyHours(userId, clockInDateStr, finalOvernightAway);
         
-        // Update daily entry with aggregated hours from all entries
+        // Get the daily entry to check day_type
+        const dailyEntryForCheck = await this.getDailyEntryByDate(weeklyTimesheet.id, clockInDateStr);
+        
+        // Calculate final hours based on day_type (unpaid days override aggregated hours)
+        const finalHours = await this.calculateHoursForDailyEntry(dailyEntryForCheck || dailyEntryRecord, aggregatedHours, userId, clockInDateStr);
+        
+        // Update daily entry with final hours
         await this.updateDailyEntry(dailyEntryRecord.id, {
             timesheet_entry_id: entryId,
-            regular_hours: aggregatedHours.regular_hours,
-            overtime_hours: aggregatedHours.overtime_hours,
-            weekend_hours: aggregatedHours.weekend_hours,
-            overnight_hours: aggregatedHours.overnight_hours,
-            total_hours: aggregatedHours.total_hours
+            regular_hours: finalHours.regular_hours,
+            overtime_hours: finalHours.overtime_hours,
+            weekend_hours: finalHours.weekend_hours,
+            overnight_hours: finalHours.overnight_hours,
+            total_hours: finalHours.total_hours
         });
         
         // Create an amendment record for audit trail (marked as approved/admin)
@@ -8696,14 +8770,17 @@ class ProductionDatabase {
         // Aggregate hours from ALL entries for this day
         const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
         
-        // Update daily entry with aggregated hours from all entries
+        // Calculate final hours based on day_type (unpaid days override aggregated hours)
+        const finalHours = await this.calculateHoursForDailyEntry(dailyEntryRecord, aggregatedHours, entry.user_id, clockInDateStr);
+        
+        // Update daily entry with final hours
         await this.updateDailyEntry(dailyEntryRecord.id, {
             timesheet_entry_id: amendment.timesheet_entry_id,
-            regular_hours: aggregatedHours.regular_hours,
-            overtime_hours: aggregatedHours.overtime_hours,
-            weekend_hours: aggregatedHours.weekend_hours,
-            overnight_hours: aggregatedHours.overnight_hours,
-            total_hours: aggregatedHours.total_hours
+            regular_hours: finalHours.regular_hours,
+            overtime_hours: finalHours.overtime_hours,
+            weekend_hours: finalHours.weekend_hours,
+            overnight_hours: finalHours.overnight_hours,
+            total_hours: finalHours.total_hours
         });
         
         return amendment;
@@ -8828,14 +8905,17 @@ class ProductionDatabase {
         // Aggregate hours from ALL entries for this day
         const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, finalOvernightAway);
         
-        // Update daily entry with aggregated hours from all entries
+        // Calculate final hours based on day_type (unpaid days override aggregated hours)
+        const finalHours = await this.calculateHoursForDailyEntry(dailyEntryRecord, aggregatedHours, entry.user_id, clockInDateStr);
+        
+        // Update daily entry with final hours
         await this.updateDailyEntry(dailyEntryRecord.id, {
             timesheet_entry_id: entryId,
-            regular_hours: aggregatedHours.regular_hours,
-            overtime_hours: aggregatedHours.overtime_hours,
-            weekend_hours: aggregatedHours.weekend_hours,
-            overnight_hours: aggregatedHours.overnight_hours,
-            total_hours: aggregatedHours.total_hours
+            regular_hours: finalHours.regular_hours,
+            overtime_hours: finalHours.overtime_hours,
+            weekend_hours: finalHours.weekend_hours,
+            overnight_hours: finalHours.overnight_hours,
+            total_hours: finalHours.total_hours
         });
         
         // Return the updated entry

@@ -2263,13 +2263,16 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
             // Aggregate hours from all entries for this day
             const aggregatedHours = await ProductionDatabase.aggregateDailyHours(userId, entryDate, overnight_away);
             
-            // Update daily entry with aggregated hours
+            // Calculate final hours based on day_type (unpaid days override aggregated hours)
+            const finalHours = await ProductionDatabase.calculateHoursForDailyEntry(updated || dailyEntry, aggregatedHours, userId, entryDate);
+            
+            // Update daily entry with final hours
             await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
-                regular_hours: aggregatedHours.regular_hours,
-                overtime_hours: aggregatedHours.overtime_hours,
-                weekend_hours: aggregatedHours.weekend_hours,
-                overnight_hours: aggregatedHours.overnight_hours,
-                total_hours: aggregatedHours.total_hours
+                regular_hours: finalHours.regular_hours,
+                overtime_hours: finalHours.overtime_hours,
+                weekend_hours: finalHours.weekend_hours,
+                overnight_hours: finalHours.overnight_hours,
+                total_hours: finalHours.total_hours
             });
         }
         
