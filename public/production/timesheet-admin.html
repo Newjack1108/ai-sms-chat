@@ -98,6 +98,9 @@
                         <option value="">All Staff</option>
                     </select>
                     <button onclick="loadPayrollSummary()" class="btn btn-primary">Load Week</button>
+                    <button onclick="refreshPayrollSummary()" class="btn btn-secondary" id="refreshPayrollBtn" title="Refresh to show latest amendments and day type changes">
+                        🔄 Refresh
+                    </button>
                     <button onclick="exportPayroll()" class="btn btn-success" id="exportBtn" style="display: none;">Export CSV</button>
                 </div>
             </div>
@@ -1568,6 +1571,33 @@
                 }
             });
             return expandedIds;
+        }
+        
+        // Refresh payroll summary - preserves expanded states and filters
+        async function refreshPayrollSummary() {
+            const refreshBtn = document.getElementById('refreshPayrollBtn');
+            const originalText = refreshBtn.textContent;
+            
+            // Show loading state
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '🔄 Refreshing...';
+            
+            try {
+                // Get currently expanded user IDs to preserve them
+                const expandedUserIds = getExpandedUserIds();
+                
+                // Reload payroll summary with preserved states
+                await loadPayrollSummary(expandedUserIds);
+                
+                showAlert('Payroll data refreshed successfully', 'success');
+            } catch (error) {
+                console.error('Error refreshing payroll summary:', error);
+                showAlert('Error refreshing payroll data: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                // Restore button state
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = originalText;
+            }
         }
         
         async function loadPayrollSummary(expandedUserIds = []) {
