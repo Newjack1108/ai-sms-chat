@@ -2641,10 +2641,20 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
 router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const adminId = req.session.production_user.id;
-        const { entry_id, amended_clock_in_time, amended_clock_out_time, reason, overnight_away } = req.body;
+        const { entry_id, amended_clock_in_time, amended_clock_out_time, reason, overnight_away, day_type, date, user_id, week_start } = req.body;
         
-        if (!entry_id || !amended_clock_in_time || !amended_clock_out_time) {
+        if (!entry_id) {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        const isHolidayOrSick = day_type === 'holiday_paid' || day_type === 'holiday_unpaid' || 
+                                day_type === 'sick_paid' || day_type === 'sick_unpaid';
+        
+        // Clock times only required if not holiday/sick
+        if (!isHolidayOrSick) {
+            if (!amended_clock_in_time || !amended_clock_out_time) {
+                return res.status(400).json({ success: false, error: 'Missing required fields' });
+            }
         }
         
         // Get the entry
@@ -2653,54 +2663,144 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
             return res.status(404).json({ success: false, error: 'Timesheet entry not found' });
         }
         
-        // Check if amended times are in the future
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const amendedClockInDate = new Date(amended_clock_in_time);
-        amendedClockInDate.setHours(0, 0, 0, 0);
-        if (amendedClockInDate > today) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Amended clock in time cannot be in the future. Please use a past date.' 
-            });
+        let updatedEntry = null;
+        
+        // If times are provided, validate and amend the entry
+        if (amended_clock_in_time && amended_clock_out_time) {
+            // Check if amended times are in the future
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const amendedClockInDate = new Date(amended_clock_in_time);
+            amendedClockInDate.setHours(0, 0, 0, 0);
+            if (amendedClockInDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Amended clock in time cannot be in the future. Please use a past date.' 
+                });
+            }
+            
+            const amendedClockOutDate = new Date(amended_clock_out_time);
+            amendedClockOutDate.setHours(0, 0, 0, 0);
+            if (amendedClockOutDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Amended clock out time cannot be in the future. Please use a past date.' 
+                });
+            }
+            
+            // Check for duplicate or overlapping times (excluding the current entry being amended)
+            const duplicates = await ProductionDatabase.checkDuplicateTimes(
+                entry.user_id, 
+                amended_clock_in_time, 
+                amended_clock_out_time, 
+                entry_id // Exclude the current entry
+            );
+            
+            // Filter out auto-clocked-out entries from duplicates (they can be replaced)
+            const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+            
+            if (realDuplicates && realDuplicates.length > 0) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+                });
+            }
+            
+            // Apply the amendment immediately
+            updatedEntry = await ProductionDatabase.adminAmendTimesheetEntry(
+                entry_id,
+                adminId,
+                amended_clock_in_time,
+                amended_clock_out_time,
+                reason || 'Amended by admin',
+                overnight_away !== undefined ? overnight_away : undefined
+            );
+        } else {
+            // No times provided, just get the entry
+            updatedEntry = entry;
         }
         
-        const amendedClockOutDate = new Date(amended_clock_out_time);
-        amendedClockOutDate.setHours(0, 0, 0, 0);
-        if (amendedClockOutDate > today) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Amended clock out time cannot be in the future. Please use a past date.' 
+        // Handle day_type - update daily entry
+        if (day_type) {
+            // Validate day_type value
+            const validDayTypes = ['holiday_paid', 'holiday_unpaid', 'sick_paid', 'sick_unpaid'];
+            if (!validDayTypes.includes(day_type)) {
+                return res.status(400).json({ success: false, error: 'Invalid day_type value' });
+            }
+            
+            // Get date from entry or use provided date
+            let entryDate = date;
+            if (!entryDate && updatedEntry.clock_in_time) {
+                entryDate = new Date(updatedEntry.clock_in_time).toISOString().split('T')[0];
+            } else if (!entryDate) {
+                return res.status(400).json({ success: false, error: 'Date is required when setting day_type without clock times' });
+            }
+            
+            // Get week start from provided value or calculate from date
+            let weekStartDate = week_start;
+            if (!weekStartDate) {
+                const dateObj = new Date(entryDate);
+                const dayOfWeek = dateObj.getDay();
+                const monday = new Date(dateObj);
+                monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+                monday.setHours(0, 0, 0, 0);
+                weekStartDate = monday.toISOString().split('T')[0];
+            }
+            
+            // Get user_id from entry or provided value
+            const targetUserId = user_id ? parseInt(user_id) : entry.user_id;
+            
+            // Get or create weekly timesheet
+            const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(targetUserId, weekStartDate);
+            const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate, updatedEntry ? updatedEntry.id : null);
+            
+            // Calculate hours based on day_type
+            let regularHours = 0;
+            let totalHours = 0;
+            
+            if (day_type === 'holiday_unpaid' || day_type === 'sick_unpaid') {
+                regularHours = 0;
+                totalHours = 0;
+            } else if (day_type === 'sick_paid') {
+                regularHours = 8;
+                totalHours = 8;
+            } else if (day_type === 'holiday_paid') {
+                // Check for linked holiday request to get hours
+                let holidayRequest = null;
+                if (dailyEntry.holiday_request_id) {
+                    holidayRequest = await ProductionDatabase.getHolidayRequestById(dailyEntry.holiday_request_id);
+                }
+                
+                // If no linked request, try to find approved request for this date and user
+                if (!holidayRequest) {
+                    const allRequests = await ProductionDatabase.getHolidayRequestsByUser(targetUserId);
+                    const dateObj = new Date(entryDate);
+                    holidayRequest = allRequests.find(req => {
+                        if (req.status !== 'approved') return false;
+                        const start = new Date(req.start_date);
+                        const end = new Date(req.end_date);
+                        return dateObj >= start && dateObj <= end;
+                    });
+                }
+                
+                if (holidayRequest && holidayRequest.days_requested) {
+                    // If it's a half day (0.5), set 4 hours, otherwise 8 hours
+                    totalHours = holidayRequest.days_requested === 0.5 ? 4 : 8;
+                    regularHours = totalHours;
+                } else {
+                    // Default to 8 hours for full day
+                    regularHours = 8;
+                    totalHours = 8;
+                }
+            }
+            
+            // Update daily entry with day_type and hours
+            await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
+                day_type: day_type,
+                regular_hours: regularHours,
+                total_hours: totalHours
             });
         }
-        
-        // Check for duplicate or overlapping times (excluding the current entry being amended)
-        const duplicates = await ProductionDatabase.checkDuplicateTimes(
-            entry.user_id, 
-            amended_clock_in_time, 
-            amended_clock_out_time, 
-            entry_id // Exclude the current entry
-        );
-        
-        // Filter out auto-clocked-out entries from duplicates (they can be replaced)
-        const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
-        
-        if (realDuplicates && realDuplicates.length > 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
-            });
-        }
-        
-        // Apply the amendment immediately
-        const updatedEntry = await ProductionDatabase.adminAmendTimesheetEntry(
-            entry_id,
-            adminId,
-            amended_clock_in_time,
-            amended_clock_out_time,
-            reason || 'Amended by admin',
-            overnight_away !== undefined ? overnight_away : undefined
-        );
         
         res.json({ success: true, entry: updatedEntry, message: 'Timesheet entry amended successfully by admin' });
     } catch (error) {
@@ -2713,10 +2813,21 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
 router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const adminId = req.session.production_user.id;
-        const { user_id, job_id, clock_in_time, clock_out_time, reason, overnight_away } = req.body;
+        const { user_id, job_id, clock_in_time, clock_out_time, reason, overnight_away, day_type } = req.body;
         
-        if (!user_id || !job_id || !clock_in_time || !clock_out_time || !reason) {
+        // Validate required fields
+        if (!user_id || !reason) {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
+        }
+        
+        const isHolidayOrSick = day_type === 'holiday_paid' || day_type === 'holiday_unpaid' || 
+                                day_type === 'sick_paid' || day_type === 'sick_unpaid';
+        
+        // Clock times and job are only required if not holiday/sick
+        if (!isHolidayOrSick) {
+            if (!job_id || !clock_in_time || !clock_out_time) {
+                return res.status(400).json({ success: false, error: 'Missing required fields' });
+            }
         }
         
         // Validate user exists
@@ -2725,69 +2836,152 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
             return res.status(404).json({ success: false, error: 'User not found' });
         }
         
-        // Validate job exists
-        const job = await ProductionDatabase.getJobById(parseInt(job_id));
-        if (!job) {
-            return res.status(404).json({ success: false, error: 'Job/Site not found' });
+        // Validate job exists (if provided)
+        if (job_id) {
+            const job = await ProductionDatabase.getJobById(parseInt(job_id));
+            if (!job) {
+                return res.status(404).json({ success: false, error: 'Job/Site not found' });
+            }
         }
         
-        // Check if times are in the past
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const clockInDate = new Date(clock_in_time);
-        clockInDate.setHours(0, 0, 0, 0);
-        if (clockInDate > today) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Clock in time cannot be in the future. Please use a past date.' 
+        let entry = null;
+        let entryDate = null;
+        
+        // If times are provided, validate and create timesheet entry
+        if (clock_in_time && clock_out_time) {
+            // Check if times are in the past
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const clockInDate = new Date(clock_in_time);
+            clockInDate.setHours(0, 0, 0, 0);
+            if (clockInDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Clock in time cannot be in the future. Please use a past date.' 
+                });
+            }
+            
+            const clockOutDate = new Date(clock_out_time);
+            clockOutDate.setHours(0, 0, 0, 0);
+            if (clockOutDate > today) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Clock out time cannot be in the future. Please use a past date.' 
+                });
+            }
+            
+            // Validate clock out is after clock in
+            if (new Date(clock_out_time) <= new Date(clock_in_time)) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Clock out time must be after clock in time.' 
+                });
+            }
+            
+            // Check for duplicate or overlapping times
+            const duplicates = await ProductionDatabase.checkDuplicateTimes(
+                parseInt(user_id), 
+                clock_in_time, 
+                clock_out_time, 
+                null // No entry to exclude (creating new entry)
+            );
+            
+            // Filter out auto-clocked-out entries from duplicates (they can be replaced)
+            const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+            
+            if (realDuplicates && realDuplicates.length > 0) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'The times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
+                });
+            }
+            
+            // Create the entry directly
+            entry = await ProductionDatabase.adminCreateTimesheetEntry(
+                parseInt(user_id),
+                adminId,
+                parseInt(job_id),
+                clock_in_time,
+                clock_out_time,
+                reason,
+                overnight_away !== undefined ? overnight_away : undefined
+            );
+            
+            entryDate = new Date(clock_in_time).toISOString().split('T')[0];
+        }
+        
+        // Handle day_type - update/create daily entry
+        if (day_type) {
+            // Validate day_type value
+            const validDayTypes = ['holiday_paid', 'holiday_unpaid', 'sick_paid', 'sick_unpaid'];
+            if (!validDayTypes.includes(day_type)) {
+                return res.status(400).json({ success: false, error: 'Invalid day_type value' });
+            }
+            
+            // Get date from entry or use clock_in_time date, or require date in request
+            if (!entryDate && clock_in_time) {
+                entryDate = new Date(clock_in_time).toISOString().split('T')[0];
+            } else if (!entryDate) {
+                // If no times provided, we need the date from request
+                const { date } = req.body;
+                if (!date) {
+                    return res.status(400).json({ success: false, error: 'Date is required when creating holiday/sick day without clock times' });
+                }
+                entryDate = date;
+            }
+            
+            // Find Monday of the week for this date
+            const dateObj = new Date(entryDate);
+            const dayOfWeek = dateObj.getDay();
+            const monday = new Date(dateObj);
+            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
+            monday.setHours(0, 0, 0, 0);
+            const weekStartDate = monday.toISOString().split('T')[0];
+            
+            // Get or create weekly timesheet
+            const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(parseInt(user_id), weekStartDate);
+            
+            // Calculate hours based on day_type
+            let regularHours = 0;
+            let totalHours = 0;
+            
+            if (day_type === 'holiday_unpaid' || day_type === 'sick_unpaid') {
+                regularHours = 0;
+                totalHours = 0;
+            } else if (day_type === 'sick_paid') {
+                regularHours = 8;
+                totalHours = 8;
+            } else if (day_type === 'holiday_paid') {
+                // Try to find approved holiday request for this date and user
+                let holidayRequest = null;
+                const allRequests = await ProductionDatabase.getHolidayRequestsByUser(parseInt(user_id));
+                const dateObj = new Date(entryDate);
+                holidayRequest = allRequests.find(req => {
+                    if (req.status !== 'approved') return false;
+                    const start = new Date(req.start_date);
+                    const end = new Date(req.end_date);
+                    return dateObj >= start && dateObj <= end;
+                });
+                
+                if (holidayRequest && holidayRequest.days_requested) {
+                    // If it's a half day (0.5), set 4 hours, otherwise 8 hours
+                    totalHours = holidayRequest.days_requested === 0.5 ? 4 : 8;
+                    regularHours = totalHours;
+                } else {
+                    // Default to 8 hours for full day
+                    regularHours = 8;
+                    totalHours = 8;
+                }
+            }
+            
+            // Get or create daily entry and update with day_type and hours
+            const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate, entry ? entry.id : null);
+            await ProductionDatabase.updateDailyEntry(dailyEntry.id, {
+                day_type: day_type,
+                regular_hours: regularHours,
+                total_hours: totalHours
             });
         }
-        
-        const clockOutDate = new Date(clock_out_time);
-        clockOutDate.setHours(0, 0, 0, 0);
-        if (clockOutDate > today) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Clock out time cannot be in the future. Please use a past date.' 
-            });
-        }
-        
-        // Validate clock out is after clock in
-        if (new Date(clock_out_time) <= new Date(clock_in_time)) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'Clock out time must be after clock in time.' 
-            });
-        }
-        
-        // Check for duplicate or overlapping times
-        const duplicates = await ProductionDatabase.checkDuplicateTimes(
-            parseInt(user_id), 
-            clock_in_time, 
-            clock_out_time, 
-            null // No entry to exclude (creating new entry)
-        );
-        
-        // Filter out auto-clocked-out entries from duplicates (they can be replaced)
-        const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
-        
-        if (realDuplicates && realDuplicates.length > 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: 'The times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
-            });
-        }
-        
-        // Create the entry directly
-        const entry = await ProductionDatabase.adminCreateTimesheetEntry(
-            parseInt(user_id),
-            adminId,
-            parseInt(job_id),
-            clock_in_time,
-            clock_out_time,
-            reason,
-            overnight_away !== undefined ? overnight_away : undefined
-        );
         
         res.json({ success: true, entry, message: 'Timesheet entry created successfully by admin' });
     } catch (error) {

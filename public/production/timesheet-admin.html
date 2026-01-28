@@ -365,6 +365,18 @@
                         <small style="color: #666; display: block; margin-top: 4px;">When checked, all hours for this day will be calculated as overnight hours (1.25x rate)</small>
                     </div>
                     
+                    <div class="form-group">
+                        <label for="adminEditDayType">Day Type</label>
+                        <select id="adminEditDayType" class="form-control">
+                            <option value="">Normal Day</option>
+                            <option value="holiday_paid">Paid Holiday</option>
+                            <option value="holiday_unpaid">Unpaid Holiday</option>
+                            <option value="sick_paid">Paid Sick Day</option>
+                            <option value="sick_unpaid">Unpaid Sick Day</option>
+                        </select>
+                        <small style="color: #666; display: block; margin-top: 4px;">For holidays and sick days, clock times are optional</small>
+                    </div>
+                    
                     <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #ffc107;">
                         <strong>⚠️ Admin Edit:</strong> This change will be applied immediately and will be marked as "Edited by Admin" on the timesheet.
                     </div>
@@ -429,6 +441,18 @@
                             <span>Overnight away from home</span>
                         </label>
                         <small style="color: #666; display: block; margin-top: 4px;">When checked, all hours for this day will be calculated as overnight hours (1.25x rate)</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addMissingDayType">Day Type</label>
+                        <select id="addMissingDayType" class="form-control">
+                            <option value="">Normal Day</option>
+                            <option value="holiday_paid">Paid Holiday</option>
+                            <option value="holiday_unpaid">Unpaid Holiday</option>
+                            <option value="sick_paid">Paid Sick Day</option>
+                            <option value="sick_unpaid">Unpaid Sick Day</option>
+                        </select>
+                        <small style="color: #666; display: block; margin-top: 4px;">For holidays and sick days, clock times are optional</small>
                     </div>
                     
                     <div style="background: #d4edda; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #28a745;">
@@ -1195,7 +1219,7 @@
         }
         
         // Admin edit timesheet entry functions
-        function showAdminEditModal(entryId, clockInTime, clockOutTime, jobName, overnightAway) {
+        async function showAdminEditModal(entryId, clockInTime, clockOutTime, jobName, overnightAway, dayType, date, userId, weekStart) {
             document.getElementById('adminEditEntryId').value = entryId;
             document.getElementById('adminOriginalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
             document.getElementById('adminOriginalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
@@ -1218,6 +1242,61 @@
             if (overnightCheckbox) {
                 overnightCheckbox.checked = overnightAway === true || overnightAway === 1 || overnightAway === '1' || overnightAway === 'true';
             }
+            
+            // Set day type - use provided value or try to fetch from daily entry
+            const dayTypeSelect = document.getElementById('adminEditDayType');
+            if (dayType) {
+                dayTypeSelect.value = dayType;
+            } else if (date && userId && weekStart) {
+                // Try to fetch current day_type
+                try {
+                    const dailyData = await apiCall(`/clock/weekly/${weekStart}/user/${userId}/daily`);
+                    const dailyBreakdown = dailyData.dailyBreakdown || [];
+                    const entryForDate = dailyBreakdown.find(e => e.entry_date === date);
+                    if (entryForDate && entryForDate.day_type) {
+                        dayTypeSelect.value = entryForDate.day_type;
+                    }
+                } catch (error) {
+                    console.log('Could not load existing day_type:', error);
+                }
+            }
+            
+            // Store date, userId, and weekStart for later use
+            dayTypeSelect.dataset.date = date || '';
+            dayTypeSelect.dataset.userId = userId || '';
+            dayTypeSelect.dataset.weekStart = weekStart || '';
+            
+            // Add event listener for day type change to make clock times conditionally required
+            const clockInField = document.getElementById('adminAmendedClockIn');
+            const clockOutField = document.getElementById('adminAmendedClockOut');
+            
+            // Remove existing listeners by cloning and replacing
+            const newDayTypeSelect = dayTypeSelect.cloneNode(true);
+            newDayTypeSelect.dataset.date = dayTypeSelect.dataset.date;
+            newDayTypeSelect.dataset.userId = dayTypeSelect.dataset.userId;
+            newDayTypeSelect.dataset.weekStart = dayTypeSelect.dataset.weekStart;
+            dayTypeSelect.parentNode.replaceChild(newDayTypeSelect, dayTypeSelect);
+            
+            newDayTypeSelect.addEventListener('change', function() {
+                const dayType = this.value;
+                const isHolidayOrSick = dayType === 'holiday_paid' || dayType === 'holiday_unpaid' || 
+                                      dayType === 'sick_paid' || dayType === 'sick_unpaid';
+                
+                if (isHolidayOrSick) {
+                    clockInField.removeAttribute('required');
+                    clockOutField.removeAttribute('required');
+                    clockInField.style.opacity = '0.6';
+                    clockOutField.style.opacity = '0.6';
+                } else {
+                    clockInField.setAttribute('required', 'required');
+                    clockOutField.setAttribute('required', 'required');
+                    clockInField.style.opacity = '1';
+                    clockOutField.style.opacity = '1';
+                }
+            });
+            
+            // Trigger change event to set initial state
+            newDayTypeSelect.dispatchEvent(new Event('change'));
             
             // Clear reason and any error styling
             const reasonField = document.getElementById('adminEditReason');
@@ -1262,12 +1341,14 @@
             const reasonField = document.getElementById('adminEditReason');
             const reason = reasonField.value.trim();
             const overnightAway = document.getElementById('adminEditOvernight').checked;
+            const dayType = document.getElementById('adminEditDayType').value || null;
+            const dayTypeSelect = document.getElementById('adminEditDayType');
+            const date = dayTypeSelect.dataset.date;
+            const userId = dayTypeSelect.dataset.userId;
+            const weekStart = dayTypeSelect.dataset.weekStart;
             
-            // Validate all required fields
-            if (!amendedClockIn || !amendedClockOut) {
-                showAlert('Please fill in all fields', 'error');
-                return;
-            }
+            const isHolidayOrSick = dayType === 'holiday_paid' || dayType === 'holiday_unpaid' || 
+                                   dayType === 'sick_paid' || dayType === 'sick_unpaid';
             
             // Enhanced validation for reason field with prominent error
             if (!reason) {
@@ -1283,9 +1364,23 @@
             // Remove any error styling if reason is provided
             reasonField.classList.remove('error');
             
-            // Convert local datetime to ISO string
-            const clockInISO = new Date(amendedClockIn).toISOString();
-            const clockOutISO = new Date(amendedClockOut).toISOString();
+            // Clock times only required if not holiday/sick
+            if (!isHolidayOrSick) {
+                if (!amendedClockIn || !amendedClockOut) {
+                    showAlert('Please fill in clock in and clock out times', 'error');
+                    return;
+                }
+                
+                // Validate clock out is after clock in
+                if (new Date(amendedClockOut) <= new Date(amendedClockIn)) {
+                    showAlert('Clock out time must be after clock in time', 'error');
+                    return;
+                }
+            }
+            
+            // Convert local datetime to ISO string (only if times provided)
+            const clockInISO = amendedClockIn ? new Date(amendedClockIn).toISOString() : null;
+            const clockOutISO = amendedClockOut ? new Date(amendedClockOut).toISOString() : null;
             
             try {
                 const result = await apiCall('/clock/amendments/admin', {
@@ -1295,7 +1390,11 @@
                         amended_clock_in_time: clockInISO,
                         amended_clock_out_time: clockOutISO,
                         reason: reason,
-                        overnight_away: overnightAway
+                        overnight_away: overnightAway,
+                        day_type: dayType,
+                        date: date,
+                        user_id: userId,
+                        week_start: weekStart
                     })
                 });
                 
@@ -1306,49 +1405,26 @@
                     hideAdminEditModal();
                     
                     // Get user ID from the updated entry to refresh the correct daily breakdown
-                    const editedUserId = updatedEntry?.user_id;
+                    const editedUserId = updatedEntry?.user_id || userId;
                     
-                    // Close any expanded daily breakdowns to force refresh
-                    document.querySelectorAll('[id^="daily-"]').forEach(row => {
-                        if (row.style.display !== 'none' && row.style.display !== '') {
-                            row.style.display = 'none';
-                            const userId = row.id.replace('daily-', '');
-                            const icon = document.getElementById(`icon-${userId}`);
-                            if (icon) icon.classList.remove('expanded');
-                            const content = document.getElementById(`daily-content-${userId}`);
-                            if (content) {
-                                content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
-                            }
-                        }
-                    });
+                    // Collect currently expanded user IDs and ensure edited user is included
+                    const expandedUserIds = getExpandedUserIds();
+                    if (editedUserId && !expandedUserIds.includes(parseInt(editedUserId))) {
+                        expandedUserIds.push(parseInt(editedUserId));
+                    }
                     
                     // Reload the timesheet data - try both possible element IDs
                     const weekSelect = document.getElementById('payrollWeekSelect');
-                    const weekStart = document.getElementById('payrollWeekStart');
-                    const weekValue = weekSelect?.value || weekStart?.value;
+                    const weekStartEl = document.getElementById('payrollWeekStart');
+                    const weekValue = weekSelect?.value || weekStartEl?.value || (weekStart || '');
                     
                     if (weekValue) {
                         // Update the select if it exists
                         if (weekSelect) {
                             weekSelect.value = weekValue;
                         }
-                        // Reload payroll summary which will refresh all data
-                        await loadPayrollSummary();
-                        
-                        // If the edited user's breakdown was open, refresh it
-                        if (editedUserId) {
-                            const dailyRow = document.getElementById(`daily-${editedUserId}`);
-                            if (dailyRow && dailyRow.style.display !== 'none') {
-                                // Force refresh by closing and reopening
-                                dailyRow.style.display = 'none';
-                                const icon = document.getElementById(`icon-${editedUserId}`);
-                                if (icon) icon.classList.remove('expanded');
-                                // Reopen after a short delay
-                                setTimeout(() => {
-                                    toggleDailyBreakdown(editedUserId, weekValue);
-                                }, 500);
-                            }
-                        }
+                        // Reload payroll summary which will refresh all data and restore expanded states
+                        await loadPayrollSummary(expandedUserIds);
                     } else {
                         // If no week selected, try to reload active clock-ins
                         try {
@@ -1454,7 +1530,19 @@
             return `${wholeHours}hrs ${minutes}mins`;
         }
         
-        async function loadPayrollSummary() {
+        // Helper function to get currently expanded user IDs
+        function getExpandedUserIds() {
+            const expandedIds = [];
+            document.querySelectorAll('[id^="daily-"]').forEach(row => {
+                if (row.style.display !== 'none' && row.style.display !== '') {
+                    const userId = row.id.replace('daily-', '');
+                    expandedIds.push(parseInt(userId));
+                }
+            });
+            return expandedIds;
+        }
+        
+        async function loadPayrollSummary(expandedUserIds = []) {
             const weekStart = document.getElementById('payrollWeekSelect').value || getCurrentWeekStart();
             const selectedStaffId = document.getElementById('payrollStaffSelect')?.value || '';
             
@@ -1638,6 +1726,19 @@
                         }
                     </style>
                 `;
+                
+                // Restore expanded states for tracked users
+                if (expandedUserIds.length > 0) {
+                    // Use setTimeout to ensure DOM is ready
+                    setTimeout(() => {
+                        expandedUserIds.forEach(userId => {
+                            const row = document.getElementById(`daily-${userId}`);
+                            if (row) {
+                                toggleDailyBreakdown(userId, weekStart);
+                            }
+                        });
+                    }, 100);
+                }
             } catch (error) {
                 console.error('Error loading payroll summary:', error);
                 document.getElementById('payrollSummary').innerHTML = 
@@ -1984,7 +2085,7 @@
                                         <td>${formatHours(total)}</td>
                                         <td>
                                             ${day.id ? `
-                                                <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}', ${dayData.overnight_away === true || dayData.overnight_away === 1 || dayData.overnight_away === '1' ? 'true' : 'false'})" 
+                                                <button onclick="showAdminEditModal(${day.id}, '${day.clock_in_time || ''}', '${day.clock_out_time || ''}', '${escapeHtml(day.job_name || '')}', ${dayData.overnight_away === true || dayData.overnight_away === 1 || dayData.overnight_away === '1' ? 'true' : 'false'}, '${dayData.day_type || ''}', '${date}', ${userId}, '${weekStart}')" 
                                                         class="btn btn-primary btn-sm" 
                                                         style="padding: 4px 8px; font-size: 11px; margin-right: 4px;"
                                                         title="Edit this entry">
@@ -2126,18 +2227,15 @@
                 
                 if (response && response.success) {
                     showAlert('Timesheet entry deleted successfully', 'success');
-                    // Reload the daily breakdown
-                    const row = document.getElementById(`daily-${userId}`);
-                    if (row && row.style.display !== 'none') {
-                        // Clear content and reload
-                        const content = document.getElementById(`daily-content-${userId}`);
-                        if (content) {
-                            content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
-                        }
-                        await toggleDailyBreakdown(userId, weekStart);
+                    
+                    // Collect currently expanded user IDs and ensure the user is included
+                    const expandedUserIds = getExpandedUserIds();
+                    if (userId && !expandedUserIds.includes(parseInt(userId))) {
+                        expandedUserIds.push(parseInt(userId));
                     }
-                    // Reload payroll summary
-                    await loadPayrollSummary();
+                    
+                    // Reload payroll summary which will refresh all data and restore expanded states
+                    await loadPayrollSummary(expandedUserIds);
                 } else {
                     throw new Error(response?.error || 'Failed to delete entry');
                 }
@@ -2199,9 +2297,53 @@
             const localDateTimeOut = new Date(dateObj.getTime() - dateObj.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
             document.getElementById('addMissingDayClockOut').value = localDateTimeOut;
             
-            // Clear reason
+            // Clear reason and day type
             document.getElementById('addMissingDayReason').value = '';
             document.getElementById('addMissingDayOvernight').checked = false;
+            document.getElementById('addMissingDayType').value = '';
+            
+            // Try to load current day_type for this date
+            try {
+                const weekStartDate = weekStart;
+                const dailyData = await apiCall(`/clock/weekly/${weekStartDate}/user/${userId}/daily`);
+                const dailyBreakdown = dailyData.dailyBreakdown || [];
+                const entryForDate = dailyBreakdown.find(e => e.entry_date === date);
+                if (entryForDate && entryForDate.day_type) {
+                    document.getElementById('addMissingDayType').value = entryForDate.day_type;
+                }
+            } catch (error) {
+                console.log('Could not load existing day_type:', error);
+            }
+            
+            // Add event listener for day type change to make clock times conditionally required
+            const dayTypeSelect = document.getElementById('addMissingDayType');
+            const clockInField = document.getElementById('addMissingDayClockIn');
+            const clockOutField = document.getElementById('addMissingDayClockOut');
+            
+            // Remove existing listeners by cloning and replacing
+            const newDayTypeSelect = dayTypeSelect.cloneNode(true);
+            dayTypeSelect.parentNode.replaceChild(newDayTypeSelect, dayTypeSelect);
+            
+            newDayTypeSelect.addEventListener('change', function() {
+                const dayType = this.value;
+                const isHolidayOrSick = dayType === 'holiday_paid' || dayType === 'holiday_unpaid' || 
+                                      dayType === 'sick_paid' || dayType === 'sick_unpaid';
+                
+                if (isHolidayOrSick) {
+                    clockInField.removeAttribute('required');
+                    clockOutField.removeAttribute('required');
+                    clockInField.style.opacity = '0.6';
+                    clockOutField.style.opacity = '0.6';
+                } else {
+                    clockInField.setAttribute('required', 'required');
+                    clockOutField.setAttribute('required', 'required');
+                    clockInField.style.opacity = '1';
+                    clockOutField.style.opacity = '1';
+                }
+            });
+            
+            // Trigger change event to set initial state
+            newDayTypeSelect.dispatchEvent(new Event('change'));
             
             // Show modal
             showModal('addMissingDayModal');
@@ -2220,34 +2362,53 @@
             const clockOut = document.getElementById('addMissingDayClockOut').value;
             const reason = document.getElementById('addMissingDayReason').value.trim();
             const overnightAway = document.getElementById('addMissingDayOvernight').checked;
+            const dayType = document.getElementById('addMissingDayType').value || null;
             const weekStart = document.getElementById('addMissingDayWeekStart').value;
             
-            // Validation
-            if (!userId || !date || !jobId || !clockIn || !clockOut || !reason) {
+            const isHolidayOrSick = dayType === 'holiday_paid' || dayType === 'holiday_unpaid' || 
+                                   dayType === 'sick_paid' || dayType === 'sick_unpaid';
+            
+            // Validation - clock times only required if not holiday/sick
+            if (!userId || !date || !reason) {
                 showAlert('Please fill in all required fields', 'error');
                 return;
             }
             
-            // Validate clock out is after clock in
-            if (new Date(clockOut) <= new Date(clockIn)) {
-                showAlert('Clock out time must be after clock in time', 'error');
+            // Job is only required if not holiday/sick (or if times are provided)
+            if (!isHolidayOrSick && !jobId) {
+                showAlert('Please select a job/site', 'error');
                 return;
             }
             
-            // Convert local datetime to ISO string
-            const clockInISO = new Date(clockIn).toISOString();
-            const clockOutISO = new Date(clockOut).toISOString();
+            // Clock times only required if not holiday/sick
+            if (!isHolidayOrSick) {
+                if (!clockIn || !clockOut) {
+                    showAlert('Please fill in clock in and clock out times', 'error');
+                    return;
+                }
+                
+                // Validate clock out is after clock in
+                if (new Date(clockOut) <= new Date(clockIn)) {
+                    showAlert('Clock out time must be after clock in time', 'error');
+                    return;
+                }
+            }
+            
+            // Convert local datetime to ISO string (only if times provided)
+            const clockInISO = clockIn ? new Date(clockIn).toISOString() : null;
+            const clockOutISO = clockOut ? new Date(clockOut).toISOString() : null;
             
             try {
                 const response = await apiCall('/clock/entries/admin/create', {
                     method: 'POST',
                     body: JSON.stringify({
                         user_id: userId,
-                        job_id: jobId,
+                        job_id: jobId || null,
                         clock_in_time: clockInISO,
                         clock_out_time: clockOutISO,
                         reason: reason,
-                        overnight_away: overnightAway
+                        overnight_away: overnightAway,
+                        day_type: dayType
                     })
                 });
                 
@@ -2255,18 +2416,14 @@
                     showAlert('Timesheet entry created successfully', 'success');
                     hideAddMissingDayModal();
                     
-                    // Reload the daily breakdown
-                    const row = document.getElementById(`daily-${userId}`);
-                    if (row && row.style.display !== 'none') {
-                        const content = document.getElementById(`daily-content-${userId}`);
-                        if (content) {
-                            content.innerHTML = '<div class="loading">Loading daily breakdown...</div>';
-                        }
-                        await toggleDailyBreakdown(userId, weekStart);
+                    // Collect currently expanded user IDs and ensure the user is included
+                    const expandedUserIds = getExpandedUserIds();
+                    if (userId && !expandedUserIds.includes(parseInt(userId))) {
+                        expandedUserIds.push(parseInt(userId));
                     }
                     
-                    // Reload payroll summary
-                    await loadPayrollSummary();
+                    // Reload payroll summary which will refresh all data and restore expanded states
+                    await loadPayrollSummary(expandedUserIds);
                 } else {
                     throw new Error(response?.error || 'Failed to create entry');
                 }
