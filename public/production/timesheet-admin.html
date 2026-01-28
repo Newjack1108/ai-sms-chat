@@ -1224,17 +1224,45 @@
             document.getElementById('adminOriginalClockIn').textContent = clockInTime ? formatDateTime(new Date(clockInTime)) : 'Not set';
             document.getElementById('adminOriginalClockOut').textContent = clockOutTime ? formatDateTime(new Date(clockOutTime)) : 'Not set';
             
-            // Set default values to current times
-            if (clockInTime) {
+            // Set default values - use existing times if available, otherwise use day-based defaults
+            let defaultClockIn = null;
+            let defaultClockOut = null;
+            
+            if (clockInTime && clockOutTime) {
+                // Use existing times
                 const clockIn = new Date(clockInTime);
-                const localDateTime = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-                document.getElementById('adminAmendedClockIn').value = localDateTime;
+                defaultClockIn = new Date(clockIn.getTime() - clockIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                
+                const clockOut = new Date(clockOutTime);
+                defaultClockOut = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+            } else if (date) {
+                // Set defaults based on day of week
+                const entryDate = new Date(date);
+                const dayOfWeek = entryDate.getDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
+                
+                // Default clock in: 8:00 AM
+                const defaultIn = new Date(entryDate);
+                defaultIn.setHours(8, 0, 0, 0);
+                defaultClockIn = new Date(defaultIn.getTime() - defaultIn.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                
+                // Default clock out based on day
+                const defaultOut = new Date(entryDate);
+                if (dayOfWeek === 5) {
+                    // Friday: 3:00 PM
+                    defaultOut.setHours(15, 0, 0, 0);
+                } else {
+                    // Monday-Thursday and Weekends: 5:00 PM
+                    defaultOut.setHours(17, 0, 0, 0);
+                }
+                defaultClockOut = new Date(defaultOut.getTime() - defaultOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
             }
             
-            if (clockOutTime) {
-                const clockOut = new Date(clockOutTime);
-                const localDateTime = new Date(clockOut.getTime() - clockOut.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-                document.getElementById('adminAmendedClockOut').value = localDateTime;
+            if (defaultClockIn) {
+                document.getElementById('adminAmendedClockIn').value = defaultClockIn;
+            }
+            
+            if (defaultClockOut) {
+                document.getElementById('adminAmendedClockOut').value = defaultClockOut;
             }
             
             // Set overnight away checkbox
@@ -2224,16 +2252,30 @@
                 
                 if (response && response.success) {
                     showAlert('Day type updated successfully', 'success');
-                    // Reload the daily breakdown to show updated data
-                    await toggleDailyBreakdown(userId, weekStart);
+                    
+                    // Collect currently expanded user IDs and ensure edited user is included
+                    const expandedUserIds = getExpandedUserIds();
+                    if (userId && !expandedUserIds.includes(parseInt(userId))) {
+                        expandedUserIds.push(parseInt(userId));
+                    }
+                    
+                    // Reload payroll summary which will refresh all data and restore expanded states
+                    await loadPayrollSummary(expandedUserIds);
                 } else {
                     throw new Error(response?.error || 'Failed to save');
                 }
             } catch (error) {
                 console.error('Error saving day type:', error);
                 showAlert('Failed to save day type: ' + (error.message || 'Unknown error'), 'error');
+                
+                // Collect currently expanded user IDs and ensure edited user is included
+                const expandedUserIds = getExpandedUserIds();
+                if (userId && !expandedUserIds.includes(parseInt(userId))) {
+                    expandedUserIds.push(parseInt(userId));
+                }
+                
                 // Reload to restore previous state
-                await toggleDailyBreakdown(userId, weekStart);
+                await loadPayrollSummary(expandedUserIds);
             }
         }
         
