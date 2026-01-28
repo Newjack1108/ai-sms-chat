@@ -8986,38 +8986,54 @@ class ProductionDatabase {
                 );
                 
                 dailyDataResult.rows.forEach(row => {
-                    dailyDataMap[row.entry_date] = {
-                        daily_notes: row.daily_notes,
-                        day_type: row.day_type,
-                        overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
-                    };
+                    // Normalize entry_date to YYYY-MM-DD string format for consistent matching
+                    const normalizedDate = row.entry_date instanceof Date 
+                        ? row.entry_date.toISOString().split('T')[0]
+                        : (row.entry_date ? new Date(row.entry_date).toISOString().split('T')[0] : null);
+                    if (normalizedDate) {
+                        dailyDataMap[normalizedDate] = {
+                            daily_notes: row.daily_notes,
+                            day_type: row.day_type,
+                            overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
+                        };
+                    }
                 });
             }
             
             // Merge daily notes, day_type, and overnight_away into entries
+            // Normalize entry_date to YYYY-MM-DD format for consistency
             const entries = entriesResult.rows.map(entry => {
-                const entryDate = entry.entry_date;
-                const dailyData = dailyDataMap[entryDate] || {};
+                // Normalize entry_date to YYYY-MM-DD string format
+                const entryDate = entry.entry_date instanceof Date 
+                    ? entry.entry_date.toISOString().split('T')[0]
+                    : (entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : null);
+                const dailyData = entryDate ? (dailyDataMap[entryDate] || {}) : {};
                 return {
                     ...entry,
+                    entry_date: entryDate, // Normalized date
                     daily_notes: dailyData.daily_notes || entry.daily_notes || null,
                     day_type: entry.day_type || dailyData.day_type || null,
                     overnight_away: dailyData.overnight_away !== undefined ? dailyData.overnight_away : (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1')
                 };
             });
             
-            // Get all dates that have entries
-            const datesWithEntries = new Set(entries.map(e => e.entry_date));
+            // Get all dates that have entries (normalized)
+            const datesWithEntries = new Set(entries.map(e => e.entry_date).filter(d => d));
             
             // Add entries for days with day_type but no clock entries
             if (weeklyTimesheet.rows.length > 0) {
                 Object.keys(dailyDataMap).forEach(date => {
-                    const dailyData = dailyDataMap[date];
+                    // Date is already normalized from dailyDataMap keys
+                    const normalizedDate = date;
+                    
+                    if (!normalizedDate) return;
+                    
+                    const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
-                    if (dailyData.day_type && !datesWithEntries.has(date)) {
+                    if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
                         entries.push({
                             id: null,
-                            entry_date: date,
+                            entry_date: normalizedDate,
                             clock_in_time: null,
                             clock_out_time: null,
                             clock_in_latitude: null,
@@ -9100,38 +9116,54 @@ class ProductionDatabase {
                 ).all(weeklyTimesheet.id, weekStartDate, weekEndStr);
                 
                 dailyDataResult.forEach(row => {
-                    dailyDataMap[row.entry_date] = {
-                        daily_notes: row.daily_notes,
-                        day_type: row.day_type,
-                        overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
-                    };
+                    // Normalize entry_date to YYYY-MM-DD string format for consistent matching
+                    const normalizedDate = row.entry_date instanceof Date 
+                        ? row.entry_date.toISOString().split('T')[0]
+                        : (row.entry_date ? new Date(row.entry_date).toISOString().split('T')[0] : null);
+                    if (normalizedDate) {
+                        dailyDataMap[normalizedDate] = {
+                            daily_notes: row.daily_notes,
+                            day_type: row.day_type,
+                            overnight_away: row.overnight_away === true || row.overnight_away === 1 || row.overnight_away === '1'
+                        };
+                    }
                 });
             }
             
             // Merge daily notes, day_type, and overnight_away into entries
+            // Normalize entry_date to YYYY-MM-DD format for consistency
             const entries = entriesResult.map(entry => {
-                const entryDate = entry.entry_date;
-                const dailyData = dailyDataMap[entryDate] || {};
+                // Normalize entry_date to YYYY-MM-DD string format
+                const entryDate = entry.entry_date instanceof Date 
+                    ? entry.entry_date.toISOString().split('T')[0]
+                    : (entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : null);
+                const dailyData = entryDate ? (dailyDataMap[entryDate] || {}) : {};
                 return {
                     ...entry,
+                    entry_date: entryDate, // Normalized date
                     daily_notes: dailyData.daily_notes || entry.daily_notes || null,
                     day_type: entry.day_type || dailyData.day_type || null,
                     overnight_away: dailyData.overnight_away !== undefined ? dailyData.overnight_away : (entry.overnight_away === true || entry.overnight_away === 1 || entry.overnight_away === '1')
                 };
             });
             
-            // Get all dates that have entries
-            const datesWithEntries = new Set(entries.map(e => e.entry_date));
+            // Get all dates that have entries (normalized)
+            const datesWithEntries = new Set(entries.map(e => e.entry_date).filter(d => d));
             
             // Add entries for days with day_type but no clock entries
             if (weeklyTimesheet) {
                 Object.keys(dailyDataMap).forEach(date => {
-                    const dailyData = dailyDataMap[date];
+                    // Date is already normalized from dailyDataMap keys
+                    const normalizedDate = date;
+                    
+                    if (!normalizedDate) return;
+                    
+                    const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
-                    if (dailyData.day_type && !datesWithEntries.has(date)) {
+                    if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
                         entries.push({
                             id: null,
-                            entry_date: date,
+                            entry_date: normalizedDate,
                             clock_in_time: null,
                             clock_out_time: null,
                             clock_in_latitude: null,
