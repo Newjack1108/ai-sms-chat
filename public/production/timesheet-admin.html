@@ -1822,6 +1822,11 @@
                                         'sick_unpaid': '<span style="background: #fd7e14; color: white; padding: 2px 4px; border-radius: 3px;">⚠ Unpaid Sick</span>'
                                     }[dayData.day_type] || '';
                                     
+                                    // Set standard day hours (8 hours) for paid holidays and paid sick days
+                                    const isPaidDay = dayData.day_type === 'holiday_paid' || dayData.day_type === 'sick_paid';
+                                    const regularHours = isPaidDay ? 8 : 0;
+                                    const totalHours = isPaidDay ? 8 : 0;
+                                    
                                     dailyHtml += `
                                         <tr style="border-top: 2px solid #4CBB17; background: #f8f9fa;">
                                             <td style="font-weight: 600; padding: 15px; vertical-align: top;">${dateStr}</td>
@@ -1848,11 +1853,11 @@
                                                     </div>
                                                 ` : ''}
                                             </td>
-                                            <td>0.00</td>
-                                            <td>0.00</td>
-                                            <td>0.00</td>
-                                            <td>0.00</td>
-                                            <td>0.00</td>
+                                            <td>${formatHours(regularHours)}</td>
+                                            <td>${formatHours(0)}</td>
+                                            <td>${formatHours(0)}</td>
+                                            <td>${formatHours(0)}</td>
+                                            <td>${formatHours(totalHours)}</td>
                                             <td style="text-align: center; padding: 15px;">
                                                 <button onclick="showAddMissingDayModal(${userId}, '${weekStart}', '${date}')" 
                                                         class="btn btn-primary btn-sm" 

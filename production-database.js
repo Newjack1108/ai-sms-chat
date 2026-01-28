@@ -9031,6 +9031,11 @@ class ProductionDatabase {
                     const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
                     if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
+                        // Set standard day hours (8 hours) for paid holidays and paid sick days
+                        const isPaidDay = dailyData.day_type === 'holiday_paid' || dailyData.day_type === 'sick_paid';
+                        const regularHours = isPaidDay ? 8 : 0;
+                        const totalHours = isPaidDay ? 8 : 0;
+                        
                         entries.push({
                             id: null,
                             entry_date: normalizedDate,
@@ -9040,11 +9045,11 @@ class ProductionDatabase {
                             clock_in_longitude: null,
                             clock_out_latitude: null,
                             clock_out_longitude: null,
-                            regular_hours: 0,
+                            regular_hours: regularHours,
                             overtime_hours: 0,
                             weekend_hours: 0,
                             overnight_hours: 0,
-                            total_hours: 0,
+                            total_hours: totalHours,
                             edited_by_admin_id: null,
                             edited_by_admin_at: null,
                             day_type: dailyData.day_type,
@@ -9161,6 +9166,11 @@ class ProductionDatabase {
                     const dailyData = dailyDataMap[normalizedDate];
                     // If this date has a day_type but no clock entries, create a synthetic entry
                     if (dailyData && dailyData.day_type && !datesWithEntries.has(normalizedDate)) {
+                        // Set standard day hours (8 hours) for paid holidays and paid sick days
+                        const isPaidDay = dailyData.day_type === 'holiday_paid' || dailyData.day_type === 'sick_paid';
+                        const regularHours = isPaidDay ? 8 : 0;
+                        const totalHours = isPaidDay ? 8 : 0;
+                        
                         entries.push({
                             id: null,
                             entry_date: normalizedDate,
@@ -9170,11 +9180,11 @@ class ProductionDatabase {
                             clock_in_longitude: null,
                             clock_out_latitude: null,
                             clock_out_longitude: null,
-                            regular_hours: 0,
+                            regular_hours: regularHours,
                             overtime_hours: 0,
                             weekend_hours: 0,
                             overnight_hours: 0,
-                            total_hours: 0,
+                            total_hours: totalHours,
                             edited_by_admin_id: null,
                             edited_by_admin_at: null,
                             day_type: dailyData.day_type,
