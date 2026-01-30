@@ -231,6 +231,25 @@
             <div id="calendarContent">
                 <div class="loading">Loading...</div>
             </div>
+            
+            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;">
+                <h3 style="margin-bottom: 10px;">Booked installations</h3>
+                <p class="text-muted" style="margin-bottom: 15px; font-size: 14px;">Installations for the current calendar period. Filter by works order status.</p>
+                <div style="margin-bottom: 15px;">
+                    <label for="installationsOrderStatusFilter" style="margin-right: 8px;">Works order status:</label>
+                    <select id="installationsOrderStatusFilter" class="form-select" style="width: auto; display: inline-block;" onchange="renderInstallationsList()">
+                        <option value="all">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="no_order">No order</option>
+                    </select>
+                </div>
+                <div id="installationsListContainer">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -491,6 +510,53 @@
                 renderDailyView(content);
                 dateDisplay.textContent = formatDate(currentDate.toISOString().split('T')[0]);
             }
+            renderInstallationsList();
+        }
+        
+        function renderInstallationsList() {
+            const container = document.getElementById('installationsListContainer');
+            if (!container) return;
+            const filterEl = document.getElementById('installationsOrderStatusFilter');
+            const filterValue = filterEl ? filterEl.value : 'all';
+            let list = installations || [];
+            if (filterValue === 'no_order') {
+                list = list.filter(inst => inst.works_order_id == null && !inst.order_id);
+            } else if (filterValue !== 'all') {
+                list = list.filter(inst => (inst.order_status || '').toLowerCase() === filterValue);
+            }
+            if (list.length === 0) {
+                container.innerHTML = '<p class="text-muted">No installations in this period' + (filterValue !== 'all' ? ' for the selected works order status.' : '.') + '</p>';
+                return;
+            }
+            const orderStatusLabel = (os) => {
+                if (os == null || os === '') return 'No order';
+                const s = String(os);
+                return s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
+            };
+            const instStatusLabel = (s) => (s == null || s === '') ? '-' : String(s).replace(/_/g, ' ');
+            let html = '<table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            list.forEach(inst => {
+                const startD = inst.start_date || inst.installation_date || '—';
+                const endD = inst.end_date || startD || '—';
+                const productName = inst.product_name ? (inst.order_id ? `Order #${inst.order_id} – ${inst.product_name}` : inst.product_name) : '—';
+                const loc = inst.location || '—';
+                const woStatus = orderStatusLabel(inst.order_status);
+                const status = instStatusLabel(inst.status);
+                html += `<tr>
+                    <td>${formatDate(startD)}</td>
+                    <td>${formatDate(endD)}</td>
+                    <td>${productName}</td>
+                    <td><span class="badge badge-secondary">${woStatus}</span></td>
+                    <td>${loc}</td>
+                    <td><span class="badge installation-block ${inst.status || 'scheduled'}">${status}</span></td>
+                    <td>
+                        <button onclick="hideModal('installationDetailsModal'); showEditInstallationModal(${inst.id})" class="btn btn-secondary btn-sm">Edit</button>
+                        <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
+                    </td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
         }
         
         function renderWeeklyView(container) {
