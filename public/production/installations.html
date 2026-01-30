@@ -569,6 +569,8 @@
                 days.push(date);
             }
             
+            // Normalize date to YYYY-MM-DD (API may return ISO string)
+            const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
             // Group installations by day - handle multi-day installations
             const dayInstallations = {};
             days.forEach(day => {
@@ -576,11 +578,11 @@
                 dayInstallations[dayStr] = [];
                 
                 installations.forEach(inst => {
-                    const instStartDate = inst.start_date || inst.installation_date;
-                    const instEndDate = inst.end_date || instStartDate;
+                    const instStartDate = toDateStr(inst.start_date || inst.installation_date);
+                    const instEndDate = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStartDate;
                     
                     // Check if this day falls within the installation date range
-                    if (dayStr >= instStartDate && dayStr <= instEndDate) {
+                    if (instStartDate && instEndDate && dayStr >= instStartDate && dayStr <= instEndDate) {
                         // Get day-specific times or use defaults
                         const dayOverride = inst.installation_days?.find(d => d.day_date === dayStr);
                         const dayStartTime = dayOverride?.start_time || inst.start_time || null;
@@ -650,6 +652,7 @@
                 html += `<div class="weekly-day-header">${day}</div>`;
             });
             
+            const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
             // Calendar days
             const today = new Date();
             for (let i = 0; i < 42; i++) {
@@ -660,8 +663,8 @@
                 const isToday = dateStr === today.toISOString().split('T')[0];
                 
                 const dayInsts = installations.filter(inst => {
-                    const instStart = inst.start_date || inst.installation_date;
-                    const instEnd = inst.end_date || instStart;
+                    const instStart = toDateStr(inst.start_date || inst.installation_date);
+                    const instEnd = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStart;
                     return instStart && instEnd && dateStr >= instStart && dateStr <= instEnd;
                 });
                 
@@ -691,13 +694,14 @@
         function renderDailyView(container) {
             const dateStr = currentDate.toISOString().split('T')[0];
             
+            const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
             // Find installations that include this day
             const dayInsts = [];
             installations.forEach(inst => {
-                const instStartDate = inst.start_date || inst.installation_date;
-                const instEndDate = inst.end_date || instStartDate;
+                const instStartDate = toDateStr(inst.start_date || inst.installation_date);
+                const instEndDate = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStartDate;
                 
-                if (dateStr >= instStartDate && dateStr <= instEndDate) {
+                if (instStartDate && instEndDate && dateStr >= instStartDate && dateStr <= instEndDate) {
                     // Get day-specific times or use defaults
                     const dayOverride = inst.installation_days?.find(d => d.day_date === dateStr);
                     const dayStartTime = dayOverride?.start_time || inst.start_time || null;

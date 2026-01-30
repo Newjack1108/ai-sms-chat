@@ -895,7 +895,9 @@ router.delete('/products/:id', requireProductionAuth, requireAdminOrOffice, asyn
         res.json({ success: true });
     } catch (error) {
         console.error('Delete product error:', error);
-        res.status(500).json({ success: false, error: error.message || 'Failed to delete product' });
+        const msg = error.message || 'Failed to delete product';
+        const isInUse = msg.includes('used in one or more orders');
+        res.status(isInUse ? 409 : 500).json({ success: false, error: msg });
     }
 });
 
@@ -1405,7 +1407,9 @@ router.delete('/orders/:id', requireProductionAuth, requireManager, async (req, 
         res.json({ success: true, message: 'Order deleted successfully' });
     } catch (error) {
         console.error('Delete order error:', error);
-        res.status(500).json({ success: false, error: 'Failed to delete order' });
+        const msg = error.message || 'Failed to delete order';
+        const isBlocked = msg.includes('linked to one or more installations');
+        res.status(isBlocked ? 409 : 500).json({ success: false, error: msg });
     }
 });
 
@@ -1481,7 +1485,7 @@ router.get('/installations/:id', requireProductionAuth, async (req, res) => {
         res.json({ success: true, installation });
     } catch (error) {
         console.error('Get installation error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get installation' });
+        res.status(500).json({ success: false, error: error.message || 'Failed to get installation' });
     }
 });
 
