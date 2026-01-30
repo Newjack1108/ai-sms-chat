@@ -888,6 +888,17 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
     }
 });
 
+router.delete('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        await ProductionDatabase.deleteProduct(productId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete product error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to delete product' });
+    }
+});
+
 router.get('/products/:id/components', requireProductionAuth, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);

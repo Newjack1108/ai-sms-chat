@@ -231,6 +231,7 @@
                                     ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
                                         <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
                                         <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
+                                        <button onclick="deleteProduct(${product.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
                                     ` : ''}
                                 </td>
                             </tr>
@@ -577,6 +578,19 @@
                 loadProducts();
             } catch (error) {
                 showAlert(error.message || 'Failed to duplicate product', 'error');
+            }
+        }
+
+        async function deleteProduct(id) {
+            const product = allProducts.find(p => p.id === id);
+            const name = product ? product.name : `#${id}`;
+            if (!confirm(`Delete product "${name}"? This will remove the product and all its components. This cannot be undone.`)) return;
+            try {
+                await apiCall(`/products/${id}`, { method: 'DELETE' });
+                showAlert('Product deleted');
+                loadProducts();
+            } catch (error) {
+                showAlert(error.message || 'Failed to delete product', 'error');
             }
         }
         

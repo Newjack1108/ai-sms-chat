@@ -4385,6 +4385,47 @@ class ProductionDatabase {
         }
     }
     
+    static async deleteProduct(id) {
+        const product = await this.getProductById(id);
+        if (!product) {
+            throw new Error('Product not found');
+        }
+        // Block delete if product is used in any order
+        if (isPostgreSQL) {
+            const orderProducts = await pool.query(
+                `SELECT COUNT(*)::int as count FROM order_products WHERE product_id = $1`,
+                [id]
+            );
+            if (orderProducts.rows[0].count > 0) {
+                throw new Error('Cannot delete product because it is used in one or more orders. Remove it from those orders first.');
+            }
+            const legacyOrders = await pool.query(
+                `SELECT COUNT(*)::int as count FROM product_orders WHERE product_id = $1`,
+                [id]
+            );
+            if (legacyOrders.rows[0].count > 0) {
+                throw new Error('Cannot delete product because it is used in one or more orders. Remove it from those orders first.');
+            }
+        } else {
+            const orderProducts = db.prepare(`SELECT COUNT(*) as count FROM order_products WHERE product_id = ?`).get(id);
+            if (orderProducts && orderProducts.count > 0) {
+                throw new Error('Cannot delete product because it is used in one or more orders. Remove it from those orders first.');
+            }
+            const legacyOrders = db.prepare(`SELECT COUNT(*) as count FROM product_orders WHERE product_id = ?`).get(id);
+            if (legacyOrders && legacyOrders.count > 0) {
+                throw new Error('Cannot delete product because it is used in one or more orders. Remove it from those orders first.');
+            }
+        }
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM product_components WHERE product_id = $1`, [id]);
+            await pool.query(`DELETE FROM finished_products WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM product_components WHERE product_id = ?`).run(id);
+            db.prepare(`DELETE FROM finished_products WHERE id = ?`).run(id);
+        }
+        return true;
+    }
+    
     // ============ PRODUCT COMPONENTS OPERATIONS ============
     
     static async addProductComponent(productId, componentType, componentId, quantityRequired, unit) {
