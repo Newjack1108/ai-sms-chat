@@ -295,8 +295,18 @@
         async function viewComponents(productId) {
             currentProductId = productId;
             try {
-                const componentsData = await apiCall(`/products/${productId}/components`);
-                
+                const [componentsData, costData] = await Promise.all([
+                    apiCall(`/products/${productId}/components`),
+                    apiCall(`/products/${productId}/cost`)
+                ]);
+                const totalCost = (costData && typeof costData.cost === 'number') ? costData.cost : 0;
+                // Keep main list in sync so Cost (Auto) is correct when modal is open or after close
+                const productIndex = allProducts.findIndex(p => p.id === productId);
+                if (productIndex >= 0) {
+                    allProducts[productIndex].calculated_cost = totalCost;
+                    displayProducts();
+                }
+
                 // Get product name from allProducts array or fetch from API
                 let productName = null;
                 const product = allProducts.find(p => p.id === productId);
@@ -311,11 +321,18 @@
                         productName = `Product #${productId}`;
                     }
                 }
-                
+
                 document.getElementById('componentsModalTitle').textContent = 'Product Components';
                 document.getElementById('componentsContent').innerHTML = `
                     <div style="margin-bottom: 20px;">
                         <h4 style="margin-bottom: 15px; color: #333;">${productName || 'Product Components'}</h4>
+                        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
+                            <div>
+                                <strong>Total product cost:</strong>
+                                <span id="componentsModalTotalCost" style="font-size: 1.1em; margin-left: 8px;">${formatCurrency(totalCost)}</span>
+                            </div>
+                            <button type="button" onclick="refreshComponentsModalTotal()" class="btn btn-secondary btn-sm">Refresh total</button>
+                        </div>
                         ${currentUser.role === 'admin' ? `
                             <button onclick="showAddComponent()" class="btn btn-primary">Add Component</button>
                         ` : ''}
@@ -447,6 +464,21 @@
             }
         }
         
+        async function refreshComponentsModalTotal() {
+            if (!currentProductId) return;
+            const el = document.getElementById('componentsModalTotalCost');
+            if (!el) return;
+            try {
+                el.textContent = '…';
+                const costData = await apiCall(`/products/${currentProductId}/cost`);
+                const cost = (costData && typeof costData.cost === 'number') ? costData.cost : 0;
+                el.textContent = formatCurrency(cost);
+            } catch (error) {
+                el.textContent = '—';
+                showAlert(error.message || 'Failed to refresh total', 'error');
+            }
+        }
+
         function showSaveButton(compId) {
             const qtyInput = document.getElementById(`qty-${compId}`);
             const saveButtons = document.getElementById(`save-buttons-${compId}`);
