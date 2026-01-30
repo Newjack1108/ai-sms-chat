@@ -659,7 +659,11 @@
                 const isOtherMonth = date.getMonth() !== month;
                 const isToday = dateStr === today.toISOString().split('T')[0];
                 
-                const dayInsts = installations.filter(inst => inst.installation_date === dateStr);
+                const dayInsts = installations.filter(inst => {
+                    const instStart = inst.start_date || inst.installation_date;
+                    const instEnd = inst.end_date || instStart;
+                    return instStart && instEnd && dateStr >= instStart && dateStr <= instEnd;
+                });
                 
                 html += `<div class="monthly-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">`;
                 html += `<div class="monthly-day-number">${date.getDate()}</div>`;
@@ -667,8 +671,9 @@
                 if (dayInsts.length > 0) {
                     html += `<div class="monthly-installation-count">${dayInsts.length} installation(s)</div>`;
                     dayInsts.slice(0, 3).forEach(inst => {
+                        const timeLabel = inst.start_time ? `${inst.start_time} - ` : '';
                         html += `<div class="monthly-installation-item ${inst.status}" onclick="showInstallationDetails(${inst.id})">
-                            ${inst.start_time} - ${inst.product_name || 'Installation'}
+                            ${timeLabel}${inst.product_name || 'Installation'}
                         </div>`;
                     });
                     if (dayInsts.length > 3) {
