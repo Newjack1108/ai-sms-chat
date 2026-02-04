@@ -78,7 +78,7 @@
                 <div class="card-header">
                     <h2>Last Week's Performance</h2>
                 </div>
-                <div id="lastWeekSummary" style="padding: 20px; text-align: center;">
+                <div id="lastWeekSummary" class="dashboard-card-scroll" style="padding: 20px; text-align: center;">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -87,7 +87,7 @@
                 <div class="card-header">
                     <h2>Stock Alerts</h2>
                 </div>
-                <div id="stockAlerts">
+                <div id="stockAlerts" class="dashboard-card-scroll">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -96,7 +96,7 @@
                 <div class="card-header">
                     <h2>Overdue Reminders</h2>
                 </div>
-                <div id="overdueReminders">
+                <div id="overdueReminders" class="dashboard-card-scroll">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -237,14 +237,14 @@
                 document.getElementById('stockAlerts').innerHTML = '<p>Error loading alerts</p>';
             }
             
-            // Load overdue reminders
+            // Load overdue reminders and pending holiday requests
             try {
                 const remindersData = await apiCall('/reminders/overdue');
                 const remindersDiv = document.getElementById('overdueReminders');
-                if (remindersData.reminders.length === 0) {
-                    remindersDiv.innerHTML = '<p>No overdue reminders</p>';
-                } else {
-                    remindersDiv.innerHTML = remindersData.reminders.slice(0, 5).map(reminder => {
+                let remindersHtml = '';
+
+                if (remindersData.reminders && remindersData.reminders.length > 0) {
+                    remindersHtml += remindersData.reminders.slice(0, 5).map(reminder => {
                         if (reminder.type === 'timesheet_approval') {
                             const weekStart = new Date(reminder.week_start_date);
                             const weekStartFormatted = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -260,9 +260,8 @@
                                 </div>
                             `;
                         } else {
-                            // Stock check or text reminder
                             const reminderType = reminder.reminder_type || 'stock_check';
-                            const reminderContent = reminderType === 'text' 
+                            const reminderContent = reminderType === 'text'
                                 ? `📝 ${reminder.reminder_text || 'Text Reminder'}`
                                 : reminder.stock_item_name || 'Stock Item';
                             return `
@@ -274,6 +273,31 @@
                         }
                     }).join('');
                 }
+
+                // Load pending holiday requests (admin/office only; 403 is ignored)
+                try {
+                    const holidaysData = await apiCall('/holidays/requests/pending');
+                    if (holidaysData && holidaysData.success && holidaysData.requests && holidaysData.requests.length > 0) {
+                        if (remindersHtml) remindersHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;"></div>';
+                        remindersHtml += holidaysData.requests.map(req => {
+                            const startStr = formatDate(req.start_date);
+                            const endStr = formatDate(req.end_date);
+                            const days = parseFloat(req.days_requested).toFixed(1);
+                            return `
+                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #e7f3ff;">
+                                    <strong style="color: #004085;">🏖️ ${req.user_name || 'Unknown'}</strong><br>
+                                    <small style="color: #004085;">${startStr} – ${endStr} (${days} days)</small>
+                                    <br>
+                                    <a href="holidays-admin.html" style="font-size: 11px; color: #004085; text-decoration: underline; margin-top: 4px; display: inline-block;">
+                                        Review request →
+                                    </a>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                } catch (_) { /* not admin/office or API error */ }
+
+                remindersDiv.innerHTML = remindersHtml || '<p>No overdue reminders</p>';
             } catch (error) {
                 document.getElementById('overdueReminders').innerHTML = '<p>Error loading reminders</p>';
             }

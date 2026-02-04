@@ -170,6 +170,13 @@ body.dashboard-page {
     font-size: 20px;
 }
 
+/* Dashboard top row: same-height cards with scrollable content */
+.dashboard-card-scroll {
+    height: 280px;
+    overflow-y: auto;
+    min-height: 120px;
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;
