@@ -6971,6 +6971,37 @@ class ProductionDatabase {
         }
     }
     
+    // Reopen entries for a date: set clock_out_time = NULL so staff show as on clock and can clock out normally
+    static async reopenTimesheetEntriesForDate(dateStr) {
+        const now = new Date().toISOString();
+        if (isPostgreSQL) {
+            const updateResult = await pool.query(
+                `UPDATE timesheet_entries
+                 SET clock_out_time = NULL, updated_at = $1
+                 WHERE (clock_in_time::date) = $2::date
+                 AND clock_out_time IS NOT NULL
+                 RETURNING id, user_id, clock_in_time, job_id`,
+                [now, dateStr]
+            );
+            const entries = updateResult.rows;
+            return { count: entries.length, entries };
+        } else {
+            const entries = db.prepare(`
+                SELECT id, user_id, clock_in_time, job_id FROM timesheet_entries
+                WHERE DATE(clock_in_time) = DATE(?)
+                AND clock_out_time IS NOT NULL
+            `).all(dateStr);
+            for (const entry of entries) {
+                db.prepare(`
+                    UPDATE timesheet_entries
+                    SET clock_out_time = NULL, updated_at = ?
+                    WHERE id = ?
+                `).run(now, entry.id);
+            }
+            return { count: entries.length, entries };
+        }
+    }
+    
     // Auto-clock-out entries for a specific date (handles entries that might span into the date)
     static async autoClockOutEntriesForDate(userId, targetDateStr) {
         if (isPostgreSQL) {

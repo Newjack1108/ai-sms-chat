@@ -167,6 +167,19 @@
                     Cleanup Old Unclosed Entries
                 </button>
                 <div id="cleanupResult" style="margin-top: 15px;"></div>
+                <p style="margin: 20px 0 10px 0; color: #666;">
+                    If staff were wrongly clocked out (e.g. by cleanup), use Reopen to remove their clock-out for a date so they can clock out normally.
+                </p>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;">
+                    <label style="display: flex; align-items: center; gap: 6px;">
+                        <span style="color: #666;">Date (optional, default today):</span>
+                        <input type="date" id="reopenDateInput" class="form-input" style="width: auto;">
+                    </label>
+                    <button onclick="reopenEntries()" class="btn btn-primary" id="reopenBtn">
+                        Reopen today's clock-ins
+                    </button>
+                </div>
+                <div id="reopenResult" style="margin-top: 15px;"></div>
             </div>
         </div>
     </div>
@@ -1524,6 +1537,58 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'Cleanup Old Unclosed Entries';
+            }
+        }
+        
+        async function reopenEntries() {
+            const btn = document.getElementById('reopenBtn');
+            const resultDiv = document.getElementById('reopenResult');
+            const dateInput = document.getElementById('reopenDateInput');
+            let dateStr = dateInput && dateInput.value ? dateInput.value.trim() : null;
+            if (!dateStr) {
+                const today = new Date();
+                dateStr = today.toISOString().split('T')[0];
+            }
+            if (!confirm('Reopen all clocked-out entries for ' + dateStr + '? They will show as on clock and can clock out as normal.')) {
+                return;
+            }
+            btn.disabled = true;
+            btn.textContent = 'Reopening...';
+            resultDiv.innerHTML = '<p style="color: #666;">Processing...</p>';
+            try {
+                const data = await apiCall('/clock/reopen-entries', {
+                    method: 'POST',
+                    body: JSON.stringify({ date: dateStr })
+                });
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; color: #155724;">
+                            <strong>Reopen complete</strong><br>
+                            ${data.message || (data.count + ' entries reopened.')}
+                        </div>
+                    `;
+                    showAlert(data.message || 'Entries reopened.', 'success');
+                    if (typeof loadActiveClockIns === 'function') {
+                        loadActiveClockIns();
+                    }
+                } else {
+                    resultDiv.innerHTML = `
+                        <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;">
+                            <strong>Error:</strong> ${data.error || 'Unknown error'}
+                        </div>
+                    `;
+                    showAlert(data.error || 'Reopen failed', 'error');
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div style="padding: 15px; background: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;">
+                        <strong>Error:</strong> ${error.message || 'Failed to reopen entries'}
+                    </div>
+                `;
+                showAlert('Failed to reopen entries: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Reopen today's clock-ins";
             }
         }
         

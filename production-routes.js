@@ -2298,6 +2298,40 @@ router.post('/clock/cleanup-old-entries', requireProductionAuth, requireAdmin, a
     }
 });
 
+// Admin route to reopen entries for a date (remove clock_out_time so staff can clock out normally)
+router.post('/clock/reopen-entries', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        let dateStr = req.body && req.body.date ? req.body.date.trim() : null;
+        if (!dateStr) {
+            const today = new Date();
+            dateStr = today.toISOString().split('T')[0];
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            return res.status(400).json({ success: false, error: 'Invalid date; use YYYY-MM-DD' });
+        }
+        const date = new Date(dateStr);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
+        if (date.getTime() > today.getTime()) {
+            return res.status(400).json({ success: false, error: 'Cannot reopen entries for a future date' });
+        }
+        const result = await ProductionDatabase.reopenTimesheetEntriesForDate(dateStr);
+        const message = result.count === 0
+            ? 'No entries to reopen for this date.'
+            : `Reopened ${result.count} entries for ${dateStr}. Staff will show as on clock and can clock out as normal.`;
+        res.json({
+            success: true,
+            message,
+            count: result.count,
+            entries: result.entries
+        });
+    } catch (error) {
+        console.error('Reopen entries error:', error);
+        res.status(500).json({ success: false, error: 'Failed to reopen entries: ' + error.message });
+    }
+});
+
 // Weekly timesheet routes
 router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
     try {
