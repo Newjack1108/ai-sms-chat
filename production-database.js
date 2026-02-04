@@ -7966,23 +7966,23 @@ class ProductionDatabase {
                     total_hours: hours
                 };
             } else if (currentDailyEntry.day_type === 'holiday_paid') {
-                // Paid holiday: try to get from holiday request, default to 8
-                let hours = 8; // Default
+                // Paid holiday: Friday = 6 hours, Mon-Thu = 8; half day = 4 or 3 (Friday)
+                const dateObj = new Date(entryDate);
+                const dayOfWeek = dateObj.getDay();
+                let hours = (dayOfWeek === 5) ? 6 : 8;
                 try {
                     const allRequests = await this.getHolidayRequestsByUser(userId);
-                    const dateObj = new Date(entryDate);
                     const holidayRequest = allRequests.find(req => {
                         if (req.status !== 'approved') return false;
                         const start = new Date(req.start_date);
                         const end = new Date(req.end_date);
                         return dateObj >= start && dateObj <= end;
                     });
-                    if (holidayRequest && holidayRequest.days_requested) {
-                        hours = holidayRequest.days_requested === 0.5 ? 4 : 8;
+                    if (holidayRequest && holidayRequest.days_requested === 0.5) {
+                        hours = (dayOfWeek === 5) ? 3 : 4; // half day
                     }
                 } catch (error) {
                     console.error('Error getting holiday request for hours calculation:', error);
-                    // Use default 8 hours
                 }
                 return {
                     regular_hours: hours,
@@ -9193,11 +9193,16 @@ class ProductionDatabase {
                                 totalHours = 8;
                             }
                         } else if (dailyData.day_type === 'holiday_paid') {
-                            // Paid holiday: hours from holiday request (half day = 4, full day = 8) or default 8
-                            // Note: We can't easily get holiday request here, so default to 8
-                            // The actual hours should be set when the daily entry is created/updated
-                            regularHours = 8;
-                            totalHours = 8;
+                            // Paid holiday: Friday = 6 hours, Mon-Thu = 8 (same as sick_paid)
+                            const dateObj = new Date(normalizedDate);
+                            const dayOfWeek = dateObj.getDay();
+                            if (dayOfWeek === 5) {
+                                regularHours = 6;
+                                totalHours = 6;
+                            } else {
+                                regularHours = 8;
+                                totalHours = 8;
+                            }
                         }
                         
                         entries.push({
@@ -9351,11 +9356,16 @@ class ProductionDatabase {
                                 totalHours = 8;
                             }
                         } else if (dailyData.day_type === 'holiday_paid') {
-                            // Paid holiday: hours from holiday request (half day = 4, full day = 8) or default 8
-                            // Note: We can't easily get holiday request here, so default to 8
-                            // The actual hours should be set when the daily entry is created/updated
-                            regularHours = 8;
-                            totalHours = 8;
+                            // Paid holiday: Friday = 6 hours, Mon-Thu = 8 (same as sick_paid)
+                            const dateObj = new Date(normalizedDate);
+                            const dayOfWeek = dateObj.getDay();
+                            if (dayOfWeek === 5) {
+                                regularHours = 6;
+                                totalHours = 6;
+                            } else {
+                                regularHours = 8;
+                                totalHours = 8;
+                            }
                         }
                         
                         entries.push({
@@ -10021,6 +10031,29 @@ class ProductionDatabase {
         }
         
         return count;
+    }
+    
+    // Calculate holiday entitlement days: Mon-Thu = 1, Friday = 0.75 (6hrs). Half day = 0.5 (or 0.375 for Friday).
+    static calculateHolidayDaysRequested(startDate, endDate, dayType) {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        if (start > end) return 0;
+        if (dayType === 'half') {
+            if (startDate !== endDate) return 0;
+            const dayOfWeek = start.getDay();
+            if (dayOfWeek === 0 || dayOfWeek === 6) return 0; // weekend
+            return dayOfWeek === 5 ? 0.375 : 0.5; // Friday half = 3hrs = 0.375, else 0.5
+        }
+        let total = 0;
+        const current = new Date(start);
+        while (current <= end) {
+            const d = current.getDay();
+            if (d >= 1 && d <= 5) {
+                total += d === 5 ? 0.75 : 1; // Friday = 0.75, Mon-Thu = 1
+            }
+            current.setDate(current.getDate() + 1);
+        }
+        return Math.round(total * 100) / 100;
     }
     
     // Holiday Entitlement Methods
@@ -10977,30 +11010,32 @@ class ProductionDatabase {
             null // No timesheet_entry_id for holidays
         );
         
+        // Friday = 6 hours, Mon-Thu = 8 hours (default working day)
+        const hours = (dayOfWeek === 5) ? 6 : 8;
         // Update daily entry with holiday information
         if (isPostgreSQL) {
             const result = await pool.query(
                 `UPDATE timesheet_daily_entries 
                  SET day_type = 'holiday_paid',
-                     regular_hours = 8,
-                     total_hours = 8,
-                     holiday_request_id = $1,
+                     regular_hours = $1,
+                     total_hours = $1,
+                     holiday_request_id = $2,
                      updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $2
+                 WHERE id = $3
                  RETURNING *`,
-                [holidayRequestId, dailyEntry.id]
+                [hours, holidayRequestId, dailyEntry.id]
             );
             return result.rows[0];
         } else {
             db.prepare(
                 `UPDATE timesheet_daily_entries 
                  SET day_type = 'holiday_paid',
-                     regular_hours = 8,
-                     total_hours = 8,
+                     regular_hours = ?,
+                     total_hours = ?,
                      holiday_request_id = ?,
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?`
-            ).run(holidayRequestId, dailyEntry.id);
+            ).run(hours, hours, holidayRequestId, dailyEntry.id);
             return this.getDailyEntryById(dailyEntry.id);
         }
     }

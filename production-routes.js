@@ -171,6 +171,13 @@ router.delete('/users/:id', requireProductionAuth, requireAdmin, async (req, res
         await ProductionDatabase.deleteUser(userId);
         res.json({ success: true });
     } catch (error) {
+        // PostgreSQL foreign key violation: user is referenced by other tables (timesheets, orders, etc.)
+        if (error.code === '23503') {
+            return res.status(400).json({
+                success: false,
+                error: 'Cannot delete user: they have linked records (timesheets, orders, tasks, etc.). Reassign or remove those first.'
+            });
+        }
         console.error('Delete user error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete user' });
     }
@@ -4245,15 +4252,10 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'For half day, start date and end date must be the same' });
         }
         
-        // Calculate weekdays
-        let weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        // Calculate holiday days (Fri = 0.75, Mon-Thu = 1, half = 0.5 or 0.375 Fri)
+        const weekdays = ProductionDatabase.calculateHolidayDaysRequested(start_date, end_date, dayType);
         if (weekdays <= 0) {
             return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
-        }
-        
-        // For half day, it's 0.5 days
-        if (dayType === 'half') {
-            weekdays = 0.5;
         }
         
         // Check entitlement
@@ -4485,15 +4487,10 @@ router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async 
             return res.status(400).json({ success: false, error: 'For half day, start date and end date must be the same' });
         }
         
-        // Calculate weekdays
-        let weekdays = ProductionDatabase.calculateWorkingDays(start_date, end_date);
+        // Calculate holiday days (Fri = 0.75, Mon-Thu = 1, half = 0.5 or 0.375 Fri)
+        const weekdays = ProductionDatabase.calculateHolidayDaysRequested(start_date, end_date, dayType);
         if (weekdays <= 0) {
             return res.status(400).json({ success: false, error: 'Date range must include at least one weekday' });
-        }
-        
-        // For half day, it's 0.5 days
-        if (dayType === 'half') {
-            weekdays = 0.5;
         }
         
         // Check entitlement

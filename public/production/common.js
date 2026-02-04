@@ -303,3 +303,9 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// Default working hours: 8am start; 5pm end Mon-Thu/Sat/Sun, 3pm end Friday
+function getDefaultWorkTimes(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    const isFriday = d.getDay() === 5;
+    return { start: '08:00', end: isFriday ? '15:00' : '17:00' };
+}

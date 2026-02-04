@@ -791,11 +791,16 @@
                 // Populate day overrides
                 dayOverrides = [];
                 if (inst.installation_days && inst.installation_days.length > 0) {
-                    dayOverrides = inst.installation_days.map(day => ({
-                        date: day.day_date,
-                        duration_hours: day.duration_hours || null,
-                        notes: day.notes || null
-                    }));
+                    dayOverrides = inst.installation_days.map(day => {
+                        const defaultTimes = typeof getDefaultWorkTimes === 'function' ? getDefaultWorkTimes(new Date(day.day_date)) : { start: '08:00', end: '17:00' };
+                        return {
+                            date: day.day_date,
+                            start_time: day.start_time || defaultTimes.start,
+                            end_time: day.end_time || defaultTimes.end,
+                            duration_hours: day.duration_hours || null,
+                            notes: day.notes || null
+                        };
+                    });
                     document.getElementById('enablePerDaySettings').checked = true;
                     togglePerDaySettings();
                     renderPerDayTable();
@@ -1041,9 +1046,11 @@
             if (dayOverrides.find(d => d.date === dateStr)) {
                 return;
             }
-            
+            const defaultTimes = typeof getDefaultWorkTimes === 'function' ? getDefaultWorkTimes(new Date(dateStr)) : { start: '08:00', end: '17:00' };
             dayOverrides.push({
                 date: dateStr,
+                start_time: defaultTimes.start,
+                end_time: defaultTimes.end,
                 duration_hours: null,
                 notes: null
             });
@@ -1103,13 +1110,14 @@
                 return;
             }
             
+            const defaultTimes = typeof getDefaultWorkTimes === 'function' ? getDefaultWorkTimes(new Date(startDate)) : { start: '08:00', end: '17:00' };
             const formData = {
                 works_order_id: document.getElementById('installationWorksOrder').value || null,
                 start_date: startDate,
                 end_date: endDate,
-                start_time: null,
+                start_time: defaultTimes.start,
                 duration_hours: parseFloat(document.getElementById('installationDuration').value),
-                end_time: null,
+                end_time: defaultTimes.end,
                 location: document.getElementById('installationLocation').value || null,
                 address: document.getElementById('installationAddress').value || null,
                 status: document.getElementById('installationStatus').value,

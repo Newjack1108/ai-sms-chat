@@ -520,26 +520,18 @@
                     daysCountSpan.textContent = 'Invalid (end date must be after start date)';
                     daysCountSpan.style.color = 'red';
                 } else {
-                    let weekdays = calculateWorkingDays(startDate, endDate);
-                    
-                    // For half day, ensure start and end dates are the same and calculate 0.5 days
-                    if (dayType === 'half') {
-                        if (startDate !== endDate) {
-                            daysCountSpan.textContent = 'Invalid (half day requires same start and end date)';
-                            daysCountSpan.style.color = 'red';
-                            return;
-                        }
-                        // For half day, it's 0.5 days if it's a weekday
-                        if (weekdays > 0) {
-                            weekdays = 0.5;
-                        } else {
-                            daysCountSpan.textContent = 'Invalid (half day must be on a weekday)';
-                            daysCountSpan.style.color = 'red';
-                            return;
-                        }
+                    if (dayType === 'half' && startDate !== endDate) {
+                        daysCountSpan.textContent = 'Invalid (half day requires same start and end date)';
+                        daysCountSpan.style.color = 'red';
+                        return;
                     }
-                    
-                    daysCountSpan.textContent = weekdays.toFixed(1);
+                    const weekdays = calculateHolidayDaysRequested(startDate, endDate, dayType);
+                    if (weekdays === 0 && dayType === 'half') {
+                        daysCountSpan.textContent = 'Invalid (half day must be on a weekday)';
+                        daysCountSpan.style.color = 'red';
+                        return;
+                    }
+                    daysCountSpan.textContent = weekdays.toFixed(2);
                     daysCountSpan.style.color = '';
                 }
             } else {
@@ -572,15 +564,9 @@
                 return;
             }
             
-            const weekdays = calculateWorkingDays(startDate, endDate);
+            const weekdays = calculateHolidayDaysRequested(startDate, endDate, dayType);
             if (weekdays <= 0) {
-                alert('Date range must include at least one weekday');
-                return;
-            }
-            
-            // For half day, validate it's a weekday
-            if (dayType === 'half' && weekdays === 0) {
-                alert('Half day must be on a weekday');
+                alert('Date range must include at least one weekday (or a weekday for half day)');
                 return;
             }
             
@@ -1173,6 +1159,30 @@
                 current.setDate(current.getDate() + 1);
             }
             return count;
+        }
+        
+        // Holiday days for entitlement: Mon-Thu = 1, Friday = 0.75, half = 0.5 or 0.375 (Friday)
+        function calculateHolidayDaysRequested(startDate, endDate, dayType) {
+            if (!startDate || !endDate) return 0;
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            if (start > end) return 0;
+            if (dayType === 'half') {
+                if (startDate !== endDate) return 0;
+                const dayOfWeek = start.getDay();
+                if (dayOfWeek === 0 || dayOfWeek === 6) return 0;
+                return dayOfWeek === 5 ? 0.375 : 0.5;
+            }
+            let total = 0;
+            const current = new Date(start);
+            while (current <= end) {
+                const d = current.getDay();
+                if (d >= 1 && d <= 5) {
+                    total += d === 5 ? 0.75 : 1;
+                }
+                current.setDate(current.getDate() + 1);
+            }
+            return Math.round(total * 100) / 100;
         }
         
         // Use this for shutdown periods display
