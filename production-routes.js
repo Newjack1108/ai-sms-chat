@@ -2097,6 +2097,152 @@ router.post('/clock/clock-out', requireProductionAuth, async (req, res) => {
     }
 });
 
+// NFC punch: no session; auth via reader token + card UID (for tablet kiosk)
+router.post('/clock/nfc-punch', async (req, res) => {
+    try {
+        const { reader_id, reader_token, card_uid } = req.body || {};
+        if (!reader_id || !reader_token || !card_uid) {
+            return res.status(400).json({ success: false, error: 'reader_id, reader_token and card_uid are required' });
+        }
+        
+        const reader = await ProductionDatabase.getNfcReaderByToken(reader_id, reader_token);
+        if (!reader) {
+            return res.status(401).json({ success: false, error: 'Invalid reader' });
+        }
+        
+        const cardUser = await ProductionDatabase.getNfcUserByCardUid(card_uid);
+        if (!cardUser) {
+            return res.status(404).json({ success: false, error: 'Card not recognised' });
+        }
+        const userId = cardUser.user_id;
+        const jobId = reader.job_id;
+        
+        // Auto-clock-out any old entries (same as normal clock-in flow)
+        try {
+            await ProductionDatabase.autoClockOutOldEntries(userId);
+        } catch (err) {
+            console.error('Error auto-clocking-out old entries:', err);
+        }
+        
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        if (currentStatus) {
+            const entry = await ProductionDatabase.clockOut(userId, null, null);
+            return res.json({ success: true, action: 'out', message: 'Clocked out', entry });
+        }
+        
+        const today = new Date().toISOString().split('T')[0];
+        const completedCount = await ProductionDatabase.countEntriesForDate(userId, today);
+        if (completedCount >= 1) {
+            return res.status(400).json({
+                success: false,
+                error: 'Already clocked in and out today. Only one clock in/out per day is allowed.'
+            });
+        }
+        
+        let adjustedClockInTime = null;
+        const job = await ProductionDatabase.getJobById(jobId);
+        if (job && job.name && job.name.toLowerCase().includes('workshop')) {
+            const now = new Date();
+            if (now.getHours() < 8) {
+                const clockInTime = new Date(now);
+                clockInTime.setHours(8, 0, 0, 0);
+                adjustedClockInTime = clockInTime;
+            }
+        }
+        
+        const entry = await ProductionDatabase.clockIn(userId, jobId, null, null, adjustedClockInTime);
+        res.json({ success: true, action: 'in', message: 'Clocked in', entry });
+    } catch (error) {
+        console.error('NFC punch error:', error);
+        res.status(500).json({ success: false, error: 'Failed to process punch' });
+    }
+});
+
+// NFC admin (cards and readers) - require admin or office
+router.get('/clock/nfc/users', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const users = await ProductionDatabase.getProductionUsersForDropdown();
+        res.json({ success: true, users });
+    } catch (error) {
+        console.error('List users for NFC error:', error);
+        res.status(500).json({ success: false, error: 'Failed to list users' });
+    }
+});
+
+router.get('/clock/nfc/cards', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const cards = await ProductionDatabase.listNfcCards();
+        res.json({ success: true, cards });
+    } catch (error) {
+        console.error('List NFC cards error:', error);
+        res.status(500).json({ success: false, error: 'Failed to list NFC cards' });
+    }
+});
+
+router.post('/clock/nfc/cards', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { user_id, card_uid, label } = req.body || {};
+        if (!user_id || !card_uid) {
+            return res.status(400).json({ success: false, error: 'user_id and card_uid are required' });
+        }
+        const card = await ProductionDatabase.createNfcCard(parseInt(user_id), card_uid, label || null);
+        res.json({ success: true, card });
+    } catch (error) {
+        if (error.message && error.message.includes('UNIQUE')) {
+            return res.status(400).json({ success: false, error: 'This card is already registered' });
+        }
+        console.error('Create NFC card error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create NFC card' });
+    }
+});
+
+router.delete('/clock/nfc/cards/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        await ProductionDatabase.deleteNfcCard(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete NFC card error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete NFC card' });
+    }
+});
+
+router.get('/clock/nfc/readers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const readers = await ProductionDatabase.listNfcReaders();
+        res.json({ success: true, readers });
+    } catch (error) {
+        console.error('List NFC readers error:', error);
+        res.status(500).json({ success: false, error: 'Failed to list NFC readers' });
+    }
+});
+
+router.post('/clock/nfc/readers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { reader_id, job_id, name } = req.body || {};
+        if (!reader_id || !job_id) {
+            return res.status(400).json({ success: false, error: 'reader_id and job_id are required' });
+        }
+        const reader = await ProductionDatabase.createNfcReader(reader_id, parseInt(job_id), name || null);
+        res.json({ success: true, reader });
+    } catch (error) {
+        if (error.message && error.message.includes('UNIQUE')) {
+            return res.status(400).json({ success: false, error: 'This reader ID is already registered' });
+        }
+        console.error('Create NFC reader error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create NFC reader' });
+    }
+});
+
+router.delete('/clock/nfc/readers/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        await ProductionDatabase.deleteNfcReader(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete NFC reader error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete NFC reader' });
+    }
+});
+
 router.get('/clock/status', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;

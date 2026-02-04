@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>NFC Clock – Tap your card</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: inherit;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+        }
+        .kiosk-box {
+            text-align: center;
+            max-width: 420px;
+            width: 100%;
+        }
+        .status {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            min-height: 1.2em;
+        }
+        .message {
+            font-size: 18px;
+            opacity: 0.9;
+            margin-bottom: 24px;
+        }
+        .result {
+            font-size: 22px;
+            font-weight: 600;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .result.show { display: block; }
+        .result.success-in { background: #4CBB17; color: #fff; }
+        .result.success-out { background: #606060; color: #fff; }
+        .result.error { background: #c0392b; color: #fff; }
+        .setup-form {
+            background: rgba(255,255,255,0.08);
+            padding: 24px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: none;
+        }
+        .setup-form.show { display: block; }
+        .setup-form label { display: block; text-align: left; margin-bottom: 8px; font-size: 14px; }
+        .setup-form input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 16px;
+            border: 1px solid #444;
+            border-radius: 8px;
+            background: #222;
+            color: #fff;
+            font-size: 16px;
+        }
+        .setup-form button {
+            width: 100%;
+            padding: 14px;
+            background: #4CBB17;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .tap-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            opacity: 0.9;
+        }
+        .reader-id-display {
+            font-size: 14px;
+            color: #888;
+            margin-top: 16px;
+        }
+        .link-back {
+            margin-top: 24px;
+            font-size: 14px;
+        }
+        .link-back a { color: #4CBB17; }
+    </style>
+</head>
+<body>
+    <div class="kiosk-box">
+        <div id="setupSection" class="setup-form">
+            <p class="message">Set up this tablet with the reader token from the NFC admin page.</p>
+            <label for="tokenInput">Reader token</label>
+            <input type="text" id="tokenInput" placeholder="Paste token from admin" autocomplete="off">
+            <button type="button" id="saveTokenBtn">Save and start</button>
+        </div>
+        <div id="mainSection">
+            <div class="tap-icon" aria-hidden="true">📱</div>
+            <div id="status" class="status">Tap your card</div>
+            <div id="message" class="message">Hold your NFC card to the back of the device</div>
+            <div id="result" class="result"></div>
+            <div id="readerIdDisplay" class="reader-id-display"></div>
+        </div>
+    </div>
+    <div class="link-back"><a href="timesheet.html">Timesheet (clock on phone)</a></div>
+
+    <script>
+        const API_BASE = '/production/api';
+        const readerId = (function () {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('reader_id') || 'default';
+        })();
+
+        const storageKey = 'nfc_reader_token_' + readerId;
+
+        function getStoredToken() {
+            try {
+                return localStorage.getItem(storageKey);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function showSetup(show) {
+            document.getElementById('setupSection').classList.toggle('show', show);
+            document.getElementById('mainSection').style.display = show ? 'none' : 'block';
+        }
+
+        function showResult(type, text) {
+            const el = document.getElementById('result');
+            el.className = 'result show ' + type;
+            el.textContent = text;
+            el.setAttribute('aria-live', 'polite');
+        }
+
+        function clearResult() {
+            document.getElementById('result').classList.remove('show');
+        }
+
+        function setStatus(text, subtext) {
+            document.getElementById('status').textContent = text;
+            const msg = document.getElementById('message');
+            if (msg) msg.textContent = subtext || msg.textContent;
+        }
+
+        async function sendPunch(cardUid) {
+            const token = getStoredToken();
+            if (!token) {
+                showResult('error', 'Reader not configured');
+                return;
+            }
+            setStatus('Processing…', '');
+            clearResult();
+            try {
+                const res = await fetch(API_BASE + '/clock/nfc-punch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        reader_id: readerId,
+                        reader_token: token,
+                        card_uid: cardUid
+                    })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
+                    if (data.action === 'in') {
+                        showResult('success-in', 'Clocked in');
+                        setStatus('Clocked in', '');
+                    } else {
+                        showResult('success-out', 'Clocked out');
+                        setStatus('Clocked out', '');
+                    }
+                    setTimeout(function () {
+                        setStatus('Tap your card', 'Hold your NFC card to the back of the device');
+                        clearResult();
+                    }, 3000);
+                } else {
+                    const err = data.error || 'Punch failed';
+                    showResult('error', err);
+                    setStatus('Error', err);
+                    setTimeout(function () {
+                        setStatus('Tap your card', 'Hold your NFC card to the back of the device');
+                        clearResult();
+                    }, 4000);
+                }
+            } catch (e) {
+                showResult('error', 'Network error');
+                setStatus('Error', 'Network error');
+                setTimeout(function () {
+                    setStatus('Tap your card', 'Hold your NFC card to the back of the device');
+                    clearResult();
+                }, 3000);
+            }
+        }
+
+        function startNfcScan() {
+            if (!('NDEFReader' in window)) {
+                setStatus('NFC not supported', 'Use Chrome on Android with NFC enabled');
+                return;
+            }
+            const nfc = new NDEFReader();
+            nfc.scan()
+                .then(function () {
+                    setStatus('Tap your card', 'Hold your NFC card to the back of the device');
+                    nfc.addEventListener('reading', function (event) {
+                        const serial = event.serialNumber || '';
+                        if (serial) {
+                            sendPunch(serial);
+                        }
+                    });
+                })
+                .catch(function (err) {
+                    setStatus('NFC error', err.message || 'Could not start NFC');
+                });
+        }
+
+        document.getElementById('readerIdDisplay').textContent = 'Reader: ' + readerId;
+
+        document.getElementById('saveTokenBtn').addEventListener('click', function () {
+            const input = document.getElementById('tokenInput');
+            const token = (input && input.value) ? input.value.trim() : '';
+            if (!token) return;
+            try {
+                localStorage.setItem(storageKey, token);
+            } catch (e) {
+                alert('Could not save token');
+                return;
+            }
+            showSetup(false);
+            startNfcScan();
+        });
+
+        if (getStoredToken()) {
+            showSetup(false);
+            startNfcScan();
+        } else {
+            showSetup(true);
+        }
+    </script>
+</body>
+</html>

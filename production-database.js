@@ -502,6 +502,29 @@ function initializeSQLite() {
         )
     `);
     
+    // NFC clock: cards (one per staff) and readers (one per tablet/location)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS nfc_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            card_uid TEXT NOT NULL UNIQUE,
+            label TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES production_users(id)
+        )
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS nfc_readers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reader_id TEXT NOT NULL UNIQUE,
+            reader_token TEXT NOT NULL,
+            job_id INTEGER NOT NULL,
+            name TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (job_id) REFERENCES jobs(id)
+        )
+    `);
+    
     // Create indexes
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_bom_panel ON bom_items(panel_id);
@@ -522,6 +545,9 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id);
         CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time);
         CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status);
+        CREATE INDEX IF NOT EXISTS idx_nfc_cards_user ON nfc_cards(user_id);
+        CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid);
+        CREATE INDEX IF NOT EXISTS idx_nfc_readers_reader_id ON nfc_readers(reader_id);
     `);
     
     // Migrate existing panels table to add new columns
@@ -1437,6 +1463,27 @@ async function initializePostgreSQL() {
             )
         `);
         
+        // NFC clock: cards (one per staff) and readers (one per tablet/location)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS nfc_cards (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES production_users(id),
+                card_uid VARCHAR(255) NOT NULL UNIQUE,
+                label TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS nfc_readers (
+                id SERIAL PRIMARY KEY,
+                reader_id VARCHAR(255) NOT NULL UNIQUE,
+                reader_token TEXT NOT NULL,
+                job_id INTEGER NOT NULL REFERENCES jobs(id),
+                name VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
         // Migrate bom_items table to add item_type and item_id columns if they don't exist
         // This MUST run before creating indexes on those columns
         try {
@@ -1530,6 +1577,9 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_clock_in ON timesheet_entries(clock_in_time)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_notices_status ON timesheet_notices(status)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_nfc_cards_user ON nfc_cards(user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_nfc_cards_uid ON nfc_cards(card_uid)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_nfc_readers_reader_id ON nfc_readers(reader_id)`);
         
         // Migrate production_users role constraint to include 'office' role
         try {
@@ -6489,6 +6539,144 @@ class ProductionDatabase {
         }
     }
     
+    // ============ NFC CLOCK (cards + readers) ============
+    
+    static async getNfcReaderByToken(readerId, readerToken) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT id, reader_id, job_id, name FROM nfc_readers WHERE reader_id = $1 AND reader_token = $2`,
+                [readerId, readerToken]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT id, reader_id, job_id, name FROM nfc_readers WHERE reader_id = ? AND reader_token = ?`
+            ).get(readerId, readerToken) || null;
+        }
+    }
+    
+    static async getNfcUserByCardUid(cardUid) {
+        if (!cardUid || typeof cardUid !== 'string') return null;
+        const uid = String(cardUid).trim();
+        if (!uid) return null;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT user_id FROM nfc_cards WHERE card_uid = $1`,
+                [uid]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT user_id FROM nfc_cards WHERE card_uid = ?`).get(uid) || null;
+        }
+    }
+    
+    static async listNfcCards() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT c.id, c.user_id, c.card_uid, c.label, c.created_at, u.username
+                 FROM nfc_cards c
+                 LEFT JOIN production_users u ON c.user_id = u.id
+                 ORDER BY u.username, c.card_uid`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT c.id, c.user_id, c.card_uid, c.label, c.created_at, u.username
+                 FROM nfc_cards c
+                 LEFT JOIN production_users u ON c.user_id = u.id
+                 ORDER BY u.username, c.card_uid`
+            ).all();
+        }
+    }
+    
+    static async listNfcReaders() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT r.id, r.reader_id, r.job_id, r.name, r.created_at, j.name as job_name
+                 FROM nfc_readers r
+                 LEFT JOIN jobs j ON r.job_id = j.id
+                 ORDER BY r.reader_id`
+            );
+            return result.rows;
+        } else {
+            return db.prepare(
+                `SELECT r.id, r.reader_id, r.job_id, r.name, r.created_at, j.name as job_name
+                 FROM nfc_readers r
+                 LEFT JOIN jobs j ON r.job_id = j.id
+                 ORDER BY r.reader_id`
+            ).all();
+        }
+    }
+    
+    static async createNfcCard(userId, cardUid, label = null) {
+        const uid = String(cardUid).trim();
+        if (!uid) throw new Error('card_uid is required');
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO nfc_cards (user_id, card_uid, label) VALUES ($1, $2, $3) RETURNING *`,
+                [userId, uid, label]
+            );
+            return result.rows[0];
+        } else {
+            const stmt = db.prepare(`INSERT INTO nfc_cards (user_id, card_uid, label) VALUES (?, ?, ?)`);
+            const info = stmt.run(userId, uid, label);
+            return db.prepare(`SELECT * FROM nfc_cards WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+    
+    static async createNfcReader(readerId, jobId, name = null) {
+        const crypto = require('crypto');
+        const readerToken = crypto.randomBytes(32).toString('hex');
+        const rid = String(readerId).trim();
+        if (!rid) throw new Error('reader_id is required');
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO nfc_readers (reader_id, reader_token, job_id, name) VALUES ($1, $2, $3, $4) RETURNING *`,
+                [rid, readerToken, jobId, name]
+            );
+            return { ...result.rows[0], reader_token: readerToken };
+        } else {
+            const stmt = db.prepare(`INSERT INTO nfc_readers (reader_id, reader_token, job_id, name) VALUES (?, ?, ?, ?)`);
+            const info = stmt.run(rid, readerToken, jobId, name);
+            const row = db.prepare(`SELECT * FROM nfc_readers WHERE id = ?`).get(info.lastInsertRowid);
+            return { ...row, reader_token: readerToken };
+        }
+    }
+    
+    static async deleteNfcCard(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM nfc_cards WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM nfc_cards WHERE id = ?`).run(id);
+        }
+    }
+    
+    static async deleteNfcReader(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM nfc_readers WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM nfc_readers WHERE id = ?`).run(id);
+        }
+    }
+    
+    static async getNfcReaderById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM nfc_readers WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(`SELECT * FROM nfc_readers WHERE id = ?`).get(id) || null;
+        }
+    }
+    
+    static async getProductionUsersForDropdown() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT id, username FROM production_users ORDER BY username`);
+            return result.rows;
+        } else {
+            return db.prepare(`SELECT id, username FROM production_users ORDER BY username`).all();
+        }
+    }
+    
     // Timesheet entry operations
     static async getCurrentClockStatus(userId) {
         if (isPostgreSQL) {
@@ -6684,10 +6872,11 @@ class ProductionDatabase {
         console.log('Starting cleanup of all old unclosed timesheet entries...');
         
         if (isPostgreSQL) {
-            // Find ALL entries that don't have a clock_out_time (regardless of date)
+            // Only close entries from BEFORE today (do not touch today's clock-ins)
             const entriesToUpdate = await pool.query(
                 `SELECT * FROM timesheet_entries
                  WHERE clock_out_time IS NULL
+                 AND (clock_in_time::date) < CURRENT_DATE
                  ORDER BY clock_in_time ASC`
             );
             
@@ -6737,10 +6926,11 @@ class ProductionDatabase {
             console.log(`Cleanup complete: ${successCount} entries updated, ${errorCount} errors`);
             return { count: successCount, entries: updatedEntries, errors: errorCount };
         } else {
-            // SQLite version
+            // SQLite version - only close entries from BEFORE today (do not touch today's clock-ins)
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE clock_out_time IS NULL
+                AND DATE(clock_in_time) < DATE('now')
                 ORDER BY clock_in_time ASC
             `).all();
             
