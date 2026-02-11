@@ -90,6 +90,11 @@
                     <input type="number" step="0.01" min="0" id="productTravelTime" class="form-input" value="0">
                     <small style="color: #6c757d;">For reference only - shown on load sheets</small>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Number of Boxes</label>
+                    <input type="number" min="0" id="productNumberOfBoxes" class="form-input" value="1">
+                    <small style="color: #6c757d;">Boxes per product for inventory / shipping</small>
+                </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save</button>
@@ -229,6 +234,7 @@
                                 <td>
                                     <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
                                     ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
+                                        <button onclick="pushToSales(${product.id})" class="btn btn-success btn-sm" title="Push to Sales App">Push to Sales</button>
                                         <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
                                         <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
                                         <button onclick="deleteProduct(${product.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
@@ -284,6 +290,7 @@
                 document.getElementById('productLoadTime').value = product.estimated_load_time || 0;
                 document.getElementById('productInstallTime').value = product.estimated_install_time || 0;
                 document.getElementById('productTravelTime').value = product.estimated_travel_time || 0;
+                document.getElementById('productNumberOfBoxes').value = product.number_of_boxes ?? 1;
                 // Load calculated cost
                 const costData = await apiCall(`/products/${product.id}/cost`);
                 document.getElementById('productCost').value = costData.cost.toFixed(2);
@@ -581,6 +588,15 @@
             }
         }
 
+        async function pushToSales(id) {
+            try {
+                await apiCall(`/products/${id}/push-to-sales`, { method: 'POST' });
+                showAlert('Product pushed to sales app');
+            } catch (error) {
+                showAlert(error.message || 'Failed to push to sales app', 'error');
+            }
+        }
+
         async function deleteProduct(id) {
             const product = allProducts.find(p => p.id === id);
             const name = product ? product.name : `#${id}`;
@@ -605,7 +621,8 @@
                 status: 'active',
                 estimated_load_time: parseFloat(document.getElementById('productLoadTime').value) || 0,
                 estimated_install_time: parseFloat(document.getElementById('productInstallTime').value) || 0,
-                estimated_travel_time: parseFloat(document.getElementById('productTravelTime').value) || 0
+                estimated_travel_time: parseFloat(document.getElementById('productTravelTime').value) || 0,
+                number_of_boxes: Math.max(0, parseInt(document.getElementById('productNumberOfBoxes').value, 10) || 1)
             };
             
             try {

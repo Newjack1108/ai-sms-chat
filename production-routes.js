@@ -849,7 +849,7 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -863,7 +863,8 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             status,
             estimated_load_time,
             estimated_install_time,
-            estimated_travel_time
+            estimated_travel_time,
+            number_of_boxes
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -875,7 +876,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes } = req.body;
         
         // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
@@ -886,7 +887,8 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
             status,
             estimated_load_time,
             estimated_install_time,
-            estimated_travel_time
+            estimated_travel_time,
+            number_of_boxes
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -927,6 +929,65 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Calculate product cost error:', error);
         res.status(500).json({ success: false, error: 'Failed to calculate product cost' });
+    }
+});
+
+router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        const salesApiUrl = process.env.SALES_APP_API_URL;
+        const salesApiKey = process.env.SALES_APP_API_KEY;
+
+        if (!salesApiUrl || !salesApiUrl.trim()) {
+            return res.status(503).json({ success: false, error: 'Sales app not configured. Set SALES_APP_API_URL in environment.' });
+        }
+
+        const product = await ProductionDatabase.getProductById(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+
+        const costData = await ProductionDatabase.calculateProductCost(productId);
+        const priceExVat = parseFloat(costData ?? product.cost_gbp ?? 0) || 0;
+        const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
+
+        const payload = {
+            name: product.name,
+            description: product.description || '',
+            price_ex_vat: priceExVat,
+            install_hours: parseFloat(product.estimated_install_time ?? 0) || 0,
+            number_of_boxes: numberOfBoxes
+        };
+
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(salesApiKey && salesApiKey.trim() && { 'Authorization': `Bearer ${salesApiKey.trim()}` })
+        };
+
+        const response = await fetch(salesApiUrl.trim(), {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.error('Sales app push failed:', response.status, text);
+            return res.status(502).json({
+                success: false,
+                error: `Sales app returned ${response.status}: ${text || response.statusText}`
+            });
+        }
+
+        const result = await response.json().catch(() => ({}));
+        res.json({ success: true, message: 'Product pushed to sales app', result });
+    } catch (error) {
+        console.error('Push to sales error:', error);
+        const msg = error.message || 'Failed to push product to sales app';
+        if (error.cause?.code === 'ENOTFOUND' || error.cause?.code === 'ECONNREFUSED') {
+            return res.status(503).json({ success: false, error: 'Cannot reach sales app. Check SALES_APP_API_URL.' });
+        }
+        res.status(500).json({ success: false, error: msg });
     }
 });
 
@@ -1020,7 +1081,12 @@ router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffi
             name: newName,
             description: originalProduct.description || '',
             product_type: originalProduct.product_type || '',
-            status: originalProduct.status || 'active'
+            category: originalProduct.category || 'Other',
+            status: originalProduct.status || 'active',
+            estimated_load_time: originalProduct.estimated_load_time ?? 0,
+            estimated_install_time: originalProduct.estimated_install_time ?? 0,
+            estimated_travel_time: originalProduct.estimated_travel_time ?? 0,
+            number_of_boxes: originalProduct.number_of_boxes ?? 1
         });
         
         // Copy all components from the original product

@@ -246,6 +246,11 @@ function initializeSQLite() {
             db.exec('ALTER TABLE finished_products ADD COLUMN estimated_travel_time REAL DEFAULT 0');
             console.log('✅ Added estimated_travel_time column to finished_products table');
         }
+        const hasNumberOfBoxes = tableInfo.some(col => col.name === 'number_of_boxes');
+        if (!hasNumberOfBoxes) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN number_of_boxes INTEGER DEFAULT 1');
+            console.log('✅ Added number_of_boxes column to finished_products table');
+        }
     } catch (error) {
         console.log('⚠️ Finished products migration check skipped:', error.message);
     }
@@ -1191,6 +1196,15 @@ async function initializePostgreSQL() {
             if (travelTimeCheck.rows.length === 0) {
                 await pool.query(`ALTER TABLE finished_products ADD COLUMN estimated_travel_time DECIMAL(10,2) DEFAULT 0`);
                 console.log('✅ Added estimated_travel_time column to finished_products table');
+            }
+            const numberOfBoxesCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'finished_products' AND column_name = 'number_of_boxes'
+            `);
+            if (numberOfBoxesCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN number_of_boxes INTEGER DEFAULT 1`);
+                console.log('✅ Added number_of_boxes column to finished_products table');
             }
         } catch (error) {
             console.log('⚠️ Finished products migration check skipped:', error.message);
@@ -4355,12 +4369,13 @@ class ProductionDatabase {
         const estimatedLoadTime = parseFloat(data.estimated_load_time || 0);
         const estimatedInstallTime = parseFloat(data.estimated_install_time || 0);
         const estimatedTravelTime = parseFloat(data.estimated_travel_time || 0);
+        const numberOfBoxes = parseInt(data.number_of_boxes || 1, 10) || 1;
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-                [data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime]
+                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+                [data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist and includes load time)
@@ -4368,10 +4383,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime);
+            const info = stmt.run(data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation (includes load time)
             await this.updateProductCost(product.id);
@@ -4401,15 +4416,16 @@ class ProductionDatabase {
         const estimatedLoadTime = data.estimated_load_time !== undefined ? parseFloat(data.estimated_load_time || 0) : null;
         const estimatedInstallTime = data.estimated_install_time !== undefined ? parseFloat(data.estimated_install_time || 0) : null;
         const estimatedTravelTime = data.estimated_travel_time !== undefined ? parseFloat(data.estimated_travel_time || 0) : null;
+        const numberOfBoxes = data.number_of_boxes !== undefined ? (parseInt(data.number_of_boxes, 10) || 1) : null;
         
         if (isPostgreSQL) {
             let query;
             let params;
             
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5, estimated_load_time = $6, estimated_install_time = $7, estimated_travel_time = $8
-                         WHERE id = $9 RETURNING *`;
-                params = [data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5, estimated_load_time = $6, estimated_install_time = $7, estimated_travel_time = $8, number_of_boxes = $9
+                         WHERE id = $10 RETURNING *`;
+                params = [data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
             } else {
                 query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5
                          WHERE id = $6 RETURNING *`;
@@ -4422,10 +4438,11 @@ class ProductionDatabase {
             return await this.getProductById(id);
         } else {
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
+                const boxes = numberOfBoxes !== null ? numberOfBoxes : 1;
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, id);
+                ).run(data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
             } else {
                 db.prepare(
                     `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?
