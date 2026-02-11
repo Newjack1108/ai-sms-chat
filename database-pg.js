@@ -5,15 +5,18 @@ const { Pool } = require('pg');
 let pool;
 let isPostgreSQL = false;
 
+// Prefer DATABASE_PRIVATE_URL on Railway (internal network, more reliable than public URL)
+const connectionString = process.env.DATABASE_PRIVATE_URL || process.env.DATABASE_URL;
+
 // Check if we're on Railway with PostgreSQL
-if (process.env.DATABASE_URL) {
+if (connectionString) {
     try {
         pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
+            connectionString,
             ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-            max: 20,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 10000
+            max: 10,                          // Lower for Railway connection limits
+            idleTimeoutMillis: 0,             // Disable - avoids "connection terminated" race after idle
+            connectionTimeoutMillis: 30000    // 30s for cold starts / slow connections
         });
         
         // Handle pool errors
@@ -21,13 +24,35 @@ if (process.env.DATABASE_URL) {
             console.error('❌ Unexpected PostgreSQL pool error:', err);
         });
         isPostgreSQL = true;
-        console.log('🗄️ Using PostgreSQL database (Railway)');
+        console.log('🗄️ Using PostgreSQL database (Railway)', process.env.DATABASE_PRIVATE_URL ? '(private URL)' : '');
     } catch (error) {
         console.error('❌ PostgreSQL connection failed:', error.message);
         isPostgreSQL = false;
     }
 } else {
     console.log('⚠️ No DATABASE_URL found, falling back to SQLite');
+}
+
+// Run a query with retries (for cold-start / DB-not-ready scenarios on Railway)
+async function queryWithRetry(queryFn, maxRetries = 3, baseDelayMs = 5000) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await queryFn();
+        } catch (error) {
+            lastError = error;
+            const isRetryable = /timeout|terminated|ECONNREFUSED|ECONNRESET|ENOTFOUND/i.test(error.message) ||
+                (error.cause && /timeout|terminated/i.test(String(error.cause)));
+            if (attempt < maxRetries && isRetryable) {
+                const delay = baseDelayMs * Math.pow(2, attempt - 1);
+                console.warn(`⚠️ Database connection attempt ${attempt}/${maxRetries} failed (${error.message}), retrying in ${delay / 1000}s...`);
+                await new Promise(r => setTimeout(r, delay));
+            } else {
+                throw error;
+            }
+        }
+    }
+    throw lastError;
 }
 
 // Initialize database schema
@@ -40,6 +65,10 @@ async function initializeDatabase() {
     console.log('🗄️ Initializing PostgreSQL database...');
     
     try {
+        // Test connection with retry (handles Railway cold-start)
+        await queryWithRetry(() => pool.query('SELECT 1'));
+        console.log('✅ PostgreSQL connection verified');
+        
         // Create leads table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS leads (
@@ -992,5 +1021,6 @@ module.exports = {
     pool,
     LeadDatabase,
     initializeDatabase,
-    isPostgreSQL
+    isPostgreSQL,
+    queryWithRetry
 };

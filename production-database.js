@@ -1,7 +1,7 @@
 // Production Database for Stock Control System
 // Supports both SQLite and PostgreSQL
 
-const { isPostgreSQL, pool } = require('./database-pg');
+const { isPostgreSQL, pool, queryWithRetry } = require('./database-pg');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -990,6 +990,9 @@ async function initializePostgreSQL() {
     console.log('🗄️ Initializing Production PostgreSQL database...');
     
     try {
+        // Verify connection (with retry for cold-start)
+        await queryWithRetry(() => pool.query('SELECT 1'));
+        
         // Production users
         await pool.query(`
             CREATE TABLE IF NOT EXISTS production_users (
