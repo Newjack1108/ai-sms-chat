@@ -1075,6 +1075,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
         }
 
         const result = await response.json().catch(() => ({}));
+        await ProductionDatabase.recordProductSalesSync(productId);
         res.json({ success: true, message: 'Product pushed to sales app', result });
     } catch (error) {
         console.error('Push to sales error:', error);
@@ -1217,7 +1218,11 @@ router.post('/requirements/calculate', requireProductionAuth, async (req, res) =
             if (!order) {
                 return res.status(404).json({ success: false, error: 'Order not found' });
             }
-            orderList = [{ product_id: order.product_id, quantity: order.quantity }];
+            if (order.products && order.products.length > 0) {
+                orderList = order.products.map(p => ({ product_id: p.product_id, quantity: p.quantity }));
+            } else {
+                orderList = [{ product_id: order.product_id, quantity: order.quantity || 1 }];
+            }
         } else if (orders && Array.isArray(orders)) {
             orderList = orders;
         } else {
@@ -1252,8 +1257,13 @@ router.post('/orders/:id/requirements', requireProductionAuth, async (req, res) 
             return res.status(404).json({ success: false, error: 'Order not found' });
         }
         
-        const orders = [{ product_id: order.product_id, quantity: order.quantity }];
-        const requirements = await ProductionDatabase.calculateMaterialRequirements(orders);
+        let orderList = [];
+        if (order.products && order.products.length > 0) {
+            orderList = order.products.map(p => ({ product_id: p.product_id, quantity: p.quantity }));
+        } else if (order.product_id) {
+            orderList = [{ product_id: order.product_id, quantity: order.quantity || 1 }];
+        }
+        const requirements = await ProductionDatabase.calculateMaterialRequirements(orderList);
         res.json({ success: true, requirements });
     } catch (error) {
         console.error('Get order requirements error:', error);

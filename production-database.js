@@ -286,6 +286,7 @@ function initializeSQLite() {
         CREATE TABLE IF NOT EXISTS leadlock_work_order_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_id INTEGER NOT NULL,
+            product_id INTEGER,
             product_name TEXT,
             quantity INTEGER DEFAULT 1,
             description TEXT,
@@ -293,7 +294,30 @@ function initializeSQLite() {
             install_hours REAL DEFAULT 0,
             number_of_boxes INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (order_id) REFERENCES product_orders(id) ON DELETE CASCADE
+            FOREIGN KEY (order_id) REFERENCES product_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES finished_products(id)
+        )
+    `);
+    
+    // Migrate leadlock_work_order_items to add product_id if missing
+    try {
+        const itemCols = db.prepare(`PRAGMA table_info(leadlock_work_order_items)`).all();
+        if (!itemCols.some(c => c.name === 'product_id')) {
+            db.exec('ALTER TABLE leadlock_work_order_items ADD COLUMN product_id INTEGER REFERENCES finished_products(id)');
+            console.log('✅ Added product_id column to leadlock_work_order_items table');
+        }
+    } catch (error) {
+        console.log('⚠️ LeadLock work order items migration check skipped:', error.message);
+    }
+    
+    // Product sales sync table (tracks products pushed to sales app)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS product_sales_sync (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (product_id) REFERENCES finished_products(id)
         )
     `);
     
@@ -1291,12 +1315,37 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS leadlock_work_order_items (
                 id SERIAL PRIMARY KEY,
                 order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
+                product_id INTEGER REFERENCES finished_products(id),
                 product_name VARCHAR(255),
                 quantity INTEGER DEFAULT 1,
                 description TEXT,
                 unit_price DECIMAL(10,2) DEFAULT 0,
                 install_hours DECIMAL(10,2) DEFAULT 0,
                 number_of_boxes INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        
+        // Migrate leadlock_work_order_items to add product_id if missing
+        try {
+            const itemColCheck = await pool.query(`
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'leadlock_work_order_items' AND column_name = 'product_id'
+            `);
+            if (itemColCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE leadlock_work_order_items ADD COLUMN product_id INTEGER REFERENCES finished_products(id)`);
+                console.log('✅ Added product_id column to leadlock_work_order_items table');
+            }
+        } catch (error) {
+            console.log('⚠️ LeadLock work order items migration check skipped:', error.message);
+        }
+        
+        // Product sales sync table (tracks products pushed to sales app)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS product_sales_sync (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES finished_products(id),
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -4488,6 +4537,23 @@ class ProductionDatabase {
         }
     }
     
+    static async getProductByName(name) {
+        if (!name || typeof name !== 'string') return null;
+        const trimmed = name.trim();
+        if (!trimmed) return null;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1`,
+                [trimmed]
+            );
+            return result.rows[0] || null;
+        } else {
+            return db.prepare(
+                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1`
+            ).get(trimmed) || null;
+        }
+    }
+    
     static async updateProduct(id, data) {
         const estimatedLoadTime = data.estimated_load_time !== undefined ? parseFloat(data.estimated_load_time || 0) : null;
         const estimatedInstallTime = data.estimated_install_time !== undefined ? parseFloat(data.estimated_install_time || 0) : null;
@@ -5001,6 +5067,22 @@ class ProductionDatabase {
         }
     }
     
+    static async recordProductSalesSync(productId) {
+        if (!productId || productId < 1) return null;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO product_sales_sync (product_id) VALUES ($1) RETURNING *`,
+                [productId]
+            );
+            return result.rows[0];
+        } else {
+            const info = db.prepare(
+                `INSERT INTO product_sales_sync (product_id) VALUES (?)`
+            ).run(productId);
+            return db.prepare(`SELECT * FROM product_sales_sync WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+    
     static async createLeadLockWorkOrder(payload) {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
@@ -5048,44 +5130,59 @@ class ProductionDatabase {
             orderId = info.lastInsertRowid;
         }
         
-        if (isPostgreSQL) {
-            await pool.query(
-                `INSERT INTO order_products (order_id, product_id, quantity) VALUES ($1, $2, $3)`,
-                [orderId, leadlockProduct.id, 1]
-            );
-            for (const item of items) {
+        for (const item of items) {
+            let matchedProduct = null;
+            if (item.product_id != null) {
+                const pid = parseInt(item.product_id, 10);
+                if (!isNaN(pid) && pid > 0) {
+                    matchedProduct = await this.getProductById(pid);
+                }
+            }
+            if (!matchedProduct && item.product_name) {
+                matchedProduct = await this.getProductByName(item.product_name);
+            }
+            const qty = parseInt(item.quantity, 10) || 1;
+            const productIdForItem = matchedProduct ? matchedProduct.id : null;
+            if (isPostgreSQL) {
                 await pool.query(
-                    `INSERT INTO leadlock_work_order_items (order_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
                     [
                         orderId,
+                        productIdForItem,
                         item.product_name || null,
-                        parseInt(item.quantity, 10) || 1,
+                        qty,
                         item.description || null,
                         parseFloat(item.unit_price) || 0,
                         parseFloat(item.install_hours) || 0,
                         parseInt(item.number_of_boxes, 10) || 1
                     ]
                 );
-            }
-        } else {
-            db.prepare(
-                `INSERT INTO order_products (order_id, product_id, quantity) VALUES (?, ?, ?)`
-            ).run(orderId, leadlockProduct.id, 1);
-            const itemStmt = db.prepare(
-                `INSERT INTO leadlock_work_order_items (order_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`
-            );
-            for (const item of items) {
-                itemStmt.run(
+                if (matchedProduct) {
+                    await pool.query(
+                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES ($1, $2, $3)`,
+                        [orderId, matchedProduct.id, qty]
+                    );
+                }
+            } else {
+                db.prepare(
+                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                ).run(
                     orderId,
+                    productIdForItem,
                     item.product_name || null,
-                    parseInt(item.quantity, 10) || 1,
+                    qty,
                     item.description || null,
                     parseFloat(item.unit_price) || 0,
                     parseFloat(item.install_hours) || 0,
                     parseInt(item.number_of_boxes, 10) || 1
                 );
+                if (matchedProduct) {
+                    db.prepare(
+                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES (?, ?, ?)`
+                    ).run(orderId, matchedProduct.id, qty);
+                }
             }
         }
         
