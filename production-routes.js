@@ -48,6 +48,20 @@ router.post('/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// LeadLock webhook auth - Bearer token for work order webhook (no session)
+function validateLeadLockWebhook(req, res, next) {
+    const apiKey = process.env.LEADLOCK_WEBHOOK_API_KEY || process.env.SALES_APP_WEBHOOK_API_KEY;
+    if (!apiKey || !apiKey.trim()) {
+        return res.status(503).json({ success: false, error: 'LeadLock webhook not configured' });
+    }
+    const authHeader = req.get('Authorization');
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    if (!token || token !== apiKey.trim()) {
+        return res.status(401).json({ success: false, error: 'Invalid or missing Bearer token' });
+    }
+    next();
+}
+
 // Sales webhook auth - shared secret for server-to-server calls (no session)
 function validateSalesWebhook(req, res, next) {
     const secret = process.env.SALES_APP_API_KEY || process.env.SALES_APP_WEBHOOK_SECRET;
@@ -93,6 +107,38 @@ router.post('/sales/product-sold', validateSalesWebhook, async (req, res) => {
     } catch (error) {
         console.error('Sales product-sold webhook error:', error);
         res.status(500).json({ success: false, error: error.message || 'Failed to create works order' });
+    }
+});
+
+// LeadLock work order webhook - receive full orders from LeadLock sales app (no session auth)
+router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) => {
+    try {
+        const body = req.body;
+        if (!body || typeof body !== 'object') {
+            return res.status(400).json({ success: false, error: 'Invalid or empty JSON body' });
+        }
+        if (!Array.isArray(body.items) || body.items.length === 0) {
+            return res.status(400).json({ success: false, error: 'items array is required and must not be empty' });
+        }
+        const order = await ProductionDatabase.createLeadLockWorkOrder({
+            order_number: body.order_number,
+            order_id: body.order_id,
+            customer_name: body.customer_name,
+            customer_postcode: body.customer_postcode,
+            customer_address: body.customer_address,
+            customer_email: body.customer_email,
+            customer_phone: body.customer_phone,
+            items: body.items,
+            total_amount: body.total_amount,
+            currency: body.currency,
+            installation_booked: body.installation_booked,
+            created_at: body.created_at
+        });
+        console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
+        res.status(200).json({ success: true, work_order_id: String(order.id) });
+    } catch (error) {
+        console.error('LeadLock work order webhook error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create work order' });
     }
 });
 

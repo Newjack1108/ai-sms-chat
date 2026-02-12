@@ -41,7 +41,7 @@ app.use(express.json({
     strict: false,
     verify: (req, res, buf, encoding) => {
         // Log raw body for webhook endpoints for debugging
-        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate'))) {
+        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate') || req.path.includes('/api/webhooks/'))) {
             try {
                 const rawBody = buf.toString(encoding || 'utf8');
                 console.log(`📦 Raw request body for ${req.path}:`, rawBody);
@@ -62,7 +62,7 @@ app.use((error, req, res, next) => {
         console.error('   Content-Type:', req.headers['content-type']);
         
         // For webhook endpoints, provide helpful error messages
-        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate'))) {
+        if (req.path && (req.path.includes('/webhook/') || req.path.includes('/api/leads/reactivate') || req.path.includes('/api/webhooks/'))) {
             return res.status(400).json({
                 success: false,
                 error: 'Invalid JSON in request body',
@@ -105,7 +105,8 @@ function requireAuth(req, res, next) {
         req.path === '/api/logout' ||
         req.path.startsWith('/webhook/') ||
         (req.method === 'POST' && req.path === '/api/leads') ||
-        (req.method === 'POST' && req.path === '/api/leads/reactivate')) {
+        (req.method === 'POST' && req.path === '/api/leads/reactivate') ||
+        (req.method === 'POST' && req.path === '/api/webhooks/work-orders')) {
         return next();
     }
     
@@ -136,8 +137,9 @@ app.use((req, res, next) => {
         return next();
     }
     
-    // Allow POST /api/leads (used by external webhooks/integrations like Make.com)
-    if (req.method === 'POST' && req.path === '/api/leads') {
+    // Allow POST /api/leads and LeadLock work order webhook (used by external webhooks/integrations)
+    if ((req.method === 'POST' && req.path === '/api/leads') ||
+        (req.method === 'POST' && req.path === '/api/webhooks/work-orders')) {
         return next();
     }
     
@@ -2454,6 +2456,47 @@ If you have any questions in the meantime our office hours are Monday to Friday,
             details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
             message: 'Failed to process external lead. Please check the webhook format and ensure all required fields are present.'
         });
+    }
+});
+
+// LeadLock work order webhook - receive orders from sales app (Bearer auth)
+app.post('/api/webhooks/work-orders', async (req, res) => {
+    try {
+        const apiKey = process.env.LEADLOCK_WEBHOOK_API_KEY || process.env.SALES_APP_WEBHOOK_API_KEY;
+        if (!apiKey || !apiKey.trim()) {
+            return res.status(503).json({ success: false, error: 'LeadLock webhook not configured (LEADLOCK_WEBHOOK_API_KEY missing)' });
+        }
+        const authHeader = req.get('Authorization');
+        const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+        if (!token || token !== apiKey.trim()) {
+            return res.status(401).json({ success: false, error: 'Invalid or missing Bearer token' });
+        }
+        const body = req.body;
+        if (!body || typeof body !== 'object') {
+            return res.status(400).json({ success: false, error: 'Invalid or empty JSON body' });
+        }
+        if (!Array.isArray(body.items) || body.items.length === 0) {
+            return res.status(400).json({ success: false, error: 'items array is required and must not be empty' });
+        }
+        const order = await ProductionDatabase.createLeadLockWorkOrder({
+            order_number: body.order_number,
+            order_id: body.order_id,
+            customer_name: body.customer_name,
+            customer_postcode: body.customer_postcode,
+            customer_address: body.customer_address,
+            customer_email: body.customer_email,
+            customer_phone: body.customer_phone,
+            items: body.items,
+            total_amount: body.total_amount,
+            currency: body.currency,
+            installation_booked: body.installation_booked,
+            created_at: body.created_at
+        });
+        console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
+        res.status(200).json({ success: true, work_order_id: String(order.id) });
+    } catch (error) {
+        console.error('LeadLock work order webhook error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create work order' });
     }
 });
 
