@@ -263,6 +263,11 @@ function initializeSQLite() {
             db.exec('ALTER TABLE product_orders ADD COLUMN customer_name TEXT');
             console.log('✅ Added customer_name column to product_orders table');
         }
+        const hasSalesOrderRef = tableInfo.some(col => col.name === 'sales_order_ref');
+        if (!hasSalesOrderRef) {
+            db.exec('ALTER TABLE product_orders ADD COLUMN sales_order_ref TEXT');
+            console.log('✅ Added sales_order_ref column to product_orders table');
+        }
     } catch (error) {
         console.log('⚠️ Product orders migration check skipped:', error.message);
     }
@@ -1220,6 +1225,15 @@ async function initializePostgreSQL() {
             if (columnCheck.rows.length === 0) {
                 await pool.query(`ALTER TABLE product_orders ADD COLUMN customer_name VARCHAR(255)`);
                 console.log('✅ Added customer_name column to product_orders table');
+            }
+            const salesOrderRefCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'product_orders' AND column_name = 'sales_order_ref'
+            `);
+            if (salesOrderRefCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE product_orders ADD COLUMN sales_order_ref VARCHAR(255)`);
+                console.log('✅ Added sales_order_ref column to product_orders table');
             }
         } catch (error) {
             console.log('⚠️ Product orders migration check skipped:', error.message);
@@ -4859,19 +4873,20 @@ class ProductionDatabase {
         const firstQuantity = products[0].quantity;
         
         let orderId;
+        const salesOrderRef = data.sales_order_ref || null;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-                [firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null]
+                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null, salesOrderRef]
             );
             orderId = result.rows[0].id;
         } else {
             const stmt = db.prepare(
-                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name)
-                 VALUES (?, ?, ?, ?, ?, ?)`
+                `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null);
+            const info = stmt.run(firstProductId, firstQuantity, data.order_date, data.status || 'pending', data.created_by, data.customer_name || null, salesOrderRef);
             orderId = info.lastInsertRowid;
         }
         

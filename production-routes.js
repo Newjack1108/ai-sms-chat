@@ -48,6 +48,54 @@ router.post('/logout', (req, res) => {
     res.json({ success: true });
 });
 
+// Sales webhook auth - shared secret for server-to-server calls (no session)
+function validateSalesWebhook(req, res, next) {
+    const secret = process.env.SALES_APP_API_KEY || process.env.SALES_APP_WEBHOOK_SECRET;
+    if (!secret || !secret.trim()) {
+        return res.status(503).json({ success: false, error: 'Sales webhook not configured' });
+    }
+    const authHeader = req.get('Authorization');
+    const webhookSecret = req.get('X-Webhook-Secret');
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : webhookSecret?.trim();
+    if (!token || token !== secret.trim()) {
+        return res.status(401).json({ success: false, error: 'Invalid or missing webhook authorization' });
+    }
+    next();
+}
+
+// Sales app webhook - create works order when product is sold (no session auth)
+router.post('/sales/product-sold', validateSalesWebhook, async (req, res) => {
+    try {
+        const { product_id, quantity, customer_name, order_date, sales_order_ref } = req.body;
+        if (!product_id || quantity == null) {
+            return res.status(400).json({ success: false, error: 'product_id and quantity are required' });
+        }
+        const productId = parseInt(product_id, 10);
+        const qty = parseInt(quantity, 10) || 1;
+        if (isNaN(productId) || productId < 1 || qty < 1) {
+            return res.status(400).json({ success: false, error: 'product_id and quantity must be positive integers' });
+        }
+        const product = await ProductionDatabase.getProductById(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        const orderDate = order_date || new Date().toISOString().slice(0, 10);
+        const order = await ProductionDatabase.createProductOrder({
+            products: [{ product_id: productId, quantity: qty }],
+            order_date: orderDate,
+            status: 'pending',
+            customer_name: customer_name || null,
+            created_by: null,
+            sales_order_ref: sales_order_ref || null
+        });
+        console.log(`Sales webhook: created works order #${order.id} for product ${productId} x${qty}`);
+        res.json({ success: true, order_id: order.id });
+    } catch (error) {
+        console.error('Sales product-sold webhook error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to create works order' });
+    }
+});
+
 router.get('/me', requireProductionAuth, (req, res) => {
     res.json({ success: true, user: req.session.production_user });
 });
@@ -952,6 +1000,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
         const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
 
         const payload = {
+            product_id: productId,
             name: product.name,
             description: product.description || '',
             price_ex_vat: priceExVat,
