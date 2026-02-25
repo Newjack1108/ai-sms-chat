@@ -133,7 +133,7 @@
         async function loadUsers() {
             try {
                 const data = await apiCall('/users');
-                allUsers = data.users || [];
+                allUsers = (data.users || []).filter(u => u.status !== 'left_company');
                 
                 // Populate user dropdown
                 const userSelect = document.getElementById('reminderUserId');

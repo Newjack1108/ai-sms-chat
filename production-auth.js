@@ -109,6 +109,11 @@ async function loginProductionUser(username, password) {
             return { success: false, error: 'Invalid credentials' };
         }
         
+        if (user.status === 'left_company') {
+            console.log('Login blocked - user has left company:', username);
+            return { success: false, error: 'Your account is no longer active' };
+        }
+        
         console.log('Login successful for user:', username, 'ID:', user.id, 'Role:', user.role);
         
         // Return user data (without password hash)

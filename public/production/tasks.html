@@ -116,7 +116,7 @@
         async function loadUsers() {
             try {
                 const data = await apiCall('/users');
-                users = data.users;
+                users = (data.users || []).filter(u => u.status !== 'left_company');
                 
                 const select = document.getElementById('taskAssignedTo');
                 select.innerHTML = '<option value="">Unassigned</option>';

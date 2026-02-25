@@ -709,6 +709,18 @@ function initializeSQLite() {
         console.log('⚠️ Role constraint migration check skipped:', error.message);
     }
     
+    // Migrate production_users to add status column (active | left_company)
+    try {
+        const userColumns = db.prepare("PRAGMA table_info(production_users)").all();
+        const hasStatus = userColumns.some(c => c.name === 'status');
+        if (!hasStatus) {
+            db.exec("ALTER TABLE production_users ADD COLUMN status TEXT DEFAULT 'active'");
+            console.log('✅ Added status column to production_users');
+        }
+    } catch (error) {
+        console.log('⚠️ Status column migration check skipped:', error.message);
+    }
+    
     // Migrate timesheet_entries to add hour calculation columns
     try {
         const columns = db.prepare("PRAGMA table_info(timesheet_entries)").all();
@@ -1780,6 +1792,20 @@ async function initializePostgreSQL() {
             console.log('⚠️ Role constraint migration check:', error.message);
         }
         
+        // Migrate production_users to add status column (active | left_company)
+        try {
+            const statusColCheck = await pool.query(`
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'production_users' AND column_name = 'status'
+            `);
+            if (statusColCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE production_users ADD COLUMN status VARCHAR(20) DEFAULT 'active'`);
+                console.log('✅ Added status column to production_users');
+            }
+        } catch (error) {
+            console.log('⚠️ Status column migration check skipped:', error.message);
+        }
+        
         // Migrate existing panels table to add new columns
         await pool.query(`
             DO $$ 
@@ -2263,10 +2289,10 @@ class ProductionDatabase {
     
     static async getAllUsers() {
         if (isPostgreSQL) {
-            const result = await pool.query(`SELECT id, username, role, created_at FROM production_users ORDER BY created_at DESC`);
+            const result = await pool.query(`SELECT id, username, role, created_at, status FROM production_users ORDER BY created_at DESC`);
             return result.rows;
         } else {
-            return db.prepare(`SELECT id, username, role, created_at FROM production_users ORDER BY created_at DESC`).all();
+            return db.prepare(`SELECT id, username, role, created_at, status FROM production_users ORDER BY created_at DESC`).all();
         }
     }
     
@@ -2279,6 +2305,22 @@ class ProductionDatabase {
             return result.rows[0];
         } else {
             db.prepare(`UPDATE production_users SET username = ?, role = ? WHERE id = ?`).run(username, role, id);
+            return this.getUserById(id);
+        }
+    }
+    
+    static async setUserStatus(id, status) {
+        if (!['active', 'left_company'].includes(status)) {
+            throw new Error('Invalid status. Must be "active" or "left_company"');
+        }
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE production_users SET status = $1 WHERE id = $2 RETURNING *`,
+                [status, id]
+            );
+            return result.rows[0];
+        } else {
+            db.prepare(`UPDATE production_users SET status = ? WHERE id = ?`).run(status, id);
             return this.getUserById(id);
         }
     }
@@ -6982,10 +7024,10 @@ class ProductionDatabase {
     
     static async getProductionUsersForDropdown() {
         if (isPostgreSQL) {
-            const result = await pool.query(`SELECT id, username FROM production_users ORDER BY username`);
+            const result = await pool.query(`SELECT id, username FROM production_users WHERE status IS NULL OR status = 'active' ORDER BY username`);
             return result.rows;
         } else {
-            return db.prepare(`SELECT id, username FROM production_users ORDER BY username`).all();
+            return db.prepare(`SELECT id, username FROM production_users WHERE status IS NULL OR status = 'active' ORDER BY username`).all();
         }
     }
     
@@ -9561,6 +9603,7 @@ class ProductionDatabase {
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  LEFT JOIN production_users approver ON wt.approved_by = approver.id
                  WHERE (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`,
@@ -9590,6 +9633,7 @@ class ProductionDatabase {
                  LEFT JOIN production_users approver ON wt.approved_by = approver.id
                  WHERE wt.week_start_date = ?
                    AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`

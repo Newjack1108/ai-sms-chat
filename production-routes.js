@@ -256,6 +256,27 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
     }
 });
 
+router.patch('/users/:id/status', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        const { status } = req.body;
+        if (!status || !['active', 'left_company'].includes(status)) {
+            return res.status(400).json({ success: false, error: 'Status must be "active" or "left_company"' });
+        }
+        if (userId === req.session.production_user.id && status === 'left_company') {
+            return res.status(400).json({ success: false, error: 'Cannot mark your own account as left company' });
+        }
+        const updatedUser = await ProductionDatabase.setUserStatus(userId, status);
+        if (!updatedUser) {
+            return res.status(404).json({ success: false, error: 'User not found' });
+        }
+        res.json({ success: true, user: { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role, status: updatedUser.status } });
+    } catch (error) {
+        console.error('Update user status error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update user status' });
+    }
+});
+
 router.delete('/users/:id', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
@@ -2002,6 +2023,10 @@ router.get('/timesheet/status', requireProductionAuth, async (req, res) => {
 router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
+        const user = await ProductionDatabase.getUserById(userId);
+        if (user && user.status === 'left_company') {
+            return res.status(403).json({ success: false, error: 'Your account is no longer active' });
+        }
         const { job_id, latitude, longitude } = req.body;
         
         if (!job_id) {
@@ -2165,6 +2190,10 @@ router.delete('/timesheet/notices/:id', requireProductionAuth, requireAdminOrOff
 router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
+        const user = await ProductionDatabase.getUserById(userId);
+        if (user && user.status === 'left_company') {
+            return res.status(403).json({ success: false, error: 'Your account is no longer active' });
+        }
         const { job_id, latitude, longitude } = req.body;
         
         if (!job_id) {
@@ -2286,6 +2315,10 @@ router.post('/clock/nfc-punch', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Card not recognised' });
         }
         const userId = cardUser.user_id;
+        const user = await ProductionDatabase.getUserById(userId);
+        if (user && user.status === 'left_company') {
+            return res.status(403).json({ success: false, error: 'Your account is no longer active' });
+        }
         const jobId = reader.job_id;
         
         // Auto-clock-out any old entries (same as normal clock-in flow)
@@ -4588,6 +4621,11 @@ router.post('/holidays/requests', requireProductionAuth, async (req, res) => {
             return res.status(401).json({ success: false, error: 'User not authenticated' });
         }
         
+        const fullUser = await ProductionDatabase.getUserById(parseInt(user.id));
+        if (fullUser && fullUser.status === 'left_company') {
+            return res.status(400).json({ success: false, error: 'You cannot request holidays - your account is no longer active' });
+        }
+        
         if (!start_date || !end_date) {
             return res.status(400).json({ success: false, error: 'Start date and end date are required' });
         }
@@ -4825,6 +4863,11 @@ router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async 
         
         if (!user_id || !start_date || !end_date) {
             return res.status(400).json({ success: false, error: 'User ID, start date, and end date are required' });
+        }
+        
+        const targetUser = await ProductionDatabase.getUserById(parseInt(user_id));
+        if (!targetUser || targetUser.status === 'left_company') {
+            return res.status(400).json({ success: false, error: 'Cannot add holiday for a user who has left the company' });
         }
         
         // Validate day_type (default to 'full' if not provided for backward compatibility)

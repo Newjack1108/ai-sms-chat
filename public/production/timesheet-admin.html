@@ -772,7 +772,7 @@
                     apiCall('/timesheet/active')
                 ]);
                 
-                const allUsers = usersData.users || [];
+                const allUsers = (usersData.users || []).filter(u => u.status !== 'left_company');
                 const activeClockIns = activeClockInsData.clockIns || [];
                 
                 // Get IDs of users who are currently clocked in
@@ -2415,7 +2415,7 @@
             // Load users for dropdown
             try {
                 const usersData = await apiCall('/users');
-                const users = usersData.users || [];
+                const users = (usersData.users || []).filter(u => u.status !== 'left_company');
                 const userSelect = document.getElementById('addMissingDayUser');
                 userSelect.innerHTML = '<option value="">Select a user</option>';
                 users.forEach(user => {

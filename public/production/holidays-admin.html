@@ -375,10 +375,11 @@
             try {
                 const response = await apiCall('/users');
                 if (response.success) {
-                    users = response.users;
+                    const activeUsers = (response.users || []).filter(u => u.status !== 'left_company');
+                    users = activeUsers;
                     const select = document.getElementById('entitlementUserId');
                     select.innerHTML = '<option value="">Select User</option>';
-                    response.users.forEach(user => {
+                    activeUsers.forEach(user => {
                         const option = document.createElement('option');
                         option.value = user.id;
                         option.textContent = user.username;
@@ -499,7 +500,7 @@
             const select = document.getElementById('addHolidayUserId');
             if (select.options.length <= 1 && users.length > 0) {
                 select.innerHTML = '<option value="">Select User</option>';
-                users.forEach(user => {
+                users.filter(u => u.status !== 'left_company').forEach(user => {
                     const option = document.createElement('option');
                     option.value = user.id;
                     option.textContent = user.username;

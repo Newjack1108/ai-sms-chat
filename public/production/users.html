@@ -101,24 +101,37 @@
                             <tr>
                                 <th>Username</th>
                                 <th>Role</th>
+                                <th>Status</th>
                                 <th>Created</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.users.map(user => `
+                            ${data.users.map(user => {
+                                const status = user.status || 'active';
+                                const isLeft = status === 'left_company';
+                                const isSelf = user.id === currentUser.id;
+                                let statusBtn = '';
+                                if (!isSelf) {
+                                    if (isLeft) {
+                                        statusBtn = `<button onclick="setUserStatus(${user.id}, 'active')" class="btn btn-secondary btn-sm">Reactivate</button>`;
+                                    } else {
+                                        statusBtn = `<button onclick="setUserStatus(${user.id}, 'left_company')" class="btn btn-warning btn-sm">Mark as left company</button>`;
+                                    }
+                                }
+                                return `
                                 <tr>
                                     <td><strong>${user.username}</strong></td>
                                     <td><span class="badge badge-info">${user.role === 'manager' ? 'office' : user.role}</span></td>
+                                    <td><span class="badge ${isLeft ? 'badge-secondary' : 'badge-success'}">${isLeft ? 'Left company' : 'Active'}</span></td>
                                     <td>${formatDate(user.created_at)}</td>
                                     <td>
                                         <button onclick="editUser(${user.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                        ${user.id !== currentUser.id ? `
-                                            <button onclick="deleteUser(${user.id})" class="btn btn-danger btn-sm">Delete</button>
-                                        ` : ''}
+                                        ${statusBtn}
+                                        ${!isSelf ? `<button onclick="deleteUser(${user.id})" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
-                            `).join('')}
+                            `}).join('')}
                         </tbody>
                     </table>
                 `;
@@ -153,6 +166,21 @@
                 showModal('userModal');
             } catch (error) {
                 showAlert('Error loading user', 'error');
+            }
+        }
+        
+        async function setUserStatus(id, status) {
+            const action = status === 'left_company' ? 'mark as left company' : 'reactivate';
+            if (!confirm(`Are you sure you want to ${action} this user?`)) return;
+            try {
+                await apiCall(`/users/${id}/status`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ status })
+                });
+                showAlert(status === 'left_company' ? 'User marked as left company' : 'User reactivated');
+                loadUsers();
+            } catch (error) {
+                showAlert(error.message || 'Failed to update status', 'error');
             }
         }
         

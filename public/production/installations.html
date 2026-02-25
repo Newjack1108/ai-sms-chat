@@ -400,9 +400,9 @@
                 const ordersResult = await apiCall('/orders');
                 worksOrders = ordersResult.orders || [];
                 
-                // Load users
+                // Load users (active only)
                 const usersResult = await apiCall('/users');
-                users = usersResult.users || [];
+                users = (usersResult.users || []).filter(u => u.status !== 'left_company');
                 
                 // Populate works order dropdown
                 const worksOrderSelect = document.getElementById('installationWorksOrder');
