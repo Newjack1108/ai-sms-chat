@@ -419,7 +419,7 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
 
 router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -432,6 +432,7 @@ router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, 
             status,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
+            max_stock: parseFloat(max_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, panel });
@@ -465,7 +466,7 @@ router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, 
 router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const { name, description, panel_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         
         // Cost is calculated automatically from BOM + labour
         const panel = await ProductionDatabase.updatePanel(panelId, {
@@ -475,6 +476,7 @@ router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (re
             status,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
+            max_stock: parseFloat(max_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, panel });
@@ -691,7 +693,7 @@ router.get('/components', requireProductionAuth, async (req, res) => {
 
 router.post('/components', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -703,6 +705,7 @@ router.post('/components', requireProductionAuth, requireAdminOrOffice, async (r
             status,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
+            max_stock: parseFloat(max_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, component });
@@ -715,7 +718,7 @@ router.post('/components', requireProductionAuth, requireAdminOrOffice, async (r
 router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
-        const { name, description, component_type, status, built_quantity, min_stock, labour_hours } = req.body;
+        const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         
         const component = await ProductionDatabase.updateComponent(componentId, {
             name,
@@ -724,6 +727,7 @@ router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async
             status,
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
+            max_stock: parseFloat(max_stock) || 0,
             labour_hours: parseFloat(labour_hours) || 0
         });
         res.json({ success: true, component });

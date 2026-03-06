@@ -736,6 +736,7 @@
                                     <th>Item</th>
                                     <th>Current</th>
                                     <th>Min Stock</th>
+                                    <th>Max Stock</th>
                                     <th>Shortfall</th>
                                     <th>Suggested Qty</th>
                                     <th>Hours/Unit</th>
@@ -753,6 +754,7 @@
                                         <td><strong>${item.name}</strong></td>
                                         <td>${item.current_quantity.toFixed(2)}</td>
                                         <td>${item.min_stock.toFixed(2)}</td>
+                                        <td>${parseFloat(item.max_stock || 0) > 0 ? parseFloat(item.max_stock || 0).toFixed(2) : '-'}</td>
                                         <td>${item.shortfall.toFixed(2)}</td>
                                         <td>${item.suggested_quantity}</td>
                                         <td>${parseFloat(item.labour_hours || 0).toFixed(2)}</td>

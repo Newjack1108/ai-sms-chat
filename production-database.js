@@ -89,6 +89,7 @@ function initializeSQLite() {
             cost_gbp REAL DEFAULT 0,
             built_quantity REAL DEFAULT 0,
             min_stock REAL DEFAULT 0,
+            max_stock REAL DEFAULT 0,
             labour_hours REAL DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -105,6 +106,7 @@ function initializeSQLite() {
             cost_gbp REAL DEFAULT 0,
             built_quantity REAL DEFAULT 0,
             min_stock REAL DEFAULT 0,
+            max_stock REAL DEFAULT 0,
             labour_hours REAL DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -626,8 +628,24 @@ function initializeSQLite() {
             db.exec('ALTER TABLE panels ADD COLUMN labour_hours REAL DEFAULT 0');
             console.log('✅ Added labour_hours column to panels');
         }
+        if (!columnNames.includes('max_stock')) {
+            db.exec('ALTER TABLE panels ADD COLUMN max_stock REAL DEFAULT 0');
+            console.log('✅ Added max_stock column to panels');
+        }
     } catch (error) {
         console.log('⚠️ Migration check skipped:', error.message);
+    }
+    
+    // Migrate existing components table to add max_stock
+    try {
+        const compColumns = db.prepare("PRAGMA table_info(components)").all();
+        const compColumnNames = compColumns.map(col => col.name);
+        if (!compColumnNames.includes('max_stock')) {
+            db.exec('ALTER TABLE components ADD COLUMN max_stock REAL DEFAULT 0');
+            console.log('✅ Added max_stock column to components');
+        }
+    } catch (error) {
+        console.log('⚠️ Components migration check skipped:', error.message);
     }
     
     // Migrate existing planner_items table to add new columns
@@ -1102,6 +1120,7 @@ async function initializePostgreSQL() {
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
                 built_quantity DECIMAL(10,2) DEFAULT 0,
                 min_stock DECIMAL(10,2) DEFAULT 0,
+                max_stock DECIMAL(10,2) DEFAULT 0,
                 labour_hours DECIMAL(10,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -1118,6 +1137,7 @@ async function initializePostgreSQL() {
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
                 built_quantity DECIMAL(10,2) DEFAULT 0,
                 min_stock DECIMAL(10,2) DEFAULT 0,
+                max_stock DECIMAL(10,2) DEFAULT 0,
                 labour_hours DECIMAL(10,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -1830,6 +1850,26 @@ async function initializePostgreSQL() {
                 ) THEN
                     ALTER TABLE panels ADD COLUMN labour_hours DECIMAL(10,2) DEFAULT 0;
                 END IF;
+                
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='panels' AND column_name='max_stock'
+                ) THEN
+                    ALTER TABLE panels ADD COLUMN max_stock DECIMAL(10,2) DEFAULT 0;
+                END IF;
+            END $$;
+        `);
+        
+        // Migrate existing components table to add max_stock
+        await pool.query(`
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='components' AND column_name='max_stock'
+                ) THEN
+                    ALTER TABLE components ADD COLUMN max_stock DECIMAL(10,2) DEFAULT 0;
+                END IF;
             END $$;
         `);
         
@@ -2482,10 +2522,10 @@ class ProductionDatabase {
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, max_stock, labour_hours)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
                 [data.name, data.description, data.panel_type, data.status || 'active', initialCost, 
-                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
+                 data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0]
             );
             const panel = result.rows[0];
             // Recalculate cost after creation - wrap in try-catch so cost update failures don't prevent panel creation
@@ -2498,11 +2538,11 @@ class ProductionDatabase {
             return await this.getPanelById(panel.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO panels (name, description, panel_type, status, cost_gbp, built_quantity, min_stock, max_stock, labour_hours)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(data.name, data.description, data.panel_type, data.status || 'active', initialCost,
-                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
+                data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0);
             const panel = await this.getPanelById(info.lastInsertRowid);
             // Recalculate cost after creation - wrap in try-catch so cost update failures don't prevent panel creation
             try {
@@ -2537,10 +2577,10 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `UPDATE panels SET name = $1, description = $2, panel_type = $3, status = $4, 
-                 built_quantity = $5, min_stock = $6, labour_hours = $7
-                 WHERE id = $8 RETURNING *`,
+                 built_quantity = $5, min_stock = $6, max_stock = $7, labour_hours = $8
+                 WHERE id = $9 RETURNING *`,
                 [data.name, data.description, data.panel_type, data.status, 
-                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id]
+                 data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0, id]
             );
             // Recalculate cost automatically (BOM + labour)
             await this.updatePanelCost(id);
@@ -2548,10 +2588,10 @@ class ProductionDatabase {
         } else {
             db.prepare(
                 `UPDATE panels SET name = ?, description = ?, panel_type = ?, status = ?,
-                 built_quantity = ?, min_stock = ?, labour_hours = ?
+                 built_quantity = ?, min_stock = ?, max_stock = ?, labour_hours = ?
                  WHERE id = ?`
             ).run(data.name, data.description, data.panel_type, data.status,
-                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id);
+                data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0, id);
             // Recalculate cost automatically
             await this.updatePanelCost(id);
             return this.getPanelById(id);
@@ -3408,21 +3448,21 @@ class ProductionDatabase {
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, max_stock, labour_hours)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
                 [data.name, data.description, data.component_type, data.status || 'active', initialCost, 
-                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0]
+                 data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0]
             );
             const component = result.rows[0];
             await this.updateComponentCost(component.id);
             return await this.getComponentById(component.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, labour_hours)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO components (name, description, component_type, status, cost_gbp, built_quantity, min_stock, max_stock, labour_hours)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(data.name, data.description, data.component_type, data.status || 'active', initialCost,
-                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0);
+                data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0);
             const component = await this.getComponentById(info.lastInsertRowid);
             await this.updateComponentCost(component.id);
             return await this.getComponentById(component.id);
@@ -3451,20 +3491,20 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             await pool.query(
                 `UPDATE components SET name = $1, description = $2, component_type = $3, status = $4, 
-                 built_quantity = $5, min_stock = $6, labour_hours = $7
-                 WHERE id = $8`,
+                 built_quantity = $5, min_stock = $6, max_stock = $7, labour_hours = $8
+                 WHERE id = $9`,
                 [data.name, data.description, data.component_type, data.status, 
-                 data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id]
+                 data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0, id]
             );
             await this.updateComponentCost(id);
             return await this.getComponentById(id);
         } else {
             db.prepare(
                 `UPDATE components SET name = ?, description = ?, component_type = ?, status = ?,
-                 built_quantity = ?, min_stock = ?, labour_hours = ?
+                 built_quantity = ?, min_stock = ?, max_stock = ?, labour_hours = ?
                  WHERE id = ?`
             ).run(data.name, data.description, data.component_type, data.status,
-                data.built_quantity || 0, data.min_stock || 0, data.labour_hours || 0, id);
+                data.built_quantity || 0, data.min_stock || 0, data.max_stock || 0, data.labour_hours || 0, id);
             await this.updateComponentCost(id);
             return this.getComponentById(id);
         }
@@ -4020,6 +4060,7 @@ class ProductionDatabase {
                      p.name as item_name,
                      p.labour_hours,
                      p.min_stock,
+                     p.max_stock,
                      p.built_quantity,
                      p.id as item_id_for_movement
                      FROM planner_items pi
@@ -4080,6 +4121,11 @@ class ProductionDatabase {
                     ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.built_quantity` : ''}
                 END as built_quantity,
                 CASE 
+                    WHEN pi.item_type = 'component' THEN c.max_stock
+                    WHEN pi.item_type = 'built_item' THEN p.max_stock
+                    ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.max_stock` : ''}
+                END as max_stock,
+                CASE 
                     WHEN pi.item_type = 'component' THEN c.id
                     WHEN pi.item_type = 'built_item' THEN p.id
                     ${hasPanelId ? `WHEN pi.item_type IS NULL THEN p.id` : ''}
@@ -4116,6 +4162,11 @@ class ProductionDatabase {
                      WHEN pi.item_type = 'built_item' THEN p.built_quantity
                      WHEN pi.item_type IS NULL THEN p.built_quantity
                  END as built_quantity,
+                 CASE 
+                     WHEN pi.item_type = 'component' THEN c.max_stock
+                     WHEN pi.item_type = 'built_item' THEN p.max_stock
+                     WHEN pi.item_type IS NULL THEN p.max_stock
+                 END as max_stock,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.id
                      WHEN pi.item_type = 'built_item' THEN p.id
@@ -4363,6 +4414,7 @@ class ProductionDatabase {
         for (const panel of panels) {
             const builtQty = parseFloat(panel.built_quantity || 0);
             const minStock = parseFloat(panel.min_stock || 0);
+            const maxStock = parseFloat(panel.max_stock || 0);
             
             // Include items that are at or below minimum stock, or items with zero stock
             if ((minStock > 0 && builtQty <= minStock) || (minStock === 0 && builtQty === 0)) {
@@ -4381,11 +4433,21 @@ class ProductionDatabase {
                     suggestedQuantity = 1;
                 }
                 
+                // Cap suggested quantity at max_stock when max_stock is set
+                if (maxStock > 0) {
+                    const cap = Math.max(0, maxStock - builtQty);
+                    suggestedQuantity = Math.min(suggestedQuantity, cap);
+                }
+                
+                // Skip if nothing to build (e.g. already at max_stock)
+                if (suggestedQuantity <= 0) continue;
+                
                 lowStockPanels.push({
                     ...panel,
                     item_type: 'built_item',
                     current_quantity: builtQty,
                     min_stock: minStock,
+                    max_stock: maxStock,
                     shortfall: shortfall,
                     suggested_quantity: suggestedQuantity
                 });
@@ -4402,6 +4464,7 @@ class ProductionDatabase {
         for (const component of components) {
             const builtQty = parseFloat(component.built_quantity || 0);
             const minStock = parseFloat(component.min_stock || 0);
+            const maxStock = parseFloat(component.max_stock || 0);
             
             // Include items that are at or below minimum stock, or items with zero stock
             if ((minStock > 0 && builtQty <= minStock) || (minStock === 0 && builtQty === 0)) {
@@ -4420,11 +4483,21 @@ class ProductionDatabase {
                     suggestedQuantity = 1;
                 }
                 
+                // Cap suggested quantity at max_stock when max_stock is set
+                if (maxStock > 0) {
+                    const cap = Math.max(0, maxStock - builtQty);
+                    suggestedQuantity = Math.min(suggestedQuantity, cap);
+                }
+                
+                // Skip if nothing to build (e.g. already at max_stock)
+                if (suggestedQuantity <= 0) continue;
+                
                 lowStockComponents.push({
                     ...component,
                     item_type: 'component',
                     current_quantity: builtQty,
                     min_stock: minStock,
+                    max_stock: maxStock,
                     shortfall: shortfall,
                     suggested_quantity: suggestedQuantity
                 });

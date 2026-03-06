@@ -68,6 +68,10 @@
                     <input type="number" step="0.01" id="componentMinStock" class="form-input" value="0">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Maximum Stock</label>
+                    <input type="number" step="0.01" id="componentMaxStock" class="form-input" value="0" placeholder="0 = no limit">
+                </div>
+                <div class="form-group">
                     <label class="form-label">Labour Hours</label>
                     <input type="number" step="0.01" id="componentLabourHours" class="form-input" value="0">
                 </div>
@@ -135,6 +139,7 @@
                                 <th>Type</th>
                                 <th>Built Qty</th>
                                 <th>Min Stock</th>
+                                <th>Max Stock</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -143,6 +148,7 @@
                             ${data.components.map(component => {
                                 const builtQty = parseFloat(component.built_quantity || 0);
                                 const minStock = parseFloat(component.min_stock || 0);
+                                const maxStock = parseFloat(component.max_stock || 0);
                                 const isLow = builtQty <= minStock && minStock > 0;
                                 return `
                                 <tr>
@@ -150,6 +156,7 @@
                                     <td>${component.component_type || '-'}</td>
                                     <td>${builtQty.toFixed(2)} ${isLow ? '<span class="badge badge-danger">Low</span>' : ''}</td>
                                     <td>${minStock.toFixed(2)}</td>
+                                    <td>${maxStock > 0 ? maxStock.toFixed(2) : '-'}</td>
                                     <td><span class="badge badge-info">${component.status}</span></td>
                                     <td>
                                         <button onclick="viewBOM(${component.id})" class="btn btn-primary btn-sm">View BOM</button>
@@ -191,6 +198,7 @@
                 document.getElementById('componentCost').value = trueCostData.true_cost.toFixed(2);
                 document.getElementById('componentBuiltQty').value = component.built_quantity || 0;
                 document.getElementById('componentMinStock').value = component.min_stock || 0;
+                document.getElementById('componentMaxStock').value = component.max_stock || 0;
                 document.getElementById('componentLabourHours').value = component.labour_hours || 0;
                 showModal('componentModal');
             } catch (error) {
@@ -229,6 +237,7 @@
                                     <p><strong>True Cost:</strong> ${formatCurrency(trueCostData.true_cost)}</p>
                                     <p><strong>Built Quantity:</strong> ${parseFloat(component.built_quantity || 0).toFixed(2)}</p>
                                     <p><strong>Min Stock:</strong> ${parseFloat(component.min_stock || 0).toFixed(2)}</p>
+                                    <p><strong>Max Stock:</strong> ${parseFloat(component.max_stock || 0) > 0 ? parseFloat(component.max_stock).toFixed(2) : 'No limit'}</p>
                                     <p><strong>WIP Value:</strong> ${formatCurrency(trueCostData.true_cost * parseFloat(component.built_quantity || 0))}</p>
                                 </div>
                             </div>
@@ -465,6 +474,7 @@
                 component_type: document.getElementById('componentType').value,
                 built_quantity: document.getElementById('componentBuiltQty').value,
                 min_stock: document.getElementById('componentMinStock').value,
+                max_stock: document.getElementById('componentMaxStock').value,
                 labour_hours: document.getElementById('componentLabourHours').value,
                 status: 'active'
             };
