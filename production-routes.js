@@ -325,7 +325,7 @@ router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, r
             min_quantity: parseFloat(min_quantity) || 0,
             location,
             category: category && category.trim() ? category.trim() : null,
-            cost_per_unit_gbp: parseFloat(cost_per_unit_gbp) || 0
+            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 100) / 100
         });
         res.json({ success: true, item });
     } catch (error) {
@@ -346,7 +346,7 @@ router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req
             min_quantity: parseFloat(min_quantity) || 0,
             location,
             category: category && category.trim() ? category.trim() : null,
-            cost_per_unit_gbp: parseFloat(cost_per_unit_gbp) || 0
+            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 100) / 100
         });
         res.json({ success: true, item });
     } catch (error) {
@@ -396,7 +396,7 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
             quantity: parseFloat(quantity),
             reference,
             user_id: req.session.production_user.id,
-            cost_gbp: parseFloat(cost_gbp) || 0
+            cost_gbp: Math.round((parseFloat(cost_gbp) || 0) * 100) / 100
         });
         res.json({ success: true, movement });
     } catch (error) {
@@ -433,7 +433,7 @@ router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, 
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             max_stock: parseFloat(max_stock) || 0,
-            labour_hours: parseFloat(labour_hours) || 0
+            labour_hours: Math.round((parseFloat(labour_hours) || 0) * 100) / 100
         });
         res.json({ success: true, panel });
     } catch (error) {
@@ -477,7 +477,7 @@ router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (re
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             max_stock: parseFloat(max_stock) || 0,
-            labour_hours: parseFloat(labour_hours) || 0
+            labour_hours: Math.round((parseFloat(labour_hours) || 0) * 100) / 100
         });
         res.json({ success: true, panel });
     } catch (error) {
@@ -706,7 +706,7 @@ router.post('/components', requireProductionAuth, requireAdminOrOffice, async (r
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             max_stock: parseFloat(max_stock) || 0,
-            labour_hours: parseFloat(labour_hours) || 0
+            labour_hours: Math.round((parseFloat(labour_hours) || 0) * 100) / 100
         });
         res.json({ success: true, component });
     } catch (error) {
@@ -728,7 +728,7 @@ router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async
             built_quantity: parseFloat(built_quantity) || 0,
             min_stock: parseFloat(min_stock) || 0,
             max_stock: parseFloat(max_stock) || 0,
-            labour_hours: parseFloat(labour_hours) || 0
+            labour_hours: Math.round((parseFloat(labour_hours) || 0) * 100) / 100
         });
         res.json({ success: true, component });
     } catch (error) {

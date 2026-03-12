@@ -283,7 +283,7 @@
                 
                 <div class="form-group">
                     <label class="form-label">Duration (hours, Default) *</label>
-                    <input type="number" id="installationDuration" class="form-input" step="0.5" min="0.5" required>
+                    <input type="number" id="installationDuration" class="form-input" step="0.01" min="0.5" required>
                     <small>Default duration for all days (can be overridden per day below)</small>
                 </div>
                 
@@ -1001,7 +1001,7 @@
                 html += `<tr ${hasOverride ? 'style="background: #fff3cd;"' : ''}>`;
                 html += `<td>${formatDate(day.date)}</td>`;
                 if (hasOverride) {
-                    html += `<td><input type="number" class="form-input" step="0.5" value="${day.override.duration_hours || ''}" onchange="updateDayOverride('${day.date}', 'duration_hours', this.value)" style="width: 80px;"></td>`;
+                    html += `<td><input type="number" class="form-input" step="0.01" value="${day.override.duration_hours || ''}" onchange="updateDayOverride('${day.date}', 'duration_hours', this.value)" style="width: 80px;"></td>`;
                     html += `<td><input type="text" class="form-input" value="${day.override.notes || ''}" onchange="updateDayOverride('${day.date}', 'notes', this.value)" style="width: 150px;"></td>`;
                     html += `<td><button type="button" onclick="removeDayOverride('${day.date}')" class="btn btn-danger btn-sm">Remove</button></td>`;
                 } else {
