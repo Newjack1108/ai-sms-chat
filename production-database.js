@@ -4743,10 +4743,13 @@ class ProductionDatabase {
                 throw new Error('Cannot delete product because it is used in one or more orders. Remove it from those orders first.');
             }
         }
+        // Remove sales sync rows (audit of pushes to LeadLock) so FK does not block delete
         if (isPostgreSQL) {
+            await pool.query(`DELETE FROM product_sales_sync WHERE product_id = $1`, [id]);
             await pool.query(`DELETE FROM product_components WHERE product_id = $1`, [id]);
             await pool.query(`DELETE FROM finished_products WHERE id = $1`, [id]);
         } else {
+            db.prepare(`DELETE FROM product_sales_sync WHERE product_id = ?`).run(id);
             db.prepare(`DELETE FROM product_components WHERE product_id = ?`).run(id);
             db.prepare(`DELETE FROM finished_products WHERE id = ?`).run(id);
         }

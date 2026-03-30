@@ -1065,7 +1065,9 @@ app.post('/api/settings', async (req, res) => {
                 first: reminderFirst !== undefined ? parseInt(reminderFirst) : currentIntervals.first,
                 second: reminderSecond !== undefined ? parseInt(reminderSecond) : currentIntervals.second,
                 final: reminderFinal !== undefined ? parseInt(reminderFinal) : currentIntervals.final,
-                checkInterval: reminderCheckInterval !== undefined ? parseInt(reminderCheckInterval) : currentIntervals.checkInterval
+                checkInterval: normalizeReminderCheckIntervalMinutes(
+                    reminderCheckInterval !== undefined ? parseInt(reminderCheckInterval, 10) : currentIntervals.checkInterval
+                )
             };
             
             await LeadDatabase.saveReminderIntervals(
@@ -1358,7 +1360,7 @@ app.get('/api/test-reminders', async (req, res) => {
 app.post('/api/trigger-reminders', async (req, res) => {
     try {
         console.log('🧪 MANUAL REMINDER CHECK TRIGGERED');
-        await checkAndSendReminders();
+        await checkAndSendReminders({ verbose: true });
         res.json({
             success: true,
             message: 'Reminder check completed. Check server logs for details.'
@@ -4314,15 +4316,27 @@ async function send48HourReminder(lead) {
     }
 }
 
+// Normalise reminder poll interval (minutes). 0 / NaN would make setInterval fire continuously.
+function normalizeReminderCheckIntervalMinutes(raw) {
+    const n = parseInt(raw, 10);
+    const minutes = Number.isFinite(n) ? n : 30;
+    return Math.min(1440, Math.max(1, minutes));
+}
+
+const REMINDER_VERBOSE_LOGS = process.env.REMINDER_VERBOSE === '1';
+
 // Check and send reminders to leads
-async function checkAndSendReminders() {
+async function checkAndSendReminders(options = {}) {
     try {
+        const { verbose = REMINDER_VERBOSE_LOGS } = options;
         const now = new Date();
         const leads = await LeadDatabase.getAllLeads();
         
         const divisor = 1000 * 60; // ms to minutes
         
-        console.log(`🔔 Checking ${leads.length} leads for reminders...`);
+        if (verbose) {
+            console.log(`🔔 Checking ${leads.length} leads for reminders...`);
+        }
         
         for (const lead of leads) {
             // Skip if qualified, paused, or closed
@@ -4359,7 +4373,9 @@ async function checkAndSendReminders() {
             }
         }
         
-        console.log(`✅ Reminder check complete`);
+        if (verbose) {
+            console.log(`✅ Reminder check complete`);
+        }
     } catch (error) {
         console.error('❌ Error checking reminders:', error);
     }
@@ -4425,6 +4441,13 @@ async function startServer() {
         
         // Load settings from database after database is initialized
         await loadSettingsFromDatabase();
+        {
+            const prevCi = REMINDER_INTERVALS.checkInterval;
+            REMINDER_INTERVALS.checkInterval = normalizeReminderCheckIntervalMinutes(REMINDER_INTERVALS.checkInterval);
+            if (prevCi !== REMINDER_INTERVALS.checkInterval) {
+                console.log(`⚠️ Reminder check interval was invalid (${prevCi}); using ${REMINDER_INTERVALS.checkInterval} minute(s). Set a value 1–1440 in settings.`);
+            }
+        }
         
         // Initialize production database
         try {
@@ -4444,11 +4467,14 @@ async function startServer() {
             console.error('   Stack:', error.stack);
         }
         
-        // Start reminder checker (checkInterval is in minutes)
-        const checkIntervalMs = REMINDER_INTERVALS.checkInterval * 60 * 1000;
+        // Start reminder checker (checkInterval in minutes; already clamped after settings load)
+        const checkIntervalMinutes = REMINDER_INTERVALS.checkInterval;
+        const checkIntervalMs = checkIntervalMinutes * 60 * 1000;
         
         setInterval(async () => {
-            console.log('🔔 Checking for leads needing reminders...');
+            if (REMINDER_VERBOSE_LOGS) {
+                console.log('🔔 Checking for leads needing reminders...');
+            }
             await checkAndSendReminders();
         }, checkIntervalMs);
         
@@ -4462,7 +4488,7 @@ async function startServer() {
             console.error('❌ Error initializing backup scheduler:', error);
         }
         
-        console.log(`🔔 Reminder service started (checks every ${REMINDER_INTERVALS.checkInterval} minutes)`);
+        console.log(`🔔 Reminder service started (checks every ${checkIntervalMinutes} minute(s); set REMINDER_VERBOSE=1 for per-check logs)`);
         console.log(`   First reminder: ${REMINDER_INTERVALS.first} minutes`);
         console.log(`   Second reminder: ${REMINDER_INTERVALS.second} minutes`);
         console.log(`   Final reminder: ${REMINDER_INTERVALS.final} minutes`);
