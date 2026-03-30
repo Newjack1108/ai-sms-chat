@@ -1756,27 +1756,9 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_nfc_readers_reader_id ON nfc_readers(reader_id)`);
         
         // Migrate production_users role constraint to include 'office' role
+        // Do not loop all CHECK constraints: names like 2200_49171_1_not_null must be quoted in SQL,
+        // and many are NOT NULL-related — dropping them would break the table.
         try {
-            // Check if constraint needs updating by trying to find existing constraint
-            const constraintCheck = await pool.query(`
-                SELECT constraint_name 
-                FROM information_schema.table_constraints 
-                WHERE table_name = 'production_users' 
-                AND constraint_type = 'CHECK'
-            `);
-            
-            if (constraintCheck.rows.length > 0) {
-                // Try to drop and recreate constraint
-                for (const constraint of constraintCheck.rows) {
-                    try {
-                        await pool.query(`ALTER TABLE production_users DROP CONSTRAINT IF EXISTS ${constraint.constraint_name}`);
-                    } catch (e) {
-                        // Constraint might be named differently or already dropped
-                        console.log('⚠️ Could not drop constraint:', constraint.constraint_name, e.message);
-                    }
-                }
-            }
-            
             // Migrate 'manager' role to 'office' if any exist
             try {
                 await pool.query(`
