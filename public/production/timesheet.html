@@ -1099,6 +1099,7 @@
                 }
                 let html = '';
                 let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
+                const today = new Date();
                 
                 weekDates.forEach(dateStr => {
                     const entry = entriesMap[dateStr] || null;
