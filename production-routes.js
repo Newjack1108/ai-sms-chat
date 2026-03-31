@@ -4,6 +4,15 @@ const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
 const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManager, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
+const {
+    londonYmd,
+    londonMondayYmd,
+    londonMondayYmdFromYmd,
+    londonYmdAddDays,
+    londonLocalTimeToUtc,
+    londonHour,
+    londonWeekdaySun0FromYmd
+} = require('./uk-datetime');
 
 // ============ AUTHENTICATION ROUTES ============
 
@@ -1854,13 +1863,13 @@ router.get('/installations/:id/conflicts', requireProductionAuth, async (req, re
         const startDate = installation.start_date || installation.installation_date;
         const endDate = installation.end_date || startDate;
         
-        // Check conflicts for each day in the date range
         const start = new Date(startDate);
         const end = new Date(endDate);
-        const current = new Date(start);
+        let ymd = londonYmd(start);
+        const endYmd = londonYmd(end);
         
-        while (current <= end) {
-            const dateStr = current.toISOString().split('T')[0];
+        while (ymd <= endYmd) {
+            const dateStr = ymd;
             
             // Get day-specific times or use defaults
             const dayOverride = installation.installation_days?.find(d => d.day_date === dateStr);
@@ -1887,7 +1896,7 @@ router.get('/installations/:id/conflicts', requireProductionAuth, async (req, re
                 conflicts[assignment.user_id][dateStr] = userConflicts.filter(c => c.type !== 'installation' || c.id !== installationId);
             }
             
-            current.setDate(current.getDate() + 1);
+            ymd = londonYmdAddDays(ymd, 1);
         }
         
         res.json({ success: true, conflicts });
@@ -2038,7 +2047,7 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
         }
         
         // Check if user already has a completed entry for today
-        const today = new Date().toISOString().split('T')[0];
+        const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         
         if (completedEntriesCount >= 1) {
@@ -2062,14 +2071,10 @@ router.post('/timesheet/clock-in', requireProductionAuth, async (req, res) => {
         const job = await ProductionDatabase.getJobById(parseInt(job_id));
         if (job && job.name && job.name.toLowerCase().includes('workshop')) {
             const now = new Date();
-            const hours = now.getHours();
-            
-            // If before 8am (hours < 8), set to 8am on the same date
-            if (hours < 8) {
-                const clockInTime = new Date(now);
-                clockInTime.setHours(8, 0, 0, 0); // Set to 8:00:00 AM
-                adjustedClockInTime = clockInTime;
-                console.log(`Workshop job detected: Adjusting clock-in time from ${now.toISOString()} to ${clockInTime.toISOString()}`);
+            if (londonHour(now) < 8) {
+                const ymd = londonYmd(now);
+                adjustedClockInTime = londonLocalTimeToUtc(ymd, 8, 0, 0);
+                console.log(`Workshop job detected: Adjusting clock-in time to 08:00 Europe/London on ${ymd}`);
             }
         }
         
@@ -2251,7 +2256,7 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
         }
         
         // Check if user already has a completed entry for today (after auto-clock-out)
-        const today = new Date().toISOString().split('T')[0];
+        const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         
         if (completedEntriesCount >= 1) {
@@ -2261,19 +2266,15 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Check if this is a Workshop job and adjust clock-in time to 8am if before 8am
+        // Check if this is a Workshop job and adjust clock-in time to 8am if before 8am (Europe/London)
         let adjustedClockInTime = null;
         const job = await ProductionDatabase.getJobById(job_id);
         if (job && job.name && job.name.toLowerCase().includes('workshop')) {
             const now = new Date();
-            const hours = now.getHours();
-            
-            // If before 8am (hours < 8), set to 8am on the same date
-            if (hours < 8) {
-                const clockInTime = new Date(now);
-                clockInTime.setHours(8, 0, 0, 0); // Set to 8:00:00 AM
-                adjustedClockInTime = clockInTime;
-                console.log(`Workshop job detected: Adjusting clock-in time from ${now.toISOString()} to ${clockInTime.toISOString()}`);
+            if (londonHour(now) < 8) {
+                const ymd = londonYmd(now);
+                adjustedClockInTime = londonLocalTimeToUtc(ymd, 8, 0, 0);
+                console.log(`Workshop job detected: Adjusting clock-in time to 08:00 Europe/London on ${ymd}`);
             }
         }
         
@@ -2338,7 +2339,7 @@ router.post('/clock/nfc-punch', async (req, res) => {
             return res.json({ success: true, action: 'out', message: 'Clocked out', entry });
         }
         
-        const today = new Date().toISOString().split('T')[0];
+        const today = londonYmd(new Date());
         const completedCount = await ProductionDatabase.countEntriesForDate(userId, today);
         if (completedCount >= 1) {
             return res.status(400).json({
@@ -2351,10 +2352,9 @@ router.post('/clock/nfc-punch', async (req, res) => {
         const job = await ProductionDatabase.getJobById(jobId);
         if (job && job.name && job.name.toLowerCase().includes('workshop')) {
             const now = new Date();
-            if (now.getHours() < 8) {
-                const clockInTime = new Date(now);
-                clockInTime.setHours(8, 0, 0, 0);
-                adjustedClockInTime = clockInTime;
+            if (londonHour(now) < 8) {
+                const ymd = londonYmd(now);
+                adjustedClockInTime = londonLocalTimeToUtc(ymd, 8, 0, 0);
             }
         }
         
@@ -2457,7 +2457,7 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
         const status = await ProductionDatabase.getCurrentClockStatus(userId);
         
         // Check if user has already completed a clock in/out cycle today
-        const today = new Date().toISOString().split('T')[0];
+        const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         const hasCompletedToday = completedEntriesCount >= 1;
         
@@ -2511,17 +2511,12 @@ router.post('/clock/reopen-entries', requireProductionAuth, requireAdmin, async 
     try {
         let dateStr = req.body && req.body.date ? req.body.date.trim() : null;
         if (!dateStr) {
-            const today = new Date();
-            dateStr = today.toISOString().split('T')[0];
+            dateStr = londonYmd(new Date());
         }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
             return res.status(400).json({ success: false, error: 'Invalid date; use YYYY-MM-DD' });
         }
-        const date = new Date(dateStr);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        date.setHours(0, 0, 0, 0);
-        if (date.getTime() > today.getTime()) {
+        if (dateStr > londonYmd(new Date())) {
             return res.status(400).json({ success: false, error: 'Cannot reopen entries for a future date' });
         }
         const result = await ProductionDatabase.reopenTimesheetEntriesForDate(dateStr);
@@ -2544,12 +2539,7 @@ router.post('/clock/reopen-entries', requireProductionAuth, requireAdmin, async 
 router.get('/clock/weekly/current', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        const monday = new Date(today);
-        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        monday.setHours(0, 0, 0, 0);
-        const weekStartDate = monday.toISOString().split('T')[0];
+        const weekStartDate = londonMondayYmd(new Date());
         
         const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
         if (!weeklyTimesheet) {
@@ -2581,11 +2571,7 @@ router.get('/clock/weekly/:weekStart', requireProductionAuth, async (req, res) =
         const userId = req.session.production_user.id;
         const weekStartDate = req.params.weekStart;
         
-        // Calculate week end date
-        const weekStart = new Date(weekStartDate);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        const weekEndStr = londonYmdAddDays(weekStartDate, 6);
         
         const weeklyTimesheet = await ProductionDatabase.getWeeklyTimesheet(userId, weekStartDate);
         if (!weeklyTimesheet) {
@@ -2653,15 +2639,11 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         
         // If overnight_away changed, recalculate hours for ALL entries for this day
         if (overnight_away !== undefined) {
-            // Get all timesheet entries for this date
-            const weekStart = new Date(weekStartDate);
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6);
-            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            const weekEndStr = londonYmdAddDays(weekStartDate, 6);
             
             const allEntries = await ProductionDatabase.getTimesheetHistory(userId, weekStartDate, weekEndStr);
             const dayEntries = allEntries.filter(te => {
-                const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+                const teDate = londonYmd(new Date(te.clock_in_time));
                 return teDate === entryDate && te.clock_out_time;
             });
             
@@ -2829,8 +2811,7 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
             });
         }
         
-        // Get date string for the entry date
-        const dateStr = entryDate.toISOString().split('T')[0];
+        const dateStr = londonYmd(new Date(clock_in_time));
         
         // Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
         // Only do this for entries that might conflict with the target date
@@ -2843,7 +2824,7 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         // Check if user already has entries for this date
         const existingEntries = await ProductionDatabase.getTimesheetHistory(userId, dateStr, dateStr);
         const entriesForDate = existingEntries.filter(te => {
-            const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+            const teDate = londonYmd(new Date(te.clock_in_time));
             return teDate === dateStr && te.clock_out_time; // Only completed entries
         });
         
@@ -2879,7 +2860,7 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
                     id: d.id,
                     clock_in_time: d.clock_in_time,
                     clock_out_time: d.clock_out_time,
-                    date: d.clock_in_time ? new Date(d.clock_in_time).toISOString().split('T')[0] : null
+                    date: d.clock_in_time ? londonYmd(new Date(d.clock_in_time)) : null
                 }))
             });
         }
@@ -2918,16 +2899,9 @@ router.post('/clock/missing-times', requireProductionAuth, async (req, res) => {
         
         // Handle overnight_away if provided
         if (overnight_away !== undefined) {
-            // Get clock-in date to determine which week
             const clockInDate = new Date(clock_in_time);
-            const clockInDateStr = clockInDate.toISOString().split('T')[0];
-            
-            // Find Monday of that week
-            const dayOfWeek = clockInDate.getDay();
-            const monday = new Date(clockInDate);
-            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const clockInDateStr = londonYmd(clockInDate);
+            const weekStartDate = londonMondayYmd(clockInDate);
             
             // Get or create weekly timesheet
             const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
@@ -3204,20 +3178,14 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
             // Get date from entry or use provided date
             let entryDate = date;
             if (!entryDate && updatedEntry.clock_in_time) {
-                entryDate = new Date(updatedEntry.clock_in_time).toISOString().split('T')[0];
+                entryDate = londonYmd(new Date(updatedEntry.clock_in_time));
             } else if (!entryDate) {
                 return res.status(400).json({ success: false, error: 'Date is required when setting day_type without clock times' });
             }
             
-            // Get week start from provided value or calculate from date
             let weekStartDate = week_start;
             if (!weekStartDate) {
-                const dateObj = new Date(entryDate);
-                const dayOfWeek = dateObj.getDay();
-                const monday = new Date(dateObj);
-                monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                monday.setHours(0, 0, 0, 0);
-                weekStartDate = monday.toISOString().split('T')[0];
+                weekStartDate = londonMondayYmdFromYmd(entryDate.slice(0, 10));
             }
             
             // Get user_id from entry or provided value
@@ -3235,15 +3203,11 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
                 regularHours = 0;
                 totalHours = 0;
             } else if (day_type === 'sick_paid') {
-                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
-                const dateObjForSick = new Date(entryDate);
-                const dayOfWeek = dateObjForSick.getDay(); // 0 = Sunday, 5 = Friday
+                const dayOfWeek = londonWeekdaySun0FromYmd(String(entryDate).slice(0, 10));
                 if (dayOfWeek === 5) {
-                    // Friday
                     regularHours = 6;
                     totalHours = 6;
                 } else {
-                    // Monday to Thursday
                     regularHours = 8;
                     totalHours = 8;
                 }
@@ -3257,12 +3221,12 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
                 // If no linked request, try to find approved request for this date and user
                 if (!holidayRequest) {
                     const allRequests = await ProductionDatabase.getHolidayRequestsByUser(targetUserId);
-                    const dateObj = new Date(entryDate);
+                    const ymd = String(entryDate).slice(0, 10);
                     holidayRequest = allRequests.find(req => {
                         if (req.status !== 'approved') return false;
-                        const start = new Date(req.start_date);
-                        const end = new Date(req.end_date);
-                        return dateObj >= start && dateObj <= end;
+                        const start = String(req.start_date).slice(0, 10);
+                        const end = String(req.end_date).slice(0, 10);
+                        return ymd >= start && ymd <= end;
                     });
                 }
                 
@@ -3309,14 +3273,8 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
                 });
             }
         } else if (updatedEntry && updatedEntry.clock_out_time) {
-            // Day_type not set, but times were amended - still need to check for existing day_type
-            const entryDate = new Date(updatedEntry.clock_in_time).toISOString().split('T')[0];
-            const dateObj = new Date(entryDate);
-            const dayOfWeek = dateObj.getDay();
-            const monday = new Date(dateObj);
-            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const entryDate = londonYmd(new Date(updatedEntry.clock_in_time));
+            const weekStartDate = londonMondayYmd(new Date(updatedEntry.clock_in_time));
             
             const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
             const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate, updatedEntry.id);
@@ -3445,7 +3403,7 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 overnight_away !== undefined ? overnight_away : undefined
             );
             
-            entryDate = new Date(clock_in_time).toISOString().split('T')[0];
+            entryDate = londonYmd(new Date(clock_in_time));
         }
         
         // Handle day_type - update/create daily entry
@@ -3458,7 +3416,7 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
             
             // Get date from entry or use clock_in_time date, or require date in request
             if (!entryDate && clock_in_time) {
-                entryDate = new Date(clock_in_time).toISOString().split('T')[0];
+                entryDate = londonYmd(new Date(clock_in_time));
             } else if (!entryDate) {
                 // If no times provided, we need the date from request
                 const { date } = req.body;
@@ -3468,13 +3426,7 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 entryDate = date;
             }
             
-            // Find Monday of the week for this date
-            const dateObj = new Date(entryDate);
-            const dayOfWeek = dateObj.getDay();
-            const monday = new Date(dateObj);
-            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const weekStartDate = londonMondayYmdFromYmd(String(entryDate).slice(0, 10));
             
             // Get or create weekly timesheet
             const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(parseInt(user_id), weekStartDate);
@@ -3487,15 +3439,11 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 regularHours = 0;
                 totalHours = 0;
             } else if (day_type === 'sick_paid') {
-                // Paid sick: 8 hours Mon-Thu, 6 hours Friday
-                const dateObjForSick = new Date(entryDate);
-                const dayOfWeek = dateObjForSick.getDay(); // 0 = Sunday, 5 = Friday
-                if (dayOfWeek === 5) {
-                    // Friday
+                const dow = londonWeekdaySun0FromYmd(String(entryDate).slice(0, 10));
+                if (dow === 5) {
                     regularHours = 6;
                     totalHours = 6;
                 } else {
-                    // Monday to Thursday
                     regularHours = 8;
                     totalHours = 8;
                 }
@@ -3503,12 +3451,12 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 // Try to find approved holiday request for this date and user
                 let holidayRequest = null;
                 const allRequests = await ProductionDatabase.getHolidayRequestsByUser(parseInt(user_id));
-                const dateObj = new Date(entryDate);
+                const ymd = String(entryDate).slice(0, 10);
                 holidayRequest = allRequests.find(req => {
                     if (req.status !== 'approved') return false;
-                    const start = new Date(req.start_date);
-                    const end = new Date(req.end_date);
-                    return dateObj >= start && dateObj <= end;
+                    const start = String(req.start_date).slice(0, 10);
+                    const end = String(req.end_date).slice(0, 10);
+                    return ymd >= start && ymd <= end;
                 });
                 
                 if (holidayRequest && holidayRequest.days_requested) {
@@ -3557,14 +3505,8 @@ router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOr
                 });
             }
         } else if (entry && entry.clock_out_time) {
-            // No day_type set, but entry was created - check for existing day_type
-            const entryDate = new Date(entry.clock_in_time).toISOString().split('T')[0];
-            const dateObj = new Date(entryDate);
-            const dayOfWeek = dateObj.getDay();
-            const monday = new Date(dateObj);
-            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const entryDate = londonYmd(new Date(entry.clock_in_time));
+            const weekStartDate = londonMondayYmd(new Date(entry.clock_in_time));
             
             const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(parseInt(user_id), weekStartDate);
             const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate, entry.id);
@@ -3718,12 +3660,7 @@ router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, re
         const adminId = req.session.production_user.id;
         
         // Check if week is complete (only allow approval of completed weeks)
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        const currentWeekMonday = new Date(today);
-        currentWeekMonday.setDate(currentWeekMonday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        currentWeekMonday.setHours(0, 0, 0, 0);
-        const currentWeekStartStr = currentWeekMonday.toISOString().split('T')[0];
+        const currentWeekStartStr = londonMondayYmd(new Date());
         
         // Week is complete if its start date is before current week's start
         if (weekStartDate >= currentWeekStartStr) {
@@ -4779,15 +4716,11 @@ router.put('/holidays/requests/:id', requireProductionAuth, async (req, res) => 
                 // Recalculate days_used to include the newly approved request
                 await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
                 
-                // Populate timesheet entries for approved holidays
-                const start = new Date(request.start_date);
-                const end = new Date(request.end_date);
-                const current = new Date(start);
-                
-                while (current <= end) {
-                    const dateStr = current.toISOString().split('T')[0];
-                    await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, dateStr, requestId);
-                    current.setDate(current.getDate() + 1);
+                let ymd = londonYmd(new Date(request.start_date));
+                const endYmd = londonYmd(new Date(request.end_date));
+                while (ymd <= endYmd) {
+                    await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, ymd, requestId);
+                    ymd = londonYmdAddDays(ymd, 1);
                 }
                 
                 res.json({ success: true, request: updated });
@@ -4841,15 +4774,11 @@ router.put('/holidays/requests/:id/approve', requireProductionAuth, requireAdmin
         // Recalculate days_used to include the newly approved request
         await ProductionDatabase.recalculateHolidayDaysUsed(request.user_id, currentYear);
         
-        // Populate timesheet entries for approved holidays
-        const start = new Date(request.start_date);
-        const end = new Date(request.end_date);
-        const current = new Date(start);
-        
-        while (current <= end) {
-            const dateStr = current.toISOString().split('T')[0];
-            await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, dateStr, requestId);
-            current.setDate(current.getDate() + 1);
+        let ymd = londonYmd(new Date(request.start_date));
+        const endYmd = londonYmd(new Date(request.end_date));
+        while (ymd <= endYmd) {
+            await ProductionDatabase.populateHolidayTimesheetEntry(request.user_id, ymd, requestId);
+            ymd = londonYmdAddDays(ymd, 1);
         }
         
         res.json({ success: true, request: updated });
@@ -4930,16 +4859,11 @@ router.post('/holidays/add', requireProductionAuth, requireAdminOrOffice, async 
         // Recalculate days_used to include the newly created approved request
         await ProductionDatabase.recalculateHolidayDaysUsed(userId, currentYear);
         
-        // Populate timesheet entries for approved holidays
-        // For half day, only populate the single date
-        const start = new Date(start_date);
-        const end = new Date(end_date);
-        const current = new Date(start);
-        
-        while (current <= end) {
-            const dateStr = current.toISOString().split('T')[0];
-            await ProductionDatabase.populateHolidayTimesheetEntry(userId, dateStr, request.id);
-            current.setDate(current.getDate() + 1);
+        let ymd = londonYmd(new Date(start_date));
+        const endYmd = londonYmd(new Date(end_date));
+        while (ymd <= endYmd) {
+            await ProductionDatabase.populateHolidayTimesheetEntry(userId, ymd, request.id);
+            ymd = londonYmdAddDays(ymd, 1);
         }
         
         res.json({ success: true, request, message: 'Holiday added and approved successfully' });

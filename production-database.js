@@ -5,6 +5,22 @@ const { isPostgreSQL, pool, queryWithRetry } = require('./database-pg');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const {
+    londonYmd,
+    londonMondayYmd,
+    londonMondayYmdFromYmd,
+    londonYmdAddDays,
+    londonDayStartUtc,
+    londonNextDayStartUtc,
+    londonDayStartMs,
+    londonDayEndInclusiveIso,
+    londonWeekdaySun0,
+    londonWeekdaySun0FromYmd,
+    roundClockUpLondon15,
+    roundClockDownLondon15,
+    londonLocalTimeToUtc,
+    ymdFromDbOrInstant
+} = require('./uk-datetime');
 
 // Get database connection (SQLite or PostgreSQL)
 let db;
@@ -4516,15 +4532,8 @@ class ProductionDatabase {
     }
     
     static async getLastWeekPlannerSummary() {
-        // Get last week's Monday (7 days ago)
-        const today = new Date();
-        const dayOfWeek = today.getDay();
-        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-        const lastMonday = new Date(today);
-        lastMonday.setDate(today.getDate() - daysToMonday - 7);
-        lastMonday.setHours(0, 0, 0, 0);
-        
-        const weekStartStr = lastMonday.toISOString().split('T')[0];
+        const thisMonday = londonMondayYmd(new Date());
+        const weekStartStr = londonYmdAddDays(thisMonday, -7);
         const planner = await this.getWeeklyPlannerByDate(weekStartStr);
         
         if (!planner) {
@@ -6631,7 +6640,7 @@ class ProductionDatabase {
                      (start_date <= $3::date AND end_date >= $3::date) OR
                      (start_date >= $2::date AND end_date <= $3::date)
                  )`,
-                [userId, start.toISOString().split('T')[0], end.toISOString().split('T')[0]]
+                [userId, londonYmd(start), londonYmd(end)]
             );
             for (const holiday of holidayResult.rows) {
                 conflicts.push({
@@ -6644,7 +6653,7 @@ class ProductionDatabase {
             }
             
             // Check existing installations - handle multi-day installations
-            const checkDate = start.toISOString().split('T')[0];
+            const checkDate = londonYmd(start);
             
             // Check which columns exist
             let hasStartDate = false;
@@ -6740,8 +6749,8 @@ class ProductionDatabase {
             }
         } else {
             // SQLite version
-            const startDateStr = start.toISOString().split('T')[0];
-            const endDateStr = end.toISOString().split('T')[0];
+            const startDateStr = londonYmd(start);
+            const endDateStr = londonYmd(end);
             const startTimeStr = start.toTimeString().slice(0, 5);
             const endTimeStr = end.toTimeString().slice(0, 5);
             
@@ -7155,11 +7164,8 @@ class ProductionDatabase {
             // Update each entry separately to set clock-out to midnight of clock-in date
             const updatedEntries = [];
             for (const entry of entriesToUpdate.rows) {
-                const clockInDate = new Date(entry.clock_in_time);
-                // Set to end of the clock-in date (23:59:59.999)
-                const midnight = new Date(clockInDate);
-                midnight.setHours(23, 59, 59, 999);
-                const clockOutTime = midnight.toISOString();
+                const ymd = londonYmd(new Date(entry.clock_in_time));
+                const clockOutTime = londonDayEndInclusiveIso(ymd);
                 
                 const updateResult = await pool.query(
                     `UPDATE timesheet_entries 
@@ -7179,14 +7185,10 @@ class ProductionDatabase {
                 try {
                     // Get clock-in date
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                    const clockInDateStr = londonYmd(clockInDate);
                     
                     // Find Monday of that week
-                    const dayOfWeek = clockInDate.getDay();
-                    const monday = new Date(clockInDate);
-                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                    monday.setHours(0, 0, 0, 0);
-                    const weekStartDate = monday.toISOString().split('T')[0];
+                    const weekStartDate = londonMondayYmd(clockInDate);
                     
                     // Get or create weekly timesheet
                     const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
@@ -7223,21 +7225,21 @@ class ProductionDatabase {
             
             return updatedEntries;
         } else {
-            // SQLite version
+            // SQLite version — only entries from before today's London calendar date
+            const todayStart = londonDayStartUtc(londonYmd(new Date()));
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE clock_out_time IS NULL
-                AND DATE(clock_in_time) < DATE('now')
+                AND clock_in_time < ?
                 ${userId ? 'AND user_id = ?' : ''}
-            `).all(userId ? [userId] : []);
+            `).all(userId ? [todayStart, userId] : [todayStart]);
             
             const updatedEntries = [];
             
             for (const entry of entries) {
                 const clockInDate = new Date(entry.clock_in_time);
-                const midnight = new Date(clockInDate);
-                midnight.setHours(23, 59, 59, 999);
-                const clockOutTime = midnight.toISOString();
+                const ymd = londonYmd(clockInDate);
+                const clockOutTime = londonDayEndInclusiveIso(ymd);
                 
                 db.prepare(`
                     UPDATE timesheet_entries 
@@ -7247,12 +7249,8 @@ class ProductionDatabase {
                 
                 // Recalculate hours (similar to PostgreSQL version)
                 try {
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    const dayOfWeek = clockInDate.getDay();
-                    const monday = new Date(clockInDate);
-                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                    monday.setHours(0, 0, 0, 0);
-                    const weekStartDate = monday.toISOString().split('T')[0];
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const weekStartDate = londonMondayYmd(clockInDate);
                     
                     const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                     const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7284,12 +7282,14 @@ class ProductionDatabase {
         console.log('Starting cleanup of all old unclosed timesheet entries...');
         
         if (isPostgreSQL) {
-            // Only close entries from BEFORE today (do not touch today's clock-ins)
+            // Only close entries from BEFORE today in Europe/London
+            const todayStartLondon = londonDayStartUtc(londonYmd(new Date()));
             const entriesToUpdate = await pool.query(
                 `SELECT * FROM timesheet_entries
                  WHERE clock_out_time IS NULL
-                 AND (clock_in_time::date) < CURRENT_DATE
-                 ORDER BY clock_in_time ASC`
+                 AND clock_in_time < $1
+                 ORDER BY clock_in_time ASC`,
+                [todayStartLondon]
             );
             
             if (entriesToUpdate.rows.length === 0) {
@@ -7310,11 +7310,8 @@ class ProductionDatabase {
                 
                 for (const entry of batch) {
                     try {
-                        const clockInDate = new Date(entry.clock_in_time);
-                        // Set to end of the clock-in date (23:59:59.999)
-                        const midnight = new Date(clockInDate);
-                        midnight.setHours(23, 59, 59, 999);
-                        const clockOutTime = midnight.toISOString();
+                        const ymd = londonYmd(new Date(entry.clock_in_time));
+                        const clockOutTime = londonDayEndInclusiveIso(ymd);
                         
                         const updateResult = await pool.query(
                             `UPDATE timesheet_entries 
@@ -7338,13 +7335,14 @@ class ProductionDatabase {
             console.log(`Cleanup complete: ${successCount} entries updated, ${errorCount} errors`);
             return { count: successCount, entries: updatedEntries, errors: errorCount };
         } else {
-            // SQLite version - only close entries from BEFORE today (do not touch today's clock-ins)
+            // SQLite — before today's London date
+            const todayStart = londonDayStartUtc(londonYmd(new Date()));
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE clock_out_time IS NULL
-                AND DATE(clock_in_time) < DATE('now')
+                AND clock_in_time < ?
                 ORDER BY clock_in_time ASC
-            `).all();
+            `).all(todayStart);
             
             if (entries.length === 0) {
                 console.log('No old unclosed entries to cleanup');
@@ -7359,10 +7357,8 @@ class ProductionDatabase {
             
             for (const entry of entries) {
                 try {
-                    const clockInDate = new Date(entry.clock_in_time);
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const ymd = londonYmd(new Date(entry.clock_in_time));
+                    const clockOutTime = londonDayEndInclusiveIso(ymd);
                     
                     db.prepare(`
                         UPDATE timesheet_entries 
@@ -7390,7 +7386,7 @@ class ProductionDatabase {
             const updateResult = await pool.query(
                 `UPDATE timesheet_entries
                  SET clock_out_time = NULL, updated_at = $1
-                 WHERE (clock_in_time::date) = $2::date
+                 WHERE ((clock_in_time AT TIME ZONE 'Europe/London')::date) = $2::date
                  AND clock_out_time IS NOT NULL
                  RETURNING id, user_id, clock_in_time, job_id`,
                 [now, dateStr]
@@ -7398,11 +7394,13 @@ class ProductionDatabase {
             const entries = updateResult.rows;
             return { count: entries.length, entries };
         } else {
+            const startIso = londonDayStartUtc(dateStr);
+            const endIso = londonNextDayStartUtc(dateStr);
             const entries = db.prepare(`
                 SELECT id, user_id, clock_in_time, job_id FROM timesheet_entries
-                WHERE DATE(clock_in_time) = DATE(?)
+                WHERE clock_in_time >= ? AND clock_in_time < ?
                 AND clock_out_time IS NOT NULL
-            `).all(dateStr);
+            `).all(startIso, endIso);
             for (const entry of entries) {
                 db.prepare(`
                     UPDATE timesheet_entries
@@ -7426,7 +7424,7 @@ class ProductionDatabase {
                 `SELECT * FROM timesheet_entries
                  WHERE user_id = $1
                  AND clock_out_time IS NULL
-                 AND DATE(clock_in_time) <= $2::date
+                 AND ((clock_in_time AT TIME ZONE 'Europe/London')::date) <= $2::date
                  ORDER BY clock_in_time DESC
                  LIMIT 10`,
                 [userId, targetDateStr]
@@ -7441,12 +7439,8 @@ class ProductionDatabase {
             for (const entry of entries.rows) {
                 try {
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    
-                    // Set clock-out to end of the clock-in date (23:59:59.999)
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                     
                     const updateResult = await pool.query(
                         `UPDATE timesheet_entries 
@@ -7461,11 +7455,7 @@ class ProductionDatabase {
                         
                         // Recalculate hours for this entry (skip if it fails - don't block)
                         try {
-                            const dayOfWeek = clockInDate.getDay();
-                            const monday = new Date(clockInDate);
-                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                            monday.setHours(0, 0, 0, 0);
-                            const weekStartDate = monday.toISOString().split('T')[0];
+                            const weekStartDate = londonMondayYmd(clockInDate);
                             
                             const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                             const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7493,21 +7483,19 @@ class ProductionDatabase {
             
             return updatedEntries;
         } else {
-            // SQLite version
+            const nextAfterTarget = londonNextDayStartUtc(targetDateStr);
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE user_id = ?
                 AND clock_out_time IS NULL
-                AND DATE(clock_in_time) <= DATE(?)
-            `).all(userId, targetDateStr);
+                AND clock_in_time < ?
+            `).all(userId, nextAfterTarget);
             
             const updatedEntries = [];
             for (const entry of entries) {
                 const clockInDate = new Date(entry.clock_in_time);
-                const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                const midnight = new Date(clockInDate);
-                midnight.setHours(23, 59, 59, 999);
-                const clockOutTime = midnight.toISOString();
+                const clockInDateStr = londonYmd(clockInDate);
+                const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                 
                 db.prepare(`
                     UPDATE timesheet_entries 
@@ -7517,11 +7505,7 @@ class ProductionDatabase {
                 
                 // Recalculate hours
                 try {
-                    const dayOfWeek = clockInDate.getDay();
-                    const monday = new Date(clockInDate);
-                    monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                    monday.setHours(0, 0, 0, 0);
-                    const weekStartDate = monday.toISOString().split('T')[0];
+                    const weekStartDate = londonMondayYmd(clockInDate);
                     
                     const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                     const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7550,21 +7534,15 @@ class ProductionDatabase {
     // Auto-clock-out old entries for a specific user (entries from previous days)
     static async autoClockOutOldEntries(userId) {
         if (isPostgreSQL) {
-            // Find entries that:
-            // 1. Don't have a clock_out_time
-            // 2. Are for this user
-            // 3. Started before today (clock_in_time is before today's date)
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStartLondon = londonDayStartUtc(londonYmd(new Date()));
             
             const entries = await pool.query(
                 `SELECT * FROM timesheet_entries
                  WHERE user_id = $1
                  AND clock_out_time IS NULL
-                 AND DATE(clock_in_time) < $2::date
+                 AND clock_in_time < $2
                  ORDER BY clock_in_time DESC`,
-                [userId, todayStr]
+                [userId, todayStartLondon]
             );
             
             if (entries.rows.length === 0) {
@@ -7575,12 +7553,8 @@ class ProductionDatabase {
             for (const entry of entries.rows) {
                 try {
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    
-                    // Set clock-out to end of the clock-in date (23:59:59.999)
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                     
                     const updateResult = await pool.query(
                         `UPDATE timesheet_entries 
@@ -7595,11 +7569,7 @@ class ProductionDatabase {
                         
                         // Recalculate hours for this entry
                         try {
-                            const dayOfWeek = clockInDate.getDay();
-                            const monday = new Date(clockInDate);
-                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                            monday.setHours(0, 0, 0, 0);
-                            const weekStartDate = monday.toISOString().split('T')[0];
+                            const weekStartDate = londonMondayYmd(clockInDate);
                             
                             const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                             const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7625,18 +7595,16 @@ class ProductionDatabase {
             
             return updatedEntries;
         } else {
-            // SQLite version
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayStr = today.toISOString().split('T')[0];
+            // SQLite — before start of today in London
+            const todayStart = londonDayStartUtc(londonYmd(new Date()));
             
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE user_id = ?
                 AND clock_out_time IS NULL
-                AND DATE(clock_in_time) < DATE(?)
+                AND clock_in_time < ?
                 ORDER BY clock_in_time DESC
-            `).all(userId, todayStr);
+            `).all(userId, todayStart);
             
             if (entries.length === 0) {
                 return [];
@@ -7646,10 +7614,8 @@ class ProductionDatabase {
             for (const entry of entries) {
                 try {
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                     
                     db.prepare(`
                         UPDATE timesheet_entries 
@@ -7659,11 +7625,7 @@ class ProductionDatabase {
                     
                     // Recalculate hours
                     try {
-                        const dayOfWeek = clockInDate.getDay();
-                        const monday = new Date(clockInDate);
-                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                        monday.setHours(0, 0, 0, 0);
-                        const weekStartDate = monday.toISOString().split('T')[0];
+                        const weekStartDate = londonMondayYmd(clockInDate);
                         
                         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                         const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7698,17 +7660,14 @@ class ProductionDatabase {
         console.log('🕛 Running midnight auto-clock-out for all users...');
         
         if (isPostgreSQL) {
-            // Find all entries that don't have a clock_out_time and started before today
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStartLondon = londonDayStartUtc(londonYmd(new Date()));
             
             const entries = await pool.query(
                 `SELECT * FROM timesheet_entries
                  WHERE clock_out_time IS NULL
-                 AND DATE(clock_in_time) < $1::date
+                 AND clock_in_time < $1
                  ORDER BY clock_in_time ASC`,
-                [todayStr]
+                [todayStartLondon]
             );
             
             if (entries.rows.length === 0) {
@@ -7724,12 +7683,8 @@ class ProductionDatabase {
             for (const entry of entries.rows) {
                 try {
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    
-                    // Set clock-out to end of the clock-in date (23:59:59.999)
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                     
                     const updateResult = await pool.query(
                         `UPDATE timesheet_entries 
@@ -7744,11 +7699,7 @@ class ProductionDatabase {
                         
                         // Recalculate hours for this entry
                         try {
-                            const dayOfWeek = clockInDate.getDay();
-                            const monday = new Date(clockInDate);
-                            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                            monday.setHours(0, 0, 0, 0);
-                            const weekStartDate = monday.toISOString().split('T')[0];
+                            const weekStartDate = londonMondayYmd(clockInDate);
                             
                             const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                             const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7776,17 +7727,14 @@ class ProductionDatabase {
             console.log(`   ✅ Midnight auto-clock-out complete: ${successCount} entries updated, ${errorCount} errors`);
             return { count: successCount, errors: errorCount };
         } else {
-            // SQLite version
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStart = londonDayStartUtc(londonYmd(new Date()));
             
             const entries = db.prepare(`
                 SELECT * FROM timesheet_entries
                 WHERE clock_out_time IS NULL
-                AND DATE(clock_in_time) < DATE(?)
+                AND clock_in_time < ?
                 ORDER BY clock_in_time ASC
-            `).all(todayStr);
+            `).all(todayStart);
             
             if (entries.length === 0) {
                 console.log('   No entries to auto-clock-out at midnight');
@@ -7801,10 +7749,8 @@ class ProductionDatabase {
             for (const entry of entries) {
                 try {
                     const clockInDate = new Date(entry.clock_in_time);
-                    const clockInDateStr = clockInDate.toISOString().split('T')[0];
-                    const midnight = new Date(clockInDate);
-                    midnight.setHours(23, 59, 59, 999);
-                    const clockOutTime = midnight.toISOString();
+                    const clockInDateStr = londonYmd(clockInDate);
+                    const clockOutTime = londonDayEndInclusiveIso(clockInDateStr);
                     
                     db.prepare(`
                         UPDATE timesheet_entries 
@@ -7814,11 +7760,7 @@ class ProductionDatabase {
                     
                     // Recalculate hours
                     try {
-                        const dayOfWeek = clockInDate.getDay();
-                        const monday = new Date(clockInDate);
-                        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                        monday.setHours(0, 0, 0, 0);
-                        const weekStartDate = monday.toISOString().split('T')[0];
+                        const weekStartDate = londonMondayYmd(clockInDate);
                         
                         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
                         const dailyEntry = await this.getOrCreateDailyEntry(weeklyTimesheet.id, clockInDateStr, entry.id);
@@ -7885,15 +7827,9 @@ class ProductionDatabase {
         try {
             // Get clock-in date to determine which week
             const clockInDate = new Date(updatedEntry.clock_in_time);
-            const clockInDateStr = clockInDate.toISOString().split('T')[0];
+            const clockInDateStr = londonYmd(clockInDate);
             
-            // Find Monday of that week
-            const dayOfWeek = clockInDate.getDay();
-            const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust when day is Sunday
-            const monday = new Date(clockInDate);
-            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const weekStartDate = londonMondayYmd(clockInDate);
             
             // Get or create weekly timesheet
             const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
@@ -7985,15 +7921,9 @@ class ProductionDatabase {
             // If there's a daily entry linked to this, recalculate hours for that day
             if (entry.clock_out_time) {
                 const clockInDate = new Date(entry.clock_in_time);
-                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                const clockInDateStr = londonYmd(clockInDate);
                 
-                // Find the weekly timesheet for this date
-                const dayOfWeek = clockInDate.getDay();
-                const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                const monday = new Date(clockInDate);
-                monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                monday.setHours(0, 0, 0, 0);
-                const weekStartDate = monday.toISOString().split('T')[0];
+                const weekStartDate = londonMondayYmd(clockInDate);
                 
                 const weeklyTimesheet = await this.getWeeklyTimesheet(entry.user_id, weekStartDate);
                 if (weeklyTimesheet) {
@@ -8035,15 +7965,9 @@ class ProductionDatabase {
             // If there's a daily entry linked to this, recalculate hours for that day
             if (entry.clock_out_time) {
                 const clockInDate = new Date(entry.clock_in_time);
-                const clockInDateStr = clockInDate.toISOString().split('T')[0];
+                const clockInDateStr = londonYmd(clockInDate);
                 
-                // Find the weekly timesheet for this date
-                const dayOfWeek = clockInDate.getDay();
-                const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-                const monday = new Date(clockInDate);
-                monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-                monday.setHours(0, 0, 0, 0);
-                const weekStartDate = monday.toISOString().split('T')[0];
+                const weekStartDate = londonMondayYmd(clockInDate);
                 
                 const weeklyTimesheet = await this.getWeeklyTimesheet(entry.user_id, weekStartDate);
                 if (weeklyTimesheet) {
@@ -8098,45 +8022,49 @@ class ProductionDatabase {
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
                  WHERE te.user_id = $1 
-                 AND DATE(te.clock_in_time) >= $2 
-                 AND DATE(te.clock_in_time) <= $3
+                 AND ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) >= $2::date
+                 AND ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) <= $3::date
                  ORDER BY te.clock_in_time DESC`,
                 [userId, startDate, endDate]
             );
             return result.rows;
         } else {
+            const startIso = londonDayStartUtc(startDate);
+            const endExclusive = londonNextDayStartUtc(endDate);
             return db.prepare(
                 `SELECT te.*, j.name as job_name 
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
                  WHERE te.user_id = ? 
-                 AND DATE(te.clock_in_time) >= ? 
-                 AND DATE(te.clock_in_time) <= ?
+                 AND te.clock_in_time >= ? 
+                 AND te.clock_in_time < ?
                  ORDER BY te.clock_in_time DESC`
-            ).all(userId, startDate, endDate);
+            ).all(userId, startIso, endExclusive);
         }
     }
     
-    // Count completed timesheet entries for a specific date
+    // Count completed timesheet entries for a specific date (London calendar day)
     static async countEntriesForDate(userId, dateStr) {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT COUNT(*) as count
                  FROM timesheet_entries
                  WHERE user_id = $1 
-                 AND DATE(clock_in_time) = $2
+                 AND ((clock_in_time AT TIME ZONE 'Europe/London')::date) = $2::date
                  AND clock_out_time IS NOT NULL`,
                 [userId, dateStr]
             );
             return parseInt(result.rows[0].count) || 0;
         } else {
+            const startIso = londonDayStartUtc(dateStr);
+            const endIso = londonNextDayStartUtc(dateStr);
             const result = db.prepare(
                 `SELECT COUNT(*) as count
                  FROM timesheet_entries
                  WHERE user_id = ? 
-                 AND DATE(clock_in_time) = ?
+                 AND clock_in_time >= ? AND clock_in_time < ?
                  AND clock_out_time IS NOT NULL`
-            ).get(userId, dateStr);
+            ).get(userId, startIso, endIso);
             return parseInt(result.count) || 0;
         }
     }
@@ -8148,18 +8076,12 @@ class ProductionDatabase {
         const clockIn = new Date(entry.clock_in_time);
         const clockOut = new Date(entry.clock_out_time);
         
-        // Check if clock-out is at end of clock-in day (23:59:59.999)
-        const clockInDayEnd = new Date(clockIn);
-        clockInDayEnd.setHours(23, 59, 59, 999);
+        const ymd = londonYmd(clockIn);
+        const endOfDayMs = Date.parse(londonDayEndInclusiveIso(ymd));
+        const nextDayMs = Date.parse(londonNextDayStartUtc(ymd));
         
-        // Check if clock-out is at midnight of next day (00:00:00)
-        const nextDay = new Date(clockIn);
-        nextDay.setDate(nextDay.getDate() + 1);
-        nextDay.setHours(0, 0, 0, 0);
-        
-        // Allow small margin for timestamp precision (within 1 second)
-        const endOfDayDiff = Math.abs(clockOut.getTime() - clockInDayEnd.getTime());
-        const midnightDiff = Math.abs(clockOut.getTime() - nextDay.getTime());
+        const endOfDayDiff = Math.abs(clockOut.getTime() - endOfDayMs);
+        const midnightDiff = Math.abs(clockOut.getTime() - nextDayMs);
         
         return endOfDayDiff < 1000 || midnightDiff < 1000;
     }
@@ -8498,7 +8420,7 @@ class ProductionDatabase {
     // Calculate hours for a timesheet entry
     // Aggregate hours from all timesheet entries for a specific date
     static async aggregateDailyHours(userId, entryDate, overnightAway = false) {
-        const dateStr = entryDate instanceof Date ? entryDate.toISOString().split('T')[0] : entryDate;
+        const dateStr = entryDate instanceof Date ? londonYmd(entryDate) : entryDate;
         
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -8510,7 +8432,7 @@ class ProductionDatabase {
                     SUM(total_hours) as total_hours
                  FROM timesheet_entries
                  WHERE user_id = $1 
-                   AND DATE(clock_in_time) = $2::date
+                   AND ((clock_in_time AT TIME ZONE 'Europe/London')::date) = $2::date
                    AND clock_out_time IS NOT NULL`,
                 [userId, dateStr]
             );
@@ -8523,6 +8445,8 @@ class ProductionDatabase {
                 total_hours: parseFloat(result.rows[0]?.total_hours || 0)
             };
         } else {
+            const startIso = londonDayStartUtc(dateStr);
+            const endIso = londonNextDayStartUtc(dateStr);
             const result = db.prepare(
                 `SELECT 
                     SUM(regular_hours) as total_regular,
@@ -8532,9 +8456,9 @@ class ProductionDatabase {
                     SUM(total_hours) as total_hours
                  FROM timesheet_entries
                  WHERE user_id = ? 
-                   AND DATE(clock_in_time) = ?
+                   AND clock_in_time >= ? AND clock_in_time < ?
                    AND clock_out_time IS NOT NULL`
-            ).get(userId, dateStr);
+            ).get(userId, startIso, endIso);
             
             return {
                 regular_hours: parseFloat(result?.total_regular || 0),
@@ -8553,13 +8477,9 @@ class ProductionDatabase {
         // This ensures admin-set day_type always overrides any clock entry hours
         let currentDailyEntry = dailyEntry;
         try {
-            // Calculate week start date
-            const dateObj = new Date(entryDate);
-            const dayOfWeek = dateObj.getDay();
-            const monday = new Date(dateObj);
-            monday.setDate(dateObj.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            const weekStartDate = monday.toISOString().split('T')[0];
+            const weekStartDate = londonMondayYmdFromYmd(
+                typeof entryDate === 'string' ? entryDate.slice(0, 10) : londonYmd(entryDate)
+            );
             
             // Get weekly timesheet
             const weeklyTimesheet = await this.getWeeklyTimesheet(userId, weekStartDate);
@@ -8588,8 +8508,8 @@ class ProductionDatabase {
                 };
             } else if (currentDailyEntry.day_type === 'sick_paid') {
                 // Paid sick: 8 hours Mon-Thu, 6 hours Friday
-                const dateObj = new Date(entryDate);
-                const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                const ymd = typeof entryDate === 'string' ? entryDate.slice(0, 10) : londonYmd(entryDate);
+                const dayOfWeek = londonWeekdaySun0FromYmd(ymd);
                 const hours = (dayOfWeek === 5) ? 6 : 8; // Friday = 6, Mon-Thu = 8
                 return {
                     regular_hours: hours,
@@ -8600,8 +8520,8 @@ class ProductionDatabase {
                 };
             } else if (currentDailyEntry.day_type === 'holiday_paid') {
                 // Paid holiday: Friday = 6 hours, Mon-Thu = 8; half day = 4 or 3 (Friday)
-                const dateObj = new Date(entryDate);
-                const dayOfWeek = dateObj.getDay();
+                const ymd = typeof entryDate === 'string' ? entryDate.slice(0, 10) : londonYmd(entryDate);
+                const dayOfWeek = londonWeekdaySun0FromYmd(ymd);
                 let hours = (dayOfWeek === 5) ? 6 : 8;
                 try {
                     const allRequests = await this.getHolidayRequestsByUser(userId);
@@ -8609,7 +8529,8 @@ class ProductionDatabase {
                         if (req.status !== 'approved') return false;
                         const start = new Date(req.start_date);
                         const end = new Date(req.end_date);
-                        return dateObj >= start && dateObj <= end;
+                        const mid = new Date(londonDayStartMs(ymd) + 12 * 60 * 60 * 1000);
+                        return mid >= start && mid <= end;
                     });
                     if (holidayRequest && holidayRequest.days_requested === 0.5) {
                         hours = (dayOfWeek === 5) ? 3 : 4; // half day
@@ -8637,47 +8558,16 @@ class ProductionDatabase {
             return null;
         }
         
-        // Helper functions to round clock times to 15-minute intervals
-        const roundClockInUp = (date) => {
-            const rounded = new Date(date);
-            const minutes = rounded.getMinutes();
-            const remainder = minutes % 15;
-            if (remainder > 0) {
-                rounded.setMinutes(minutes + (15 - remainder));
-                rounded.setSeconds(0);
-                rounded.setMilliseconds(0);
-            } else {
-                rounded.setSeconds(0);
-                rounded.setMilliseconds(0);
-            }
-            return rounded;
-        };
-        
-        const roundClockOutDown = (date) => {
-            const rounded = new Date(date);
-            const minutes = rounded.getMinutes();
-            const remainder = minutes % 15;
-            rounded.setMinutes(minutes - remainder);
-            rounded.setSeconds(0);
-            rounded.setMilliseconds(0);
-            return rounded;
-        };
-        
         let clockIn = new Date(entry.clock_in_time);
         let clockOut = new Date(entry.clock_out_time);
         
-        // Determine day of week before rounding
-        const clockInDate = new Date(clockIn);
-        const dayOfWeek = clockInDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
-        const isFriday = dayOfWeek === 5; // Friday
+        const dayOfWeek = londonWeekdaySun0(clockIn);
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const isFriday = dayOfWeek === 5;
         
-        // Apply rounding to Friday and weekends
         if (isFriday || isWeekend) {
-            clockIn = roundClockInUp(clockIn);
-            clockOut = roundClockOutDown(clockOut);
-            // Update clockInDate to use rounded clockIn for consistency
-            clockInDate.setTime(clockIn.getTime());
+            clockIn = roundClockUpLondon15(clockIn);
+            clockOut = roundClockDownLondon15(clockOut);
         }
         
         const totalHours = (clockOut - clockIn) / (1000 * 60 * 60); // Convert to hours
@@ -8698,14 +8588,10 @@ class ProductionDatabase {
             weekendHours = totalHours;
             calculatedTotal = totalHours;
         } else if (isFriday) {
-            // Friday: Standard hours only between 8am and 3pm (45min break)
-            // Anything outside this window is overtime
-            
-            // Set standard hours window: 8am to 3pm
-            const standardStart = new Date(clockInDate);
-            standardStart.setHours(8, 0, 0, 0); // 8:00 AM
-            const standardEnd = new Date(clockInDate);
-            standardEnd.setHours(15, 0, 0, 0); // 3:00 PM (15:00)
+            // Friday: Standard hours only between 8am and 3pm London (45min break)
+            const ymd = londonYmd(clockIn);
+            const standardStart = londonLocalTimeToUtc(ymd, 8, 0, 0);
+            const standardEnd = londonLocalTimeToUtc(ymd, 15, 0, 0);
             
             // Calculate hours within standard window (8am-3pm)
             const clockInInWindow = clockIn > standardStart ? clockIn : standardStart;
@@ -8769,13 +8655,9 @@ class ProductionDatabase {
     // Weekly timesheet operations
     static async getOrCreateWeeklyTimesheet(userId, weekStartDate) {
         try {
-            // weekStartDate should be a Monday date in YYYY-MM-DD format
-            const weekStart = new Date(weekStartDate);
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6); // Sunday
-            
-            const weekStartStr = weekStart.toISOString().split('T')[0];
-            const weekEndStr = weekEnd.toISOString().split('T')[0];
+            // weekStartDate should be a Monday date in YYYY-MM-DD format (London calendar)
+            const weekStartStr = weekStartDate;
+            const weekEndStr = londonYmdAddDays(weekStartDate, 6);
             
             if (isPostgreSQL) {
                 // Try to get existing
@@ -9210,14 +9092,9 @@ class ProductionDatabase {
         
         // Get clock-in date to determine which week
         const clockInDate = new Date(clockInTime);
-        const clockInDateStr = clockInDate.toISOString().split('T')[0];
+        const clockInDateStr = londonYmd(clockInDate);
         
-        // Find Monday of that week
-        const dayOfWeek = clockInDate.getDay();
-        const monday = new Date(clockInDate);
-        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        monday.setHours(0, 0, 0, 0);
-        const weekStartDate = monday.toISOString().split('T')[0];
+        const weekStartDate = londonMondayYmd(clockInDate);
         
         // Get or create weekly timesheet
         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
@@ -9442,15 +9319,9 @@ class ProductionDatabase {
         
         // Get clock-in date to determine which week
         const clockInDate = new Date(finalClockIn);
-        const clockInDateStr = clockInDate.toISOString().split('T')[0];
+        const clockInDateStr = londonYmd(clockInDate);
         
-        // Find Monday of that week
-        const dayOfWeek = clockInDate.getDay();
-        const diff = clockInDate.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-        const monday = new Date(clockInDate);
-        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        monday.setHours(0, 0, 0, 0);
-        const weekStartDate = monday.toISOString().split('T')[0];
+        const weekStartDate = londonMondayYmd(clockInDate);
         
         // Get or create weekly timesheet
         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
@@ -9552,14 +9423,9 @@ class ProductionDatabase {
         
         // Get clock-in date to determine which week
         const clockInDate = new Date(amendedClockIn);
-        const clockInDateStr = clockInDate.toISOString().split('T')[0];
+        const clockInDateStr = londonYmd(clockInDate);
         
-        // Find Monday of that week
-        const dayOfWeek = clockInDate.getDay();
-        const monday = new Date(clockInDate);
-        monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        monday.setHours(0, 0, 0, 0);
-        const weekStartDate = monday.toISOString().split('T')[0];
+        const weekStartDate = londonMondayYmd(clockInDate);
         
         // Get or create weekly timesheet
         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(entry.user_id, weekStartDate);
@@ -9582,12 +9448,10 @@ class ProductionDatabase {
         const finalOvernightAway = overnightAway !== undefined ? overnightAway : (updatedDailyEntry ? updatedDailyEntry.overnight_away : false);
         
         // Recalculate hours for ALL entries for this day with the correct overnight_away value
-        const weekEnd = new Date(monday);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        const weekEndStr = londonYmdAddDays(weekStartDate, 6);
         const allEntries = await this.getTimesheetHistory(entry.user_id, weekStartDate, weekEndStr);
         const dayEntries = allEntries.filter(te => {
-            const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+            const teDate = londonYmd(new Date(te.clock_in_time));
             return teDate === clockInDateStr && te.clock_out_time;
         });
         
@@ -9703,18 +9567,14 @@ class ProductionDatabase {
     
     // Get daily payroll breakdown for a specific user
     static async getPayrollDailyBreakdown(userId, weekStartDate) {
-        // Calculate week end date
-        const weekStart = new Date(weekStartDate);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        const weekEndStr = londonYmdAddDays(weekStartDate, 6);
         
         if (isPostgreSQL) {
             // Get all timesheet entries for the week, grouped by date
             const entriesResult = await pool.query(
                 `SELECT 
                     te.id,
-                    DATE(te.clock_in_time) as entry_date,
+                    ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
                     te.clock_in_latitude,
@@ -9733,12 +9593,12 @@ class ProductionDatabase {
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
                  LEFT JOIN weekly_timesheets wt ON wt.user_id = te.user_id AND wt.week_start_date = $2::date
-                 LEFT JOIN timesheet_daily_entries tde ON tde.weekly_timesheet_id = wt.id AND DATE(te.clock_in_time) = tde.entry_date
+                 LEFT JOIN timesheet_daily_entries tde ON tde.weekly_timesheet_id = wt.id AND ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) = tde.entry_date
                  WHERE te.user_id = $1 
                    AND te.clock_out_time IS NOT NULL
-                   AND DATE(te.clock_in_time) >= $2::date
-                   AND DATE(te.clock_in_time) <= $3::date
-                 ORDER BY DATE(te.clock_in_time), te.clock_in_time`,
+                   AND ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) >= $2::date
+                   AND ((te.clock_in_time AT TIME ZONE 'Europe/London')::date) <= $3::date
+                 ORDER BY ((te.clock_in_time AT TIME ZONE 'Europe/London')::date), te.clock_in_time`,
                 [userId, weekStartDate, weekEndStr]
             );
             
@@ -9762,10 +9622,7 @@ class ProductionDatabase {
                 );
                 
                 dailyDataResult.rows.forEach(row => {
-                    // Normalize entry_date to YYYY-MM-DD string format for consistent matching
-                    const normalizedDate = row.entry_date instanceof Date 
-                        ? row.entry_date.toISOString().split('T')[0]
-                        : (row.entry_date ? new Date(row.entry_date).toISOString().split('T')[0] : null);
+                    const normalizedDate = ymdFromDbOrInstant(row.entry_date);
                     if (normalizedDate) {
                         dailyDataMap[normalizedDate] = {
                             daily_notes: row.daily_notes,
@@ -9779,10 +9636,7 @@ class ProductionDatabase {
             // Merge daily notes, day_type, and overnight_away into entries
             // Normalize entry_date to YYYY-MM-DD format for consistency
             const entries = entriesResult.rows.map(entry => {
-                // Normalize entry_date to YYYY-MM-DD string format
-                const entryDate = entry.entry_date instanceof Date 
-                    ? entry.entry_date.toISOString().split('T')[0]
-                    : (entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : null);
+                const entryDate = ymdFromDbOrInstant(entry.entry_date);
                 const dailyData = entryDate ? (dailyDataMap[entryDate] || {}) : {};
                 return {
                     ...entry,
@@ -9815,22 +9669,16 @@ class ProductionDatabase {
                             regularHours = 0;
                             totalHours = 0;
                         } else if (dailyData.day_type === 'sick_paid') {
-                            // Paid sick: 8 hours Mon-Thu, 6 hours Friday
-                            const dateObj = new Date(normalizedDate);
-                            const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                            const dayOfWeek = londonWeekdaySun0FromYmd(normalizedDate);
                             if (dayOfWeek === 5) {
-                                // Friday
                                 regularHours = 6;
                                 totalHours = 6;
                             } else {
-                                // Monday to Thursday
                                 regularHours = 8;
                                 totalHours = 8;
                             }
                         } else if (dailyData.day_type === 'holiday_paid') {
-                            // Paid holiday: Friday = 6 hours, Mon-Thu = 8 (same as sick_paid)
-                            const dateObj = new Date(normalizedDate);
-                            const dayOfWeek = dateObj.getDay();
+                            const dayOfWeek = londonWeekdaySun0FromYmd(normalizedDate);
                             if (dayOfWeek === 5) {
                                 regularHours = 6;
                                 totalHours = 6;
@@ -9876,11 +9724,11 @@ class ProductionDatabase {
                 return new Date(a.clock_in_time) - new Date(b.clock_in_time);
             });
         } else {
-            // Get all timesheet entries for the week, grouped by date
+            const weekStartUtc = londonDayStartUtc(weekStartDate);
+            const afterWeekUtc = londonNextDayStartUtc(weekEndStr);
             const entriesResult = db.prepare(
                 `SELECT 
                     te.id,
-                    DATE(te.clock_in_time) as entry_date,
                     te.clock_in_time,
                     te.clock_out_time,
                     te.clock_in_latitude,
@@ -9894,18 +9742,15 @@ class ProductionDatabase {
                     te.total_hours,
                     te.edited_by_admin_id,
                     te.edited_by_admin_at,
-                    tde.day_type,
                     j.name as job_name
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
-                 LEFT JOIN weekly_timesheets wt ON wt.user_id = te.user_id AND wt.week_start_date = ?
-                 LEFT JOIN timesheet_daily_entries tde ON tde.weekly_timesheet_id = wt.id AND DATE(te.clock_in_time) = tde.entry_date
                  WHERE te.user_id = ? 
                    AND te.clock_out_time IS NOT NULL
-                   AND DATE(te.clock_in_time) >= ?
-                   AND DATE(te.clock_in_time) <= ?
-                 ORDER BY DATE(te.clock_in_time), te.clock_in_time`
-            ).all(weekStartDate, userId, weekStartDate, weekEndStr);
+                   AND te.clock_in_time >= ?
+                   AND te.clock_in_time < ?
+                 ORDER BY te.clock_in_time`
+            ).all(userId, weekStartUtc, afterWeekUtc);
             
             // Get daily notes and day_type for the week
             const weeklyTimesheet = db.prepare(
@@ -9925,10 +9770,7 @@ class ProductionDatabase {
                 ).all(weeklyTimesheet.id, weekStartDate, weekEndStr);
                 
                 dailyDataResult.forEach(row => {
-                    // Normalize entry_date to YYYY-MM-DD string format for consistent matching
-                    const normalizedDate = row.entry_date instanceof Date 
-                        ? row.entry_date.toISOString().split('T')[0]
-                        : (row.entry_date ? new Date(row.entry_date).toISOString().split('T')[0] : null);
+                    const normalizedDate = ymdFromDbOrInstant(row.entry_date);
                     if (normalizedDate) {
                         dailyDataMap[normalizedDate] = {
                             daily_notes: row.daily_notes,
@@ -9939,13 +9781,8 @@ class ProductionDatabase {
                 });
             }
             
-            // Merge daily notes, day_type, and overnight_away into entries
-            // Normalize entry_date to YYYY-MM-DD format for consistency
             const entries = entriesResult.map(entry => {
-                // Normalize entry_date to YYYY-MM-DD string format
-                const entryDate = entry.entry_date instanceof Date 
-                    ? entry.entry_date.toISOString().split('T')[0]
-                    : (entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : null);
+                const entryDate = londonYmd(new Date(entry.clock_in_time));
                 const dailyData = entryDate ? (dailyDataMap[entryDate] || {}) : {};
                 return {
                     ...entry,
@@ -9978,22 +9815,16 @@ class ProductionDatabase {
                             regularHours = 0;
                             totalHours = 0;
                         } else if (dailyData.day_type === 'sick_paid') {
-                            // Paid sick: 8 hours Mon-Thu, 6 hours Friday
-                            const dateObj = new Date(normalizedDate);
-                            const dayOfWeek = dateObj.getDay(); // 0 = Sunday, 5 = Friday
+                            const dayOfWeek = londonWeekdaySun0FromYmd(normalizedDate);
                             if (dayOfWeek === 5) {
-                                // Friday
                                 regularHours = 6;
                                 totalHours = 6;
                             } else {
-                                // Monday to Thursday
                                 regularHours = 8;
                                 totalHours = 8;
                             }
                         } else if (dailyData.day_type === 'holiday_paid') {
-                            // Paid holiday: Friday = 6 hours, Mon-Thu = 8 (same as sick_paid)
-                            const dateObj = new Date(normalizedDate);
-                            const dayOfWeek = dateObj.getDay();
+                            const dayOfWeek = londonWeekdaySun0FromYmd(normalizedDate);
                             if (dayOfWeek === 5) {
                                 regularHours = 6;
                                 totalHours = 6;
@@ -11619,21 +11450,15 @@ class ProductionDatabase {
             return null;
         }
         
-        // Check if date is a weekday (skip weekends)
-        const dateObj = new Date(date);
-        const dayOfWeek = dateObj.getDay();
+        const ymd = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())
+            ? String(date).trim()
+            : londonYmd(new Date(date));
+        const dayOfWeek = londonWeekdaySun0FromYmd(ymd);
         if (dayOfWeek === 0 || dayOfWeek === 6) {
-            // Weekend, don't populate
             return null;
         }
         
-        // Find Monday of the week for this date
-        const day = dateObj.getDay();
-        const diff = dateObj.getDate() - day + (day === 0 ? -6 : 1);
-        const monday = new Date(dateObj);
-        monday.setDate(diff);
-        monday.setHours(0, 0, 0, 0);
-        const weekStartDate = monday.toISOString().split('T')[0];
+        const weekStartDate = londonMondayYmdFromYmd(ymd);
         
         // Get or create weekly timesheet
         const weeklyTimesheet = await this.getOrCreateWeeklyTimesheet(userId, weekStartDate);
@@ -11641,7 +11466,7 @@ class ProductionDatabase {
         // Get or create daily entry
         const dailyEntry = await this.getOrCreateDailyEntry(
             weeklyTimesheet.id,
-            date,
+            ymd,
             null // No timesheet_entry_id for holidays
         );
         
@@ -11676,25 +11501,19 @@ class ProductionDatabase {
     }
     
     static async checkAndPopulateApprovedHolidays(userId, weekStartDate) {
-        const weekStart = new Date(weekStartDate);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        const weekEndStr = weekEnd.toISOString().split('T')[0];
+        const weekEndStr = londonYmdAddDays(weekStartDate, 6);
         
         // Get approved holidays for this week
         const holidays = await this.getApprovedHolidaysInDateRange(weekStartDate, weekEndStr, userId);
         
-        // Populate timesheet entries for each holiday day
         for (const holiday of holidays) {
-            const start = new Date(holiday.start_date);
-            const end = new Date(holiday.end_date);
-            const current = new Date(Math.max(start, weekStart));
-            const weekEndDate = new Date(Math.min(end, weekEnd));
-            
-            while (current <= weekEndDate) {
-                const dateStr = current.toISOString().split('T')[0];
-                await this.populateHolidayTimesheetEntry(userId, dateStr, holiday.id);
-                current.setDate(current.getDate() + 1);
+            const startYmd = ymdFromDbOrInstant(holiday.start_date);
+            const endYmd = ymdFromDbOrInstant(holiday.end_date);
+            let cur = startYmd > weekStartDate ? startYmd : weekStartDate;
+            const last = endYmd < weekEndStr ? endYmd : weekEndStr;
+            while (cur <= last) {
+                await this.populateHolidayTimesheetEntry(userId, cur, holiday.id);
+                cur = londonYmdAddDays(cur, 1);
             }
         }
         

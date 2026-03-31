@@ -1112,7 +1112,7 @@
                                 const originalOut = amendment.original_clock_out_time ? formatDateTime(new Date(amendment.original_clock_out_time)) : '-';
                                 const amendedIn = amendment.amended_clock_in_time ? formatDateTime(new Date(amendment.amended_clock_in_time)) : '-';
                                 const amendedOut = amendment.amended_clock_out_time ? formatDateTime(new Date(amendment.amended_clock_out_time)) : '-';
-                                const dateStr = amendment.original_clock_in_time ? new Date(amendment.original_clock_in_time).toISOString().split('T')[0] : '-';
+                                const dateStr = amendment.original_clock_in_time ? londonYmd(new Date(amendment.original_clock_in_time)) : '-';
                                 return `
                                     <tr>
                                         <td>${escapeHtml(amendment.username || 'Unknown')}</td>
@@ -1546,8 +1546,7 @@
             const dateInput = document.getElementById('reopenDateInput');
             let dateStr = dateInput && dateInput.value ? dateInput.value.trim() : null;
             if (!dateStr) {
-                const today = new Date();
-                dateStr = today.toISOString().split('T')[0];
+                dateStr = londonYmd(new Date());
             }
             if (!confirm('Reopen all clocked-out entries for ' + dateStr + '? They will show as on clock and can clock out as normal.')) {
                 return;
@@ -1593,13 +1592,7 @@
         }
         
         function getCurrentWeekStart() {
-            const today = new Date();
-            const dayOfWeek = today.getDay();
-            const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const monday = new Date(today);
-            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            return monday.toISOString().split('T')[0];
+            return londonMondayYmd(new Date());
         }
         
         function isWeekComplete(weekStartDate) {
@@ -1894,12 +1887,8 @@
                     return;
                 }
                 
-                // Get previous week's start date (last Monday)
-                // On Saturday, the previous week ended on Friday, so go back to last Monday
-                const lastMonday = new Date(today);
-                lastMonday.setDate(lastMonday.getDate() - 5); // Go back 5 days from Saturday to get last Monday
-                lastMonday.setHours(0, 0, 0, 0);
-                const weekStartStr = lastMonday.toISOString().split('T')[0];
+                // Previous completed week (London): Monday before this week
+                const weekStartStr = londonYmdAddDays(londonMondayYmd(new Date()), -7);
                 
                 // Get payroll summary for previous week
                 const data = await apiCall(`/clock/payroll/${weekStartStr}`);
@@ -1915,7 +1904,7 @@
                 
                 if (approvedCount < totalCount) {
                     const unapprovedCount = totalCount - approvedCount;
-                    const weekStartFormatted = lastMonday.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                    const weekStartFormatted = formatDate(weekStartStr);
                     
                     // Show prominent reminder
                     const reminderHtml = `
@@ -1984,12 +1973,10 @@
                         }
                         
                         // Generate all dates for the week
-                        const weekStartDate = new Date(weekStart);
+                        const ws = typeof weekStart === 'string' ? weekStart.slice(0, 10) : londonYmd(weekStart);
                         const weekDates = [];
                         for (let i = 0; i < 7; i++) {
-                            const date = new Date(weekStartDate);
-                            date.setDate(weekStartDate.getDate() + i);
-                            weekDates.push(date.toISOString().split('T')[0]);
+                            weekDates.push(londonYmdAddDays(ws, i));
                         }
                         
                         // Group entries by date to show daily totals

@@ -2,6 +2,62 @@
 
 const API_BASE = '/production/api';
 
+/** UK civil dates / week boundaries (Europe/London, GMT/BST). */
+const UK_TIMEZONE = 'Europe/London';
+
+function londonYmd(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: UK_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).format(d);
+}
+
+function londonWeekdayOffsetFromMonday(date) {
+    const long = new Intl.DateTimeFormat('en-GB', {
+        timeZone: UK_TIMEZONE,
+        weekday: 'long'
+    }).format(date instanceof Date ? date : new Date(date));
+    const map = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5, Sunday: 6 };
+    return map[long];
+}
+
+function londonMondayYmd(date = new Date()) {
+    const d = date instanceof Date ? date : new Date(date);
+    const ymd = londonYmd(d);
+    const [y, m, day] = ymd.split('-').map(Number);
+    const wd = londonWeekdayOffsetFromMonday(d);
+    const t = new Date(Date.UTC(y, m - 1, day));
+    t.setUTCDate(t.getUTCDate() - wd);
+    const yy = t.getUTCFullYear();
+    const mm = String(t.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(t.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+}
+
+function londonYmdAddDays(ymd, delta) {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const t = new Date(Date.UTC(y, m - 1, d));
+    t.setUTCDate(t.getUTCDate() + delta);
+    const yy = t.getUTCFullYear();
+    const mm = String(t.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(t.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+}
+
+/** Plain YYYY-MM-DD or timestamp → London calendar date string. */
+function ymdFromDbOrInstant(val) {
+    if (val == null || val === '') {
+        return null;
+    }
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) {
+        return val.trim();
+    }
+    return londonYmd(new Date(val));
+}
+
 // API helper function
 async function apiCall(endpoint, options = {}) {
     try {
@@ -139,6 +195,7 @@ function formatDate(dateString) {
     if (!dateString) return '-';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-GB', {
+        timeZone: UK_TIMEZONE,
         year: 'numeric',
         month: 'short',
         day: 'numeric'
@@ -150,6 +207,7 @@ function formatDateTime(dateString) {
     if (!dateString) return '-';
     const date = new Date(dateString);
     return date.toLocaleString('en-GB', {
+        timeZone: UK_TIMEZONE,
         year: 'numeric',
         month: 'short',
         day: 'numeric',

@@ -906,13 +906,7 @@
         let currentWeekStart = null;
         
         function getCurrentWeekStart() {
-            const today = new Date();
-            const dayOfWeek = today.getDay();
-            const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-            const monday = new Date(today);
-            monday.setDate(monday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-            monday.setHours(0, 0, 0, 0);
-            return monday.toISOString().split('T')[0];
+            return londonMondayYmd(new Date());
         }
         
         // Round hours down to 15-minute intervals (0.25 hour increments)
@@ -935,20 +929,19 @@
         }
         
         function getWeekDates(weekStart) {
-            const start = new Date(weekStart);
+            const ws = typeof weekStart === 'string' ? weekStart.slice(0, 10) : londonYmd(weekStart);
             const dates = [];
             for (let i = 0; i < 7; i++) {
-                const date = new Date(start);
-                date.setDate(start.getDate() + i);
-                dates.push(date.toISOString().split('T')[0]);
+                dates.push(londonYmdAddDays(ws, i));
             }
             return dates;
         }
         
         function getDayName(dateStr) {
-            const date = new Date(dateStr);
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            return days[date.getDay()];
+            const ymd = String(dateStr).slice(0, 10);
+            const [y, m, d] = ymd.split('-').map(Number);
+            const inst = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+            return new Intl.DateTimeFormat('en-GB', { timeZone: UK_TIMEZONE, weekday: 'long' }).format(inst);
         }
         
         // Activity points functions
@@ -1054,7 +1047,7 @@
                 // Map daily entries - normalize entry_date format to YYYY-MM-DD
                 dailyEntries.forEach(entry => {
                     // Normalize date format to ensure consistent matching
-                    const normalizedDate = entry.entry_date ? new Date(entry.entry_date).toISOString().split('T')[0] : entry.entry_date;
+                    const normalizedDate = ymdFromDbOrInstant(entry.entry_date) || entry.entry_date;
                     entriesMap[normalizedDate] = {
                         ...entry,
                         entry_date: normalizedDate,
@@ -1067,8 +1060,7 @@
                 
                 // Group all timesheet entries by date
                 timesheetEntries.forEach(te => {
-                    const clockInDate = new Date(te.clock_in_time);
-                    const dateStr = clockInDate.toISOString().split('T')[0];
+                    const dateStr = londonYmd(new Date(te.clock_in_time));
                     
                     if (!timesheetEntriesByDate[dateStr]) {
                         timesheetEntriesByDate[dateStr] = [];
@@ -1113,8 +1105,7 @@
                     const dayName = getDayName(dateStr);
                     const date = new Date(dateStr);
                     const isCurrentWeek = weekStart === getCurrentWeekStart();
-                    const today = new Date();
-                    const isToday = dateStr === today.toISOString().split('T')[0];
+                    const isToday = dateStr === londonYmd(new Date());
                     
                     // Debug: Log entry data for activities
                     if (isCurrentWeek && entry) {
@@ -1382,16 +1373,12 @@
         
         function previousWeek() {
             if (!currentWeekStart) return;
-            const date = new Date(currentWeekStart);
-            date.setDate(date.getDate() - 7);
-            loadWeeklyTimesheet(date.toISOString().split('T')[0]);
+            loadWeeklyTimesheet(londonYmdAddDays(currentWeekStart.slice(0, 10), -7));
         }
         
         function nextWeek() {
             if (!currentWeekStart) return;
-            const date = new Date(currentWeekStart);
-            date.setDate(date.getDate() + 7);
-            loadWeeklyTimesheet(date.toISOString().split('T')[0]);
+            loadWeeklyTimesheet(londonYmdAddDays(currentWeekStart.slice(0, 10), 7));
         }
         
         function showAddActivityForm(dateStr) {
@@ -1428,8 +1415,7 @@
                 return;
             }
             
-            // Normalize date format to YYYY-MM-DD
-            const normalizedDate = new Date(dateStr).toISOString().split('T')[0];
+            const normalizedDate = ymdFromDbOrInstant(dateStr) || dateStr;
             
             try {
                 let activities = [];
@@ -1445,7 +1431,7 @@
                     // If not found, try to find with any date format match
                     if (!dayEntry) {
                         dayEntry = weeklyData.dailyEntries.find(e => {
-                            const entryDate = new Date(e.entry_date).toISOString().split('T')[0];
+                            const entryDate = ymdFromDbOrInstant(e.entry_date);
                             return entryDate === normalizedDate;
                         });
                     }
@@ -1517,8 +1503,7 @@
                 return;
             }
             
-            // Normalize date format to YYYY-MM-DD
-            const normalizedDate = new Date(dateStr).toISOString().split('T')[0];
+            const normalizedDate = ymdFromDbOrInstant(dateStr) || dateStr;
             
             try {
                 // Get current activities
@@ -1532,7 +1517,7 @@
                     // If not found, try to find with any date format match
                     if (!dayEntry) {
                         dayEntry = weeklyData.dailyEntries.find(e => {
-                            const entryDate = new Date(e.entry_date).toISOString().split('T')[0];
+                            const entryDate = ymdFromDbOrInstant(e.entry_date);
                             return entryDate === normalizedDate;
                         });
                     }
@@ -1872,9 +1857,9 @@
                     try {
                         const weeklyData = await apiCall(`/clock/weekly/${currentWeekStart || getCurrentWeekStart()}`);
                         if (weeklyData && weeklyData.success && weeklyData.timesheetEntries) {
-                            const entryDate = new Date(clockInISO).toISOString().split('T')[0];
+                            const entryDate = londonYmd(new Date(clockInISO));
                             const existingEntry = weeklyData.timesheetEntries.find(te => {
-                                const teDate = new Date(te.clock_in_time).toISOString().split('T')[0];
+                                const teDate = londonYmd(new Date(te.clock_in_time));
                                 return teDate === entryDate && te.clock_out_time;
                             });
                             
