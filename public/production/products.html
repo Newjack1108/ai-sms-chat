@@ -175,7 +175,7 @@
             if (value == null || value === '') return '—';
             const d = new Date(value);
             if (Number.isNaN(d.getTime())) return '—';
-            return d.toLocaleString();
+            return d.toLocaleDateString();
         }
 
         async function loadProducts() {
@@ -233,7 +233,7 @@
                             <th>Category</th>
                             <th>Type</th>
                             <th>Status</th>
-                            <th>Last push to sales</th>
+                            <th>Last push date</th>
                             <th>Cost (Auto)</th>
                             <th>Actions</th>
                         </tr>
