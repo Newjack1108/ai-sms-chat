@@ -185,6 +185,7 @@
                                         <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewPanelDetails(${panel.id})" class="btn btn-success btn-sm">Details</button>
                                         ${currentUser.role === 'admin' ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        ${currentUser.role === 'admin' ? `<button onclick="duplicateBuiltItem(${panel.id})" class="btn btn-info btn-sm">Duplicate</button>` : ''}
                                         ${currentUser.role === 'admin' ? `<button onclick="deletePanel(${panel.id}, event)" data-panel-id="${panel.id}" data-panel-name="${(panel.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
@@ -494,6 +495,17 @@
                 viewBOM(panelId);
             } catch (error) {
                 showAlert(error.message, 'error');
+            }
+        }
+        
+        async function duplicateBuiltItem(id) {
+            if (!confirm('Duplicate this built item? This will create a copy with the same BOM and a new ID.')) return;
+            try {
+                await apiCall(`/panels/${id}/duplicate`, { method: 'POST' });
+                showAlert('Built item duplicated');
+                loadPanels();
+            } catch (error) {
+                showAlert(error.message || 'Failed to duplicate built item', 'error');
             }
         }
         

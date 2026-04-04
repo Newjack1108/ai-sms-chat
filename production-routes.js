@@ -524,6 +524,20 @@ router.delete('/panels/:id', requireProductionAuth, requireAdminOrOffice, async 
     }
 });
 
+router.post('/panels/:id/duplicate', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id);
+        const panel = await ProductionDatabase.duplicatePanel(panelId);
+        if (!panel) {
+            return res.status(404).json({ success: false, error: 'Built item not found' });
+        }
+        res.json({ success: true, panel });
+    } catch (error) {
+        console.error('Duplicate panel error:', error);
+        res.status(500).json({ success: false, error: 'Failed to duplicate built item' });
+    }
+});
+
 router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);

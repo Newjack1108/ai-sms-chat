@@ -2710,6 +2710,42 @@ class ProductionDatabase {
         }
     }
     
+    static async duplicatePanel(sourcePanelId) {
+        const source = await this.getPanelById(sourcePanelId);
+        if (!source) {
+            return null;
+        }
+        const allPanels = await this.getAllPanels();
+        const baseName = source.name;
+        let newName = `${baseName} (Copy)`;
+        let copyNumber = 1;
+        while (allPanels.some((p) => p.name === newName)) {
+            copyNumber++;
+            newName = `${baseName} (Copy ${copyNumber})`;
+        }
+        const duplicate = await this.createPanel({
+            name: newName,
+            description: source.description || '',
+            panel_type: source.panel_type || '',
+            status: source.status || 'active',
+            built_quantity: 0,
+            min_stock: source.min_stock || 0,
+            max_stock: source.max_stock || 0,
+            labour_hours: source.labour_hours || 0
+        });
+        const bomItems = await this.getPanelBOM(sourcePanelId);
+        for (const row of bomItems) {
+            await this.addBOMItem(
+                duplicate.id,
+                row.item_type,
+                row.item_id,
+                parseFloat(row.quantity_required),
+                row.unit
+            );
+        }
+        return await this.getPanelById(duplicate.id);
+    }
+    
     // ============ BOM OPERATIONS ============
     
     static async addBOMItem(panelId, itemType, itemId, quantityRequired, unit) {
