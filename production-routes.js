@@ -977,7 +977,7 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -987,6 +987,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             name,
             description,
             product_type,
+            is_optional_extra,
             category,
             status,
             estimated_load_time,
@@ -1004,13 +1005,14 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes } = req.body;
+        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         
         // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
             product_type,
+            is_optional_extra,
             category,
             status,
             estimated_load_time,
@@ -1078,6 +1080,9 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
         const costData = await ProductionDatabase.calculateProductCost(productId);
         const priceExVat = parseFloat(costData ?? product.cost_gbp ?? 0) || 0;
         const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
+        const salesProductType = product.is_optional_extra
+            ? 'optional_extra'
+            : (product.product_type || '').trim();
 
         const payload = {
             product_id: productId,
@@ -1085,7 +1090,8 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
             description: product.description || '',
             price_ex_vat: priceExVat,
             install_hours: parseFloat(product.estimated_install_time ?? 0) || 0,
-            number_of_boxes: numberOfBoxes
+            number_of_boxes: numberOfBoxes,
+            product_type: salesProductType
         };
 
         const headers = {
@@ -1211,6 +1217,7 @@ router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffi
             name: newName,
             description: originalProduct.description || '',
             product_type: originalProduct.product_type || '',
+            is_optional_extra: !!originalProduct.is_optional_extra,
             category: originalProduct.category || 'Other',
             status: originalProduct.status || 'active',
             estimated_load_time: originalProduct.estimated_load_time ?? 0,

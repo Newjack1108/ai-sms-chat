@@ -176,6 +176,7 @@ function initializeSQLite() {
             name TEXT NOT NULL,
             description TEXT,
             product_type TEXT,
+            is_optional_extra INTEGER NOT NULL DEFAULT 0,
             category TEXT DEFAULT 'Other',
             status TEXT DEFAULT 'active',
             cost_gbp REAL DEFAULT 0,
@@ -268,6 +269,11 @@ function initializeSQLite() {
         if (!hasNumberOfBoxes) {
             db.exec('ALTER TABLE finished_products ADD COLUMN number_of_boxes INTEGER DEFAULT 1');
             console.log('✅ Added number_of_boxes column to finished_products table');
+        }
+        const hasOptionalExtra = tableInfo.some(col => col.name === 'is_optional_extra');
+        if (!hasOptionalExtra) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN is_optional_extra INTEGER NOT NULL DEFAULT 0');
+            console.log('✅ Added is_optional_extra column to finished_products table');
         }
     } catch (error) {
         console.log('⚠️ Finished products migration check skipped:', error.message);
@@ -1202,6 +1208,7 @@ async function initializePostgreSQL() {
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
                 product_type VARCHAR(100),
+                is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE,
                 category VARCHAR(100) DEFAULT 'Other',
                 status VARCHAR(50) DEFAULT 'active',
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
@@ -1307,6 +1314,15 @@ async function initializePostgreSQL() {
             if (numberOfBoxesCheck.rows.length === 0) {
                 await pool.query(`ALTER TABLE finished_products ADD COLUMN number_of_boxes INTEGER DEFAULT 1`);
                 console.log('✅ Added number_of_boxes column to finished_products table');
+            }
+            const optionalExtraCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'finished_products' AND column_name = 'is_optional_extra'
+            `);
+            if (optionalExtraCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE`);
+                console.log('✅ Added is_optional_extra column to finished_products table');
             }
         } catch (error) {
             console.log('⚠️ Finished products migration check skipped:', error.message);
@@ -4601,12 +4617,13 @@ class ProductionDatabase {
         const estimatedInstallTime = parseFloat(data.estimated_install_time || 0);
         const estimatedTravelTime = parseFloat(data.estimated_travel_time || 0);
         const numberOfBoxes = parseInt(data.number_of_boxes || 1, 10) || 1;
+        const isOptionalExtra = !!data.is_optional_extra;
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-                [data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
+                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+                [data.name, data.description, data.product_type, isOptionalExtra, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist and includes load time)
@@ -4614,10 +4631,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
+            const info = stmt.run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation (includes load time)
             await this.updateProductCost(product.id);
@@ -4635,11 +4652,16 @@ class ProductionDatabase {
     }
     
     static async getAllProducts() {
+        const sql = `
+            SELECT fp.*,
+                (SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at
+            FROM finished_products fp
+            ORDER BY name`;
         if (isPostgreSQL) {
-            const result = await pool.query(`SELECT * FROM finished_products ORDER BY name`);
+            const result = await pool.query(sql);
             return result.rows;
         } else {
-            return db.prepare(`SELECT * FROM finished_products ORDER BY name`).all();
+            return db.prepare(sql).all();
         }
     }
     
@@ -4665,19 +4687,20 @@ class ProductionDatabase {
         const estimatedInstallTime = data.estimated_install_time !== undefined ? parseFloat(data.estimated_install_time || 0) : null;
         const estimatedTravelTime = data.estimated_travel_time !== undefined ? parseFloat(data.estimated_travel_time || 0) : null;
         const numberOfBoxes = data.number_of_boxes !== undefined ? (parseInt(data.number_of_boxes, 10) || 1) : null;
+        const isOptionalExtra = !!data.is_optional_extra;
         
         if (isPostgreSQL) {
             let query;
             let params;
             
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5, estimated_load_time = $6, estimated_install_time = $7, estimated_travel_time = $8, number_of_boxes = $9
-                         WHERE id = $10 RETURNING *`;
-                params = [data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, is_optional_extra = $4, category = $5, status = $6, estimated_load_time = $7, estimated_install_time = $8, estimated_travel_time = $9, number_of_boxes = $10
+                         WHERE id = $11 RETURNING *`;
+                params = [data.name, data.description, data.product_type, isOptionalExtra, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
             } else {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, category = $4, status = $5
-                         WHERE id = $6 RETURNING *`;
-                params = [data.name, data.description, data.product_type, data.category || 'Other', data.status, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, is_optional_extra = $4, category = $5, status = $6
+                         WHERE id = $7 RETURNING *`;
+                params = [data.name, data.description, data.product_type, isOptionalExtra, data.category || 'Other', data.status, id];
             }
             
             await pool.query(query, params);
@@ -4688,14 +4711,14 @@ class ProductionDatabase {
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
                 const boxes = numberOfBoxes !== null ? numberOfBoxes : 1;
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, is_optional_extra = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
+                ).run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
             } else {
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, category = ?, status = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, is_optional_extra = ?, category = ?, status = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, data.category || 'Other', data.status, id);
+                ).run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, id);
             }
             // Recalculate cost automatically (includes load time)
             await this.updateProductCost(id);
@@ -5158,9 +5181,9 @@ class ProductionDatabase {
             );
             if (found.rows[0]) return found.rows[0];
             const created = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-                [name, 'Order from LeadLock sales app', 'product', 'LeadLock', 'active', 0, 0, 0, 0, 1]
+                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+                [name, 'Order from LeadLock sales app', 'product', false, 'LeadLock', 'active', 0, 0, 0, 0, 1]
             );
             return created.rows[0];
         } else {
@@ -5169,9 +5192,9 @@ class ProductionDatabase {
             ).get(name);
             if (found) return found;
             const info = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(name, 'Order from LeadLock sales app', 'product', 'LeadLock', 'active', 0, 0, 0, 0, 1);
+                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).run(name, 'Order from LeadLock sales app', 'product', 0, 'LeadLock', 'active', 0, 0, 0, 0, 1);
             return db.prepare(`SELECT * FROM finished_products WHERE id = ?`).get(info.lastInsertRowid);
         }
     }
