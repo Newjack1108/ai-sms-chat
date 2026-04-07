@@ -524,7 +524,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" onclick="closeAmendmentModal()">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Submit Request</button>
+                        <button type="submit" id="amendmentSubmitBtn" class="btn btn-primary">Submit Request</button>
                     </div>
                 </form>
             </div>
@@ -568,7 +568,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" onclick="closeAddMissingTimesModal()">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Submit Request</button>
+                        <button type="submit" id="missingTimesSubmitBtn" class="btn btn-primary">Submit Request</button>
                     </div>
                 </form>
             </div>
@@ -580,6 +580,8 @@
         console.log('=== TIMESHEET PAGE SCRIPT LOADING ===');
         let currentUser = null;
         let currentStatus = null;
+        let amendmentFormSubmitting = false;
+        let missingTimesFormSubmitting = false;
         let jobs = [];
         let currentLocation = null;
         let hasCompletedToday = false;
@@ -1817,6 +1819,7 @@
         
         document.getElementById('addMissingTimesForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (missingTimesFormSubmitting) return;
             
             const dateStr = document.getElementById('missingTimesDate').value;
             const jobId = parseInt(document.getElementById('missingTimesJob').value);
@@ -1829,6 +1832,13 @@
             const clockInISO = new Date(clockIn).toISOString();
             const clockOutISO = new Date(clockOut).toISOString();
             
+            const missingBtn = document.getElementById('missingTimesSubmitBtn');
+            const missingBtnText = missingBtn ? missingBtn.textContent : '';
+            missingTimesFormSubmitting = true;
+            if (missingBtn) {
+                missingBtn.disabled = true;
+                missingBtn.textContent = 'Submitting…';
+            }
             try {
                 const data = await apiCall('/clock/missing-times', {
                     method: 'POST',
@@ -1883,11 +1893,18 @@
                         // Ignore error - just show the main error message
                     }
                 }
+            } finally {
+                missingTimesFormSubmitting = false;
+                if (missingBtn) {
+                    missingBtn.disabled = false;
+                    missingBtn.textContent = missingBtnText || 'Submit Request';
+                }
             }
         });
         
         document.getElementById('amendmentForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (amendmentFormSubmitting) return;
             
             const entryId = parseInt(document.getElementById('amendmentEntryId').value);
             const amendedClockIn = document.getElementById('amendedClockIn').value;
@@ -1921,6 +1938,13 @@
                 }
             }
             
+            const amendBtn = document.getElementById('amendmentSubmitBtn');
+            const amendBtnText = amendBtn ? amendBtn.textContent : '';
+            amendmentFormSubmitting = true;
+            if (amendBtn) {
+                amendBtn.disabled = true;
+                amendBtn.textContent = 'Submitting…';
+            }
             try {
                 await apiCall('/clock/amendments', {
                     method: 'POST',
@@ -1950,6 +1974,12 @@
                 }
                 
                 showAlert(errorMsg, 'error');
+            } finally {
+                amendmentFormSubmitting = false;
+                if (amendBtn) {
+                    amendBtn.disabled = false;
+                    amendBtn.textContent = amendBtnText || 'Submit Request';
+                }
             }
         });
         

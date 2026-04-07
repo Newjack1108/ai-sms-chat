@@ -14,6 +14,25 @@ const {
     londonWeekdaySun0FromYmd
 } = require('./uk-datetime');
 
+const PENDING_AMENDMENT_EXISTS_MSG =
+    'A pending amendment already exists for this entry. Wait for review or contact a manager.';
+
+function isPendingAmendmentUniqueViolation(error) {
+    if (!error) return false;
+    if (error.code === '23505') return true;
+    const msg = (error.message || '').toLowerCase();
+    if (msg.includes('idx_amendments_one_pending_per_entry')) return true;
+    const code = String(error.code ?? '');
+    if (
+        (code.includes('SQLITE_CONSTRAINT') || code === '19') &&
+        msg.includes('timesheet_amendments') &&
+        msg.includes('unique')
+    ) {
+        return true;
+    }
+    return false;
+}
+
 // ============ AUTHENTICATION ROUTES ============
 
 router.post('/login', async (req, res) => {
@@ -3090,6 +3109,11 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
             }
         }
         
+        const existingPending = await ProductionDatabase.getPendingAmendmentForEntry(entry_id);
+        if (existingPending) {
+            return res.status(409).json({ success: false, error: PENDING_AMENDMENT_EXISTS_MSG });
+        }
+        
         const amendment = await ProductionDatabase.requestTimeAmendment(
             entry_id,
             userId,
@@ -3101,6 +3125,9 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
         res.json({ success: true, amendment });
     } catch (error) {
         console.error('Request amendment error:', error);
+        if (isPendingAmendmentUniqueViolation(error)) {
+            return res.status(409).json({ success: false, error: PENDING_AMENDMENT_EXISTS_MSG });
+        }
         res.status(500).json({ success: false, error: 'Failed to request amendment' });
     }
 });

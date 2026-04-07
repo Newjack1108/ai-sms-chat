@@ -53,6 +53,61 @@ if (!isPostgreSQL) {
     }
 }
 
+function ensureSQLitePendingAmendmentUniqueness() {
+    if (!db) return;
+    try {
+        db.exec(`
+            DELETE FROM timesheet_amendments
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT ta.id FROM timesheet_amendments ta
+                    INNER JOIN (
+                        SELECT timesheet_entry_id, MIN(id) AS keep_id
+                        FROM timesheet_amendments
+                        WHERE status = 'pending'
+                        GROUP BY timesheet_entry_id
+                        HAVING COUNT(*) > 1
+                    ) g ON g.timesheet_entry_id = ta.timesheet_entry_id
+                    WHERE ta.status = 'pending' AND ta.id != g.keep_id
+                )
+            )
+        `);
+        db.exec(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_amendments_one_pending_per_entry
+            ON timesheet_amendments(timesheet_entry_id) WHERE status = 'pending'
+        `);
+        console.log('✅ timesheet_amendments: at most one pending row per entry enforced');
+    } catch (error) {
+        console.log('⚠️ timesheet_amendments uniqueness migration:', error.message);
+    }
+}
+
+async function ensurePostgresPendingAmendmentUniqueness() {
+    if (!isPostgreSQL) return;
+    try {
+        await pool.query(`
+            DELETE FROM timesheet_amendments ta
+            USING (
+                SELECT timesheet_entry_id, MIN(id) AS keep_id
+                FROM timesheet_amendments
+                WHERE status = 'pending'
+                GROUP BY timesheet_entry_id
+                HAVING COUNT(*) > 1
+            ) d
+            WHERE ta.timesheet_entry_id = d.timesheet_entry_id
+              AND ta.status = 'pending'
+              AND ta.id <> d.keep_id
+        `);
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_amendments_one_pending_per_entry
+            ON timesheet_amendments (timesheet_entry_id) WHERE (status = 'pending')
+        `);
+        console.log('✅ timesheet_amendments: at most one pending row per entry enforced');
+    } catch (error) {
+        console.log('⚠️ timesheet_amendments uniqueness migration:', error.message);
+    }
+}
+
 // Initialize database schema
 async function initializeProductionDatabase() {
     if (isPostgreSQL) {
@@ -1091,6 +1146,8 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id);
         CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date);
     `);
+    
+    ensureSQLitePendingAmendmentUniqueness();
     
     console.log('✅ Production SQLite database initialized');
 }
@@ -2297,6 +2354,8 @@ async function initializePostgreSQL() {
         // Create indexes for installation_days
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date)`);
+        
+        await ensurePostgresPendingAmendmentUniqueness();
         
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
@@ -9222,6 +9281,19 @@ class ProductionDatabase {
     }
     
     // Amendment operations
+    static async getPendingAmendmentForEntry(entryId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM timesheet_amendments WHERE timesheet_entry_id = $1 AND status = 'pending' LIMIT 1`,
+                [entryId]
+            );
+            return result.rows[0] || null;
+        }
+        return db.prepare(
+            `SELECT * FROM timesheet_amendments WHERE timesheet_entry_id = ? AND status = 'pending' LIMIT 1`
+        ).get(entryId) || null;
+    }
+    
     static async requestTimeAmendment(entryId, userId, amendedClockIn, amendedClockOut, reason) {
         const entry = await this.getTimesheetEntryById(entryId);
         if (!entry) {
