@@ -33,6 +33,36 @@ function isPendingAmendmentUniqueViolation(error) {
     return false;
 }
 
+/** Values accepted by the external sales app product sync API (422 if unknown). */
+const SALES_APP_PRODUCT_TYPES = new Set([
+    'cabin',
+    'cabins',
+    'extra',
+    'optional_extra',
+    'product',
+    'shed',
+    'sheds',
+    'stable',
+    'stables'
+]);
+
+/** Map production DB free-text types to sales enum values; unknown → product. */
+function productTypeForSalesPush(rawType, isOptionalExtra) {
+    if (isOptionalExtra) return 'optional_extra';
+    const normalized = (rawType || '').trim().toLowerCase();
+    if (!normalized) return 'product';
+    if (SALES_APP_PRODUCT_TYPES.has(normalized)) return normalized;
+    const synonyms = {
+        shelter: 'shed',
+        shelters: 'sheds',
+        'field shelter': 'shed',
+        'field shelters': 'sheds'
+    };
+    const mapped = synonyms[normalized];
+    if (mapped && SALES_APP_PRODUCT_TYPES.has(mapped)) return mapped;
+    return 'product';
+}
+
 // ============ AUTHENTICATION ROUTES ============
 
 router.post('/login', async (req, res) => {
@@ -1113,9 +1143,10 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
         const costData = await ProductionDatabase.calculateProductCost(productId);
         const priceExVat = parseFloat(costData ?? product.cost_gbp ?? 0) || 0;
         const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
-        const salesProductType = product.is_optional_extra
-            ? 'optional_extra'
-            : (product.product_type || '').trim();
+        const salesProductType = productTypeForSalesPush(
+            product.product_type,
+            !!product.is_optional_extra
+        );
 
         const payload = {
             product_id: productId,
