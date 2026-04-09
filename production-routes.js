@@ -38,7 +38,6 @@ const SALES_APP_PRODUCT_TYPES = new Set([
     'cabin',
     'cabins',
     'extra',
-    'optional_extra',
     'product',
     'shed',
     'sheds',
@@ -48,7 +47,7 @@ const SALES_APP_PRODUCT_TYPES = new Set([
 
 /** Map production DB free-text types to sales enum values; unknown → product. */
 function productTypeForSalesPush(rawType, isOptionalExtra) {
-    if (isOptionalExtra) return 'optional_extra';
+    if (isOptionalExtra) return 'extra';
     const normalized = (rawType || '').trim().toLowerCase();
     if (!normalized) return 'product';
     if (SALES_APP_PRODUCT_TYPES.has(normalized)) return normalized;
@@ -56,7 +55,8 @@ function productTypeForSalesPush(rawType, isOptionalExtra) {
         shelter: 'shed',
         shelters: 'sheds',
         'field shelter': 'shed',
-        'field shelters': 'sheds'
+        'field shelters': 'sheds',
+        optional_extra: 'extra'
     };
     const mapped = synonyms[normalized];
     if (mapped && SALES_APP_PRODUCT_TYPES.has(mapped)) return mapped;
@@ -255,7 +255,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        if (!['admin', 'office', 'staff'].includes(role)) {
+        if (!['admin', 'office', 'staff', 'installer'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -288,7 +288,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
         const { username, role, password } = req.body;
         const userId = parseInt(req.params.id);
         
-        if (role && !['admin', 'office', 'staff'].includes(role)) {
+        if (role && !['admin', 'office', 'staff', 'installer'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         

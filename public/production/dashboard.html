@@ -151,9 +151,12 @@
             const user = await checkAuth();
             if (!user) return;
             
-            // Redirect staff users to timesheet page (staff can access timesheet, tasks, reminders)
-            if (user.role === 'staff') {
-                const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html'];
+            // Redirect staff-like users away from dashboard (they use timesheet, tasks, reminders, holidays, calendar)
+            if (user.role === 'staff' || user.role === 'installer') {
+                const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html', 'holidays.html'];
+                if (user.role === 'installer') {
+                    allowedPages.push('installations.html');
+                }
                 const currentPage = window.location.pathname.split('/').pop();
                 if (!allowedPages.includes(currentPage)) {
                     window.location.href = 'timesheet.html';

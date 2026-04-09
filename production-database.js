@@ -128,7 +128,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
@@ -778,7 +778,7 @@ function initializeSQLite() {
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             `);
@@ -814,6 +814,55 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Status column migration check skipped:', error.message);
+    }
+    
+    // Migrate production_users role constraint to include 'installer' role
+    try {
+        const tableInfoInstaller = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
+        if (tableInfoInstaller && tableInfoInstaller.sql && !tableInfoInstaller.sql.includes("'installer'")) {
+            console.log('🔄 Migrating production_users table to support installer role...');
+            const installerUserCols = db.prepare("PRAGMA table_info(production_users)").all();
+            const installerHasStatus = installerUserCols.some(c => c.name === 'status');
+            
+            if (installerHasStatus) {
+                db.exec(`
+                    CREATE TABLE IF NOT EXISTS production_users_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT DEFAULT 'active'
+                    )
+                `);
+                db.exec(`
+                    INSERT INTO production_users_new (id, username, password_hash, role, created_at, status)
+                    SELECT id, username, password_hash, role, created_at, COALESCE(status, 'active')
+                    FROM production_users
+                `);
+            } else {
+                db.exec(`
+                    CREATE TABLE IF NOT EXISTS production_users_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
+                db.exec(`
+                    INSERT INTO production_users_new (id, username, password_hash, role, created_at)
+                    SELECT id, username, password_hash, role, created_at
+                    FROM production_users
+                `);
+            }
+            
+            db.exec('DROP TABLE production_users');
+            db.exec('ALTER TABLE production_users_new RENAME TO production_users');
+            console.log('✅ Migrated production_users table to support installer role');
+        }
+    } catch (error) {
+        console.log('⚠️ Installer role migration check skipped:', error.message);
     }
     
     // Migrate timesheet_entries to add hour calculation columns
@@ -1167,7 +1216,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'staff')),
+                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -1869,9 +1918,9 @@ async function initializePostgreSQL() {
                 await pool.query(`
                     ALTER TABLE production_users 
                     ADD CONSTRAINT production_users_role_check 
-                    CHECK (role IN ('admin', 'office', 'staff'))
+                    CHECK (role IN ('admin', 'office', 'staff', 'installer'))
                 `);
-                console.log('✅ Updated production_users role constraint to include office role');
+                console.log('✅ Updated production_users role constraint (admin, office, staff, installer)');
             } catch (e) {
                 // Constraint might already be correct or table doesn't exist yet
                 if (!e.message.includes('does not exist')) {

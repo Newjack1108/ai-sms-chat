@@ -263,12 +263,24 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// Check if user is staff and redirect to timesheet if they try to access restricted pages
+// Staff-like field roles: same nav restrictions; installers also get installation calendar
+function isRestrictedFieldStaff(user) {
+    return user && (user.role === 'staff' || user.role === 'installer');
+}
+
+function restrictedFieldStaffAllowedPages(user) {
+    const base = ['timesheet.html', 'tasks.html', 'reminders.html', 'holidays.html', 'login.html'];
+    if (user.role === 'installer') {
+        return [...base, 'installations.html'];
+    }
+    return base;
+}
+
+// Redirect staff-like users when they open pages outside their allowlist
 async function restrictStaffAccess() {
     const user = await checkAuth();
-    if (user && user.role === 'staff') {
-        // Staff can access timesheet, tasks, reminders, and holidays pages
-        const allowedPages = ['timesheet.html', 'tasks.html', 'reminders.html', 'holidays.html', 'login.html'];
+    if (isRestrictedFieldStaff(user)) {
+        const allowedPages = restrictedFieldStaffAllowedPages(user);
         const currentPage = window.location.pathname.split('/').pop();
         
         if (!allowedPages.includes(currentPage) && !window.location.pathname.includes('login.html')) {
@@ -294,8 +306,8 @@ async function initNavbar() {
             adminItems.forEach(item => item.style.display = 'none');
         }
         
-        // Hide admin-or-office items for staff (including items within dropdowns)
-        if (user.role === 'staff') {
+        // Hide admin-or-office items for staff and installers (including items within dropdowns)
+        if (isRestrictedFieldStaff(user)) {
             const adminOrOfficeItems = document.querySelectorAll('.admin-or-office');
             adminOrOfficeItems.forEach(item => {
                 // Check if it's a dropdown container - if so, hide the whole dropdown
@@ -308,10 +320,17 @@ async function initNavbar() {
             });
         }
         
-        // Hide manager-only items for staff (legacy support)
-        if (user.role === 'staff') {
+        // Hide manager-only items for staff and installers (legacy support)
+        if (isRestrictedFieldStaff(user)) {
             const managerItems = document.querySelectorAll('.manager-only');
             managerItems.forEach(item => item.style.display = 'none');
+        }
+        
+        // Show installer-only nav links for installers only
+        if (user.role === 'installer') {
+            document.querySelectorAll('.installer-only').forEach(item => {
+                item.style.display = '';
+            });
         }
         
         // Show office-only items only for office and admin

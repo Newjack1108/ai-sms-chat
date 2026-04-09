@@ -429,6 +429,7 @@
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
+            <a href="installations.html" class="btn btn-secondary btn-sm installer-only" style="display: none;">Installation calendar</a>
             <a href="holidays.html" class="btn btn-secondary btn-sm">Holidays</a>
             <a href="dashboard.html" class="btn btn-secondary btn-sm manager-only">Dashboard</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
@@ -599,8 +600,8 @@
             console.log('Initializing navbar...');
             initNavbar();
             
-            // Hide dashboard link for staff
-            if (currentUser.role === 'staff') {
+            // Hide dashboard link for staff-like roles (navbar also uses manager-only)
+            if (currentUser.role === 'staff' || currentUser.role === 'installer') {
                 const dashboardLink = document.querySelector('a[href="dashboard.html"]');
                 if (dashboardLink) {
                     dashboardLink.style.display = 'none';

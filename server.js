@@ -208,12 +208,20 @@ app.get('/production', requireProductionAuth, (req, res) => {
 
 // Production HTML pages (protected)
 app.get('/production/*.html', requireProductionAuth, (req, res) => {
-    // Redirect staff users to timesheet page (except timesheet.html itself)
-    if (req.session.production_user && 
-        req.session.production_user.role === 'staff' && 
-        !req.path.includes('timesheet.html') && 
-        !req.path.includes('login.html')) {
-        return res.redirect('/production/timesheet.html');
+    const pu = req.session.production_user;
+    const role = pu && pu.role;
+    const restrictedField = role === 'staff' || role === 'installer';
+    if (pu && restrictedField) {
+        const allowed =
+            req.path.includes('timesheet.html') ||
+            req.path.includes('login.html') ||
+            req.path.includes('tasks.html') ||
+            req.path.includes('reminders.html') ||
+            req.path.includes('holidays.html') ||
+            (role === 'installer' && req.path.includes('installations.html'));
+        if (!allowed) {
+            return res.redirect('/production/timesheet.html');
+        }
     }
     
     const fileName = req.path.replace('/production/', '') || 'dashboard.html';

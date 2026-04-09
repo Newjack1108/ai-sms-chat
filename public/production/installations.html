@@ -202,7 +202,7 @@
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
-            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <a href="dashboard.html" id="productionHomeNav" class="btn btn-secondary btn-sm">Dashboard</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
     </nav>
@@ -211,7 +211,7 @@
         <div class="card">
             <div class="card-header">
                 <h2>Installations</h2>
-                <button onclick="showAddInstallationModal()" class="btn btn-primary">Add Installation</button>
+                <button type="button" id="addInstallationBtn" onclick="showAddInstallationModal()" class="btn btn-primary">Add Installation</button>
             </div>
             
             <div class="calendar-controls">
@@ -370,17 +370,37 @@
         let worksOrders = [];
         let users = [];
         let editingInstallationId = null;
+        let canManageInstallations = false;
         
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
+            if (await restrictStaffAccess()) return;
+            const user = await checkAuth();
+            if (!user) return;
+            
+            canManageInstallations =
+                user.role === 'admin' ||
+                user.role === 'office' ||
+                user.role === 'manager';
+            
+            const home = document.getElementById('productionHomeNav');
+            if (home && (user.role === 'installer' || user.role === 'staff')) {
+                home.href = 'timesheet.html';
+                home.textContent = 'Timesheet';
+            }
+            
+            const addBtn = document.getElementById('addInstallationBtn');
+            if (addBtn && !canManageInstallations) {
+                addBtn.style.display = 'none';
+            }
+            
+            await initNavbar();
             await loadData();
             renderCalendar();
             
-            // Check if order_id is in URL params
             const urlParams = new URLSearchParams(window.location.search);
             const orderId = urlParams.get('order_id');
-            if (orderId) {
-                // Pre-fill the form with the works order
+            if (orderId && canManageInstallations) {
                 setTimeout(() => {
                     document.getElementById('installationWorksOrder').value = orderId;
                     showAddInstallationModal();
@@ -390,39 +410,38 @@
         
         async function loadData() {
             try {
-                // Load installations
                 const startDate = getStartOfPeriod();
                 const endDate = getEndOfPeriod();
                 const instResult = await apiCall(`/installations?start_date=${startDate}&end_date=${endDate}`);
                 installations = instResult.installations || [];
                 
-                // Load works orders
-                const ordersResult = await apiCall('/orders');
-                worksOrders = ordersResult.orders || [];
-                
-                // Load users (active only)
-                const usersResult = await apiCall('/users');
-                users = (usersResult.users || []).filter(u => u.status !== 'left_company');
-                
-                // Populate works order dropdown
-                const worksOrderSelect = document.getElementById('installationWorksOrder');
-                worksOrderSelect.innerHTML = '<option value="">None</option>';
-                worksOrders.forEach(order => {
-                    const option = document.createElement('option');
-                    option.value = order.id;
-                    option.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${order.quantity})`;
-                    worksOrderSelect.appendChild(option);
-                });
-                
-                // Populate user dropdown
-                const userSelect = document.getElementById('addUserSelect');
-                userSelect.innerHTML = '<option value="">Select user...</option>';
-                users.forEach(user => {
-                    const option = document.createElement('option');
-                    option.value = user.id;
-                    option.textContent = user.username;
-                    userSelect.appendChild(option);
-                });
+                if (canManageInstallations) {
+                    const ordersResult = await apiCall('/orders');
+                    worksOrders = ordersResult.orders || [];
+                    const usersResult = await apiCall('/users');
+                    users = (usersResult.users || []).filter(u => u.status !== 'left_company');
+                    
+                    const worksOrderSelect = document.getElementById('installationWorksOrder');
+                    worksOrderSelect.innerHTML = '<option value="">None</option>';
+                    worksOrders.forEach(order => {
+                        const option = document.createElement('option');
+                        option.value = order.id;
+                        option.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${order.quantity})`;
+                        worksOrderSelect.appendChild(option);
+                    });
+                    
+                    const userSelect = document.getElementById('addUserSelect');
+                    userSelect.innerHTML = '<option value="">Select user...</option>';
+                    users.forEach(u => {
+                        const option = document.createElement('option');
+                        option.value = u.id;
+                        option.textContent = u.username;
+                        userSelect.appendChild(option);
+                    });
+                } else {
+                    worksOrders = [];
+                    users = [];
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
                 showAlert('Error loading data: ' + error.message, 'error');
@@ -742,6 +761,7 @@
         }
         
         function showAddInstallationModal() {
+            if (!canManageInstallations) return;
             editingInstallationId = null;
             assignedUsers = [];
             dayOverrides = [];
@@ -760,6 +780,7 @@
         }
         
         async function showEditInstallationModal(id) {
+            if (!canManageInstallations) return;
             try {
                 editingInstallationId = id;
                 const result = await apiCall(`/installations/${id}`);
@@ -1173,10 +1194,11 @@
                                 inst.assigned_users.map(u => `<li>${u.username}${u.role ? ` (${u.role})` : ''}</li>`).join('') : 
                                 '<li>No users assigned</li>'}
                         </ul>
+                        ${canManageInstallations ? `
                         <div style="margin-top: 20px;">
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
                             <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>
-                        </div>
+                        </div>` : ''}
                     </div>
                 `;
                 
@@ -1188,6 +1210,7 @@
         }
         
         async function deleteInstallation(id) {
+            if (!canManageInstallations) return;
             if (!confirm('Are you sure you want to delete this installation?')) {
                 return;
             }

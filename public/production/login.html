@@ -204,8 +204,8 @@
                 console.log('Login response:', data);
                 
                 if (data.success) {
-                    // Redirect staff to timesheet, others to dashboard
-                    if (data.user && data.user.role === 'staff') {
+                    // Redirect staff and installers to timesheet, others to dashboard
+                    if (data.user && (data.user.role === 'staff' || data.user.role === 'installer')) {
                         window.location.href = '/production/timesheet.html';
                     } else {
                         window.location.href = '/production/dashboard.html';
