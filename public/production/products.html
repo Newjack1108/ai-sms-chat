@@ -59,14 +59,19 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Product Type</label>
-                    <input type="text" id="productType" class="form-input">
+                    <select id="productType" class="form-select">
+                        <option value="stables">Stables</option>
+                        <option value="sheds">Sheds</option>
+                        <option value="cabins">Cabins</option>
+                        <option value="other">Other</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                         <input type="checkbox" id="productOptionalExtra" style="width: auto;">
                         <span>Optional extra</span>
                     </label>
-                    <small style="color: #6c757d;">When checked, the sales app receives <code>product_type: extra</code> on push (otherwise the text above is mapped to allowed sales types, default <code>product</code>).</small>
+                    <small style="color: #6c757d;">When checked, the sales app receives <code>product_type: extra</code> on push (otherwise the selected type is sent: <code>stables</code>, <code>sheds</code>, <code>cabins</code>, or <code>other</code>).</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Category *</label>
@@ -132,6 +137,23 @@
         let currentProductId = null;
         let selectedCategory = 'all';
         let allProducts = [];
+
+        function normalizeProductTypeForSelect(value) {
+            const v = (value || '').toString().trim().toLowerCase();
+            if (!v) return 'other';
+            if (v === 'stables' || v === 'stable') return 'stables';
+            if (v === 'sheds' || v === 'shed' || v === 'shelter' || v === 'field shelter' || v === 'field shelters') return 'sheds';
+            if (v === 'cabins' || v === 'cabin') return 'cabins';
+            return 'other';
+        }
+
+        function productTypeLabel(value) {
+            const normalized = normalizeProductTypeForSelect(value);
+            if (normalized === 'stables') return 'Stables';
+            if (normalized === 'sheds') return 'Sheds';
+            if (normalized === 'cabins') return 'Cabins';
+            return 'Other';
+        }
         
         async function init() {
             // Redirect staff users
@@ -243,7 +265,7 @@
                             <tr>
                                 <td><strong>${product.name}</strong></td>
                                 <td><span class="badge badge-secondary">${product.category || 'Other'}</span></td>
-                                <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${product.product_type || (product.is_optional_extra ? '' : '—')}</td>
+                                <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>
                                 <td><span class="badge badge-info">${product.status}</span></td>
                                 <td>${formatPushedToSalesAt(product.last_pushed_to_sales_at)}</td>
                                 <td>${formatCurrency(product.calculated_cost)}</td>
@@ -288,6 +310,7 @@
             document.getElementById('productModalTitle').textContent = 'Add Product';
             document.getElementById('productForm').reset();
             document.getElementById('productId').value = '';
+            document.getElementById('productType').value = 'other';
             showModal('productModal');
         }
         
@@ -301,7 +324,7 @@
                 document.getElementById('productId').value = product.id;
                 document.getElementById('productName').value = product.name;
                 document.getElementById('productDescription').value = product.description || '';
-                document.getElementById('productType').value = product.product_type || '';
+                document.getElementById('productType').value = normalizeProductTypeForSelect(product.product_type);
                 document.getElementById('productOptionalExtra').checked = !!product.is_optional_extra;
                 document.getElementById('productCategory').value = product.category || 'Other';
                 document.getElementById('productLoadTime').value = product.estimated_load_time || 0;

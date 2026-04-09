@@ -33,34 +33,49 @@ function isPendingAmendmentUniqueViolation(error) {
     return false;
 }
 
-/** Values accepted by the external sales app product sync API (422 if unknown). */
-const SALES_APP_PRODUCT_TYPES = new Set([
-    'cabin',
-    'cabins',
-    'extra',
-    'product',
-    'shed',
-    'sheds',
-    'stable',
-    'stables'
-]);
+/** Canonical product types used in Production and LeadLock push. */
+const CANONICAL_PRODUCT_TYPES = new Set(['stables', 'sheds', 'cabins', 'other']);
 
-/** Map production DB free-text types to sales enum values; unknown → product. */
+/**
+ * Normalise DB / driver values so the optional-extra checkbox always drives sales correctly.
+ * Sales API expects product_type "extra" for add-ons.
+ */
+function isFinishedProductMarkedOptionalExtra(product) {
+    if (!product) return false;
+    const v = product.is_optional_extra;
+    if (v === true || v === 1) return true;
+    if (typeof v === 'string' && (v === '1' || v.toLowerCase() === 'true')) return true;
+    return false;
+}
+
+/** Map production DB free-text types to sales enum values; unknown → other. */
 function productTypeForSalesPush(rawType, isOptionalExtra) {
     if (isOptionalExtra) return 'extra';
+    const normalized = normalizeProductType(rawType);
+    if (CANONICAL_PRODUCT_TYPES.has(normalized)) return normalized;
+    return 'other';
+}
+
+/** Best-match legacy free-text types into canonical dropdown values. */
+function normalizeProductType(rawType) {
     const normalized = (rawType || '').trim().toLowerCase();
-    if (!normalized) return 'product';
-    if (SALES_APP_PRODUCT_TYPES.has(normalized)) return normalized;
+    if (!normalized) return 'other';
+    if (normalized === 'stables' || normalized === 'stable') return 'stables';
+    if (
+        normalized === 'sheds' ||
+        normalized === 'shed' ||
+        normalized === 'shelter' ||
+        normalized === 'field shelter' ||
+        normalized === 'field shelters'
+    ) return 'sheds';
+    if (normalized === 'cabins' || normalized === 'cabin') return 'cabins';
+    if (normalized === 'other') return 'other';
     const synonyms = {
-        shelter: 'shed',
-        shelters: 'sheds',
-        'field shelter': 'shed',
-        'field shelters': 'sheds',
-        optional_extra: 'extra'
+        optional_extra: 'other'
     };
     const mapped = synonyms[normalized];
-    if (mapped && SALES_APP_PRODUCT_TYPES.has(mapped)) return mapped;
-    return 'product';
+    if (mapped && CANONICAL_PRODUCT_TYPES.has(mapped)) return mapped;
+    return 'other';
 }
 
 // ============ AUTHENTICATION ROUTES ============
@@ -1041,6 +1056,7 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const normalizedProductType = normalizeProductType(product_type);
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -1049,7 +1065,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
         const product = await ProductionDatabase.createProduct({
             name,
             description,
-            product_type,
+            product_type: normalizedProductType,
             is_optional_extra,
             category,
             status,
@@ -1069,12 +1085,13 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
     try {
         const productId = parseInt(req.params.id);
         const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const normalizedProductType = normalizeProductType(product_type);
         
         // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
-            product_type,
+            product_type: normalizedProductType,
             is_optional_extra,
             category,
             status,
@@ -1145,7 +1162,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
         const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
         const salesProductType = productTypeForSalesPush(
             product.product_type,
-            !!product.is_optional_extra
+            isFinishedProductMarkedOptionalExtra(product)
         );
 
         const payload = {
@@ -1280,7 +1297,7 @@ router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffi
         const duplicateProduct = await ProductionDatabase.createProduct({
             name: newName,
             description: originalProduct.description || '',
-            product_type: originalProduct.product_type || '',
+            product_type: normalizeProductType(originalProduct.product_type),
             is_optional_extra: !!originalProduct.is_optional_extra,
             category: originalProduct.category || 'Other',
             status: originalProduct.status || 'active',
