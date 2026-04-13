@@ -422,6 +422,15 @@
             }
         });
         
+        function formatWorksOrderOptionLabel(order) {
+            const name = (order.customer_name || '').trim();
+            const id = order.id;
+            if (name) {
+                return `${name} - Order #${id}`;
+            }
+            return `Order #${id}`;
+        }
+        
         async function loadData() {
             try {
                 const startDate = getStartOfPeriod();
@@ -440,7 +449,7 @@
                     worksOrders.forEach(order => {
                         const option = document.createElement('option');
                         option.value = order.id;
-                        option.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${order.quantity})`;
+                        option.textContent = formatWorksOrderOptionLabel(order);
                         worksOrderSelect.appendChild(option);
                     });
                     
@@ -782,19 +791,12 @@
             if (!opt) {
                 opt = document.createElement('option');
                 opt.value = idStr;
-                const qty = order.quantity != null
-                    ? order.quantity
-                    : (order.products || []).reduce((s, p) => s + (parseInt(p.quantity, 10) || 0), 0);
-                opt.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${qty || '?'})`;
+                opt.textContent = formatWorksOrderOptionLabel(order);
                 select.appendChild(opt);
             }
             select.value = idStr;
-            document.getElementById('installationLocation').value = order.customer_name || '';
-            let addr = (order.customer_address || '').trim();
-            if (!addr && order.customer_postcode) {
-                addr = String(order.customer_postcode).trim();
-            }
-            document.getElementById('installationAddress').value = addr;
+            document.getElementById('installationLocation').value = (order.customer_postcode || '').trim();
+            document.getElementById('installationAddress').value = (order.customer_address || '').trim();
             document.getElementById('installationNotes').value = order.notes || '';
             const lab = parseFloat(order.labour_estimate_hours);
             if (!Number.isNaN(lab) && lab >= 0.5) {
@@ -1236,11 +1238,12 @@
                                 inst.assigned_users.map(u => `<li>${u.username}${u.role ? ` (${u.role})` : ''}</li>`).join('') : 
                                 '<li>No users assigned</li>'}
                         </ul>
-                        ${canManageInstallations ? `
-                        <div style="margin-top: 20px;">
+                        <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px;">
+                            <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>
+                            ${canManageInstallations ? `
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
-                            <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>
-                        </div>` : ''}
+                            <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>` : ''}
+                        </div>
                     </div>
                 `;
                 
