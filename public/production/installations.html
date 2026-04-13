@@ -399,12 +399,26 @@
             renderCalendar();
             
             const urlParams = new URLSearchParams(window.location.search);
-            const orderId = urlParams.get('order_id');
-            if (orderId && canManageInstallations) {
-                setTimeout(() => {
-                    document.getElementById('installationWorksOrder').value = orderId;
-                    showAddInstallationModal();
-                }, 500);
+            const orderIdParam = urlParams.get('order_id');
+            if (orderIdParam && canManageInstallations) {
+                const id = parseInt(orderIdParam, 10);
+                if (!Number.isNaN(id)) {
+                    try {
+                        const result = await apiCall(`/orders/${id}`);
+                        const order = result.order;
+                        if (!order) {
+                            showAlert('Works order not found.', 'error');
+                        } else {
+                            showAddInstallationModal();
+                            applyOrderPrefillToInstallationForm(order);
+                            const url = new URL(window.location.href);
+                            url.searchParams.delete('order_id');
+                            history.replaceState(null, '', url.pathname + url.search + url.hash);
+                        }
+                    } catch (error) {
+                        showAlert('Could not load works order: ' + error.message, 'error');
+                    }
+                }
             }
         });
         
@@ -758,6 +772,34 @@
             
             html += '</div>';
             container.innerHTML = html;
+        }
+        
+        function applyOrderPrefillToInstallationForm(order) {
+            if (!order || order.id == null) return;
+            const select = document.getElementById('installationWorksOrder');
+            const idStr = String(order.id);
+            let opt = select.querySelector(`option[value="${idStr}"]`);
+            if (!opt) {
+                opt = document.createElement('option');
+                opt.value = idStr;
+                const qty = order.quantity != null
+                    ? order.quantity
+                    : (order.products || []).reduce((s, p) => s + (parseInt(p.quantity, 10) || 0), 0);
+                opt.textContent = `Order #${order.id} - ${order.product_name || 'Unknown'} (Qty: ${qty || '?'})`;
+                select.appendChild(opt);
+            }
+            select.value = idStr;
+            document.getElementById('installationLocation').value = order.customer_name || '';
+            let addr = (order.customer_address || '').trim();
+            if (!addr && order.customer_postcode) {
+                addr = String(order.customer_postcode).trim();
+            }
+            document.getElementById('installationAddress').value = addr;
+            document.getElementById('installationNotes').value = order.notes || '';
+            const lab = parseFloat(order.labour_estimate_hours);
+            if (!Number.isNaN(lab) && lab >= 0.5) {
+                document.getElementById('installationDuration').value = lab;
+            }
         }
         
         function showAddInstallationModal() {
