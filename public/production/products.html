@@ -67,11 +67,19 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">LeadLock Category</label>
+                    <select id="leadlockCategory" class="form-select">
+                        <option value="stables">STABLES</option>
+                        <option value="sheds">SHEDS</option>
+                        <option value="cabins">CABINS</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                         <input type="checkbox" id="productOptionalExtra" style="width: auto;">
                         <span>Optional extra</span>
                     </label>
-                    <small style="color: #6c757d;">When checked, the sales app receives <code>product_type: extra</code> on push (otherwise the selected type is sent: <code>stables</code>, <code>sheds</code>, <code>cabins</code>, or <code>other</code>).</small>
+                    <small style="color: #6c757d;">When checked, the sales app receives <code>product_type: extra</code>. Push also always includes <code>category</code> from LeadLock Category.</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Category *</label>
@@ -145,6 +153,14 @@
             if (v === 'sheds' || v === 'shed' || v === 'shelter' || v === 'field shelter' || v === 'field shelters') return 'sheds';
             if (v === 'cabins' || v === 'cabin') return 'cabins';
             return 'other';
+        }
+
+        function normalizeLeadlockCategoryForSelect(value) {
+            const v = (value || '').toString().trim().toLowerCase();
+            if (v === 'stables' || v === 'stable') return 'stables';
+            if (v === 'cabins' || v === 'cabin') return 'cabins';
+            if (v === 'sheds' || v === 'shed' || v === 'shelter' || v === 'field shelter' || v === 'field shelters') return 'sheds';
+            return 'sheds';
         }
 
         function productTypeLabel(value) {
@@ -311,6 +327,7 @@
             document.getElementById('productForm').reset();
             document.getElementById('productId').value = '';
             document.getElementById('productType').value = 'other';
+            document.getElementById('leadlockCategory').value = 'sheds';
             showModal('productModal');
         }
         
@@ -325,6 +342,7 @@
                 document.getElementById('productName').value = product.name;
                 document.getElementById('productDescription').value = product.description || '';
                 document.getElementById('productType').value = normalizeProductTypeForSelect(product.product_type);
+                document.getElementById('leadlockCategory').value = normalizeLeadlockCategoryForSelect(product.leadlock_category || product.product_type);
                 document.getElementById('productOptionalExtra').checked = !!product.is_optional_extra;
                 document.getElementById('productCategory').value = product.category || 'Other';
                 document.getElementById('productLoadTime').value = product.estimated_load_time || 0;
@@ -658,6 +676,7 @@
                 name: document.getElementById('productName').value,
                 description: document.getElementById('productDescription').value,
                 product_type: document.getElementById('productType').value,
+                leadlock_category: document.getElementById('leadlockCategory').value,
                 is_optional_extra: document.getElementById('productOptionalExtra').checked,
                 category: document.getElementById('productCategory').value,
                 status: 'active',

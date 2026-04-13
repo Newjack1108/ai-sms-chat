@@ -257,6 +257,10 @@
                     <input type="text" id="editOrderCustomerName" class="form-input" placeholder="Optional">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Sales notes</label>
+                    <textarea id="editOrderNotes" class="form-input" rows="3" placeholder="From LeadLock or internal notes"></textarea>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Status *</label>
                     <select id="editOrderStatus" class="form-select" required>
                         <option value="pending">Pending</option>
@@ -445,6 +449,7 @@
                             <tr>
                                 <th>Product</th>
                                 <th>Customer</th>
+                                <th>Sales notes</th>
                                 <th>Quantity</th>
                                 <th>Status</th>
                                 <th>Order Date</th>
@@ -469,10 +474,18 @@
                                     ? order.products.reduce((sum, p) => sum + (parseInt(p.quantity) || 0), 0)
                                     : (order.quantity || 1);
                                 
+                                const notesRaw = order.notes != null ? String(order.notes) : '';
+                                const notesTrim = notesRaw.trim();
+                                const notesTitleEsc = notesTrim
+                                    ? notesTrim.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                                    : '';
+                                const notesShort = notesTrim.length > 40 ? notesTrim.slice(0, 40) + '…' : notesTrim;
+                                
                                 return `
                                 <tr>
                                     <td><strong>${productsDisplay}</strong></td>
                                     <td>${order.customer_name || '-'}</td>
+                                    <td style="max-width: 200px;" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesShort) : '—'}</td>
                                     <td>${totalQuantity}</td>
                                     <td><span class="badge badge-info">${order.status}</span></td>
                                     <td>${formatDate(order.order_date)}</td>
@@ -2009,6 +2022,7 @@
                 document.getElementById('editOrderQty').value = order.quantity;
                 document.getElementById('editOrderDate').value = order.order_date ? order.order_date.split('T')[0] : '';
                 document.getElementById('editOrderCustomerName').value = order.customer_name || '';
+                document.getElementById('editOrderNotes').value = order.notes != null ? String(order.notes) : '';
                 document.getElementById('editOrderStatus').value = order.status;
                 
                 showModal('editOrderModal');
@@ -2179,6 +2193,7 @@
                         quantity: document.getElementById('editOrderQty').value,
                         order_date: document.getElementById('editOrderDate').value,
                         customer_name: document.getElementById('editOrderCustomerName').value || null,
+                        notes: document.getElementById('editOrderNotes').value,
                         status: document.getElementById('editOrderStatus').value
                     })
                 });

@@ -231,6 +231,7 @@ function initializeSQLite() {
             name TEXT NOT NULL,
             description TEXT,
             product_type TEXT,
+            leadlock_category TEXT NOT NULL DEFAULT 'sheds',
             is_optional_extra INTEGER NOT NULL DEFAULT 0,
             category TEXT DEFAULT 'Other',
             status TEXT DEFAULT 'active',
@@ -330,6 +331,19 @@ function initializeSQLite() {
             db.exec('ALTER TABLE finished_products ADD COLUMN is_optional_extra INTEGER NOT NULL DEFAULT 0');
             console.log('✅ Added is_optional_extra column to finished_products table');
         }
+        const hasLeadlockCategory = tableInfo.some(col => col.name === 'leadlock_category');
+        if (!hasLeadlockCategory) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN leadlock_category TEXT NOT NULL DEFAULT \'sheds\'');
+            db.exec(`
+                UPDATE finished_products
+                SET leadlock_category = CASE
+                    WHEN LOWER(TRIM(COALESCE(product_type, ''))) IN ('stable', 'stables') THEN 'stables'
+                    WHEN LOWER(TRIM(COALESCE(product_type, ''))) IN ('cabin', 'cabins') THEN 'cabins'
+                    ELSE 'sheds'
+                END
+            `);
+            console.log('✅ Added leadlock_category column to finished_products table');
+        }
     } catch (error) {
         console.log('⚠️ Finished products migration check skipped:', error.message);
     }
@@ -347,7 +361,7 @@ function initializeSQLite() {
             db.exec('ALTER TABLE product_orders ADD COLUMN sales_order_ref TEXT');
             console.log('✅ Added sales_order_ref column to product_orders table');
         }
-        const leadlockCols = ['customer_postcode', 'customer_address', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'installation_booked', 'leadlock_order_id', 'labour_estimate_hours', 'shipping_boxes_count'];
+        const leadlockCols = ['customer_postcode', 'customer_address', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'installation_booked', 'leadlock_order_id', 'labour_estimate_hours', 'shipping_boxes_count', 'notes'];
         for (const col of leadlockCols) {
             if (!tableInfo.some(c => c.name === col)) {
                 const type = col === 'total_amount' || col === 'labour_estimate_hours' ? 'REAL' : col === 'installation_booked' ? 'INTEGER' : 'TEXT';
@@ -1314,6 +1328,7 @@ async function initializePostgreSQL() {
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
                 product_type VARCHAR(100),
+                leadlock_category VARCHAR(20) NOT NULL DEFAULT 'sheds',
                 is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE,
                 category VARCHAR(100) DEFAULT 'Other',
                 status VARCHAR(50) DEFAULT 'active',
@@ -1430,6 +1445,23 @@ async function initializePostgreSQL() {
                 await pool.query(`ALTER TABLE finished_products ADD COLUMN is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE`);
                 console.log('✅ Added is_optional_extra column to finished_products table');
             }
+            const leadlockCategoryCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'finished_products' AND column_name = 'leadlock_category'
+            `);
+            if (leadlockCategoryCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN leadlock_category VARCHAR(20) NOT NULL DEFAULT 'sheds'`);
+                await pool.query(`
+                    UPDATE finished_products
+                    SET leadlock_category = CASE
+                        WHEN LOWER(TRIM(COALESCE(product_type, ''))) IN ('stable', 'stables') THEN 'stables'
+                        WHEN LOWER(TRIM(COALESCE(product_type, ''))) IN ('cabin', 'cabins') THEN 'cabins'
+                        ELSE 'sheds'
+                    END
+                `);
+                console.log('✅ Added leadlock_category column to finished_products table');
+            }
         } catch (error) {
             console.log('⚠️ Finished products migration check skipped:', error.message);
         }
@@ -1464,7 +1496,8 @@ async function initializePostgreSQL() {
                 { name: 'installation_booked', type: 'BOOLEAN DEFAULT FALSE' },
                 { name: 'leadlock_order_id', type: 'VARCHAR(100)' },
                 { name: 'labour_estimate_hours', type: 'DECIMAL(10,2)' },
-                { name: 'shipping_boxes_count', type: 'INTEGER' }
+                { name: 'shipping_boxes_count', type: 'INTEGER' },
+                { name: 'notes', type: 'TEXT' }
             ];
             for (const col of leadlockCols) {
                 const colCheck = await pool.query(`
@@ -4757,6 +4790,7 @@ class ProductionDatabase {
         // Cost will be calculated automatically from components
         const initialCost = data.cost_gbp || 0;
         const category = data.category || 'Other';
+        const leadlockCategory = data.leadlock_category || 'sheds';
         const estimatedLoadTime = parseFloat(data.estimated_load_time || 0);
         const estimatedInstallTime = parseFloat(data.estimated_install_time || 0);
         const estimatedTravelTime = parseFloat(data.estimated_travel_time || 0);
@@ -4765,9 +4799,9 @@ class ProductionDatabase {
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-                [data.name, data.description, data.product_type, isOptionalExtra, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+                [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist and includes load time)
@@ -4775,10 +4809,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
+            const info = stmt.run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation (includes load time)
             await this.updateProductCost(product.id);
@@ -4832,19 +4866,20 @@ class ProductionDatabase {
         const estimatedTravelTime = data.estimated_travel_time !== undefined ? parseFloat(data.estimated_travel_time || 0) : null;
         const numberOfBoxes = data.number_of_boxes !== undefined ? (parseInt(data.number_of_boxes, 10) || 1) : null;
         const isOptionalExtra = !!data.is_optional_extra;
+        const leadlockCategory = data.leadlock_category || 'sheds';
         
         if (isPostgreSQL) {
             let query;
             let params;
             
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, is_optional_extra = $4, category = $5, status = $6, estimated_load_time = $7, estimated_install_time = $8, estimated_travel_time = $9, number_of_boxes = $10
-                         WHERE id = $11 RETURNING *`;
-                params = [data.name, data.description, data.product_type, isOptionalExtra, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, category = $6, status = $7, estimated_load_time = $8, estimated_install_time = $9, estimated_travel_time = $10, number_of_boxes = $11
+                         WHERE id = $12 RETURNING *`;
+                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
             } else {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, is_optional_extra = $4, category = $5, status = $6
-                         WHERE id = $7 RETURNING *`;
-                params = [data.name, data.description, data.product_type, isOptionalExtra, data.category || 'Other', data.status, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, category = $6, status = $7
+                         WHERE id = $8 RETURNING *`;
+                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, data.category || 'Other', data.status, id];
             }
             
             await pool.query(query, params);
@@ -4855,14 +4890,14 @@ class ProductionDatabase {
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
                 const boxes = numberOfBoxes !== null ? numberOfBoxes : 1;
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, is_optional_extra = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
+                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
             } else {
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, is_optional_extra = ?, category = ?, status = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, category = ?, status = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, id);
+                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, id);
             }
             // Recalculate cost automatically (includes load time)
             await this.updateProductCost(id);
@@ -5325,9 +5360,9 @@ class ProductionDatabase {
             );
             if (found.rows[0]) return found.rows[0];
             const created = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-                [name, 'Order from LeadLock sales app', 'product', false, 'LeadLock', 'active', 0, 0, 0, 0, 1]
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+                [name, 'Order from LeadLock sales app', 'other', 'sheds', false, 'LeadLock', 'active', 0, 0, 0, 0, 1]
             );
             return created.rows[0];
         } else {
@@ -5336,9 +5371,9 @@ class ProductionDatabase {
             ).get(name);
             if (found) return found;
             const info = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(name, 'Order from LeadLock sales app', 'product', 0, 'LeadLock', 'active', 0, 0, 0, 0, 1);
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).run(name, 'Order from LeadLock sales app', 'other', 'sheds', 0, 'LeadLock', 'active', 0, 0, 0, 0, 1);
             return db.prepare(`SELECT * FROM finished_products WHERE id = ?`).get(info.lastInsertRowid);
         }
     }
@@ -5370,13 +5405,14 @@ class ProductionDatabase {
         const leadlockProduct = await this.getOrCreateLeadLockProduct();
         const salesOrderRef = payload.order_number ? `LeadLock-${payload.order_number}` : `LeadLock-${payload.order_id || Date.now()}`;
         const installationBooked = payload.installation_booked === true || payload.installation_booked === 'true';
+        const salesNotes = payload.notes == null ? '' : String(payload.notes);
         
         let orderId;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -5384,15 +5420,16 @@ class ProductionDatabase {
                     payload.customer_email || null, payload.customer_phone || null, payload.currency || null,
                     parseFloat(payload.total_amount) || null, installationBooked,
                     payload.order_id != null ? String(payload.order_id) : null,
-                    labourEstimateHours || null, shippingBoxesCount || null
+                    labourEstimateHours || null, shippingBoxesCount || null,
+                    salesNotes
                 ]
             );
             orderId = result.rows[0].id;
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -5401,7 +5438,8 @@ class ProductionDatabase {
                 payload.customer_email || null, payload.customer_phone || null, payload.currency || null,
                 parseFloat(payload.total_amount) || null, installationBooked ? 1 : 0,
                 payload.order_id != null ? String(payload.order_id) : null,
-                labourEstimateHours || null, shippingBoxesCount || null
+                labourEstimateHours || null, shippingBoxesCount || null,
+                salesNotes
             );
             orderId = info.lastInsertRowid;
         }
@@ -5654,6 +5692,11 @@ class ProductionDatabase {
         if (data.customer_name !== undefined) {
             updates.push(`customer_name = $${paramIndex}`);
             values.push(data.customer_name || null);
+            paramIndex++;
+        }
+        if (data.notes !== undefined) {
+            updates.push(`notes = $${paramIndex}`);
+            values.push(data.notes == null ? null : String(data.notes));
             paramIndex++;
         }
         

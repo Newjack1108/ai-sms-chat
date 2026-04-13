@@ -35,6 +35,7 @@ function isPendingAmendmentUniqueViolation(error) {
 
 /** Canonical product types used in Production and LeadLock push. */
 const CANONICAL_PRODUCT_TYPES = new Set(['stables', 'sheds', 'cabins', 'other']);
+const LEADLOCK_CATEGORY_VALUES = new Set(['stables', 'sheds', 'cabins']);
 
 /**
  * Normalise DB / driver values so the optional-extra checkbox always drives sales correctly.
@@ -76,6 +77,20 @@ function normalizeProductType(rawType) {
     const mapped = synonyms[normalized];
     if (mapped && CANONICAL_PRODUCT_TYPES.has(mapped)) return mapped;
     return 'other';
+}
+
+function normalizeLeadlockCategory(rawCategory) {
+    const normalized = (rawCategory || '').toString().trim().toLowerCase();
+    if (normalized === 'stables' || normalized === 'stable') return 'stables';
+    if (
+        normalized === 'sheds' ||
+        normalized === 'shed' ||
+        normalized === 'shelter' ||
+        normalized === 'field shelter' ||
+        normalized === 'field shelters'
+    ) return 'sheds';
+    if (normalized === 'cabins' || normalized === 'cabin') return 'cabins';
+    return 'sheds';
 }
 
 // ============ AUTHENTICATION ROUTES ============
@@ -205,7 +220,8 @@ router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) =
             total_amount: body.total_amount,
             currency: body.currency,
             installation_booked: body.installation_booked,
-            created_at: body.created_at
+            created_at: body.created_at,
+            notes: body.notes == null ? '' : String(body.notes)
         });
         console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
         res.status(200).json({ success: true, work_order_id: String(order.id) });
@@ -1055,8 +1071,9 @@ router.get('/products', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
+        const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
@@ -1066,6 +1083,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             name,
             description,
             product_type: normalizedProductType,
+            leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
             category,
             status,
@@ -1084,14 +1102,16 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
+        const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         
         // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
             name,
             description,
             product_type: normalizedProductType,
+            leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
             category,
             status,
@@ -1164,6 +1184,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
             product.product_type,
             isFinishedProductMarkedOptionalExtra(product)
         );
+        const leadlockCategory = normalizeLeadlockCategory(product.leadlock_category || product.product_type);
 
         const payload = {
             product_id: productId,
@@ -1172,7 +1193,8 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
             price_ex_vat: priceExVat,
             install_hours: parseFloat(product.estimated_install_time ?? 0) || 0,
             number_of_boxes: numberOfBoxes,
-            product_type: salesProductType
+            product_type: salesProductType,
+            category: LEADLOCK_CATEGORY_VALUES.has(leadlockCategory) ? leadlockCategory : 'sheds'
         };
 
         const headers = {
@@ -1298,6 +1320,7 @@ router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffi
             name: newName,
             description: originalProduct.description || '',
             product_type: normalizeProductType(originalProduct.product_type),
+            leadlock_category: normalizeLeadlockCategory(originalProduct.leadlock_category || originalProduct.product_type),
             is_optional_extra: !!originalProduct.is_optional_extra,
             category: originalProduct.category || 'Other',
             status: originalProduct.status || 'active',
@@ -1680,7 +1703,7 @@ router.get('/orders/:id', requireProductionAuth, async (req, res) => {
 router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id);
-        const { product_id, quantity, order_date, status, customer_name } = req.body;
+        const { product_id, quantity, order_date, status, customer_name, notes } = req.body;
         
         const updateData = {};
         if (product_id !== undefined) updateData.product_id = parseInt(product_id);
@@ -1688,6 +1711,7 @@ router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res
         if (order_date !== undefined) updateData.order_date = order_date;
         if (status !== undefined) updateData.status = status;
         if (customer_name !== undefined) updateData.customer_name = customer_name;
+        if (notes !== undefined) updateData.notes = notes == null ? null : String(notes);
         
         const order = await ProductionDatabase.updateProductOrder(orderId, updateData);
         res.json({ success: true, order });
