@@ -361,10 +361,10 @@ function initializeSQLite() {
             db.exec('ALTER TABLE product_orders ADD COLUMN sales_order_ref TEXT');
             console.log('✅ Added sales_order_ref column to product_orders table');
         }
-        const leadlockCols = ['customer_postcode', 'customer_address', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'installation_booked', 'leadlock_order_id', 'labour_estimate_hours', 'shipping_boxes_count', 'notes'];
+        const leadlockCols = ['customer_postcode', 'customer_address', 'customer_email', 'customer_phone', 'currency', 'total_amount', 'installation_booked', 'leadlock_order_id', 'labour_estimate_hours', 'shipping_boxes_count', 'travel_time_hours_round_trip', 'notes'];
         for (const col of leadlockCols) {
             if (!tableInfo.some(c => c.name === col)) {
-                const type = col === 'total_amount' || col === 'labour_estimate_hours' ? 'REAL' : col === 'installation_booked' ? 'INTEGER' : 'TEXT';
+                const type = col === 'total_amount' || col === 'labour_estimate_hours' || col === 'travel_time_hours_round_trip' ? 'REAL' : col === 'installation_booked' ? 'INTEGER' : 'TEXT';
                 const def = col === 'installation_booked' ? ' DEFAULT 0' : '';
                 db.exec(`ALTER TABLE product_orders ADD COLUMN ${col} ${type}${def}`);
                 console.log(`✅ Added ${col} column to product_orders table`);
@@ -1497,6 +1497,7 @@ async function initializePostgreSQL() {
                 { name: 'leadlock_order_id', type: 'VARCHAR(100)' },
                 { name: 'labour_estimate_hours', type: 'DECIMAL(10,2)' },
                 { name: 'shipping_boxes_count', type: 'INTEGER' },
+                { name: 'travel_time_hours_round_trip', type: 'DECIMAL(10,2)' },
                 { name: 'notes', type: 'TEXT' }
             ];
             for (const col of leadlockCols) {
@@ -5284,6 +5285,14 @@ class ProductionDatabase {
             quantity: parseFloat(op.quantity || 1)
         }));
         
+        let travelTimeHoursRoundTrip = null;
+        if (order.travel_time_hours_round_trip != null && order.travel_time_hours_round_trip !== '') {
+            const t = parseFloat(order.travel_time_hours_round_trip);
+            if (Number.isFinite(t)) {
+                travelTimeHoursRoundTrip = t;
+            }
+        }
+        
         return {
             order_id: orderId,
             products: productsList,
@@ -5293,7 +5302,8 @@ class ProductionDatabase {
             standalone_spares: standaloneSpares,
             estimated_load_time: totalLoadTime,
             estimated_install_time: totalInstallTime,
-            estimated_travel_time: totalTravelTime
+            estimated_travel_time: totalTravelTime,
+            travel_time_hours_round_trip: travelTimeHoursRoundTrip
         };
     }
     
@@ -5398,6 +5408,15 @@ class ProductionDatabase {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
         const shippingBoxesCount = items.reduce((sum, i) => sum + (parseInt(i.number_of_boxes, 10) || 0), 0);
+        let travelTimeHoursRoundTrip = null;
+        if (payload.travel_time_hours_round_trip !== undefined && payload.travel_time_hours_round_trip !== null && payload.travel_time_hours_round_trip !== '') {
+            const t = typeof payload.travel_time_hours_round_trip === 'number'
+                ? payload.travel_time_hours_round_trip
+                : parseFloat(payload.travel_time_hours_round_trip);
+            if (Number.isFinite(t)) {
+                travelTimeHoursRoundTrip = t;
+            }
+        }
         
         let orderDate = (payload.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) orderDate = new Date().toISOString().slice(0, 10);
@@ -5411,8 +5430,8 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -5421,6 +5440,7 @@ class ProductionDatabase {
                     parseFloat(payload.total_amount) || null, installationBooked,
                     payload.order_id != null ? String(payload.order_id) : null,
                     labourEstimateHours || null, shippingBoxesCount || null,
+                    travelTimeHoursRoundTrip,
                     salesNotes
                 ]
             );
@@ -5428,8 +5448,8 @@ class ProductionDatabase {
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -5439,6 +5459,7 @@ class ProductionDatabase {
                 parseFloat(payload.total_amount) || null, installationBooked ? 1 : 0,
                 payload.order_id != null ? String(payload.order_id) : null,
                 labourEstimateHours || null, shippingBoxesCount || null,
+                travelTimeHoursRoundTrip,
                 salesNotes
             );
             orderId = info.lastInsertRowid;
@@ -6147,7 +6168,7 @@ class ProductionDatabase {
                 if (isPostgreSQL) {
                     const orderResult = await pool.query(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         fp.name as product_name
+                         fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
                          WHERE po.id = $1`,
@@ -6158,11 +6179,14 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.product_name = row.product_name;
+                        installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
+                            ? Number(row.travel_time_hours_round_trip)
+                            : null;
                     }
                 } else {
                     const row = db.prepare(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         fp.name as product_name
+                         fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
                          WHERE po.id = ?`
@@ -6171,6 +6195,9 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.product_name = row.product_name;
+                        installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
+                            ? Number(row.travel_time_hours_round_trip)
+                            : null;
                     }
                 }
             } catch (err) {
@@ -6202,6 +6229,57 @@ class ProductionDatabase {
             installation.installation_days = [];
         }
         return installation;
+    }
+    
+    static async getLeadlockWorkOrderItems(orderId) {
+        try {
+            if (isPostgreSQL) {
+                const result = await pool.query(
+                    `SELECT * FROM leadlock_work_order_items WHERE order_id = $1 ORDER BY id`,
+                    [orderId]
+                );
+                return result.rows;
+            }
+            return db.prepare(
+                `SELECT * FROM leadlock_work_order_items WHERE order_id = ? ORDER BY id`
+            ).all(orderId);
+        } catch (err) {
+            console.log('getLeadlockWorkOrderItems failed:', err.message);
+            return [];
+        }
+    }
+    
+    /** Full installation + linked works order + LeadLock lines for fitter job sheet. */
+    static async getInstallationJobSheet(installationId) {
+        const installation = await this.getInstallationById(installationId);
+        if (!installation) {
+            return null;
+        }
+        let order = null;
+        let leadlock_items = [];
+        const orderId = installation.works_order_id;
+        if (orderId) {
+            order = await this.getProductOrderById(orderId);
+            if (order && Array.isArray(order.products)) {
+                for (const p of order.products) {
+                    if (!p.product_id) continue;
+                    try {
+                        const fp = await this.getProductById(p.product_id);
+                        if (fp) {
+                            p.product_description = fp.description ?? null;
+                            p.estimated_install_time = fp.estimated_install_time ?? null;
+                            p.number_of_boxes = fp.number_of_boxes ?? null;
+                            p.estimated_travel_time = fp.estimated_travel_time ?? null;
+                            p.finished_product_type = fp.product_type ?? null;
+                        }
+                    } catch (e) {
+                        console.log('getInstallationJobSheet: product enrich failed', e.message);
+                    }
+                }
+            }
+            leadlock_items = await this.getLeadlockWorkOrderItems(orderId);
+        }
+        return { installation, order, leadlock_items };
     }
     
     static async getAllInstallations(startDate = null, endDate = null) {

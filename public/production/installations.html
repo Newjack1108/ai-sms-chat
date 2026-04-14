@@ -285,6 +285,7 @@
                     <label class="form-label">Duration (hours, Default) *</label>
                     <input type="number" id="installationDuration" class="form-input" step="0.01" min="0.5" required>
                     <small>Default duration for all days (can be overridden per day below)</small>
+                    <p id="worksOrderTravelHint" class="text-muted" style="display: none; margin-top: 8px; margin-bottom: 0; font-size: 0.9rem;"></p>
                 </div>
                 
                 <div class="form-group">
@@ -419,6 +420,11 @@
                         showAlert('Could not load works order: ' + error.message, 'error');
                     }
                 }
+            }
+            
+            const woSel = document.getElementById('installationWorksOrder');
+            if (woSel) {
+                woSel.addEventListener('change', () => refreshWorksOrderTravelHint(null));
             }
         });
         
@@ -783,6 +789,35 @@
             container.innerHTML = html;
         }
         
+        function refreshWorksOrderTravelHint(fallbackTravelRoundTripHours) {
+            const hint = document.getElementById('worksOrderTravelHint');
+            if (!hint) return;
+            const sel = document.getElementById('installationWorksOrder');
+            const id = parseInt(sel && sel.value, 10);
+            if (!sel || Number.isNaN(id)) {
+                hint.textContent = '';
+                hint.style.display = 'none';
+                return;
+            }
+            const fromList = worksOrders.find(o => o.id === id);
+            let raw = fromList && fromList.travel_time_hours_round_trip != null && fromList.travel_time_hours_round_trip !== ''
+                ? fromList.travel_time_hours_round_trip
+                : fallbackTravelRoundTripHours;
+            if (raw === undefined || raw === null || raw === '') {
+                hint.textContent = '';
+                hint.style.display = 'none';
+                return;
+            }
+            const t = parseFloat(raw);
+            if (Number.isNaN(t)) {
+                hint.textContent = '';
+                hint.style.display = 'none';
+                return;
+            }
+            hint.textContent = `LeadLock drive time (round trip): ${t.toFixed(2)} h — allow alongside site duration when planning.`;
+            hint.style.display = 'block';
+        }
+        
         function applyOrderPrefillToInstallationForm(order) {
             if (!order || order.id == null) return;
             const select = document.getElementById('installationWorksOrder');
@@ -802,6 +837,7 @@
             if (!Number.isNaN(lab) && lab >= 0.5) {
                 document.getElementById('installationDuration').value = lab;
             }
+            refreshWorksOrderTravelHint(order.travel_time_hours_round_trip);
         }
         
         function showAddInstallationModal() {
@@ -820,6 +856,7 @@
             document.getElementById('enablePerDaySettings').checked = false;
             document.getElementById('perDaySettings').style.display = 'none';
             document.getElementById('perDayTable').innerHTML = '';
+            refreshWorksOrderTravelHint(null);
             showModal('installationModal');
         }
         
@@ -875,6 +912,7 @@
                 }
                 
                 checkAvailability();
+                refreshWorksOrderTravelHint(inst.travel_time_hours_round_trip);
                 showModal('installationModal');
             } catch (error) {
                 showAlert('Error loading installation: ' + error.message, 'error');
@@ -1226,6 +1264,7 @@
                             <tr><th>Works Order:</th><td>${inst.works_order_id ? `Order #${inst.works_order_id} - ${inst.product_name || 'Unknown'}` : 'None'}</td></tr>
                             <tr><th>Date:</th><td>${formatDate(inst.installation_date)}</td></tr>
                             <tr><th>Duration:</th><td>${inst.duration_hours} hours</td></tr>
+                            ${inst.travel_time_hours_round_trip != null && inst.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(inst.travel_time_hours_round_trip)) ? `<tr><th>LeadLock drive (round trip):</th><td>${parseFloat(inst.travel_time_hours_round_trip).toFixed(2)} h</td></tr>` : ''}
                             <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
                             <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
                             <tr><th>Status:</th><td><span class="badge badge-info">${inst.status}</span></td></tr>

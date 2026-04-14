@@ -2501,7 +2501,8 @@ app.post('/api/webhooks/work-orders', async (req, res) => {
             currency: body.currency,
             installation_booked: body.installation_booked,
             created_at: body.created_at,
-            notes: body.notes == null ? '' : String(body.notes)
+            notes: body.notes == null ? '' : String(body.notes),
+            travel_time_hours_round_trip: body.travel_time_hours_round_trip
         });
         console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
         res.status(200).json({ success: true, work_order_id: String(order.id) });

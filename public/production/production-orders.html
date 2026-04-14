@@ -260,6 +260,10 @@
                     <label class="form-label">Sales notes</label>
                     <textarea id="editOrderNotes" class="form-input" rows="3" placeholder="From LeadLock or internal notes"></textarea>
                 </div>
+                <div class="form-group" id="editOrderTravelGroup" style="display: none;">
+                    <label class="form-label">LeadLock drive time (round trip)</label>
+                    <input type="text" id="editOrderTravelTime" class="form-input" readonly style="background: #f8f9fa;">
+                </div>
                 <div class="form-group">
                     <label class="form-label">Status *</label>
                     <select id="editOrderStatus" class="form-select" required>
@@ -450,6 +454,7 @@
                                 <th>Product</th>
                                 <th>Customer</th>
                                 <th>Sales notes</th>
+                                <th>Travel (rt h)</th>
                                 <th>Quantity</th>
                                 <th>Status</th>
                                 <th>Order Date</th>
@@ -480,12 +485,17 @@
                                     ? notesTrim.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                                     : '';
                                 const notesShort = notesTrim.length > 40 ? notesTrim.slice(0, 40) + '…' : notesTrim;
+                                const travelRt = order.travel_time_hours_round_trip;
+                                const travelCell = travelRt != null && travelRt !== '' && !Number.isNaN(parseFloat(travelRt))
+                                    ? parseFloat(travelRt).toFixed(2)
+                                    : '—';
                                 
                                 return `
                                 <tr>
                                     <td><strong>${productsDisplay}</strong></td>
                                     <td>${order.customer_name || '-'}</td>
                                     <td style="max-width: 200px;" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesShort) : '—'}</td>
+                                    <td>${travelCell}</td>
                                     <td>${totalQuantity}</td>
                                     <td><span class="badge badge-info">${order.status}</span></td>
                                     <td>${formatDate(order.order_date)}</td>
@@ -1193,6 +1203,9 @@
                                     `<span style="border-bottom: 2px dashed #666; padding: 0 30px; display: inline-block; min-width: 100px;">&nbsp;</span> <em style="color: #666;">(for reference only)</em>`
                                 }
                             </p>
+                            ${loadSheet.travel_time_hours_round_trip != null && loadSheet.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(loadSheet.travel_time_hours_round_trip)) ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>LeadLock drive time (round trip):</strong> ${parseFloat(loadSheet.travel_time_hours_round_trip).toFixed(2)} hours</p>
+                            ` : ''}
                         </div>
                         <div style="padding: 15px; border-top: 2px solid #E8F5E9; margin-top: 20px; text-align: center;">
                             <button onclick="saveAndCloseLoadSheet(${orderId})" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">Save & Close</button>
@@ -1517,6 +1530,9 @@
                                     `<span style="border-bottom: 2px dashed #666; padding: 0 30px; display: inline-block; min-width: 100px;">&nbsp;</span> <em style="color: #666;">(for reference only)</em>`
                                 }
                             </p>
+                            ${loadSheet.travel_time_hours_round_trip != null && loadSheet.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(loadSheet.travel_time_hours_round_trip)) ? `
+                                <p style="margin: 5px 0; font-size: 16px;"><strong>LeadLock drive time (round trip):</strong> ${parseFloat(loadSheet.travel_time_hours_round_trip).toFixed(2)} hours</p>
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -2024,6 +2040,17 @@
                 document.getElementById('editOrderCustomerName').value = order.customer_name || '';
                 document.getElementById('editOrderNotes').value = order.notes != null ? String(order.notes) : '';
                 document.getElementById('editOrderStatus').value = order.status;
+                
+                const travelGroup = document.getElementById('editOrderTravelGroup');
+                const travelInput = document.getElementById('editOrderTravelTime');
+                const tr = order.travel_time_hours_round_trip;
+                if (tr != null && tr !== '' && !Number.isNaN(parseFloat(tr))) {
+                    travelGroup.style.display = '';
+                    travelInput.value = `${parseFloat(tr).toFixed(2)} h (LeadLock round trip)`;
+                } else {
+                    travelGroup.style.display = 'none';
+                    travelInput.value = '';
+                }
                 
                 showModal('editOrderModal');
             } catch (error) {

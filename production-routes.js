@@ -221,7 +221,8 @@ router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) =
             currency: body.currency,
             installation_booked: body.installation_booked,
             created_at: body.created_at,
-            notes: body.notes == null ? '' : String(body.notes)
+            notes: body.notes == null ? '' : String(body.notes),
+            travel_time_hours_round_trip: body.travel_time_hours_round_trip
         });
         console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
         res.status(200).json({ success: true, work_order_id: String(order.id) });
@@ -1796,6 +1797,28 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
         res.status(500).json({ success: false, error: 'Failed to get installations', details: error.message });
+    }
+});
+
+router.get('/installations/:id/job-sheet', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        if (Number.isNaN(installationId)) {
+            return res.status(400).json({ success: false, error: 'Invalid installation id' });
+        }
+        const data = await ProductionDatabase.getInstallationJobSheet(installationId);
+        if (!data) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        res.json({
+            success: true,
+            installation: data.installation,
+            order: data.order,
+            leadlock_items: data.leadlock_items || []
+        });
+    } catch (error) {
+        console.error('Get installation job sheet error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to load job sheet' });
     }
 });
 
