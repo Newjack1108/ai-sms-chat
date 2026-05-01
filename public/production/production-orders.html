@@ -137,6 +137,7 @@
             <div id="calculatorContent">
                 <div class="form-group">
                     <label class="form-label">Select Works Orders to Calculate</label>
+                    <p class="text-muted" style="font-size: 0.9rem; margin-bottom: 8px;">Uses the same page as the works orders table below (change page to include other orders).</p>
                     <div id="ordersCheckboxes"></div>
                 </div>
                 <button onclick="calculateRequirements()" class="btn btn-primary">Calculate Requirements</button>
@@ -325,7 +326,13 @@
         let currentUser = null;
         let products = [];
         let orders = [];
+        let ordersTotal = 0;
+        let ordersPage = 1;
+        const ORDERS_PAGE_SIZE = 25;
         let quotes = [];
+        let quotesTotal = 0;
+        let quotesPage = 1;
+        const QUOTES_PAGE_SIZE = 25;
         let components = [];
         let panels = [];
         let stockItems = [];
@@ -345,7 +352,7 @@
         
         async function loadComponents() {
             try {
-                const data = await apiCall('/components');
+                const data = await apiCall('/components?all=1');
                 components = data.components || [];
             } catch (error) {
                 console.error('Error loading components:', error);
@@ -363,7 +370,7 @@
         
         async function loadStockItems() {
             try {
-                const data = await apiCall('/stock');
+                const data = await apiCall('/stock?all=1');
                 stockItems = data.items || [];
             } catch (error) {
                 console.error('Error loading stock items:', error);
@@ -372,8 +379,8 @@
         
         async function loadProducts() {
             try {
-                const data = await apiCall('/products');
-                products = data.products.filter(p => p.status === 'active');
+                const data = await apiCall('/products?all=1');
+                products = (data.products || []).filter(p => p.status === 'active');
                 
                 // Populate order product selects in table
                 populateOrderProductSelects();
@@ -391,14 +398,35 @@
             }
         }
         
+        function renderQuotesPager() {
+            const totalPages = Math.max(1, Math.ceil(quotesTotal / QUOTES_PAGE_SIZE));
+            if (quotesTotal <= QUOTES_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${quotesPage} of ${totalPages} (${quotesTotal} quotes)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${quotesPage <= 1 ? 'disabled' : ''} onclick="goQuotesPage(${quotesPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${quotesPage >= totalPages ? 'disabled' : ''} onclick="goQuotesPage(${quotesPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goQuotesPage(p) {
+            quotesPage = Math.max(1, p);
+            loadQuotes();
+        }
+        
         async function loadQuotes() {
             try {
-                const data = await apiCall('/quotes');
-                quotes = data.quotes;
+                const data = await apiCall(`/quotes?page=${quotesPage}&page_size=${QUOTES_PAGE_SIZE}`);
+                quotes = data.quotes || [];
+                quotesTotal = typeof data.total === 'number' ? data.total : quotes.length;
+                if (quotes.length === 0 && quotesTotal > 0 && quotesPage > 1) {
+                    quotesPage--;
+                    return loadQuotes();
+                }
                 const quotesList = document.getElementById('quotesList');
                 
                 if (quotes.length === 0) {
-                    quotesList.innerHTML = '<p>No quotes found</p>';
+                    quotesList.innerHTML = '<p>No quotes found</p>' + renderQuotesPager();
                     return;
                 }
                 
@@ -429,20 +457,42 @@
                             `).join('')}
                         </tbody>
                     </table>
+                    ${renderQuotesPager()}
                 `;
             } catch (error) {
                 document.getElementById('quotesList').innerHTML = '<p>Error loading quotes</p>';
             }
         }
         
+        function renderOrdersPager() {
+            const totalPages = Math.max(1, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE));
+            if (ordersTotal <= ORDERS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${ordersPage} of ${totalPages} (${ordersTotal} orders)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${ordersPage <= 1 ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${ordersPage >= totalPages ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goOrdersPage(p) {
+            ordersPage = Math.max(1, p);
+            loadOrders();
+        }
+        
         async function loadOrders() {
             try {
-                const data = await apiCall('/orders');
-                orders = data.orders;
+                const data = await apiCall(`/orders?page=${ordersPage}&page_size=${ORDERS_PAGE_SIZE}`);
+                orders = data.orders || [];
+                ordersTotal = typeof data.total === 'number' ? data.total : orders.length;
+                if (orders.length === 0 && ordersTotal > 0 && ordersPage > 1) {
+                    ordersPage--;
+                    return loadOrders();
+                }
                 const ordersList = document.getElementById('ordersList');
                 
                 if (orders.length === 0) {
-                    ordersList.innerHTML = '<p>No works orders found</p>';
+                    ordersList.innerHTML = '<p>No works orders found</p>' + renderOrdersPager();
                     updateOrdersCheckboxes();
                     return;
                 }
@@ -514,6 +564,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderOrdersPager()}
                 `;
                 updateOrdersCheckboxes();
             } catch (error) {
@@ -2087,6 +2138,7 @@
                 });
                 showAlert('Quote created');
                 hideModal('quoteModal');
+                quotesPage = 1;
                 loadQuotes();
             } catch (error) {
                 showAlert(error.message, 'error');
@@ -2196,6 +2248,7 @@
                     </tr>
                 `;
                 populateOrderProductSelects();
+                ordersPage = 1;
                 loadOrders();
             } catch (error) {
                 showAlert(error.message, 'error');

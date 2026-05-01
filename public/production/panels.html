@@ -101,6 +101,9 @@
         let currentUser = null;
         let stockItems = [];
         let components = [];
+        let panelsPage = 1;
+        let panelsTotal = 0;
+        const PANELS_PAGE_SIZE = 25;
         
         async function init() {
             // Redirect staff users
@@ -115,8 +118,8 @@
         
         async function loadStockItems() {
             try {
-                const data = await apiCall('/stock');
-                stockItems = data.items;
+                const data = await apiCall('/stock?all=1');
+                stockItems = data.items || [];
             } catch (error) {
                 console.error('Error loading stock items:', error);
             }
@@ -124,25 +127,47 @@
         
         async function loadComponents() {
             try {
-                const data = await apiCall('/components');
-                components = data.components;
+                const data = await apiCall('/components?all=1');
+                components = data.components || [];
             } catch (error) {
                 console.error('Error loading components:', error);
             }
         }
         
+        function renderPanelsPager() {
+            const totalPages = Math.max(1, Math.ceil(panelsTotal / PANELS_PAGE_SIZE));
+            if (panelsTotal <= PANELS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${panelsPage} of ${totalPages} (${panelsTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${panelsPage <= 1 ? 'disabled' : ''} onclick="goPanelsPage(${panelsPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${panelsPage >= totalPages ? 'disabled' : ''} onclick="goPanelsPage(${panelsPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goPanelsPage(p) {
+            panelsPage = Math.max(1, p);
+            loadPanels();
+        }
+        
         async function loadPanels() {
             try {
-                const data = await apiCall('/panels');
+                const data = await apiCall(`/panels?page=${panelsPage}&page_size=${PANELS_PAGE_SIZE}`);
                 const panelsList = document.getElementById('panelsList');
+                const plist = data.panels || [];
+                panelsTotal = typeof data.total === 'number' ? data.total : plist.length;
+                if (plist.length === 0 && panelsTotal > 0 && panelsPage > 1) {
+                    panelsPage--;
+                    return loadPanels();
+                }
                 
-                if (data.panels.length === 0) {
-                    panelsList.innerHTML = '<p>No built items found</p>';
+                if (plist.length === 0) {
+                    panelsList.innerHTML = '<p>No built items found</p>' + renderPanelsPager();
                     return;
                 }
                 
-                // Calculate costs for all panels
-                const panelsWithCosts = await Promise.all(data.panels.map(async (panel) => {
+                // Calculate costs for panels on this page
+                const panelsWithCosts = await Promise.all(plist.map(async (panel) => {
                     try {
                         const costData = await apiCall(`/panels/${panel.id}/true-cost`);
                         return { ...panel, calculated_cost: costData.true_cost };
@@ -193,6 +218,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderPanelsPager()}
                 `;
             } catch (error) {
                 document.getElementById('panelsList').innerHTML = '<p>Error loading built items</p>';
@@ -208,8 +234,8 @@
         
         async function editPanel(id) {
             try {
-                const data = await apiCall('/panels');
-                const panel = data.panels.find(p => p.id === id);
+                const data = await apiCall(`/panels/${id}`);
+                const panel = data.panel;
                 if (!panel) return;
                 
                 document.getElementById('panelModalTitle').textContent = 'Edit Built Item';
@@ -232,8 +258,8 @@
         
         async function viewPanelDetails(id) {
             try {
-                const panelData = await apiCall('/panels');
-                const panel = panelData.panels.find(p => p.id === id);
+                const panelData = await apiCall(`/panels/${id}`);
+                const panel = panelData.panel;
                 if (!panel) return;
                 
                 const bomValueData = await apiCall(`/panels/${id}/bom-value`);

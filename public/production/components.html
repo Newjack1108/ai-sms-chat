@@ -100,6 +100,9 @@
     <script>
         let currentUser = null;
         let stockItems = [];
+        let componentsPage = 1;
+        let componentsTotal = 0;
+        const COMPONENTS_PAGE_SIZE = 25;
         
         async function init() {
             // Redirect staff users
@@ -114,20 +117,42 @@
         
         async function loadStockItems() {
             try {
-                const data = await apiCall('/stock');
-                stockItems = data.items;
+                const data = await apiCall('/stock?all=1');
+                stockItems = data.items || [];
             } catch (error) {
                 console.error('Error loading stock items:', error);
             }
         }
         
+        function renderComponentsPager() {
+            const totalPages = Math.max(1, Math.ceil(componentsTotal / COMPONENTS_PAGE_SIZE));
+            if (componentsTotal <= COMPONENTS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${componentsPage} of ${totalPages} (${componentsTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${componentsPage <= 1 ? 'disabled' : ''} onclick="goComponentsPage(${componentsPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${componentsPage >= totalPages ? 'disabled' : ''} onclick="goComponentsPage(${componentsPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goComponentsPage(p) {
+            componentsPage = Math.max(1, p);
+            loadComponents();
+        }
+        
         async function loadComponents() {
             try {
-                const data = await apiCall('/components');
+                const data = await apiCall(`/components?page=${componentsPage}&page_size=${COMPONENTS_PAGE_SIZE}`);
                 const componentsList = document.getElementById('componentsList');
+                const clist = data.components || [];
+                componentsTotal = typeof data.total === 'number' ? data.total : clist.length;
+                if (clist.length === 0 && componentsTotal > 0 && componentsPage > 1) {
+                    componentsPage--;
+                    return loadComponents();
+                }
                 
-                if (data.components.length === 0) {
-                    componentsList.innerHTML = '<p>No components found</p>';
+                if (clist.length === 0) {
+                    componentsList.innerHTML = '<p>No components found</p>' + renderComponentsPager();
                     return;
                 }
                 
@@ -145,7 +170,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.components.map(component => {
+                            ${clist.map(component => {
                                 const builtQty = parseFloat(component.built_quantity || 0);
                                 const minStock = parseFloat(component.min_stock || 0);
                                 const maxStock = parseFloat(component.max_stock || 0);
@@ -169,6 +194,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderComponentsPager()}
                 `;
             } catch (error) {
                 document.getElementById('componentsList').innerHTML = '<p>Error loading components</p>';
@@ -184,8 +210,8 @@
         
         async function editComponent(id) {
             try {
-                const data = await apiCall('/components');
-                const component = data.components.find(c => c.id === id);
+                const data = await apiCall(`/components/${id}`);
+                const component = data.component;
                 if (!component) return;
                 
                 document.getElementById('componentModalTitle').textContent = 'Edit Component';
@@ -208,8 +234,8 @@
         
         async function viewComponentDetails(id) {
             try {
-                const componentData = await apiCall('/components');
-                const component = componentData.components.find(c => c.id === id);
+                const componentData = await apiCall(`/components/${id}`);
+                const component = componentData.component;
                 if (!component) return;
                 
                 const bomValueData = await apiCall(`/components/${id}/cost`);

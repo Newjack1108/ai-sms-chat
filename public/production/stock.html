@@ -30,7 +30,7 @@
             <div style="padding: 15px 20px; background: #f8f9fa; border-bottom: 1px solid #ddd;">
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <label for="categoryFilter" style="font-weight: 600; color: #2c3e50;">Filter by Category:</label>
-                    <select id="categoryFilter" class="form-select" style="width: auto; min-width: 200px;" onchange="loadStock()">
+                    <select id="categoryFilter" class="form-select" style="width: auto; min-width: 200px;" onchange="stockPage=1; loadStock()">
                         <option value="">All Categories</option>
                     </select>
                     <span id="filterStatus" style="color: #666; font-size: 14px;"></span>
@@ -144,6 +144,45 @@
         }
         
         let currentUser = null;
+        let stockPage = 1;
+        const STOCK_PAGE_SIZE = 25;
+        let stockTotal = 0;
+        
+        async function loadStockCategories() {
+            try {
+                const data = await apiCall('/stock/categories');
+                const categoryFilter = document.getElementById('categoryFilter');
+                const current = categoryFilter.value || '';
+                categoryFilter.innerHTML = '<option value="">All Categories</option>';
+                (data.categories || []).forEach(cat => {
+                    const option = document.createElement('option');
+                    option.value = cat;
+                    option.textContent = cat;
+                    categoryFilter.appendChild(option);
+                });
+                if (current && [...categoryFilter.options].some(o => o.value === current)) {
+                    categoryFilter.value = current;
+                }
+            } catch (e) {
+                console.error('Categories load failed', e);
+            }
+        }
+        
+        function renderStockPager() {
+            const totalPages = Math.max(1, Math.ceil(stockTotal / STOCK_PAGE_SIZE));
+            if (stockTotal <= STOCK_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${stockPage} of ${totalPages} (${stockTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${stockPage <= 1 ? 'disabled' : ''} onclick="goStockPage(${stockPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${stockPage >= totalPages ? 'disabled' : ''} onclick="goStockPage(${stockPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goStockPage(p) {
+            stockPage = Math.max(1, p);
+            loadStock();
+        }
         
         async function init() {
             // Redirect staff users
@@ -154,65 +193,44 @@
             initNavbar();
             
             // Wait a bit for DOM to be fully ready
-            setTimeout(() => {
+            setTimeout(async () => {
+                await loadStockCategories();
                 loadStock();
             }, 100);
         }
         
         async function loadStock() {
             try {
-                const data = await apiCall('/stock');
-                const stockList = document.getElementById('stockList');
                 const categoryFilter = document.getElementById('categoryFilter');
+                const selectedCategory = (categoryFilter && categoryFilter.value) ? categoryFilter.value : '';
+                const qs = new URLSearchParams({
+                    page: String(stockPage),
+                    page_size: String(STOCK_PAGE_SIZE)
+                });
+                if (selectedCategory) qs.set('category', selectedCategory);
+                const data = await apiCall(`/stock?${qs.toString()}`);
+                const stockList = document.getElementById('stockList');
                 const filterStatus = document.getElementById('filterStatus');
                 
-                // Ensure data.items exists and is an array
                 if (!data || !data.items || !Array.isArray(data.items)) {
                     console.error('Invalid stock data received:', data);
                     stockList.innerHTML = '<p>Error: Invalid data received from server</p>';
                     return;
                 }
                 
-                // Get all unique categories from items (safely handle missing category property)
-                const categories = [...new Set(data.items
-                    .map(item => item.category)
-                    .filter(c => c && typeof c === 'string' && c.trim())
-                )].sort();
-                
-                // Always refresh category filter dropdown with current categories
-                if (categoryFilter) {
-                    const currentFilter = categoryFilter.value || '';
-                    categoryFilter.innerHTML = '<option value="">All Categories</option>';
-                    categories.forEach(cat => {
-                        const option = document.createElement('option');
-                        option.value = cat;
-                        option.textContent = cat;
-                        categoryFilter.appendChild(option);
-                    });
-                    // Restore filter if it was set and still exists
-                    if (currentFilter && categories.includes(currentFilter)) {
-                        categoryFilter.value = currentFilter;
-                    }
+                stockTotal = typeof data.total === 'number' ? data.total : data.items.length;
+                if (data.items.length === 0 && stockTotal > 0 && stockPage > 1) {
+                    stockPage--;
+                    return loadStock();
                 }
                 
-                // Filter items by selected category
-                const selectedCategory = (categoryFilter && categoryFilter.value) ? categoryFilter.value : '';
-                let filteredItems = data.items;
-                if (selectedCategory) {
-                    filteredItems = data.items.filter(item => item.category === selectedCategory);
-                }
-                
-                // Update filter status
                 if (filterStatus) {
-                    if (selectedCategory) {
-                        filterStatus.textContent = `Showing ${filteredItems.length} item(s) in category "${selectedCategory}"`;
-                    } else {
-                        filterStatus.textContent = `Showing ${filteredItems.length} item(s)${categories.length > 0 ? ` across ${categories.length} categor${categories.length === 1 ? 'y' : 'ies'}` : ''}`;
-                    }
+                    const catPart = selectedCategory ? ` in category "${selectedCategory}"` : '';
+                    filterStatus.textContent = `Showing ${data.items.length} of ${stockTotal} item(s)${catPart} (page ${stockPage})`;
                 }
                 
-                if (filteredItems.length === 0) {
-                    stockList.innerHTML = `<p>No raw materials found${selectedCategory ? ` in category "${selectedCategory}"` : ''}</p>`;
+                if (data.items.length === 0) {
+                    stockList.innerHTML = `<p>No raw materials found${selectedCategory ? ` in category "${selectedCategory}"` : ''}</p>` + renderStockPager();
                     return;
                 }
                 
@@ -232,7 +250,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${filteredItems.map(item => {
+                            ${data.items.map(item => {
                                 const currentQty = parseFloat(item.current_quantity) || 0;
                                 const minQty = parseFloat(item.min_quantity) || 0;
                                 const isLow = currentQty <= minQty;
@@ -257,6 +275,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderStockPager()}
                 `;
             } catch (error) {
                 console.error('Error loading stock:', error);
@@ -275,8 +294,8 @@
         
         async function editStock(id) {
             try {
-                const data = await apiCall(`/stock`);
-                const item = data.items.find(i => i.id === id);
+                const data = await apiCall(`/stock/${id}`);
+                const item = data.item;
                 if (!item) return;
                 
                 document.getElementById('stockModalTitle').textContent = 'Edit Raw Material';
@@ -325,6 +344,8 @@
                     showAlert('Raw material created');
                 }
                 hideModal('stockModal');
+                stockPage = 1;
+                await loadStockCategories();
                 loadStock();
             } catch (error) {
                 showAlert(error.message, 'error');

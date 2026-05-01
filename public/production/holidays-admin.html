@@ -798,7 +798,7 @@
         async function loadAllRequests() {
             try {
                 console.log('Loading all requests...');
-                const response = await apiCall('/holidays/requests');
+                const response = await apiCall('/holidays/requests?all=1');
                 console.log('All requests response:', response);
                 
                 if (response && response.success) {
@@ -1223,7 +1223,7 @@
                 console.log('Loading calendar for:', month, year);
                 
                 // Fetch all holiday requests for the year
-                const requestsResponse = await apiCall(`/holidays/requests?year=${year}`);
+                const requestsResponse = await apiCall(`/holidays/requests?year=${year}&all=1`);
                 console.log('Holiday requests response:', requestsResponse);
                 
                 if (!requestsResponse) {

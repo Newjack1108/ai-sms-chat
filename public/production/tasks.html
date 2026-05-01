@@ -30,7 +30,7 @@
                 <button onclick="showAddTaskModal()" class="btn btn-primary">Add Task</button>
             </div>
             <div style="margin-bottom: 20px;">
-                <button onclick="loadTasks()" class="btn btn-secondary btn-sm">All Tasks</button>
+                <button onclick="loadAllTasks()" class="btn btn-secondary btn-sm">All Tasks</button>
                 <button onclick="loadMyTasks()" class="btn btn-secondary btn-sm">My Tasks</button>
                 <button onclick="loadOverdueTasks()" class="btn btn-secondary btn-sm">Overdue</button>
             </div>
@@ -102,6 +102,9 @@
         let currentUser = null;
         let users = [];
         let currentFilter = 'all';
+        let tasksPage = 1;
+        let tasksTotal = 0;
+        const TASKS_PAGE_SIZE = 25;
         
         async function init() {
             // Redirect staff users
@@ -111,7 +114,7 @@
             if (!currentUser) return;
             initNavbar();
             await loadUsers();
-            loadTasks();
+            loadAllTasks();
         }
         
         async function loadUsers() {
@@ -129,18 +132,52 @@
             }
         }
         
+        function renderTasksPager() {
+            const totalPages = Math.max(1, Math.ceil(tasksTotal / TASKS_PAGE_SIZE));
+            if (tasksTotal <= TASKS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${tasksPage} of ${totalPages} (${tasksTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${tasksPage <= 1 ? 'disabled' : ''} onclick="goTasksPage(${tasksPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${tasksPage >= totalPages ? 'disabled' : ''} onclick="goTasksPage(${tasksPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goTasksPage(p) {
+            tasksPage = Math.max(1, p);
+            reloadTasksCurrentFilter();
+        }
+        
+        function reloadTasksCurrentFilter() {
+            if (currentFilter === 'my') {
+                loadTasks({ assigned_to_user_id: currentUser.id });
+            } else if (currentFilter === 'overdue') {
+                loadTasks({ overdue: true });
+            } else {
+                loadTasks({});
+            }
+        }
+        
         async function loadTasks(filter = {}) {
             try {
                 const queryParams = new URLSearchParams();
                 if (filter.status) queryParams.append('status', filter.status);
                 if (filter.assigned_to_user_id) queryParams.append('assigned_to_user_id', filter.assigned_to_user_id);
                 if (filter.overdue) queryParams.append('overdue', 'true');
+                queryParams.append('page', tasksPage);
+                queryParams.append('page_size', TASKS_PAGE_SIZE);
                 
                 const data = await apiCall(`/tasks?${queryParams.toString()}`);
                 const tasksList = document.getElementById('tasksList');
+                const tlist = data.tasks || [];
+                tasksTotal = typeof data.total === 'number' ? data.total : tlist.length;
+                if (tlist.length === 0 && tasksTotal > 0 && tasksPage > 1) {
+                    tasksPage--;
+                    return loadTasks(filter);
+                }
                 
-                if (data.tasks.length === 0) {
-                    tasksList.innerHTML = '<p>No tasks found</p>';
+                if (tlist.length === 0) {
+                    tasksList.innerHTML = '<p>No tasks found</p>' + renderTasksPager();
                     return;
                 }
                 
@@ -159,7 +196,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.tasks.map(task => {
+                            ${tlist.map(task => {
                                 const isOverdue = task.due_date && task.due_date < today && task.status !== 'completed';
                                 return `
                                     <tr>
@@ -186,19 +223,28 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderTasksPager()}
                 `;
             } catch (error) {
                 document.getElementById('tasksList').innerHTML = '<p>Error loading tasks</p>';
             }
         }
         
+        function loadAllTasks() {
+            currentFilter = 'all';
+            tasksPage = 1;
+            loadTasks({});
+        }
+        
         function loadMyTasks() {
             currentFilter = 'my';
+            tasksPage = 1;
             loadTasks({ assigned_to_user_id: currentUser.id });
         }
         
         function loadOverdueTasks() {
             currentFilter = 'overdue';
+            tasksPage = 1;
             loadTasks({ overdue: true });
         }
         
@@ -212,8 +258,8 @@
         
         async function editTask(id) {
             try {
-                const data = await apiCall('/tasks');
-                const task = data.tasks.find(t => t.id === id);
+                const data = await apiCall(`/tasks/${id}`);
+                const task = data.task;
                 if (!task) return;
                 
                 document.getElementById('taskModalTitle').textContent = 'Edit Task';
@@ -231,8 +277,8 @@
         
         async function viewTaskDetails(id) {
             try {
-                const taskData = await apiCall('/tasks');
-                const task = taskData.tasks.find(t => t.id === id);
+                const taskData = await apiCall(`/tasks/${id}`);
+                const task = taskData.task;
                 if (!task) return;
                 
                 const commentsData = await apiCall(`/tasks/${id}/comments`);
@@ -292,7 +338,7 @@
             try {
                 await apiCall(`/tasks/${id}/complete`, { method: 'POST' });
                 showAlert('Task marked as complete');
-                loadTasks();
+                reloadTasksCurrentFilter();
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -303,7 +349,7 @@
             try {
                 await apiCall(`/tasks/${id}`, { method: 'DELETE' });
                 showAlert('Task deleted');
-                loadTasks();
+                reloadTasksCurrentFilter();
             } catch (error) {
                 showAlert(error.message, 'error');
             }
@@ -333,9 +379,10 @@
                         body: JSON.stringify(data)
                     });
                     showAlert('Task created');
+                    tasksPage = 1;
                 }
                 hideModal('taskModal');
-                loadTasks();
+                reloadTasksCurrentFilter();
             } catch (error) {
                 showAlert(error.message, 'error');
             }

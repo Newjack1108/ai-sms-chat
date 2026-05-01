@@ -14,6 +14,16 @@ const {
     londonWeekdaySun0FromYmd
 } = require('./uk-datetime');
 
+function parsePaginationQuery(req, defaults = {}) {
+    const maxPageSize = defaults.maxPageSize ?? 100;
+    const defaultPageSize = defaults.defaultPageSize ?? 25;
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    let pageSize = parseInt(String(req.query.page_size ?? req.query.pageSize ?? defaultPageSize), 10);
+    if (Number.isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
+    pageSize = Math.min(maxPageSize, pageSize);
+    return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
 const PENDING_AMENDMENT_EXISTS_MSG =
     'A pending amendment already exists for this entry. Wait for review or contact a manager.';
 
@@ -390,13 +400,69 @@ router.delete('/users/:id', requireProductionAuth, requireAdmin, async (req, res
 
 // ============ STOCK MANAGEMENT ROUTES ============
 
+router.get('/stock/low-stock', requireProductionAuth, async (req, res) => {
+    try {
+        const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20));
+        const items = await ProductionDatabase.getLowStockItemsPreview(limit);
+        res.json({ success: true, items });
+    } catch (error) {
+        console.error('Get low-stock error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get low stock items' });
+    }
+});
+
 router.get('/stock', requireProductionAuth, async (req, res) => {
     try {
-        const items = await ProductionDatabase.getAllStockItems();
-        res.json({ success: true, items });
+        if (String(req.query.all) === '1') {
+            const items = await ProductionDatabase.getAllStockItems();
+            return res.json({
+                success: true,
+                items,
+                total: items.length,
+                page: 1,
+                page_size: items.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const category = req.query.category ? String(req.query.category).trim() : null;
+        const lowOnly = String(req.query.low_only) === '1' || req.query.low_only === 'true';
+        const { items, total, page: p, page_size } = await ProductionDatabase.getStockItemsPaged({
+            page,
+            pageSize,
+            category: category || null,
+            lowOnly
+        });
+        res.json({ success: true, items, total, page: p, page_size });
     } catch (error) {
         console.error('Get stock error:', error);
         res.status(500).json({ success: false, error: 'Failed to get stock items' });
+    }
+});
+
+router.get('/stock/categories', requireProductionAuth, async (req, res) => {
+    try {
+        const categories = await ProductionDatabase.getStockCategories();
+        res.json({ success: true, categories });
+    } catch (error) {
+        console.error('Get stock categories error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get categories' });
+    }
+});
+
+router.get('/stock/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id, 10);
+        if (Number.isNaN(itemId)) {
+            return res.status(400).json({ success: false, error: 'Invalid stock item id' });
+        }
+        const item = await ProductionDatabase.getStockItemById(itemId);
+        if (!item) {
+            return res.status(404).json({ success: false, error: 'Stock item not found' });
+        }
+        res.json({ success: true, item });
+    } catch (error) {
+        console.error('Get stock item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get stock item' });
     }
 });
 
@@ -499,8 +565,19 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
 
 router.get('/panels', requireProductionAuth, async (req, res) => {
     try {
-        const panels = await ProductionDatabase.getAllPanels();
-        res.json({ success: true, panels });
+        if (String(req.query.all) === '1') {
+            const panels = await ProductionDatabase.getAllPanels();
+            return res.json({
+                success: true,
+                panels,
+                total: panels.length,
+                page: 1,
+                page_size: panels.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const { panels, total, page: p, page_size } = await ProductionDatabase.getPanelsPaged({ page, pageSize });
+        res.json({ success: true, panels, total, page: p, page_size });
     } catch (error) {
         console.error('Get panels error:', error);
         res.status(500).json({ success: false, error: 'Failed to get panels' });
@@ -550,6 +627,23 @@ router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, 
             error: errorMessage,
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+});
+
+router.get('/panels/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const panelId = parseInt(req.params.id, 10);
+        if (Number.isNaN(panelId)) {
+            return res.status(400).json({ success: false, error: 'Invalid panel id' });
+        }
+        const panel = await ProductionDatabase.getPanelById(panelId);
+        if (!panel) {
+            return res.status(404).json({ success: false, error: 'Built item not found' });
+        }
+        res.json({ success: true, panel });
+    } catch (error) {
+        console.error('Get panel error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get built item' });
     }
 });
 
@@ -787,8 +881,19 @@ router.post('/panels/:id/movement', requireProductionAuth, async (req, res) => {
 
 router.get('/components', requireProductionAuth, async (req, res) => {
     try {
-        const components = await ProductionDatabase.getAllComponents();
-        res.json({ success: true, components });
+        if (String(req.query.all) === '1') {
+            const components = await ProductionDatabase.getAllComponents();
+            return res.json({
+                success: true,
+                components,
+                total: components.length,
+                page: 1,
+                page_size: components.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const { components, total, page: p, page_size } = await ProductionDatabase.getComponentsPaged({ page, pageSize });
+        res.json({ success: true, components, total, page: p, page_size });
     } catch (error) {
         console.error('Get components error:', error);
         res.status(500).json({ success: false, error: 'Failed to get components' });
@@ -816,6 +921,23 @@ router.post('/components', requireProductionAuth, requireAdminOrOffice, async (r
     } catch (error) {
         console.error('Create component error:', error);
         res.status(500).json({ success: false, error: 'Failed to create component' });
+    }
+});
+
+router.get('/components/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const componentId = parseInt(req.params.id, 10);
+        if (Number.isNaN(componentId)) {
+            return res.status(400).json({ success: false, error: 'Invalid component id' });
+        }
+        const component = await ProductionDatabase.getComponentById(componentId);
+        if (!component) {
+            return res.status(404).json({ success: false, error: 'Component not found' });
+        }
+        res.json({ success: true, component });
+    } catch (error) {
+        console.error('Get component error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get component' });
     }
 });
 
@@ -1009,6 +1131,13 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
         const totalStockValue = await ProductionDatabase.getTotalStockValue();
         const totalPanelValue = await ProductionDatabase.getTotalPanelValue();
         const lastWeekSummary = await ProductionDatabase.getLastWeekPlannerSummary();
+        const lowStockPreview = await ProductionDatabase.getLowStockItemsPreview(20);
+        const recentOrders = await ProductionDatabase.getProductOrdersPaged({
+            page: 1,
+            pageSize: 10,
+            quoteOnly: false,
+            includeProducts: false
+        });
         
         res.json({
             success: true,
@@ -1016,7 +1145,9 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
                 total_wip_value: totalWIPValue,
                 total_stock_value: totalStockValue,
                 total_panel_value: totalPanelValue,
-                last_week: lastWeekSummary
+                last_week: lastWeekSummary,
+                low_stock_preview: lowStockPreview,
+                recent_orders: recentOrders.orders
             }
         });
     } catch (error) {
@@ -1062,8 +1193,26 @@ router.put('/settings/:key', requireProductionAuth, requireAdmin, async (req, re
 
 router.get('/products', requireProductionAuth, async (req, res) => {
     try {
-        const products = await ProductionDatabase.getAllProducts();
-        res.json({ success: true, products });
+        if (String(req.query.all) === '1') {
+            const products = await ProductionDatabase.getAllProducts();
+            return res.json({
+                success: true,
+                products,
+                total: products.length,
+                page: 1,
+                page_size: products.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const status = req.query.status ? String(req.query.status).trim() : null;
+        const category = req.query.category ? String(req.query.category).trim() : null;
+        const { products, total, page: p, page_size } = await ProductionDatabase.getProductsPaged({
+            page,
+            pageSize,
+            status: status || null,
+            category: category || null
+        });
+        res.json({ success: true, products, total, page: p, page_size });
     } catch (error) {
         console.error('Get products error:', error);
         res.status(500).json({ success: false, error: 'Failed to get products' });
@@ -1097,6 +1246,23 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
     } catch (error) {
         console.error('Create product error:', error);
         res.status(500).json({ success: false, error: 'Failed to create product' });
+    }
+});
+
+router.get('/products/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id, 10);
+        if (Number.isNaN(productId)) {
+            return res.status(400).json({ success: false, error: 'Invalid product id' });
+        }
+        const product = await ProductionDatabase.getProductById(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        res.json({ success: true, product });
+    } catch (error) {
+        console.error('Get product error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get product' });
     }
 });
 
@@ -1575,10 +1741,15 @@ router.delete('/orders/:id/spares/:spareId', requireProductionAuth, requireAdmin
 
 router.get('/quotes', requireProductionAuth, async (req, res) => {
     try {
-        const orders = await ProductionDatabase.getAllProductOrders();
-        // Filter to only return quotes (status = 'quote')
-        const quotes = orders.filter(order => order.status === 'quote');
-        res.json({ success: true, quotes });
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const includeProducts = req.query.include_products !== '0' && req.query.include_products !== 'false';
+        const { orders, total, page: p, page_size } = await ProductionDatabase.getProductOrdersPaged({
+            page,
+            pageSize,
+            quoteOnly: true,
+            includeProducts
+        });
+        res.json({ success: true, quotes: orders, total, page: p, page_size });
     } catch (error) {
         console.error('Get quotes error:', error);
         res.status(500).json({ success: false, error: 'Failed to get quotes' });
@@ -1633,12 +1804,28 @@ router.post('/quotes/:id/convert-to-order', requireProductionAuth, requireManage
 
 // ============ PRODUCT ORDERS ROUTES ============
 
+router.get('/orders/for-select', requireProductionAuth, async (req, res) => {
+    try {
+        const limit = Math.min(2000, Math.max(1, parseInt(String(req.query.limit ?? '1500'), 10) || 1500));
+        const orders = await ProductionDatabase.getProductOrdersForSelectList(limit);
+        res.json({ success: true, orders });
+    } catch (error) {
+        console.error('Get orders for-select error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get orders list' });
+    }
+});
+
 router.get('/orders', requireProductionAuth, async (req, res) => {
     try {
-        const orders = await ProductionDatabase.getAllProductOrders();
-        // Filter out quotes - only return actual orders
-        const actualOrders = orders.filter(order => order.status !== 'quote');
-        res.json({ success: true, orders: actualOrders });
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const includeProducts = req.query.include_products !== '0' && req.query.include_products !== 'false';
+        const { orders, total, page: p, page_size } = await ProductionDatabase.getProductOrdersPaged({
+            page,
+            pageSize,
+            quoteOnly: false,
+            includeProducts
+        });
+        res.json({ success: true, orders, total, page: p, page_size });
     } catch (error) {
         console.error('Get orders error:', error);
         res.status(500).json({ success: false, error: 'Failed to get orders' });
@@ -1788,14 +1975,10 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
         const endDate = req.query.end_date || null;
-        console.log('Getting installations with start_date:', startDate, 'end_date:', endDate);
         const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
-        console.log('Successfully retrieved', installations.length, 'installations');
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
-        console.error('Error message:', error.message);
-        console.error('Error stack:', error.stack);
         res.status(500).json({ success: false, error: 'Failed to get installations', details: error.message });
     }
 });
@@ -2109,6 +2292,13 @@ router.get('/timesheet/jobs', requireProductionAuth, async (req, res) => {
         const jobs = includeInactive 
             ? await ProductionDatabase.getAllJobsIncludingInactive()
             : await ProductionDatabase.getAllJobs();
+        if (req.query.page != null || req.query.page_size != null || req.query.pageSize != null) {
+            const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+            const total = jobs.length;
+            const start = (page - 1) * pageSize;
+            const slice = jobs.slice(start, start + pageSize);
+            return res.json({ success: true, jobs: slice, total, page, page_size: pageSize });
+        }
         res.json({ success: true, jobs });
     } catch (error) {
         console.error('Get jobs error:', error);
@@ -3930,8 +4120,23 @@ router.get('/reminders', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const userRole = req.session.production_user.role;
-        const reminders = await ProductionDatabase.getAllReminders(userId, userRole);
-        res.json({ success: true, reminders });
+        if (String(req.query.all) === '1') {
+            const reminders = await ProductionDatabase.getAllReminders(userId, userRole);
+            return res.json({
+                success: true,
+                reminders,
+                total: reminders.length,
+                page: 1,
+                page_size: reminders.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const { reminders, total, page: p, page_size } = await ProductionDatabase.getRemindersPaged(
+            userId,
+            userRole,
+            { page, pageSize }
+        );
+        res.json({ success: true, reminders, total, page: p, page_size });
     } catch (error) {
         console.error('Get reminders error:', error);
         res.status(500).json({ success: false, error: 'Failed to get reminders' });
@@ -3985,6 +4190,42 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
         console.error('Get overdue reminders error:', error);
         console.error('Error stack:', error.stack);
         res.status(500).json({ success: false, error: 'Failed to get overdue reminders: ' + error.message });
+    }
+});
+
+router.get('/reminders/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const reminderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(reminderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid reminder id' });
+        }
+        const userId = req.session.production_user.id;
+        const userRole = req.session.production_user.role;
+        const reminder = await ProductionDatabase.getReminderWithJoinsById(reminderId);
+        if (!reminder) {
+            return res.status(404).json({ success: false, error: 'Reminder not found' });
+        }
+        const uid = parseInt(userId, 10);
+        let visible = false;
+        if (userRole === 'admin') {
+            visible =
+                parseInt(reminder.created_by_user_id, 10) === uid ||
+                (reminder.user_id == null && reminder.target_role == null);
+        } else {
+            const assignedUserId =
+                reminder.user_id == null || reminder.user_id === '' ? null : parseInt(reminder.user_id, 10);
+            visible =
+                (assignedUserId !== null && !Number.isNaN(assignedUserId) && assignedUserId === uid) ||
+                (reminder.target_role && reminder.target_role === userRole) ||
+                parseInt(reminder.created_by_user_id, 10) === uid;
+        }
+        if (!visible) {
+            return res.status(404).json({ success: false, error: 'Reminder not found' });
+        }
+        res.json({ success: true, reminder });
+    } catch (error) {
+        console.error('Get reminder error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get reminder' });
     }
 });
 
@@ -4435,9 +4676,19 @@ router.get('/tasks', requireProductionAuth, async (req, res) => {
         if (req.query.status) filters.status = req.query.status;
         if (req.query.assigned_to_user_id) filters.assigned_to_user_id = parseInt(req.query.assigned_to_user_id);
         if (req.query.overdue === 'true') filters.overdue = true;
-        
-        const tasks = await ProductionDatabase.getAllTasks(filters);
-        res.json({ success: true, tasks });
+        if (String(req.query.all) === '1') {
+            const tasks = await ProductionDatabase.getAllTasks(filters);
+            return res.json({
+                success: true,
+                tasks,
+                total: tasks.length,
+                page: 1,
+                page_size: tasks.length
+            });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const { tasks, total, page: p, page_size } = await ProductionDatabase.getTasksPaged(filters, { page, pageSize });
+        res.json({ success: true, tasks, total, page: p, page_size });
     } catch (error) {
         console.error('Get tasks error:', error);
         res.status(500).json({ success: false, error: 'Failed to get tasks' });
@@ -4455,6 +4706,23 @@ router.get('/tasks/my', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Get my tasks error:', error);
         res.status(500).json({ success: false, error: 'Failed to get my tasks' });
+    }
+});
+
+router.get('/tasks/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const taskId = parseInt(req.params.id, 10);
+        if (Number.isNaN(taskId)) {
+            return res.status(400).json({ success: false, error: 'Invalid task id' });
+        }
+        const task = await ProductionDatabase.getTaskById(taskId);
+        if (!task) {
+            return res.status(404).json({ success: false, error: 'Task not found' });
+        }
+        res.json({ success: true, task });
+    } catch (error) {
+        console.error('Get task error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get task' });
     }
 });
 
@@ -4668,15 +4936,38 @@ router.get('/holidays/requests', requireProductionAuth, async (req, res) => {
         const user = req.session.production_user;
         const year = req.query.year ? parseInt(req.query.year) : null;
         
-        if (user.role === 'admin' || user.role === 'office') {
-            const requests = await ProductionDatabase.getAllHolidayRequests(year);
-            res.json({ success: true, requests });
-        } else {
-            // Ensure user ID is parsed as integer for proper filtering
-            const userId = parseInt(user.id);
-            console.log('Getting holiday requests for user ID:', userId, 'type:', typeof userId);
+        if (String(req.query.mine) === '1') {
+            const userId = parseInt(user.id, 10);
             const requests = await ProductionDatabase.getHolidayRequestsByUser(userId, year);
-            console.log('Found', requests.length, 'requests for user', userId);
+            return res.json({
+                success: true,
+                requests,
+                total: requests.length,
+                page: 1,
+                page_size: requests.length
+            });
+        }
+        
+        if (user.role === 'admin' || user.role === 'office') {
+            if (String(req.query.all) === '1') {
+                const requests = await ProductionDatabase.getAllHolidayRequests(year);
+                return res.json({
+                    success: true,
+                    requests,
+                    total: requests.length,
+                    page: 1,
+                    page_size: requests.length
+                });
+            }
+            const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+            const { requests, total, page: p, page_size } = await ProductionDatabase.getAllHolidayRequestsPaged(year, {
+                page,
+                pageSize
+            });
+            return res.json({ success: true, requests, total, page: p, page_size });
+        } else {
+            const userId = parseInt(user.id, 10);
+            const requests = await ProductionDatabase.getHolidayRequestsByUser(userId, year);
             res.json({ success: true, requests });
         }
     } catch (error) {
@@ -5212,6 +5503,13 @@ router.post('/backups/create', requireProductionAuth, requireAdmin, async (req, 
 router.get('/backups', requireProductionAuth, requireAdmin, async (req, res) => {
     try {
         const backups = await backupService.listBackups();
+        if (req.query.page != null || req.query.page_size != null || req.query.pageSize != null) {
+            const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+            const total = backups.length;
+            const start = (page - 1) * pageSize;
+            const slice = backups.slice(start, start + pageSize);
+            return res.json({ success: true, backups: slice, total, page, page_size: pageSize });
+        }
         res.json({ success: true, backups });
     } catch (error) {
         console.error('List backups error:', error);

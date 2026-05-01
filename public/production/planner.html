@@ -323,7 +323,7 @@
         
         async function loadAllComponents() {
             try {
-                const data = await apiCall('/components');
+                const data = await apiCall('/components?all=1');
                 allComponents = data.components;
             } catch (error) {
                 console.error('Error loading components:', error);

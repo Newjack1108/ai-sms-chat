@@ -145,6 +145,9 @@
         let currentProductId = null;
         let selectedCategory = 'all';
         let allProducts = [];
+        let productsPage = 1;
+        let productsTotal = 0;
+        const PRODUCTS_PAGE_SIZE = 25;
 
         function normalizeProductTypeForSelect(value) {
             const v = (value || '').toString().trim().toLowerCase();
@@ -184,8 +187,8 @@
         
         async function loadPanels() {
             try {
-                const data = await apiCall('/panels');
-                panels = data.panels;
+                const data = await apiCall('/panels?all=1');
+                panels = data.panels || [];
             } catch (error) {
                 console.error('Error loading panels:', error);
             }
@@ -193,8 +196,8 @@
         
         async function loadStockItems() {
             try {
-                const data = await apiCall('/stock');
-                stockItems = data.items;
+                const data = await apiCall('/stock?all=1');
+                stockItems = data.items || [];
             } catch (error) {
                 console.error('Error loading stock items:', error);
             }
@@ -202,8 +205,8 @@
         
         async function loadComponents() {
             try {
-                const data = await apiCall('/components');
-                components = data.components;
+                const data = await apiCall('/components?all=1');
+                components = data.components || [];
             } catch (error) {
                 console.error('Error loading components:', error);
             }
@@ -216,19 +219,48 @@
             return d.toLocaleDateString();
         }
 
+        function renderProductsPager() {
+            const totalPages = Math.max(1, Math.ceil(productsTotal / PRODUCTS_PAGE_SIZE));
+            if (productsTotal <= PRODUCTS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${productsPage} of ${totalPages} (${productsTotal} products)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${productsPage <= 1 ? 'disabled' : ''} onclick="goProductsPage(${productsPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${productsPage >= totalPages ? 'disabled' : ''} onclick="goProductsPage(${productsPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goProductsPage(p) {
+            productsPage = Math.max(1, p);
+            loadProducts();
+        }
+        
         async function loadProducts() {
             try {
-                const data = await apiCall('/products');
+                const qs = new URLSearchParams({
+                    page: String(productsPage),
+                    page_size: String(PRODUCTS_PAGE_SIZE)
+                });
+                if (selectedCategory !== 'all') {
+                    qs.set('category', selectedCategory);
+                }
+                const data = await apiCall(`/products?${qs.toString()}`);
                 const productsList = document.getElementById('productsList');
+                const rows = data.products || [];
+                productsTotal = typeof data.total === 'number' ? data.total : rows.length;
+                if (rows.length === 0 && productsTotal > 0 && productsPage > 1) {
+                    productsPage--;
+                    return loadProducts();
+                }
                 
-                if (data.products.length === 0) {
-                    productsList.innerHTML = '<p>No products found</p>';
+                if (rows.length === 0) {
+                    productsList.innerHTML = '<p>No products found</p>' + renderProductsPager();
                     allProducts = [];
                     return;
                 }
                 
-                // Calculate costs for all products
-                const productsWithCosts = await Promise.all(data.products.map(async (product) => {
+                // Calculate costs for all products on this page
+                const productsWithCosts = await Promise.all(rows.map(async (product) => {
                     try {
                         const costData = await apiCall(`/products/${product.id}/cost`);
                         return { ...product, calculated_cost: costData.cost };
@@ -251,15 +283,10 @@
         
         function displayProducts() {
             const productsList = document.getElementById('productsList');
-            
-            // Filter products by category
-            let filteredProducts = allProducts;
-            if (selectedCategory !== 'all') {
-                filteredProducts = allProducts.filter(product => product.category === selectedCategory);
-            }
+            const filteredProducts = allProducts;
             
             if (filteredProducts.length === 0) {
-                productsList.innerHTML = '<p>No products found in this category</p>';
+                productsList.innerHTML = '<p>No products found in this category</p>' + renderProductsPager();
                 return;
             }
             
@@ -298,11 +325,13 @@
                         `).join('')}
                     </tbody>
                 </table>
+                ${renderProductsPager()}
             `;
         }
         
         function filterProducts(category) {
             selectedCategory = category;
+            productsPage = 1;
             
             // Update active tab
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -318,8 +347,7 @@
                 document.getElementById('tab-other').classList.add('active');
             }
             
-            // Display filtered products
-            displayProducts();
+            loadProducts();
         }
         
         function showAddProductModal() {
@@ -333,8 +361,8 @@
         
         async function editProduct(id) {
             try {
-                const data = await apiCall('/products');
-                const product = data.products.find(p => p.id === id);
+                const data = await apiCall(`/products/${id}`);
+                const product = data.product;
                 if (!product) return;
                 
                 document.getElementById('productModalTitle').textContent = 'Edit Product';
@@ -657,7 +685,13 @@
         }
 
         async function deleteProduct(id) {
-            const product = allProducts.find(p => p.id === id);
+            let product = allProducts.find(p => p.id === id);
+            if (!product) {
+                try {
+                    const r = await apiCall(`/products/${id}`);
+                    product = r.product;
+                } catch (_) { /* ignore */ }
+            }
             const name = product ? product.name : `#${id}`;
             if (!confirm(`Delete product "${name}"? This will remove the product and all its components. This cannot be undone.`)) return;
             try {
@@ -701,6 +735,7 @@
                     showAlert('Product created');
                 }
                 hideModal('productModal');
+                productsPage = 1;
                 loadProducts();
             } catch (error) {
                 showAlert(error.message, 'error');

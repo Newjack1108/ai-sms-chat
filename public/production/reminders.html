@@ -117,6 +117,9 @@
         let stockItems = [];
         
         let allUsers = [];
+        let remindersPage = 1;
+        let remindersTotal = 0;
+        const REMINDERS_PAGE_SIZE = 25;
         
         async function init() {
             // Redirect staff users
@@ -213,10 +216,11 @@
         
         async function loadStockItems() {
             try {
-                const data = await apiCall('/stock');
-                stockItems = data.items;
+                const data = await apiCall('/stock?all=1');
+                stockItems = data.items || [];
                 
                 const select = document.getElementById('reminderStockItem');
+                select.innerHTML = '<option value="">Select stock item...</option>';
                 stockItems.forEach(item => {
                     select.innerHTML += `<option value="${item.id}">${item.name}</option>`;
                 });
@@ -225,13 +229,35 @@
             }
         }
         
+        function renderRemindersPager() {
+            const totalPages = Math.max(1, Math.ceil(remindersTotal / REMINDERS_PAGE_SIZE));
+            if (remindersTotal <= REMINDERS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${remindersPage} of ${totalPages} (${remindersTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${remindersPage <= 1 ? 'disabled' : ''} onclick="goRemindersPage(${remindersPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${remindersPage >= totalPages ? 'disabled' : ''} onclick="goRemindersPage(${remindersPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goRemindersPage(p) {
+            remindersPage = Math.max(1, p);
+            loadReminders();
+        }
+        
         async function loadReminders() {
             try {
-                const data = await apiCall('/reminders');
+                const data = await apiCall(`/reminders?page=${remindersPage}&page_size=${REMINDERS_PAGE_SIZE}`);
                 const remindersList = document.getElementById('remindersList');
+                const rlist = data.reminders || [];
+                remindersTotal = typeof data.total === 'number' ? data.total : rlist.length;
+                if (rlist.length === 0 && remindersTotal > 0 && remindersPage > 1) {
+                    remindersPage--;
+                    return loadReminders();
+                }
                 
-                if (data.reminders.length === 0) {
-                    remindersList.innerHTML = '<p>No reminders found</p>';
+                if (rlist.length === 0) {
+                    remindersList.innerHTML = '<p>No reminders found</p>' + renderRemindersPager();
                     return;
                 }
                 
@@ -250,7 +276,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${data.reminders.map(reminder => {
+                            ${rlist.map(reminder => {
                                 const isOverdue = reminder.next_check_date && reminder.next_check_date < today;
                                 const isActive = reminder.is_active === true || reminder.is_active === 1;
                                 const reminderType = reminder.reminder_type || 'stock_check';
@@ -301,6 +327,7 @@
                             }).join('')}
                         </tbody>
                     </table>
+                    ${renderRemindersPager()}
                 `;
             } catch (error) {
                 document.getElementById('remindersList').innerHTML = '<p>Error loading reminders</p>';
@@ -321,8 +348,8 @@
         
         async function editReminder(id) {
             try {
-                const data = await apiCall('/reminders');
-                const reminder = data.reminders.find(r => r.id === id);
+                const data = await apiCall(`/reminders/${id}`);
+                const reminder = data.reminder;
                 if (!reminder) return;
                 
                 document.getElementById('reminderModalTitle').textContent = 'Edit Reminder';

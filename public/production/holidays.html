@@ -388,13 +388,11 @@
                 const meResponse = await apiCall('/me');
                 const currentUserId = meResponse?.user?.id ? parseInt(meResponse.user.id) : null;
                 
-                const response = await apiCall('/holidays/requests');
+                const response = await apiCall('/holidays/requests?mine=1');
                 if (response.success) {
-                    // Filter to only show current user's requests (even if admin can see all)
-                    let myRequests = response.requests;
+                    let myRequests = response.requests || [];
                     if (currentUserId !== null) {
-                        myRequests = response.requests.filter(req => parseInt(req.user_id) === currentUserId);
-                        console.log('Filtered requests: showing', myRequests.length, 'out of', response.requests.length, 'for user', currentUserId);
+                        myRequests = myRequests.filter(req => parseInt(req.user_id, 10) === currentUserId);
                     }
                     displayMyRequests(myRequests);
                 }

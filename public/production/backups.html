@@ -139,6 +139,9 @@
         let currentUser = null;
         let backups = [];
         let restoreBackupId = null;
+        let backupsPage = 1;
+        let backupsTotal = 0;
+        const BACKUPS_PAGE_SIZE = 25;
         
         async function init() {
             // Redirect staff users
@@ -173,6 +176,7 @@
                 
                 // Reload backups list
                 setTimeout(() => {
+                    backupsPage = 1;
                     loadBackups();
                     statusDiv.style.display = 'none';
                 }, 2000);
@@ -184,15 +188,36 @@
             }
         }
         
+        function renderBackupsPager() {
+            const totalPages = Math.max(1, Math.ceil(backupsTotal / BACKUPS_PAGE_SIZE));
+            if (backupsTotal <= BACKUPS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span>Page ${backupsPage} of ${totalPages} (${backupsTotal} items)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${backupsPage <= 1 ? 'disabled' : ''} onclick="goBackupsPage(${backupsPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${backupsPage >= totalPages ? 'disabled' : ''} onclick="goBackupsPage(${backupsPage + 1})">Next</button>
+                </div>`;
+        }
+        
+        function goBackupsPage(p) {
+            backupsPage = Math.max(1, p);
+            loadBackups();
+        }
+        
         async function loadBackups() {
             try {
-                const data = await apiCall('/backups');
+                const data = await apiCall(`/backups?page=${backupsPage}&page_size=${BACKUPS_PAGE_SIZE}`);
                 backups = data.backups || [];
+                backupsTotal = typeof data.total === 'number' ? data.total : backups.length;
+                if (backups.length === 0 && backupsTotal > 0 && backupsPage > 1) {
+                    backupsPage--;
+                    return loadBackups();
+                }
                 
                 const backupsList = document.getElementById('backupsList');
                 
                 if (backups.length === 0) {
-                    backupsList.innerHTML = '<p>No backups found. Create your first backup to get started.</p>';
+                    backupsList.innerHTML = '<p>No backups found. Create your first backup to get started.</p>' + renderBackupsPager();
                     return;
                 }
                 
@@ -223,6 +248,7 @@
                             `).join('')}
                         </tbody>
                     </table>
+                    ${renderBackupsPager()}
                 `;
             } catch (error) {
                 document.getElementById('backupsList').innerHTML = `<p>Error loading backups: ${error.message}</p>`;

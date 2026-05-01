@@ -445,7 +445,7 @@
                 installations = instResult.installations || [];
                 
                 if (canManageInstallations) {
-                    const ordersResult = await apiCall('/orders');
+                    const ordersResult = await apiCall('/orders/for-select');
                     worksOrders = ordersResult.orders || [];
                     const usersResult = await apiCall('/users');
                     users = (usersResult.users || []).filter(u => u.status !== 'left_company');

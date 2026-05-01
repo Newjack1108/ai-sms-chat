@@ -687,6 +687,10 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_product_components_product ON product_components(product_id);
         CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id);
         CREATE INDEX IF NOT EXISTS idx_stock_movements_user ON stock_movements(user_id);
+        CREATE INDEX IF NOT EXISTS idx_stock_items_category ON stock_items(category);
+        CREATE INDEX IF NOT EXISTS idx_product_orders_created_at ON product_orders(created_at);
+        CREATE INDEX IF NOT EXISTS idx_product_orders_status ON product_orders(status);
+        CREATE INDEX IF NOT EXISTS idx_order_products_order_id ON order_products(order_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
@@ -1388,6 +1392,11 @@ async function initializePostgreSQL() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_orders_created_at ON product_orders(created_at DESC)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_orders_status ON product_orders(status)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_products_order_id ON order_products(order_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_items_category ON stock_items(category)`);
         
         // Migrate finished_products to add category column
         try {
@@ -2577,6 +2586,109 @@ class ProductionDatabase {
         }
     }
     
+    /** Stock rows at or below minimum quantity (for dashboard alerts). */
+    static async getLowStockItemsPreview(limit = 20) {
+        const cap = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM stock_items
+                 WHERE current_quantity::numeric <= min_quantity::numeric
+                 ORDER BY name ASC
+                 LIMIT $1`,
+                [cap]
+            );
+            return result.rows;
+        }
+        return db.prepare(
+            `SELECT * FROM stock_items
+             WHERE CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)
+             ORDER BY name ASC
+             LIMIT ?`
+        ).all(cap);
+    }
+    
+    /**
+     * Paginated stock list.
+     * @param {object} opts
+     * @param {number} opts.page
+     * @param {number} opts.pageSize
+     * @param {string|null} opts.category exact or null
+     * @param {boolean} opts.lowOnly rows where current_quantity <= min_quantity
+     */
+    static async getStockItemsPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const category = opts.category && String(opts.category).trim() ? String(opts.category).trim() : null;
+        const lowOnly = !!opts.lowOnly;
+        const conds = [];
+        const params = [];
+        if (category) {
+            if (isPostgreSQL) {
+                params.push(category);
+                conds.push(`category = $${params.length}`);
+            } else {
+                params.push(category);
+                conds.push('category = ?');
+            }
+        }
+        if (lowOnly) {
+            if (isPostgreSQL) {
+                conds.push('current_quantity::numeric <= min_quantity::numeric');
+            } else {
+                conds.push('CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)');
+            }
+        }
+        const whereSql = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+        let total;
+        if (isPostgreSQL) {
+            const countRes = await pool.query(
+                `SELECT COUNT(*)::int AS c FROM stock_items ${whereSql}`,
+                params
+            );
+            total = countRes.rows[0].c;
+        } else {
+            const row = db.prepare(`SELECT COUNT(*) AS c FROM stock_items ${whereSql}`).get(...params);
+            total = row.c;
+        }
+        let items;
+        if (isPostgreSQL) {
+            const limitParam = params.length + 1;
+            const offsetParam = params.length + 2;
+            const result = await pool.query(
+                `SELECT * FROM stock_items ${whereSql}
+                 ORDER BY name ASC
+                 LIMIT $${limitParam} OFFSET $${offsetParam}`,
+                [...params, pageSize, offset]
+            );
+            items = result.rows;
+        } else {
+            items = db.prepare(
+                `SELECT * FROM stock_items ${whereSql}
+                 ORDER BY name ASC
+                 LIMIT ? OFFSET ?`
+            ).all(...params, pageSize, offset);
+        }
+        return { items, total, page, page_size: pageSize };
+    }
+    
+    static async getStockCategories() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT category FROM stock_items
+                 WHERE category IS NOT NULL AND TRIM(category) <> ''
+                 ORDER BY category ASC`
+            );
+            return result.rows.map(r => r.category);
+        }
+        const rows = db.prepare(
+            `SELECT DISTINCT category FROM stock_items
+             WHERE category IS NOT NULL AND TRIM(category) != ''
+             ORDER BY category ASC`
+        ).all();
+        return rows.map(r => r.category);
+    }
+    
     static async updateStockItem(id, data) {
         await this.ensureStockItemsSchema();
         await this.ensureStockItemsSchema();
@@ -2727,6 +2839,22 @@ class ProductionDatabase {
         } else {
             return db.prepare(`SELECT * FROM panels ORDER BY name`).all();
         }
+    }
+    
+    static async getPanelsPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        let total;
+        if (isPostgreSQL) {
+            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM panels`);
+            total = c.rows[0].c;
+            const r = await pool.query(`SELECT * FROM panels ORDER BY name ASC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+            return { panels: r.rows, total, page, page_size: pageSize };
+        }
+        const row = db.prepare(`SELECT COUNT(*) AS c FROM panels`).get();
+        const rows = db.prepare(`SELECT * FROM panels ORDER BY name ASC LIMIT ? OFFSET ?`).all(pageSize, offset);
+        return { panels: rows, total: row.c, page, page_size: pageSize };
     }
     
     static async updatePanel(id, data) {
@@ -3677,6 +3805,21 @@ class ProductionDatabase {
         } else {
             return db.prepare(`SELECT * FROM components ORDER BY name`).all();
         }
+    }
+    
+    static async getComponentsPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        if (isPostgreSQL) {
+            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM components`);
+            const total = c.rows[0].c;
+            const r = await pool.query(`SELECT * FROM components ORDER BY name ASC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+            return { components: r.rows, total, page, page_size: pageSize };
+        }
+        const row = db.prepare(`SELECT COUNT(*) AS c FROM components`).get();
+        const rows = db.prepare(`SELECT * FROM components ORDER BY name ASC LIMIT ? OFFSET ?`).all(pageSize, offset);
+        return { components: rows, total: row.c, page, page_size: pageSize };
     }
     
     static async updateComponent(id, data) {
@@ -4844,6 +4987,57 @@ class ProductionDatabase {
         }
     }
     
+    static async getProductsPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const status = opts.status && String(opts.status).trim() ? String(opts.status).trim() : null;
+        const category = opts.category && String(opts.category).trim() ? String(opts.category).trim() : null;
+        const baseFrom = `FROM finished_products fp`;
+        const syncSub = `(SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at`;
+        const condsPg = [];
+        const condsLite = [];
+        const paramsPg = [];
+        const paramsLite = [];
+        if (status) {
+            condsPg.push(`fp.status = $${paramsPg.length + 1}`);
+            paramsPg.push(status);
+            condsLite.push('fp.status = ?');
+            paramsLite.push(status);
+        }
+        if (category) {
+            condsPg.push(`fp.category = $${paramsPg.length + 1}`);
+            paramsPg.push(category);
+            condsLite.push('fp.category = ?');
+            paramsLite.push(category);
+        }
+        const whereSql = condsPg.length ? `WHERE ${condsPg.join(' AND ')}` : '';
+        const whereSqlLite = condsLite.length ? `WHERE ${condsLite.join(' AND ')}` : '';
+        let total;
+        if (isPostgreSQL) {
+            const cr = await pool.query(`SELECT COUNT(*)::int AS c ${baseFrom} ${whereSql}`, paramsPg);
+            total = cr.rows[0].c;
+        } else {
+            const row = db.prepare(`SELECT COUNT(*) AS c ${baseFrom} ${whereSqlLite}`).get(...paramsLite);
+            total = row.c;
+        }
+        let rows;
+        if (isPostgreSQL) {
+            const lim = paramsPg.length + 1;
+            const off = paramsPg.length + 2;
+            const r2 = await pool.query(
+                `SELECT fp.*, ${syncSub} ${baseFrom} ${whereSql} ORDER BY fp.name ASC LIMIT $${lim} OFFSET $${off}`,
+                [...paramsPg, pageSize, offset]
+            );
+            rows = r2.rows;
+        } else {
+            rows = db.prepare(
+                `SELECT fp.*, ${syncSub} ${baseFrom} ${whereSqlLite} ORDER BY fp.name ASC LIMIT ? OFFSET ?`
+            ).all(...paramsLite, pageSize, offset);
+        }
+        return { products: rows, total, page, page_size: pageSize };
+    }
+    
     static async getProductByName(name) {
         if (!name || typeof name !== 'string') return null;
         const trimmed = name.trim();
@@ -5546,6 +5740,77 @@ class ProductionDatabase {
         }
     }
     
+    /** Batch-load order_products for many order ids (single query). Mutates orders in place: sets .products array. */
+    static async attachOrderProductsBatch(orders) {
+        if (!orders || orders.length === 0) return;
+        const ids = orders.map(o => o.id).filter(id => id != null);
+        if (ids.length === 0) return;
+        for (const o of orders) {
+            o.products = [];
+        }
+        const byOrderId = new Map();
+        for (const o of orders) {
+            byOrderId.set(o.id, o);
+        }
+        let rows;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT op.*, fp.name as product_name
+                 FROM order_products op
+                 LEFT JOIN finished_products fp ON op.product_id = fp.id
+                 WHERE op.order_id = ANY($1::int[])
+                 ORDER BY op.order_id, op.id`,
+                [ids]
+            );
+            rows = result.rows;
+        } else {
+            const placeholders = ids.map(() => '?').join(',');
+            rows = db.prepare(
+                `SELECT op.*, fp.name as product_name
+                 FROM order_products op
+                 LEFT JOIN finished_products fp ON op.product_id = fp.id
+                 WHERE op.order_id IN (${placeholders})
+                 ORDER BY op.order_id, op.id`
+            ).all(...ids);
+        }
+        for (const row of rows) {
+            const order = byOrderId.get(row.order_id);
+            if (order) order.products.push(row);
+        }
+    }
+    
+    /**
+     * Lightweight works-order rows for dropdowns (no order_products).
+     * @param {number} limit capped at 2000
+     */
+    static async getProductOrdersForSelectList(limit = 1500) {
+        const cap = Math.min(2000, Math.max(1, parseInt(limit, 10) || 1500));
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT po.id, po.customer_name, po.status, po.order_date, po.sales_order_ref,
+                        po.labour_estimate_hours, po.travel_time_hours_round_trip,
+                        fp.name as product_name
+                 FROM product_orders po
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 WHERE (po.status IS NULL OR po.status != 'quote')
+                 ORDER BY po.created_at DESC
+                 LIMIT $1`,
+                [cap]
+            );
+            return result.rows;
+        }
+        return db.prepare(
+            `SELECT po.id, po.customer_name, po.status, po.order_date, po.sales_order_ref,
+                    po.labour_estimate_hours, po.travel_time_hours_round_trip,
+                    fp.name as product_name
+             FROM product_orders po
+             LEFT JOIN finished_products fp ON po.product_id = fp.id
+             WHERE (po.status IS NULL OR po.status != 'quote')
+             ORDER BY po.created_at DESC
+             LIMIT ?`
+        ).all(cap);
+    }
+    
     static async addProductToOrder(orderId, productId, quantity) {
         if (isPostgreSQL) {
             await pool.query(
@@ -5632,13 +5897,69 @@ class ProductionDatabase {
                  ORDER BY po.created_at DESC`
             ).all();
         }
-        
-        // Add products array to each order
-        for (const order of orders) {
-            order.products = await this.getOrderProducts(order.id);
-        }
-        
+        await this.attachOrderProductsBatch(orders);
         return orders;
+    }
+    
+    /**
+     * Paginated product orders with batched order_products.
+     * @param {object} opts
+     * @param {number} opts.page 1-based
+     * @param {number} opts.pageSize max 100
+     * @param {boolean} opts.quoteOnly if true, only status = quote; if false, exclude quotes
+     * @param {boolean} opts.includeProducts default true
+     */
+    static async getProductOrdersPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const quoteOnly = !!opts.quoteOnly;
+        const includeProducts = opts.includeProducts !== false;
+        const whereSql = quoteOnly
+            ? `WHERE po.status = 'quote'`
+            : `WHERE (po.status IS NULL OR po.status != 'quote')`;
+        let total;
+        if (isPostgreSQL) {
+            const countRes = await pool.query(
+                `SELECT COUNT(*)::int AS c FROM product_orders po ${whereSql}`
+            );
+            total = countRes.rows[0].c;
+        } else {
+            const row = db.prepare(`SELECT COUNT(*) AS c FROM product_orders po ${whereSql}`).get();
+            total = row.c;
+        }
+        let orders;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT po.*, fp.name as product_name, u.username as created_by_name
+                 FROM product_orders po
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 LEFT JOIN production_users u ON po.created_by = u.id
+                 ${whereSql}
+                 ORDER BY po.created_at DESC
+                 LIMIT $1 OFFSET $2`,
+                [pageSize, offset]
+            );
+            orders = result.rows;
+        } else {
+            orders = db.prepare(
+                `SELECT po.*, fp.name as product_name, u.username as created_by_name
+                 FROM product_orders po
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 LEFT JOIN production_users u ON po.created_by = u.id
+                 ${whereSql}
+                 ORDER BY po.created_at DESC
+                 LIMIT ? OFFSET ?`
+            ).all(pageSize, offset);
+        }
+        if (includeProducts && orders.length > 0) {
+            await this.attachOrderProductsBatch(orders);
+        } else {
+            for (const o of orders) {
+                o.products = [];
+            }
+        }
+        return { orders, total, page, page_size: pageSize };
     }
     
     // Deduct stock for all product components when a product order is completed
@@ -10507,6 +10828,22 @@ class ProductionDatabase {
         }
     }
     
+    static async getReminderWithJoinsById(id) {
+        const sel = `SELECT r.*, si.name as stock_item_name,
+                u.username as assigned_user_name,
+                creator.username as created_by_username
+         FROM stock_check_reminders r
+         LEFT JOIN stock_items si ON r.stock_item_id = si.id
+         LEFT JOIN production_users u ON r.user_id = u.id
+         LEFT JOIN production_users creator ON r.created_by_user_id = creator.id
+         WHERE r.id = `;
+        if (isPostgreSQL) {
+            const result = await pool.query(`${sel}$1`, [id]);
+            return result.rows[0] || null;
+        }
+        return db.prepare(`${sel}?`).get(id) || null;
+    }
+    
     static async getAllReminders(userId = null, userRole = null) {
         // Build WHERE clause based on user permissions
         let whereClause = '';
@@ -10561,6 +10898,60 @@ class ProductionDatabase {
                 return db.prepare(query).all();
             }
         }
+    }
+    
+    static async getRemindersPaged(userId = null, userRole = null, opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        let whereClause = '';
+        const params = [];
+        let paramIndex = 1;
+        if (userId && userRole) {
+            if (userRole === 'admin') {
+                whereClause = `(r.created_by_user_id = $${paramIndex} OR (r.user_id IS NULL AND r.target_role IS NULL))`;
+                params.push(userId);
+                paramIndex++;
+            } else {
+                whereClause = `(r.user_id = $${paramIndex} OR r.target_role = $${paramIndex + 1} OR r.created_by_user_id = $${paramIndex})`;
+                params.push(userId, userRole, userId);
+                paramIndex += 3;
+            }
+        }
+        const whereSQL = whereClause ? `WHERE ${whereClause}` : '';
+        const baseJoin = `FROM stock_check_reminders r
+                 LEFT JOIN stock_items si ON r.stock_item_id = si.id
+                 LEFT JOIN production_users u ON r.user_id = u.id
+                 LEFT JOIN production_users creator ON r.created_by_user_id = creator.id`;
+        const sel = `SELECT r.*, si.name as stock_item_name,
+                        u.username as assigned_user_name,
+                        creator.username as created_by_username `;
+        if (isPostgreSQL) {
+            const countRes = await pool.query(`SELECT COUNT(*)::int AS c ${baseJoin} ${whereSQL}`, params);
+            const total = countRes.rows[0].c;
+            const lim = params.length + 1;
+            const off = params.length + 2;
+            const r = await pool.query(
+                `${sel} ${baseJoin} ${whereSQL} ORDER BY r.next_check_date ASC LIMIT $${lim} OFFSET $${off}`,
+                [...params, pageSize, offset]
+            );
+            return { reminders: r.rows, total, page, page_size: pageSize };
+        }
+        let sqliteWhere = '';
+        const sp = [];
+        if (userId && userRole) {
+            if (userRole === 'admin') {
+                sqliteWhere = `WHERE (r.created_by_user_id = ? OR (r.user_id IS NULL AND r.target_role IS NULL))`;
+                sp.push(userId);
+            } else {
+                sqliteWhere = `WHERE (r.user_id = ? OR r.target_role = ? OR r.created_by_user_id = ?)`;
+                sp.push(userId, userRole, userId);
+            }
+        }
+        const qBase = `${sel} ${baseJoin} ${sqliteWhere}`;
+        const row = db.prepare(`SELECT COUNT(*) AS c ${baseJoin} ${sqliteWhere}`).get(...sp);
+        const rows = db.prepare(`${qBase} ORDER BY r.next_check_date ASC LIMIT ? OFFSET ?`).all(...sp, pageSize, offset);
+        return { reminders: rows, total: row.c, page, page_size: pageSize };
     }
     
     static async getOverdueReminders(userId = null, userRole = null) {
@@ -11292,6 +11683,53 @@ class ProductionDatabase {
         }
     }
     
+    static async getAllHolidayRequestsPaged(year = null, opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const baseJoin = `FROM holiday_requests hr
+                LEFT JOIN production_users u1 ON hr.user_id = u1.id
+                LEFT JOIN production_users u2 ON hr.requested_by_user_id = u2.id
+                LEFT JOIN production_users u3 ON hr.reviewed_by_user_id = u3.id`;
+        const sel = `SELECT hr.*, 
+                u1.username as user_name,
+                u2.username as requested_by_name,
+                u3.username as reviewed_by_name `;
+        if (isPostgreSQL) {
+            const w = year ? `WHERE EXTRACT(YEAR FROM hr.start_date) = $1` : '';
+            const p = year ? [year] : [];
+            const countRes = await pool.query(
+                `SELECT COUNT(*)::int AS c ${baseJoin} ${w}`,
+                p
+            );
+            const total = countRes.rows[0].c;
+            if (year) {
+                const r = await pool.query(
+                    `${sel} ${baseJoin} ${w} ORDER BY hr.start_date DESC LIMIT $2 OFFSET $3`,
+                    [year, pageSize, offset]
+                );
+                return { requests: r.rows, total, page, page_size: pageSize };
+            }
+            const r = await pool.query(
+                `${sel} ${baseJoin} ORDER BY hr.start_date DESC LIMIT $1 OFFSET $2`,
+                [pageSize, offset]
+            );
+            return { requests: r.rows, total, page, page_size: pageSize };
+        }
+        if (year) {
+            const row = db.prepare(`SELECT COUNT(*) AS c ${baseJoin} WHERE strftime('%Y', hr.start_date) = ?`).get(year.toString());
+            const rows = db.prepare(
+                `${sel} ${baseJoin} WHERE strftime('%Y', hr.start_date) = ? ORDER BY hr.start_date DESC LIMIT ? OFFSET ?`
+            ).all(year.toString(), pageSize, offset);
+            return { requests: rows, total: row.c, page, page_size: pageSize };
+        }
+        const row = db.prepare(`SELECT COUNT(*) AS c ${baseJoin}`).get();
+        const rows = db.prepare(
+            `${sel} ${baseJoin} ORDER BY hr.start_date DESC LIMIT ? OFFSET ?`
+        ).all(pageSize, offset);
+        return { requests: rows, total: row.c, page, page_size: pageSize };
+    }
+    
     static async getPendingHolidayRequests() {
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -11932,6 +12370,65 @@ class ProductionDatabase {
             sqliteQuery += ` ORDER BY t.due_date ASC, t.created_at DESC`;
             return db.prepare(sqliteQuery).all(...sqliteParams);
         }
+    }
+    
+    static async getTasksPaged(filters = {}, opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const baseJoin = `FROM tasks t
+                     LEFT JOIN production_users u1 ON t.assigned_to_user_id = u1.id
+                     LEFT JOIN production_users u2 ON t.created_by_user_id = u2.id
+                     LEFT JOIN production_users u3 ON t.completed_by_user_id = u3.id`;
+        const selCols = `SELECT t.*, 
+                     u1.username as assigned_to_name,
+                     u2.username as created_by_name,
+                     u3.username as completed_by_name `;
+        if (isPostgreSQL) {
+            const p = [];
+            let w = 'WHERE 1=1';
+            let i = 1;
+            if (filters.status) {
+                w += ` AND t.status = $${i++}`;
+                p.push(filters.status);
+            }
+            if (filters.assigned_to_user_id) {
+                w += ` AND t.assigned_to_user_id = $${i++}`;
+                p.push(filters.assigned_to_user_id);
+            }
+            if (filters.overdue) {
+                const today = new Date().toISOString().split('T')[0];
+                w += ` AND t.due_date < $${i++} AND t.status != 'completed'`;
+                p.push(today);
+            }
+            const countRes = await pool.query(`SELECT COUNT(*)::int AS c ${baseJoin} ${w}`, p);
+            const total = countRes.rows[0].c;
+            const r = await pool.query(
+                `${selCols} ${baseJoin} ${w} ORDER BY t.due_date ASC, t.created_at DESC LIMIT $${i++} OFFSET $${i++}`,
+                [...p, pageSize, offset]
+            );
+            return { tasks: r.rows, total, page, page_size: pageSize };
+        }
+        const sp = [];
+        let w = 'WHERE 1=1';
+        if (filters.status) {
+            w += ' AND t.status = ?';
+            sp.push(filters.status);
+        }
+        if (filters.assigned_to_user_id) {
+            w += ' AND t.assigned_to_user_id = ?';
+            sp.push(filters.assigned_to_user_id);
+        }
+        if (filters.overdue) {
+            const today = new Date().toISOString().split('T')[0];
+            w += ` AND t.due_date < ? AND t.status != 'completed'`;
+            sp.push(today);
+        }
+        const row = db.prepare(`SELECT COUNT(*) AS c ${baseJoin} ${w}`).get(...sp);
+        const rows = db.prepare(
+            `${selCols} ${baseJoin} ${w} ORDER BY t.due_date ASC, t.created_at DESC LIMIT ? OFFSET ?`
+        ).all(...sp, pageSize, offset);
+        return { tasks: rows, total: row.c, page, page_size: pageSize };
     }
     
     static async updateTask(id, data) {
