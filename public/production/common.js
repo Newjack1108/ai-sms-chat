@@ -226,6 +226,265 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+/** Product line for load sheet heading (matches production-orders display). */
+function getLoadSheetProductsDisplay(loadSheet) {
+    if (!loadSheet) {
+        return '';
+    }
+    const products = loadSheet.products;
+    if (products && products.length > 0) {
+        return products
+            .map(p => `${p.product_name || 'Unknown'} (x${p.quantity})`)
+            .join(', ');
+    }
+    return `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
+}
+
+/**
+ * Read-only HTML for load sheet tables and estimated times (no checkboxes / PDF).
+ * Used e.g. in installations.html Installation Details modal.
+ */
+function renderLoadSheetReadOnlyHtml(loadSheet) {
+    if (!loadSheet) {
+        return '';
+    }
+    const components = loadSheet.components || [];
+    const builtItems = loadSheet.built_items || [];
+    const rawMaterials = loadSheet.raw_materials || [];
+    const standalone = loadSheet.standalone_spares || {
+        components: [],
+        built_items: [],
+        raw_materials: []
+    };
+    const standaloneComps = standalone.components || [];
+    const standaloneBuilt = standalone.built_items || [];
+    const standaloneRaw = standalone.raw_materials || [];
+
+    const compHasSparesCol = components.some(c => c.spares && c.spares.length > 0);
+    const builtHasSparesCol = builtItems.some(bi => bi.spares && bi.spares.length > 0);
+    const rawHasLocCol = rawMaterials.some(rm => rm.location);
+    const rawHasSparesCol = rawMaterials.some(rm => rm.spares && rm.spares.length > 0);
+
+    let html = '';
+
+    if (components.length > 0) {
+        html += `<h4>Components Required</h4>
+<table class="table">
+<thead><tr>
+<th>Component</th><th>Quantity</th><th>Unit</th>${compHasSparesCol ? '<th>Spares</th>' : ''}
+</tr></thead><tbody>`;
+        html += components.map((c) => {
+            const spareRows =
+                c.spares && c.spares.length > 0
+                    ? c.spares
+                          .map((spare) => {
+                              const loaded = parseFloat(spare.quantity_loaded || 0);
+                              const used = parseFloat(spare.quantity_used || 0);
+                              const returned = parseFloat(spare.quantity_returned || 0);
+                              return `<tr style="background: #fff3cd;">
+<td><em>Spare: ${escapeHtml(c.name)}</em></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(c.unit)}</td>
+${compHasSparesCol ? '<td></td>' : ''}
+</tr>`;
+                          })
+                          .join('')
+                    : '';
+            return `<tr>
+<td><strong>${escapeHtml(c.name)}</strong></td>
+<td>${parseFloat(c.quantity).toFixed(2)}</td>
+<td>${escapeHtml(c.unit)}</td>
+${compHasSparesCol ? '<td></td>' : ''}
+</tr>${spareRows}`;
+        }).join('');
+        html += `</tbody></table>`;
+    }
+
+    if (builtItems.length > 0) {
+        html += `<h4>Built Items Required</h4>
+<table class="table">
+<thead><tr>
+<th>Built Item</th><th>Quantity</th><th>Unit</th>${builtHasSparesCol ? '<th>Spares</th>' : ''}
+</tr></thead><tbody>`;
+        html += builtItems.map((bi) => {
+            const spareRows =
+                bi.spares && bi.spares.length > 0
+                    ? bi.spares
+                          .map((spare) => {
+                              const loaded = parseFloat(spare.quantity_loaded || 0);
+                              const used = parseFloat(spare.quantity_used || 0);
+                              const returned = parseFloat(spare.quantity_returned || 0);
+                              return `<tr style="background: #fff3cd;">
+<td><em>Spare: ${escapeHtml(bi.name)}</em></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(bi.unit)}</td>
+${builtHasSparesCol ? '<td></td>' : ''}
+</tr>`;
+                          })
+                          .join('')
+                    : '';
+            return `<tr>
+<td><strong>${escapeHtml(bi.name)}</strong></td>
+<td>${parseFloat(bi.quantity).toFixed(2)}</td>
+<td>${escapeHtml(bi.unit)}</td>
+${builtHasSparesCol ? '<td></td>' : ''}
+</tr>${spareRows}`;
+        }).join('');
+        html += `</tbody></table>`;
+    }
+
+    if (rawMaterials.length > 0) {
+        html += `<h4>Raw Materials Required</h4>
+<table class="table">
+<thead><tr>
+<th>Material</th><th>Quantity</th><th>Unit</th>
+${rawHasLocCol ? '<th>Location</th>' : ''}
+${rawHasSparesCol ? '<th>Spares</th>' : ''}
+</tr></thead><tbody>`;
+        html += rawMaterials.map((rm) => {
+            const spareRows =
+                rm.spares && rm.spares.length > 0
+                    ? rm.spares
+                          .map((spare) => {
+                              const loaded = parseFloat(spare.quantity_loaded || 0);
+                              const used = parseFloat(spare.quantity_used || 0);
+                              const returned = parseFloat(spare.quantity_returned || 0);
+                              return `<tr style="background: #fff3cd;">
+<td><em>Spare: ${escapeHtml(rm.name)}</em></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(rm.unit)}</td>
+${rawHasLocCol ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
+${rawHasSparesCol ? '<td></td>' : ''}
+</tr>`;
+                          })
+                          .join('')
+                    : '';
+            return `<tr>
+<td><strong>${escapeHtml(rm.name)}</strong></td>
+<td>${parseFloat(rm.quantity).toFixed(2)}</td>
+<td>${escapeHtml(rm.unit)}</td>
+${rawHasLocCol ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
+${rawHasSparesCol ? '<td></td>' : ''}
+</tr>${spareRows}`;
+        }).join('');
+        html += `</tbody></table>`;
+    } else {
+        html += '<p>No raw materials required</p>';
+    }
+
+    if (
+        standaloneComps.length > 0 ||
+        standaloneBuilt.length > 0 ||
+        standaloneRaw.length > 0
+    ) {
+        html += `<h4>Standalone Spares (Not in Main Requirements)</h4>`;
+        if (standaloneComps.length > 0) {
+            html += `<h5>Components</h5>
+<table class="table">
+<thead><tr><th>Component</th><th>Spare Quantity</th><th>Unit</th></tr></thead><tbody>`;
+            html += standaloneComps
+                .map((c) => {
+                    const spare = c.spares && c.spares[0];
+                    if (!spare) {
+                        return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(c.name)}</strong></td><td>—</td><td>${escapeHtml(c.unit)}</td>
+</tr>`;
+                    }
+                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                    const used = parseFloat(spare.quantity_used || 0);
+                    const returned = parseFloat(spare.quantity_returned || 0);
+                    return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(c.name)}</strong></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(c.unit)}</td>
+</tr>`;
+                })
+                .join('');
+            html += `</tbody></table>`;
+        }
+        if (standaloneBuilt.length > 0) {
+            html += `<h5>Built Items</h5>
+<table class="table">
+<thead><tr><th>Built Item</th><th>Spare Quantity</th><th>Unit</th></tr></thead><tbody>`;
+            html += standaloneBuilt
+                .map((bi) => {
+                    const spare = bi.spares && bi.spares[0];
+                    if (!spare) {
+                        return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(bi.name)}</strong></td><td>—</td><td>${escapeHtml(bi.unit)}</td>
+</tr>`;
+                    }
+                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                    const used = parseFloat(spare.quantity_used || 0);
+                    const returned = parseFloat(spare.quantity_returned || 0);
+                    return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(bi.name)}</strong></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(bi.unit)}</td>
+</tr>`;
+                })
+                .join('');
+            html += `</tbody></table>`;
+        }
+        if (standaloneRaw.length > 0) {
+            const stRawLoc = standaloneRaw.some((rm) => rm.location);
+            html += `<h5>Raw Materials</h5>
+<table class="table">
+<thead><tr>
+<th>Material</th><th>Spare Quantity</th><th>Unit</th>
+${stRawLoc ? '<th>Location</th>' : ''}
+</tr></thead><tbody>`;
+            html += standaloneRaw
+                .map((rm) => {
+                    const spare = rm.spares && rm.spares[0];
+                    if (!spare) {
+                        return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(rm.name)}</strong></td><td>—</td><td>${escapeHtml(rm.unit)}</td>
+${stRawLoc ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
+</tr>`;
+                    }
+                    const loaded = parseFloat(spare.quantity_loaded || 0);
+                    const used = parseFloat(spare.quantity_used || 0);
+                    const returned = parseFloat(spare.quantity_returned || 0);
+                    return `<tr style="background: #fff3cd;">
+<td><strong>${escapeHtml(rm.name)}</strong></td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
+<td>${escapeHtml(rm.unit)}</td>
+${stRawLoc ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
+</tr>`;
+                })
+                .join('');
+            html += `</tbody></table>`;
+        }
+    }
+
+    html += `<div style="padding: 15px; margin-top: 20px; background: #f0f7ff; border: 2px solid #4a90e2; border-radius: 8px;">
+<h4 style="margin: 0 0 10px 0; color: #2c5aa0;">Estimated Times</h4>`;
+    if (loadSheet.estimated_load_time && loadSheet.estimated_load_time > 0) {
+        html += `<p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Load Time:</strong> ${parseFloat(loadSheet.estimated_load_time).toFixed(2)} hours</p>`;
+    }
+    if (loadSheet.estimated_install_time && loadSheet.estimated_install_time > 0) {
+        html += `<p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Install Time:</strong> ${parseFloat(loadSheet.estimated_install_time).toFixed(2)} hours <em style="color: #666;">(for reference only)</em></p>`;
+    }
+    html += `<p style="margin: 5px 0; font-size: 16px;"><strong>Estimated Travel Time:</strong> `;
+    if (loadSheet.estimated_travel_time && loadSheet.estimated_travel_time > 0) {
+        html += `${parseFloat(loadSheet.estimated_travel_time).toFixed(2)} hours`;
+    } else {
+        html += `<span style="border-bottom: 2px dashed #666; padding: 0 30px; display: inline-block; min-width: 100px;">&nbsp;</span> <em style="color: #666;">(for reference only)</em>`;
+    }
+    html += `</p>`;
+    if (
+        loadSheet.travel_time_hours_round_trip != null &&
+        loadSheet.travel_time_hours_round_trip !== '' &&
+        !Number.isNaN(parseFloat(loadSheet.travel_time_hours_round_trip))
+    ) {
+        html += `<p style="margin: 5px 0; font-size: 16px;"><strong>LeadLock drive time (round trip):</strong> ${parseFloat(loadSheet.travel_time_hours_round_trip).toFixed(2)} hours</p>`;
+    }
+    html += `</div>`;
+
+    return html;
+}
+
 // Show alert
 function showAlert(message, type = 'success') {
     const alertDiv = document.createElement('div');

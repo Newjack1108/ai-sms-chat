@@ -352,7 +352,7 @@
     
     <!-- Installation Details Modal -->
     <div id="installationDetailsModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 900px;">
             <div class="modal-header">
                 <h3>Installation Details</h3>
                 <button class="modal-close" onclick="hideModal('installationDetailsModal')">&times;</button>
@@ -1256,6 +1256,26 @@
             try {
                 const result = await apiCall(`/installations/${id}`);
                 const inst = result.installation;
+
+                let loadSheetSection = '';
+                if (inst.works_order_id) {
+                    try {
+                        const lsResult = await apiCall(`/orders/${inst.works_order_id}/load-sheet`);
+                        if (lsResult && lsResult.load_sheet) {
+                            const ls = lsResult.load_sheet;
+                            const title = getLoadSheetProductsDisplay(ls);
+                            loadSheetSection = `
+                        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #dee2e6;">
+                            <h5>Load sheet — ${escapeHtml(title)}</h5>
+                            <div class="requirements-section installation-load-sheet-copy" style="max-height: 55vh; overflow-y: auto;">
+                                ${renderLoadSheetReadOnlyHtml(ls)}
+                            </div>
+                        </div>`;
+                        }
+                    } catch (e) {
+                        loadSheetSection = `<p class="text-muted" style="margin-top: 16px;">Could not load load sheet.</p>`;
+                    }
+                }
                 
                 let html = `
                     <div style="padding: 20px;">
@@ -1277,6 +1297,7 @@
                                 inst.assigned_users.map(u => `<li>${u.username}${u.role ? ` (${u.role})` : ''}</li>`).join('') : 
                                 '<li>No users assigned</li>'}
                         </ul>
+                        ${loadSheetSection}
                         <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px;">
                             <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>
                             ${canManageInstallations ? `
