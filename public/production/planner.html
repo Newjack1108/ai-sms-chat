@@ -314,8 +314,8 @@
         
         async function loadAllPanels() {
             try {
-                const data = await apiCall('/panels');
-                allPanels = data.panels;
+                const data = await apiCall('/panels?all=1');
+                allPanels = data.panels || [];
             } catch (error) {
                 console.error('Error loading panels:', error);
             }
