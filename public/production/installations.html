@@ -391,6 +391,7 @@
         let currentView = 'weekly';
         let currentDate = new Date();
         let installations = [];
+        let holidayAllocations = [];
         let worksOrders = [];
         let users = [];
         let editingInstallationId = null;
@@ -496,6 +497,8 @@
                 const endDate = getEndOfPeriod();
                 const instResult = await apiCall(`/installations?start_date=${startDate}&end_date=${endDate}`);
                 installations = instResult.installations || [];
+                const holidayResult = await apiCall(`/holidays/calendar?start_date=${startDate}&end_date=${endDate}`);
+                holidayAllocations = holidayResult.requests || [];
                 
                 if (canManageInstallations) {
                     const ordersResult = await apiCall('/orders/for-select');
@@ -637,6 +640,13 @@
             const instStatusLabel = (s) => (s == null || s === '') ? '-' : String(s).replace(/_/g, ' ');
             let html = '<table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
             list.forEach(inst => {
+                const isAssignedInstaller = !!(
+                    canInstallerActions &&
+                    currentUser &&
+                    Array.isArray(inst.assigned_users) &&
+                    inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                );
+                const canOpen = canManageInstallations || isAssignedInstaller;
                 const startD = inst.start_date || inst.installation_date || '—';
                 const endD = inst.end_date || startD || '—';
                 const productName = inst.product_name ? (inst.order_id ? `Order #${inst.order_id} – ${inst.product_name}` : inst.product_name) : '—';
@@ -651,8 +661,14 @@
                     <td>${loc}</td>
                     <td><span class="badge installation-block ${inst.status || 'scheduled'}">${status}</span></td>
                     <td>
-                        <button onclick="hideModal('installationDetailsModal'); showEditInstallationModal(${inst.id})" class="btn btn-secondary btn-sm">Edit</button>
-                        <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
+                        ${canManageInstallations ? `
+                            <button onclick="hideModal('installationDetailsModal'); showEditInstallationModal(${inst.id})" class="btn btn-secondary btn-sm">Edit</button>
+                            <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
+                        ` : ''}
+                        ${!canManageInstallations && canOpen ? `
+                            <button onclick="showInstallationDetails(${inst.id})" class="btn btn-secondary btn-sm">Open</button>
+                        ` : ''}
+                        ${!canManageInstallations && !canOpen ? `<span class="text-muted">Not allocated</span>` : ''}
                     </td>
                 </tr>`;
             });
@@ -672,11 +688,17 @@
             
             // Normalize date to YYYY-MM-DD (API may return ISO string)
             const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
+            const dayHolidays = {};
             // Group installations by day - handle multi-day installations
             const dayInstallations = {};
             days.forEach(day => {
                 const dayStr = day.toISOString().split('T')[0];
                 dayInstallations[dayStr] = [];
+                dayHolidays[dayStr] = (holidayAllocations || []).filter(h => {
+                    const hStart = toDateStr(h.start_date);
+                    const hEnd = toDateStr(h.end_date) || hStart;
+                    return hStart && hEnd && dayStr >= hStart && dayStr <= hEnd;
+                });
                 
                 installations.forEach(inst => {
                     const instStartDate = toDateStr(inst.start_date || inst.installation_date);
@@ -719,15 +741,28 @@
                 
                 html += '<div class="weekly-day-cell">';
                 dayInsts.forEach(inst => {
+                    const isAssignedInstaller = !!(
+                        canInstallerActions &&
+                        currentUser &&
+                        Array.isArray(inst.assigned_users) &&
+                        inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                    );
+                    const canOpen = canManageInstallations || isAssignedInstaller;
                     const instStartDate = inst.start_date || inst.installation_date;
                     const instEndDate = inst.end_date || instStartDate;
                     const title = inst.isMultiDay ? 
                         `${inst.product_name || 'Installation'} (${instStartDate} to ${instEndDate})` :
                         `${inst.product_name || 'Installation'}`;
-                    html += `<div class="installation-block ${inst.status}" onclick="showInstallationDetails(${inst.id})" title="${title}">
+                    html += `<div class="installation-block ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? title : `${title} - Not allocated`}">
                         ${inst.product_name || 'Installation'}
                         ${inst.isMultiDay ? '<span class="user-badge">Multi-day</span>' : ''}
                         ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
+                    </div>`;
+                });
+                (dayHolidays[dayStr] || []).forEach(h => {
+                    const holidayLabel = h.is_company_shutdown ? 'Company shutdown' : `${h.user_name} holiday`;
+                    html += `<div class="installation-block" style="background:#fff3cd; color:#664d03; border-left: 4px solid #ffc107;" title="${holidayLabel}">
+                        ${holidayLabel}
                     </div>`;
                 });
                 html += '</div>';
@@ -768,6 +803,11 @@
                     const instEnd = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStart;
                     return instStart && instEnd && dateStr >= instStart && dateStr <= instEnd;
                 });
+                const dayHolidays = (holidayAllocations || []).filter(h => {
+                    const hStart = toDateStr(h.start_date);
+                    const hEnd = toDateStr(h.end_date) || hStart;
+                    return hStart && hEnd && dateStr >= hStart && dateStr <= hEnd;
+                });
                 
                 html += `<div class="monthly-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">`;
                 html += `<div class="monthly-day-number">${date.getDate()}</div>`;
@@ -775,13 +815,32 @@
                 if (dayInsts.length > 0) {
                     html += `<div class="monthly-installation-count">${dayInsts.length} installation(s)</div>`;
                     dayInsts.slice(0, 3).forEach(inst => {
+                        const isAssignedInstaller = !!(
+                            canInstallerActions &&
+                            currentUser &&
+                            Array.isArray(inst.assigned_users) &&
+                            inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                        );
+                        const canOpen = canManageInstallations || isAssignedInstaller;
                         const timeLabel = inst.start_time ? `${inst.start_time} - ` : '';
-                        html += `<div class="monthly-installation-item ${inst.status}" onclick="showInstallationDetails(${inst.id})">
+                        html += `<div class="monthly-installation-item ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? 'Open installation' : 'Not allocated'}">
                             ${timeLabel}${inst.product_name || 'Installation'}
                         </div>`;
                     });
                     if (dayInsts.length > 3) {
                         html += `<div style="font-size: 10px; color: #666; margin-top: 2px;">+${dayInsts.length - 3} more</div>`;
+                    }
+                }
+                if (dayHolidays.length > 0) {
+                    html += `<div class="monthly-installation-count" style="background:#fff3cd; color:#664d03;">${dayHolidays.length} holiday allocation(s)</div>`;
+                    dayHolidays.slice(0, 2).forEach(h => {
+                        const holidayLabel = h.is_company_shutdown ? 'Company shutdown' : `${h.user_name} holiday`;
+                        html += `<div class="monthly-installation-item" style="background:#fff3cd; color:#664d03;">
+                            ${holidayLabel}
+                        </div>`;
+                    });
+                    if (dayHolidays.length > 2) {
+                        html += `<div style="font-size: 10px; color: #664d03; margin-top: 2px;">+${dayHolidays.length - 2} more holidays</div>`;
                     }
                 }
                 
@@ -818,6 +877,11 @@
                     });
                 }
             });
+            const dayHolidays = (holidayAllocations || []).filter(h => {
+                const hStart = toDateStr(h.start_date);
+                const hEnd = toDateStr(h.end_date) || hStart;
+                return hStart && hEnd && dateStr >= hStart && dateStr <= hEnd;
+            });
             
             let html = '<div class="daily-view">';
             
@@ -825,15 +889,29 @@
             html += '<div class="daily-time-slot">All Day</div>';
             html += '<div class="daily-slot-content">';
             dayInsts.forEach(inst => {
+                const isAssignedInstaller = !!(
+                    canInstallerActions &&
+                    currentUser &&
+                    Array.isArray(inst.assigned_users) &&
+                    inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                );
+                const canOpen = canManageInstallations || isAssignedInstaller;
                 const dateRange = inst.isMultiDay ? 
                     ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
-                html += `<div class="daily-installation ${inst.status}" onclick="showInstallationDetails(${inst.id})">
+                html += `<div class="daily-installation ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? 'Open installation' : 'Not allocated'}">
                     <strong>${inst.product_name || 'Installation'}</strong>${dateRange}<br>
                     ${inst.duration_hours ? `<small>Duration: ${inst.duration_hours} hours</small><br>` : ''}
                     ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
                     ${inst.assigned_users && inst.assigned_users.length > 0 ? 
                         `<small>Assigned: ${inst.assigned_users.map(u => u.username).join(', ')}</small>` : 
                         '<small>No users assigned</small>'}
+                </div>`;
+            });
+            dayHolidays.forEach(h => {
+                const holidayLabel = h.is_company_shutdown ? 'Company shutdown' : `${h.user_name} holiday`;
+                html += `<div class="daily-installation" style="background:#fff3cd; color:#664d03; border-left: 4px solid #ffc107;">
+                    <strong>${holidayLabel}</strong><br>
+                    <small>Type: ${h.day_type === 'half' ? 'Half day' : 'Full day'}</small>
                 </div>`;
             });
             html += '</div>';

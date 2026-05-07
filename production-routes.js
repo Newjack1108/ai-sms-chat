@@ -2409,11 +2409,7 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
         const endDate = req.query.end_date || null;
-        let installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
-        const user = req.session.production_user;
-        if (user?.role === 'installer') {
-            installations = installations.filter(inst => isInstallerAssignedToInstallation(inst, user.id));
-        }
+        const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
@@ -5659,6 +5655,41 @@ router.get('/holidays/requests', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Get holiday requests error:', error);
         res.status(500).json({ success: false, error: 'Failed to get holiday requests' });
+    }
+});
+
+// Calendar-safe holiday feed: approved requests only, visible to all authenticated production users.
+router.get('/holidays/calendar', requireProductionAuth, async (req, res) => {
+    try {
+        const allRequests = await ProductionDatabase.getAllHolidayRequests();
+        const startDate = req.query.start_date || null;
+        const endDate = req.query.end_date || null;
+        const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
+
+        const requests = (allRequests || [])
+            .filter(r => r.status === 'approved')
+            .filter(r => {
+                const reqStart = toDateStr(r.start_date);
+                const reqEnd = toDateStr(r.end_date) || reqStart;
+                if (!reqStart) return false;
+                if (startDate && reqEnd < startDate) return false;
+                if (endDate && reqStart > endDate) return false;
+                return true;
+            })
+            .map(r => ({
+                id: r.id,
+                user_id: r.user_id,
+                user_name: r.user_name || 'Unknown',
+                start_date: toDateStr(r.start_date),
+                end_date: toDateStr(r.end_date) || toDateStr(r.start_date),
+                day_type: r.day_type || 'full',
+                is_company_shutdown: !!r.is_company_shutdown
+            }));
+
+        res.json({ success: true, requests });
+    } catch (error) {
+        console.error('Get holiday calendar feed error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get holiday calendar feed' });
     }
 });
 
