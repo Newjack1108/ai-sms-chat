@@ -239,6 +239,23 @@ function initializeSQLite() {
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
+
+    // Suppliers table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS suppliers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            code TEXT,
+            contact_name TEXT,
+            email TEXT,
+            phone TEXT,
+            address TEXT,
+            notes TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
     
     // Product components table
     db.exec(`
@@ -250,6 +267,54 @@ function initializeSQLite() {
             quantity_required REAL NOT NULL,
             unit TEXT NOT NULL,
             FOREIGN KEY (product_id) REFERENCES finished_products(id) ON DELETE CASCADE
+        )
+    `);
+
+    // Optional many-to-many approved suppliers per product
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS product_suppliers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            supplier_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (product_id) REFERENCES finished_products(id) ON DELETE CASCADE,
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+            UNIQUE(product_id, supplier_id)
+        )
+    `);
+
+    // Purchase orders table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS purchase_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            po_number TEXT NOT NULL UNIQUE,
+            supplier_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'partial', 'received', 'cancelled')),
+            order_date TEXT NOT NULL,
+            expected_date TEXT,
+            notes TEXT,
+            subtotal_gbp REAL DEFAULT 0,
+            created_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+            FOREIGN KEY (created_by) REFERENCES production_users(id)
+        )
+    `);
+
+    // Purchase order items
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS purchase_order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            purchase_order_id INTEGER NOT NULL,
+            stock_item_id INTEGER NOT NULL,
+            quantity REAL NOT NULL,
+            unit_cost_gbp REAL NOT NULL DEFAULT 0,
+            line_total_gbp REAL NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id)
         )
     `);
     
@@ -691,6 +756,13 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_product_orders_created_at ON product_orders(created_at);
         CREATE INDEX IF NOT EXISTS idx_product_orders_status ON product_orders(status);
         CREATE INDEX IF NOT EXISTS idx_order_products_order_id ON order_products(order_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code_unique ON suppliers(code);
+        CREATE INDEX IF NOT EXISTS idx_product_suppliers_product ON product_suppliers(product_id);
+        CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier ON product_suppliers(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_at ON purchase_orders(created_at);
+        CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_order_items_stock ON purchase_order_items(stock_item_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to_user_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
@@ -1352,6 +1424,65 @@ async function initializePostgreSQL() {
                 unit VARCHAR(50) NOT NULL
             )
         `);
+
+        // Suppliers
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS suppliers (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                code VARCHAR(100),
+                contact_name VARCHAR(255),
+                email VARCHAR(255),
+                phone VARCHAR(100),
+                address TEXT,
+                notes TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Product suppliers (optional many-to-many approved suppliers per product)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS product_suppliers (
+                id SERIAL PRIMARY KEY,
+                product_id INTEGER NOT NULL REFERENCES finished_products(id) ON DELETE CASCADE,
+                supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(product_id, supplier_id)
+            )
+        `);
+
+        // Purchase orders
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                id SERIAL PRIMARY KEY,
+                po_number VARCHAR(32) NOT NULL UNIQUE,
+                supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+                status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'partial', 'received', 'cancelled')),
+                order_date DATE NOT NULL,
+                expected_date DATE,
+                notes TEXT,
+                subtotal_gbp DECIMAL(12,2) DEFAULT 0,
+                created_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Purchase order items
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS purchase_order_items (
+                id SERIAL PRIMARY KEY,
+                purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
+                quantity DECIMAL(12,2) NOT NULL,
+                unit_cost_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
+                line_total_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         
         // Product orders
         await pool.query(`
@@ -1397,6 +1528,13 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_orders_status ON product_orders(status)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_order_products_order_id ON order_products(order_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_stock_items_category ON stock_items(category)`);
+        await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code_unique ON suppliers(code) WHERE code IS NOT NULL`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_suppliers_product ON product_suppliers(product_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier ON product_suppliers(supplier_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_at ON purchase_orders(created_at DESC)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_order_items_stock ON purchase_order_items(stock_item_id)`);
         
         // Migrate finished_products to add category column
         try {
@@ -5142,6 +5280,420 @@ class ProductionDatabase {
             db.prepare(`DELETE FROM finished_products WHERE id = ?`).run(id);
         }
         return true;
+    }
+
+    // ============ SUPPLIER + PURCHASE ORDER OPERATIONS ============
+
+    static async createSupplier(data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO suppliers (name, code, contact_name, email, phone, address, notes, is_active, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+                 RETURNING *`,
+                [
+                    data.name,
+                    data.code || null,
+                    data.contact_name || null,
+                    data.email || null,
+                    data.phone || null,
+                    data.address || null,
+                    data.notes || null,
+                    data.is_active !== false
+                ]
+            );
+            return result.rows[0];
+        }
+        const info = db.prepare(
+            `INSERT INTO suppliers (name, code, contact_name, email, phone, address, notes, is_active, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+        ).run(
+            data.name,
+            data.code || null,
+            data.contact_name || null,
+            data.email || null,
+            data.phone || null,
+            data.address || null,
+            data.notes || null,
+            data.is_active === false ? 0 : 1
+        );
+        return this.getSupplierById(info.lastInsertRowid);
+    }
+
+    static async getSupplierById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM suppliers WHERE id = $1`, [id]);
+            return result.rows[0] || null;
+        }
+        return db.prepare(`SELECT * FROM suppliers WHERE id = ?`).get(id) || null;
+    }
+
+    static async getAllSuppliers() {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM suppliers ORDER BY name ASC`);
+            return result.rows;
+        }
+        return db.prepare(`SELECT * FROM suppliers ORDER BY name ASC`).all();
+    }
+
+    static async updateSupplier(id, data) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE suppliers
+                 SET name = $1, code = $2, contact_name = $3, email = $4, phone = $5, address = $6, notes = $7, is_active = $8, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $9 RETURNING *`,
+                [
+                    data.name,
+                    data.code || null,
+                    data.contact_name || null,
+                    data.email || null,
+                    data.phone || null,
+                    data.address || null,
+                    data.notes || null,
+                    data.is_active !== false,
+                    id
+                ]
+            );
+            return result.rows[0] || null;
+        }
+        db.prepare(
+            `UPDATE suppliers
+             SET name = ?, code = ?, contact_name = ?, email = ?, phone = ?, address = ?, notes = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`
+        ).run(
+            data.name,
+            data.code || null,
+            data.contact_name || null,
+            data.email || null,
+            data.phone || null,
+            data.address || null,
+            data.notes || null,
+            data.is_active === false ? 0 : 1,
+            id
+        );
+        return this.getSupplierById(id);
+    }
+
+    static async deleteSupplier(id) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM suppliers WHERE id = $1`, [id]);
+            return;
+        }
+        db.prepare(`DELETE FROM suppliers WHERE id = ?`).run(id);
+    }
+
+    static async setProductSuppliers(productId, supplierIds) {
+        const ids = [...new Set((supplierIds || []).map(v => parseInt(v, 10)).filter(v => !Number.isNaN(v) && v > 0))];
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM product_suppliers WHERE product_id = $1`, [productId]);
+            for (const supplierId of ids) {
+                await pool.query(
+                    `INSERT INTO product_suppliers (product_id, supplier_id) VALUES ($1, $2) ON CONFLICT (product_id, supplier_id) DO NOTHING`,
+                    [productId, supplierId]
+                );
+            }
+            return this.getProductSuppliers(productId);
+        }
+        db.prepare(`DELETE FROM product_suppliers WHERE product_id = ?`).run(productId);
+        const insertStmt = db.prepare(`INSERT OR IGNORE INTO product_suppliers (product_id, supplier_id) VALUES (?, ?)`);
+        for (const supplierId of ids) {
+            insertStmt.run(productId, supplierId);
+        }
+        return this.getProductSuppliers(productId);
+    }
+
+    static async getProductSuppliers(productId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT ps.product_id, ps.supplier_id, s.*
+                 FROM product_suppliers ps
+                 INNER JOIN suppliers s ON s.id = ps.supplier_id
+                 WHERE ps.product_id = $1
+                 ORDER BY s.name ASC`,
+                [productId]
+            );
+            return result.rows;
+        }
+        return db.prepare(
+            `SELECT ps.product_id, ps.supplier_id, s.*
+             FROM product_suppliers ps
+             INNER JOIN suppliers s ON s.id = ps.supplier_id
+             WHERE ps.product_id = ?
+             ORDER BY s.name ASC`
+        ).all(productId);
+    }
+
+    static async getPurchaseOrderById(id) {
+        let po;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+                 FROM purchase_orders po
+                 INNER JOIN suppliers s ON s.id = po.supplier_id
+                 WHERE po.id = $1`,
+                [id]
+            );
+            po = result.rows[0] || null;
+            if (!po) return null;
+            const itemsResult = await pool.query(
+                `SELECT poi.*, si.name AS stock_item_name, si.unit AS stock_item_unit
+                 FROM purchase_order_items poi
+                 INNER JOIN stock_items si ON si.id = poi.stock_item_id
+                 WHERE poi.purchase_order_id = $1
+                 ORDER BY poi.id ASC`,
+                [id]
+            );
+            po.items = itemsResult.rows;
+            return po;
+        }
+        po = db.prepare(
+            `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+             FROM purchase_orders po
+             INNER JOIN suppliers s ON s.id = po.supplier_id
+             WHERE po.id = ?`
+        ).get(id) || null;
+        if (!po) return null;
+        po.items = db.prepare(
+            `SELECT poi.*, si.name AS stock_item_name, si.unit AS stock_item_unit
+             FROM purchase_order_items poi
+             INNER JOIN stock_items si ON si.id = poi.stock_item_id
+             WHERE poi.purchase_order_id = ?
+             ORDER BY poi.id ASC`
+        ).all(id);
+        return po;
+    }
+
+    static async getPurchaseOrdersPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const status = opts.status && String(opts.status).trim() ? String(opts.status).trim() : null;
+        let total = 0;
+        if (isPostgreSQL) {
+            const countParams = [];
+            let where = '';
+            if (status) {
+                countParams.push(status);
+                where = ` WHERE po.status = $1`;
+            }
+            const countResult = await pool.query(`SELECT COUNT(*)::int AS c FROM purchase_orders po${where}`, countParams);
+            total = countResult.rows[0].c;
+            const rowsResult = await pool.query(
+                `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+                 FROM purchase_orders po
+                 INNER JOIN suppliers s ON s.id = po.supplier_id
+                 ${where}
+                 ORDER BY po.created_at DESC
+                 LIMIT $${countParams.length + 1} OFFSET $${countParams.length + 2}`,
+                [...countParams, pageSize, offset]
+            );
+            return { orders: rowsResult.rows, total, page, page_size: pageSize };
+        }
+        let where = '';
+        const params = [];
+        if (status) {
+            where = ' WHERE po.status = ?';
+            params.push(status);
+        }
+        const countRow = db.prepare(`SELECT COUNT(*) AS c FROM purchase_orders po${where}`).get(...params);
+        total = countRow.c;
+        const orders = db.prepare(
+            `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+             FROM purchase_orders po
+             INNER JOIN suppliers s ON s.id = po.supplier_id
+             ${where}
+             ORDER BY po.created_at DESC
+             LIMIT ? OFFSET ?`
+        ).all(...params, pageSize, offset);
+        return { orders, total, page, page_size: pageSize };
+    }
+
+    static async getNextPurchaseOrderNumber(orderDate) {
+        const year = String((orderDate || new Date().toISOString().slice(0, 10)).slice(0, 4));
+        const prefix = `PO-${year}-`;
+        if (isPostgreSQL) {
+            await pool.query(`SELECT pg_advisory_xact_lock($1)`, [13052026]);
+            const result = await pool.query(
+                `SELECT po_number
+                 FROM purchase_orders
+                 WHERE po_number LIKE $1
+                 ORDER BY po_number DESC
+                 LIMIT 1`,
+                [`${prefix}%`]
+            );
+            const last = result.rows[0]?.po_number || null;
+            const nextSeq = last ? (parseInt(String(last).split('-')[2], 10) + 1) : 1;
+            return `${prefix}${String(nextSeq).padStart(4, '0')}`;
+        }
+        const row = db.prepare(
+            `SELECT po_number
+             FROM purchase_orders
+             WHERE po_number LIKE ?
+             ORDER BY po_number DESC
+             LIMIT 1`
+        ).get(`${prefix}%`);
+        const last = row?.po_number || null;
+        const nextSeq = last ? (parseInt(String(last).split('-')[2], 10) + 1) : 1;
+        return `${prefix}${String(nextSeq).padStart(4, '0')}`;
+    }
+
+    static async createPurchaseOrder(data) {
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (items.length === 0) {
+            throw new Error('At least one purchase order item is required');
+        }
+        const orderDate = data.order_date || new Date().toISOString().slice(0, 10);
+        if (isPostgreSQL) {
+            await pool.query('BEGIN');
+            try {
+                const poNumber = await this.getNextPurchaseOrderNumber(orderDate);
+                const poResult = await pool.query(
+                    `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, created_by, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, 0, $7, CURRENT_TIMESTAMP)
+                     RETURNING id`,
+                    [poNumber, data.supplier_id, data.status || 'draft', orderDate, data.expected_date || null, data.notes || null, data.created_by || null]
+                );
+                const poId = poResult.rows[0].id;
+                let subtotal = 0;
+                for (const item of items) {
+                    const qty = parseFloat(item.quantity || 0);
+                    const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                    const lineTotal = parseFloat((qty * unitCost).toFixed(2));
+                    subtotal += lineTotal;
+                    await pool.query(
+                        `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
+                         VALUES ($1, $2, $3, $4, $5, $6)`,
+                        [poId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null]
+                    );
+                }
+                await pool.query(
+                    `UPDATE purchase_orders SET subtotal_gbp = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                    [parseFloat(subtotal.toFixed(2)), poId]
+                );
+                await pool.query('COMMIT');
+                return this.getPurchaseOrderById(poId);
+            } catch (error) {
+                await pool.query('ROLLBACK');
+                throw error;
+            }
+        }
+        const tx = db.transaction((payload) => {
+            const year = String(payload.order_date.slice(0, 4));
+            const prefix = `PO-${year}-`;
+            const lastRow = db.prepare(
+                `SELECT po_number
+                 FROM purchase_orders
+                 WHERE po_number LIKE ?
+                 ORDER BY po_number DESC
+                 LIMIT 1`
+            ).get(`${prefix}%`);
+            const last = lastRow?.po_number || null;
+            const nextSeq = last ? (parseInt(String(last).split('-')[2], 10) + 1) : 1;
+            const poNumber = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+            const poInfo = db.prepare(
+                `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, created_by, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP)`
+            ).run(
+                poNumber,
+                payload.supplier_id,
+                payload.status || 'draft',
+                payload.order_date,
+                payload.expected_date || null,
+                payload.notes || null,
+                payload.created_by || null
+            );
+            const poId = poInfo.lastInsertRowid;
+            let subtotal = 0;
+            const insertItem = db.prepare(
+                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
+                 VALUES (?, ?, ?, ?, ?, ?)`
+            );
+            for (const item of payload.items) {
+                const qty = parseFloat(item.quantity || 0);
+                const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                const lineTotal = parseFloat((qty * unitCost).toFixed(2));
+                subtotal += lineTotal;
+                insertItem.run(poId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null);
+            }
+            db.prepare(`UPDATE purchase_orders SET subtotal_gbp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                .run(parseFloat(subtotal.toFixed(2)), poId);
+            return poId;
+        });
+        const poId = tx({ ...data, order_date: orderDate, items });
+        return this.getPurchaseOrderById(poId);
+    }
+
+    static async updatePurchaseOrderStatus(id, status) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE purchase_orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+                [status, id]
+            );
+            return result.rows[0] || null;
+        }
+        db.prepare(`UPDATE purchase_orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(status, id);
+        return this.getPurchaseOrderById(id);
+    }
+
+    static async addPurchaseOrderItem(purchaseOrderId, item) {
+        const qty = parseFloat(item.quantity || 0);
+        const unitCost = parseFloat(item.unit_cost_gbp || 0);
+        const lineTotal = parseFloat((qty * unitCost).toFixed(2));
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [purchaseOrderId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null]
+            );
+            const subtotalResult = await pool.query(
+                `SELECT COALESCE(SUM(line_total_gbp), 0)::numeric AS subtotal
+                 FROM purchase_order_items
+                 WHERE purchase_order_id = $1`,
+                [purchaseOrderId]
+            );
+            await pool.query(
+                `UPDATE purchase_orders SET subtotal_gbp = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                [parseFloat(subtotalResult.rows[0].subtotal || 0), purchaseOrderId]
+            );
+            return this.getPurchaseOrderById(purchaseOrderId);
+        }
+        db.prepare(
+            `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
+             VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(purchaseOrderId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null);
+        const subtotalRow = db.prepare(
+            `SELECT COALESCE(SUM(line_total_gbp), 0) AS subtotal
+             FROM purchase_order_items
+             WHERE purchase_order_id = ?`
+        ).get(purchaseOrderId);
+        db.prepare(`UPDATE purchase_orders SET subtotal_gbp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+            .run(parseFloat(subtotalRow.subtotal || 0), purchaseOrderId);
+        return this.getPurchaseOrderById(purchaseOrderId);
+    }
+
+    static async deletePurchaseOrderItem(purchaseOrderId, itemId) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM purchase_order_items WHERE purchase_order_id = $1 AND id = $2`, [purchaseOrderId, itemId]);
+            const subtotalResult = await pool.query(
+                `SELECT COALESCE(SUM(line_total_gbp), 0)::numeric AS subtotal
+                 FROM purchase_order_items
+                 WHERE purchase_order_id = $1`,
+                [purchaseOrderId]
+            );
+            await pool.query(
+                `UPDATE purchase_orders SET subtotal_gbp = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                [parseFloat(subtotalResult.rows[0].subtotal || 0), purchaseOrderId]
+            );
+            return this.getPurchaseOrderById(purchaseOrderId);
+        }
+        db.prepare(`DELETE FROM purchase_order_items WHERE purchase_order_id = ? AND id = ?`).run(purchaseOrderId, itemId);
+        const subtotalRow = db.prepare(
+            `SELECT COALESCE(SUM(line_total_gbp), 0) AS subtotal
+             FROM purchase_order_items
+             WHERE purchase_order_id = ?`
+        ).get(purchaseOrderId);
+        db.prepare(`UPDATE purchase_orders SET subtotal_gbp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+            .run(parseFloat(subtotalRow.subtotal || 0), purchaseOrderId);
+        return this.getPurchaseOrderById(purchaseOrderId);
     }
     
     // ============ PRODUCT COMPONENTS OPERATIONS ============

@@ -135,6 +135,18 @@
             </div>
         </div>
     </div>
+
+    <div id="suppliersModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="suppliersModalTitle">Approved Suppliers</h3>
+                <button class="modal-close" onclick="hideModal('suppliersModal')">&times;</button>
+            </div>
+            <div id="suppliersModalContent">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
     
     <script src="common.js"></script>
     <script>
@@ -142,6 +154,7 @@
         let panels = [];
         let stockItems = [];
         let components = [];
+        let suppliersDb = [];
         let currentProductId = null;
         let selectedCategory = 'all';
         let allProducts = [];
@@ -181,7 +194,7 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
-            await Promise.all([loadPanels(), loadStockItems(), loadComponents()]);
+            await Promise.all([loadPanels(), loadStockItems(), loadComponents(), loadSuppliers()]);
             loadProducts();
         }
         
@@ -209,6 +222,15 @@
                 components = data.components || [];
             } catch (error) {
                 console.error('Error loading components:', error);
+            }
+        }
+
+        async function loadSuppliers() {
+            try {
+                const data = await apiCall('/suppliers');
+                suppliersDb = data.suppliers || [];
+            } catch (error) {
+                console.error('Error loading suppliers:', error);
             }
         }
         
@@ -316,6 +338,7 @@
                                     <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
                                     ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
                                         <button onclick="pushToSales(${product.id})" class="btn btn-success btn-sm" title="Push to Sales App">Push to Sales</button>
+                                        <button onclick="manageProductSuppliers(${product.id})" class="btn btn-primary btn-sm" title="Assign approved suppliers">Suppliers</button>
                                         <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
                                         <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
                                         <button onclick="deleteProduct(${product.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
@@ -671,6 +694,54 @@
                 loadProducts();
             } catch (error) {
                 showAlert(error.message || 'Failed to duplicate product', 'error');
+            }
+        }
+
+        async function manageProductSuppliers(productId) {
+            currentProductId = productId;
+            try {
+                const [productData, assignedData] = await Promise.all([
+                    apiCall(`/products/${productId}`),
+                    apiCall(`/products/${productId}/suppliers`)
+                ]);
+                const product = productData.product;
+                const assignedIds = new Set((assignedData.suppliers || []).map((s) => s.id));
+                document.getElementById('suppliersModalTitle').textContent = `Approved Suppliers - ${product ? product.name : `Product #${productId}`}`;
+                document.getElementById('suppliersModalContent').innerHTML = `
+                    <div style="margin-bottom: 12px;">
+                        <small>Select any suppliers that are approved for this product.</small>
+                    </div>
+                    <div style="max-height: 320px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #e9ecef; border-radius: 6px; padding: 10px;">
+                        ${(suppliersDb.length === 0) ? '<p>No suppliers found. Create suppliers first.</p>' : suppliersDb.map((s) => `
+                            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <input type="checkbox" class="supplier-checkbox" value="${s.id}" ${assignedIds.has(s.id) ? 'checked' : ''}>
+                                <span>${escapeHtml(s.name)}${s.code ? ` (${escapeHtml(s.code)})` : ''}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                    <div class="text-right">
+                        <button type="button" class="btn btn-secondary" onclick="hideModal('suppliersModal')">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="saveProductSuppliers()">Save Suppliers</button>
+                    </div>
+                `;
+                showModal('suppliersModal');
+            } catch (error) {
+                showAlert(error.message || 'Failed to load suppliers', 'error');
+            }
+        }
+
+        async function saveProductSuppliers() {
+            if (!currentProductId) return;
+            const selected = Array.from(document.querySelectorAll('.supplier-checkbox:checked')).map((el) => parseInt(el.value, 10));
+            try {
+                await apiCall(`/products/${currentProductId}/suppliers`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ supplier_ids: selected })
+                });
+                showAlert('Approved suppliers updated');
+                hideModal('suppliersModal');
+            } catch (error) {
+                showAlert(error.message || 'Failed to save approved suppliers', 'error');
             }
         }
 

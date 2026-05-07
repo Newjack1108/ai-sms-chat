@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purchase Orders - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            <h1>Purchase Orders</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Purchase Orders</h2>
+                <button class="btn btn-primary admin-or-office" onclick="showCreatePoModal()">Create Purchase Order</button>
+            </div>
+            <div id="ordersList"><div class="loading">Loading...</div></div>
+        </div>
+    </div>
+
+    <div id="poModal" class="modal">
+        <div class="modal-content" style="max-width: 980px;">
+            <div class="modal-header">
+                <h3>Create Purchase Order</h3>
+                <button class="modal-close" onclick="hideModal('poModal')">&times;</button>
+            </div>
+            <form id="poForm">
+                <div class="grid grid-2">
+                    <div class="form-group"><label class="form-label">PO Number</label><input id="poNumberPreview" class="form-input" readonly></div>
+                    <div class="form-group"><label class="form-label">Order Date</label><input id="poOrderDate" type="date" class="form-input" required></div>
+                    <div class="form-group"><label class="form-label">Expected Date</label><input id="poExpectedDate" type="date" class="form-input"></div>
+                    <div class="form-group"><label class="form-label">Supplier *</label><select id="poSupplier" class="form-select" required></select></div>
+                </div>
+                <div class="form-group"><label class="form-label">Notes</label><textarea id="poNotes" class="form-textarea"></textarea></div>
+                <h4>Line Items</h4>
+                <table class="table">
+                    <thead><tr><th>Raw Material</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th></th></tr></thead>
+                    <tbody id="lineItemsBody"></tbody>
+                </table>
+                <div style="margin-bottom: 12px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addLineItem()">Add Line Item</button>
+                </div>
+                <div style="font-weight: 600; margin-bottom: 12px;">Subtotal: <span id="subtotalLabel">£0.00</span></div>
+                <div class="text-right">
+                    <button type="button" class="btn btn-secondary" onclick="hideModal('poModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create PO</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        let suppliers = [];
+        let stockItems = [];
+        let lineItems = [];
+
+        async function init() {
+            if (await restrictStaffAccess()) return;
+            const user = await checkAuth();
+            if (!user) return;
+            await initNavbar();
+            await Promise.all([loadSuppliers(), loadStockItems(), loadOrders()]);
+        }
+
+        async function loadSuppliers() {
+            const data = await apiCall('/suppliers');
+            suppliers = (data.suppliers || []).filter((s) => s.is_active);
+            const select = document.getElementById('poSupplier');
+            select.innerHTML = '<option value="">Select supplier</option>' + suppliers.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}${s.code ? ` (${escapeHtml(s.code)})` : ''}</option>`).join('');
+        }
+
+        async function loadStockItems() {
+            const data = await apiCall('/stock?all=1');
+            stockItems = data.items || [];
+        }
+
+        function renderLineItems() {
+            const tbody = document.getElementById('lineItemsBody');
+            tbody.innerHTML = lineItems.map((item, i) => {
+                const total = (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0;
+                return `
+                    <tr>
+                        <td>
+                            <select class="form-select" onchange="updateLineItem(${i}, 'stock_item_id', this.value)">
+                                <option value="">Select raw material</option>
+                                ${stockItems.map((s) => `<option value="${s.id}" ${String(item.stock_item_id) === String(s.id) ? 'selected' : ''}>${escapeHtml(s.name)} (${escapeHtml(s.unit || 'unit')})</option>`).join('')}
+                            </select>
+                        </td>
+                        <td><input type="number" min="0.01" step="0.01" class="form-input" value="${item.quantity || ''}" onchange="updateLineItem(${i}, 'quantity', this.value)"></td>
+                        <td><input type="number" min="0" step="0.01" class="form-input" value="${item.unit_cost_gbp || ''}" onchange="updateLineItem(${i}, 'unit_cost_gbp', this.value)"></td>
+                        <td>${formatCurrency(total)}</td>
+                        <td><button type="button" class="btn btn-danger btn-sm" onclick="removeLineItem(${i})">Remove</button></td>
+                    </tr>
+                `;
+            }).join('');
+            const subtotal = lineItems.reduce((sum, item) => sum + ((parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0), 0);
+            document.getElementById('subtotalLabel').textContent = formatCurrency(subtotal);
+        }
+
+        function addLineItem() {
+            lineItems.push({ stock_item_id: '', quantity: '', unit_cost_gbp: '' });
+            renderLineItems();
+        }
+
+        function removeLineItem(index) {
+            lineItems.splice(index, 1);
+            renderLineItems();
+        }
+
+        function updateLineItem(index, key, value) {
+            lineItems[index][key] = value;
+            renderLineItems();
+        }
+
+        async function showCreatePoModal() {
+            document.getElementById('poForm').reset();
+            document.getElementById('poOrderDate').value = londonYmd(new Date());
+            lineItems = [];
+            addLineItem();
+            const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(document.getElementById('poOrderDate').value)}`);
+            document.getElementById('poNumberPreview').value = numberData.po_number || '';
+            showModal('poModal');
+        }
+
+        async function loadOrders() {
+            try {
+                const data = await apiCall('/purchase-orders?page=1&page_size=100');
+                const rows = data.orders || [];
+                const container = document.getElementById('ordersList');
+                if (!rows.length) {
+                    container.innerHTML = '<p>No purchase orders yet</p>';
+                    return;
+                }
+                container.innerHTML = `
+                    <table class="table">
+                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Status</th><th>Order Date</th><th>Expected</th><th>Subtotal</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${rows.map((o) => `
+                                <tr>
+                                    <td><strong>${escapeHtml(o.po_number)}</strong></td>
+                                    <td>${escapeHtml(o.supplier_name || '-')}</td>
+                                    <td><span class="badge badge-info">${escapeHtml(o.status || '')}</span></td>
+                                    <td>${formatDate(o.order_date)}</td>
+                                    <td>${formatDate(o.expected_date)}</td>
+                                    <td>${formatCurrency(o.subtotal_gbp || 0)}</td>
+                                    <td>
+                                        <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
+                                        <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('ordersList').innerHTML = '<p>Error loading purchase orders</p>';
+            }
+        }
+
+        async function viewPo(id) {
+            try {
+                const data = await apiCall(`/purchase-orders/${id}`);
+                const o = data.order;
+                const lines = (o.items || []).map((it) => `${it.stock_item_name}: ${it.quantity} x ${formatCurrency(it.unit_cost_gbp)} = ${formatCurrency(it.line_total_gbp)}`).join('\n');
+                alert(`PO ${o.po_number}\nSupplier: ${o.supplier_name}\nStatus: ${o.status}\n\n${lines}`);
+            } catch (error) {
+                showAlert(error.message || 'Failed to load purchase order', 'error');
+            }
+        }
+
+        async function receivePo(id) {
+            if (!confirm('Receive this PO and post stock in movements for each line item?')) return;
+            try {
+                await apiCall(`/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify({}) });
+                showAlert('Purchase order received and stock updated', 'success');
+                await loadOrders();
+            } catch (error) {
+                showAlert(error.message || 'Failed to receive purchase order', 'error');
+            }
+        }
+
+        document.getElementById('poOrderDate').addEventListener('change', async (e) => {
+            const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(e.target.value)}`);
+            document.getElementById('poNumberPreview').value = numberData.po_number || '';
+        });
+
+        document.getElementById('poForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payloadItems = lineItems.map((i) => ({
+                stock_item_id: parseInt(i.stock_item_id, 10),
+                quantity: parseFloat(i.quantity || 0),
+                unit_cost_gbp: parseFloat(i.unit_cost_gbp || 0)
+            })).filter((i) => !Number.isNaN(i.stock_item_id) && i.quantity > 0);
+            if (!payloadItems.length) {
+                showAlert('Add at least one valid line item', 'error');
+                return;
+            }
+            const payload = {
+                supplier_id: parseInt(document.getElementById('poSupplier').value, 10),
+                order_date: document.getElementById('poOrderDate').value,
+                expected_date: document.getElementById('poExpectedDate').value || null,
+                notes: document.getElementById('poNotes').value.trim() || null,
+                items: payloadItems
+            };
+            try {
+                await apiCall('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
+                hideModal('poModal');
+                showAlert('Purchase order created', 'success');
+                await loadOrders();
+            } catch (error) {
+                showAlert(error.message || 'Failed to create purchase order', 'error');
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>

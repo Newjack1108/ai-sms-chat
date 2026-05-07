@@ -561,6 +561,258 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
     }
 });
 
+// ============ SUPPLIER + PURCHASE ORDER ROUTES ============
+
+router.get('/suppliers', requireProductionAuth, async (req, res) => {
+    try {
+        const suppliers = await ProductionDatabase.getAllSuppliers();
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Get suppliers error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get suppliers' });
+    }
+});
+
+router.post('/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { name, code, contact_name, email, phone, address, notes, is_active } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ success: false, error: 'Supplier name is required' });
+        }
+        const supplier = await ProductionDatabase.createSupplier({
+            name: String(name).trim(),
+            code: code ? String(code).trim() : null,
+            contact_name,
+            email,
+            phone,
+            address,
+            notes,
+            is_active
+        });
+        res.json({ success: true, supplier });
+    } catch (error) {
+        console.error('Create supplier error:', error);
+        const msg = (error.message || '').toLowerCase();
+        const isDuplicate = msg.includes('unique') || msg.includes('duplicate');
+        res.status(isDuplicate ? 409 : 500).json({ success: false, error: isDuplicate ? 'Supplier code already exists' : 'Failed to create supplier' });
+    }
+});
+
+router.put('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const supplierId = parseInt(req.params.id, 10);
+        if (Number.isNaN(supplierId)) {
+            return res.status(400).json({ success: false, error: 'Invalid supplier id' });
+        }
+        const { name, code, contact_name, email, phone, address, notes, is_active } = req.body;
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ success: false, error: 'Supplier name is required' });
+        }
+        const supplier = await ProductionDatabase.updateSupplier(supplierId, {
+            name: String(name).trim(),
+            code: code ? String(code).trim() : null,
+            contact_name,
+            email,
+            phone,
+            address,
+            notes,
+            is_active
+        });
+        if (!supplier) {
+            return res.status(404).json({ success: false, error: 'Supplier not found' });
+        }
+        res.json({ success: true, supplier });
+    } catch (error) {
+        console.error('Update supplier error:', error);
+        const msg = (error.message || '').toLowerCase();
+        const isDuplicate = msg.includes('unique') || msg.includes('duplicate');
+        res.status(isDuplicate ? 409 : 500).json({ success: false, error: isDuplicate ? 'Supplier code already exists' : 'Failed to update supplier' });
+    }
+});
+
+router.delete('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const supplierId = parseInt(req.params.id, 10);
+        if (Number.isNaN(supplierId)) {
+            return res.status(400).json({ success: false, error: 'Invalid supplier id' });
+        }
+        await ProductionDatabase.deleteSupplier(supplierId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete supplier error:', error);
+        const isInUse = String(error.code || '') === '23503' || (error.message || '').toLowerCase().includes('foreign key');
+        res.status(isInUse ? 409 : 500).json({ success: false, error: isInUse ? 'Cannot delete supplier because it is referenced by existing records' : 'Failed to delete supplier' });
+    }
+});
+
+router.get('/purchase-orders/next-number', requireProductionAuth, async (req, res) => {
+    try {
+        const orderDate = req.query.order_date ? String(req.query.order_date) : undefined;
+        const poNumber = await ProductionDatabase.getNextPurchaseOrderNumber(orderDate);
+        res.json({ success: true, po_number: poNumber });
+    } catch (error) {
+        console.error('Get next purchase order number error:', error);
+        res.status(500).json({ success: false, error: 'Failed to generate purchase order number' });
+    }
+});
+
+router.get('/purchase-orders', requireProductionAuth, async (req, res) => {
+    try {
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const status = req.query.status ? String(req.query.status).trim() : null;
+        const { orders, total, page: p, page_size } = await ProductionDatabase.getPurchaseOrdersPaged({ page, pageSize, status });
+        res.json({ success: true, orders, total, page: p, page_size });
+    } catch (error) {
+        console.error('Get purchase orders error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get purchase orders' });
+    }
+});
+
+router.get('/purchase-orders/:id', requireProductionAuth, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        if (Number.isNaN(poId)) {
+            return res.status(400).json({ success: false, error: 'Invalid purchase order id' });
+        }
+        const order = await ProductionDatabase.getPurchaseOrderById(poId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Get purchase order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get purchase order' });
+    }
+});
+
+router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const { supplier_id, order_date, expected_date, status, notes, items } = req.body;
+        const supplierId = parseInt(supplier_id, 10);
+        if (Number.isNaN(supplierId)) {
+            return res.status(400).json({ success: false, error: 'Valid supplier_id is required' });
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, error: 'At least one line item is required' });
+        }
+        const normalizedItems = items.map((item) => ({
+            stock_item_id: parseInt(item.stock_item_id, 10),
+            quantity: parseFloat(item.quantity || 0),
+            unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
+            notes: item.notes || null
+        })).filter((item) => !Number.isNaN(item.stock_item_id) && item.quantity > 0);
+        if (normalizedItems.length === 0) {
+            return res.status(400).json({ success: false, error: 'Line items must include stock_item_id and quantity > 0' });
+        }
+        const order = await ProductionDatabase.createPurchaseOrder({
+            supplier_id: supplierId,
+            order_date: order_date || new Date().toISOString().slice(0, 10),
+            expected_date: expected_date || null,
+            status: status || 'draft',
+            notes: notes || null,
+            created_by: req.session.production_user ? req.session.production_user.id : null,
+            items: normalizedItems
+        });
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Create purchase order error:', error);
+        const msg = (error.message || '').toLowerCase();
+        const isDuplicate = msg.includes('unique') || msg.includes('duplicate');
+        res.status(isDuplicate ? 409 : 500).json({ success: false, error: isDuplicate ? 'Purchase order number already exists, try again' : 'Failed to create purchase order' });
+    }
+});
+
+router.patch('/purchase-orders/:id/status', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        const status = String(req.body.status || '').trim();
+        if (Number.isNaN(poId)) {
+            return res.status(400).json({ success: false, error: 'Invalid purchase order id' });
+        }
+        if (!['draft', 'sent', 'partial', 'received', 'cancelled'].includes(status)) {
+            return res.status(400).json({ success: false, error: 'Invalid status value' });
+        }
+        const order = await ProductionDatabase.updatePurchaseOrderStatus(poId, status);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Update purchase order status error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update purchase order status' });
+    }
+});
+
+router.post('/purchase-orders/:id/items', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        const stockItemId = parseInt(req.body.stock_item_id, 10);
+        const quantity = parseFloat(req.body.quantity || 0);
+        const unitCost = parseFloat(req.body.unit_cost_gbp || 0);
+        if (Number.isNaN(poId) || Number.isNaN(stockItemId) || quantity <= 0) {
+            return res.status(400).json({ success: false, error: 'Valid ids and quantity are required' });
+        }
+        const order = await ProductionDatabase.addPurchaseOrderItem(poId, {
+            stock_item_id: stockItemId,
+            quantity,
+            unit_cost_gbp: unitCost,
+            notes: req.body.notes || null
+        });
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Add purchase order item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to add purchase order item' });
+    }
+});
+
+router.delete('/purchase-orders/:id/items/:itemId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        const itemId = parseInt(req.params.itemId, 10);
+        if (Number.isNaN(poId) || Number.isNaN(itemId)) {
+            return res.status(400).json({ success: false, error: 'Invalid ids' });
+        }
+        const order = await ProductionDatabase.deletePurchaseOrderItem(poId, itemId);
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Delete purchase order item error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete purchase order item' });
+    }
+});
+
+router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        if (Number.isNaN(poId)) {
+            return res.status(400).json({ success: false, error: 'Invalid purchase order id' });
+        }
+        const order = await ProductionDatabase.getPurchaseOrderById(poId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        const quantitiesByItemId = req.body && typeof req.body === 'object' ? (req.body.received_quantities || {}) : {};
+        const userId = req.session.production_user ? req.session.production_user.id : null;
+        for (const item of order.items || []) {
+            const raw = quantitiesByItemId[item.id];
+            const qty = raw === undefined || raw === null || raw === '' ? parseFloat(item.quantity || 0) : parseFloat(raw);
+            if (!(qty > 0)) continue;
+            await ProductionDatabase.recordStockMovement({
+                stock_item_id: item.stock_item_id,
+                movement_type: 'in',
+                quantity: qty,
+                reference: `PO ${order.po_number}`,
+                user_id: userId,
+                cost_gbp: parseFloat(item.unit_cost_gbp || 0) * qty
+            });
+        }
+        const updatedOrder = await ProductionDatabase.updatePurchaseOrderStatus(poId, 'received');
+        res.json({ success: true, order: updatedOrder });
+    } catch (error) {
+        console.error('Receive purchase order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to receive purchase order' });
+    }
+});
+
 // ============ PANELS & BOM ROUTES ============
 
 router.get('/panels', requireProductionAuth, async (req, res) => {
@@ -1304,6 +1556,35 @@ router.delete('/products/:id', requireProductionAuth, requireAdminOrOffice, asyn
         const msg = error.message || 'Failed to delete product';
         const isInUse = msg.includes('used in one or more orders');
         res.status(isInUse ? 409 : 500).json({ success: false, error: msg });
+    }
+});
+
+router.get('/products/:id/suppliers', requireProductionAuth, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id, 10);
+        if (Number.isNaN(productId)) {
+            return res.status(400).json({ success: false, error: 'Invalid product id' });
+        }
+        const suppliers = await ProductionDatabase.getProductSuppliers(productId);
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Get product suppliers error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get product suppliers' });
+    }
+});
+
+router.put('/products/:id/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id, 10);
+        if (Number.isNaN(productId)) {
+            return res.status(400).json({ success: false, error: 'Invalid product id' });
+        }
+        const supplierIds = Array.isArray(req.body.supplier_ids) ? req.body.supplier_ids : [];
+        const suppliers = await ProductionDatabase.setProductSuppliers(productId, supplierIds);
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Update product suppliers error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update product suppliers' });
     }
 });
 
