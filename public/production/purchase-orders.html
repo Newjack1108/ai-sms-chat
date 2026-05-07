@@ -68,11 +68,22 @@
         </div>
     </div>
 
+    <div id="receiveModal" class="modal">
+        <div class="modal-content" style="max-width: 980px;">
+            <div class="modal-header">
+                <h3 id="receiveModalTitle">Receive Purchase Order</h3>
+                <button class="modal-close" onclick="hideModal('receiveModal')">&times;</button>
+            </div>
+            <div id="receiveModalContent"><div class="loading">Loading...</div></div>
+        </div>
+    </div>
+
     <script src="common.js"></script>
     <script>
         let suppliers = [];
         let stockItems = [];
         let lineItems = [];
+        let currentReceiveOrder = null;
 
         async function init() {
             if (await restrictStaffAccess()) return;
@@ -167,6 +178,7 @@
                                     <td>
                                         <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
                                         <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
+                                        <button class="btn btn-danger btn-sm admin-or-office" onclick="deletePo(${o.id}, '${escapeHtml(o.po_number)}')">Delete</button>
                                     </td>
                                 </tr>
                             `).join('')}
@@ -190,23 +202,97 @@
         }
 
         async function receivePo(id) {
-            const modeInput = prompt('Receive mode: type "add" to add stock (default) or "adjust" to set exact stock quantity.', 'add');
-            if (modeInput === null) return;
-            const receiveMode = (modeInput || 'add').trim().toLowerCase();
-            if (!['add', 'adjust'].includes(receiveMode)) {
-                showAlert('Invalid receive mode. Use add or adjust.', 'error');
+            try {
+                const data = await apiCall(`/purchase-orders/${id}`);
+                const order = data.order;
+                currentReceiveOrder = order;
+                if (!order || !order.items || order.items.length === 0) {
+                    showAlert('This purchase order has no line items and cannot be received.', 'error');
+                    return;
+                }
+                document.getElementById('receiveModalTitle').textContent = `Receive ${order.po_number}`;
+                document.getElementById('receiveModalContent').innerHTML = `
+                    <div style="margin-bottom: 12px;">
+                        <strong>Supplier:</strong> ${escapeHtml(order.supplier_name || '-')}<br>
+                        <small>Choose Add or Adjust for each line, then submit.</small>
+                    </div>
+                    <table class="table">
+                        <thead><tr><th>Raw Material</th><th>Ordered Qty</th><th>Receive Qty</th><th>Mode</th></tr></thead>
+                        <tbody>
+                            ${(order.items || []).map((item) => `
+                                <tr>
+                                    <td>${escapeHtml(item.stock_item_name || '-')}</td>
+                                    <td>${item.quantity}</td>
+                                    <td>
+                                        <input type="number" min="0.01" step="0.01" class="form-input receive-qty"
+                                            data-item-id="${item.id}" value="${item.quantity}" style="max-width: 140px;">
+                                    </td>
+                                    <td>
+                                        <select class="form-select receive-mode" data-item-id="${item.id}" style="max-width: 220px;">
+                                            <option value="add">Add to stock</option>
+                                            <option value="adjust">Adjust stock to exact qty</option>
+                                        </select>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div class="text-right">
+                        <button type="button" class="btn btn-secondary" onclick="hideModal('receiveModal')">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="submitReceive()">Submit Receive</button>
+                    </div>
+                `;
+                showModal('receiveModal');
+            } catch (error) {
+                showAlert(error.message || 'Failed to load purchase order', 'error');
+            }
+        }
+
+        async function submitReceive() {
+            if (!currentReceiveOrder) return;
+            const qtyEls = Array.from(document.querySelectorAll('.receive-qty'));
+            const modeEls = Array.from(document.querySelectorAll('.receive-mode'));
+            const modeById = new Map(modeEls.map((el) => [String(el.dataset.itemId), el.value]));
+            const receivedLines = [];
+            for (const qtyEl of qtyEls) {
+                const itemId = parseInt(qtyEl.dataset.itemId, 10);
+                const quantity = parseFloat(qtyEl.value || 0);
+                const mode = String(modeById.get(String(itemId)) || 'add');
+                if (!(quantity > 0)) {
+                    showAlert('All receive quantities must be greater than zero', 'error');
+                    return;
+                }
+                if (!['add', 'adjust'].includes(mode)) {
+                    showAlert('Invalid mode selected for one or more lines', 'error');
+                    return;
+                }
+                receivedLines.push({ item_id: itemId, quantity, mode });
+            }
+            if (receivedLines.length === 0) {
+                showAlert('No receive lines found', 'error');
                 return;
             }
-            const msg = receiveMode === 'adjust'
-                ? 'Receive this PO in ADJUST mode? This sets stock to exact quantities entered per line.'
-                : 'Receive this PO in ADD mode? This adds quantities onto current stock.';
-            if (!confirm(msg)) return;
             try {
-                await apiCall(`/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify({ receive_mode: receiveMode }) });
-                showAlert(`Purchase order received (${receiveMode} mode)`, 'success');
+                await apiCall(`/purchase-orders/${currentReceiveOrder.id}/receive`, {
+                    method: 'POST',
+                    body: JSON.stringify({ received_lines: receivedLines })
+                });
+                hideModal('receiveModal');
+                showAlert('Purchase order received successfully', 'success');
                 await loadOrders();
             } catch (error) {
                 showAlert(error.message || 'Failed to receive purchase order', 'error');
+            }
+        }
+
+        async function deletePo(id, poNumber) {
+            if (!confirm(`Delete purchase order ${poNumber || `#${id}`}? This cannot be undone.`)) return;
+            try {
+                await apiCall(`/purchase-orders/${id}`, { method: 'DELETE' });
+                showAlert('Purchase order deleted', 'success');
+                await loadOrders();
+            } catch (error) {
+                showAlert(error.message || 'Failed to delete purchase order', 'error');
             }
         }
 

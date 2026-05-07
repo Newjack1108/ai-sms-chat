@@ -5723,6 +5723,15 @@ class ProductionDatabase {
             .run(parseFloat(subtotalRow.subtotal || 0), purchaseOrderId);
         return this.getPurchaseOrderById(purchaseOrderId);
     }
+
+    static async deletePurchaseOrder(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`DELETE FROM purchase_orders WHERE id = $1 RETURNING id`, [id]);
+            return !!result.rows[0];
+        }
+        const info = db.prepare(`DELETE FROM purchase_orders WHERE id = ?`).run(id);
+        return info.changes > 0;
+    }
     
     // ============ PRODUCT COMPONENTS OPERATIONS ============
     

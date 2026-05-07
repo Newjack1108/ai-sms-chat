@@ -780,6 +780,23 @@ router.delete('/purchase-orders/:id/items/:itemId', requireProductionAuth, requi
     }
 });
 
+router.delete('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        if (Number.isNaN(poId)) {
+            return res.status(400).json({ success: false, error: 'Invalid purchase order id' });
+        }
+        const deleted = await ProductionDatabase.deletePurchaseOrder(poId);
+        if (!deleted) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete purchase order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete purchase order' });
+    }
+});
+
 router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
@@ -790,26 +807,62 @@ router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminO
         if (!order) {
             return res.status(404).json({ success: false, error: 'Purchase order not found' });
         }
+        if (!order.items || order.items.length === 0) {
+            return res.status(400).json({ success: false, error: 'Cannot receive this purchase order because it has no line items' });
+        }
         const receiveMode = String((req.body && req.body.receive_mode) || 'add').trim().toLowerCase();
         if (!['add', 'adjust'].includes(receiveMode)) {
             return res.status(400).json({ success: false, error: 'receive_mode must be either add or adjust' });
         }
-        if (!order.items || order.items.length === 0) {
-            return res.status(400).json({ success: false, error: 'Cannot receive this purchase order because it has no line items' });
+        const lineItemsById = new Map((order.items || []).map((item) => [item.id, item]));
+        const receivedLinesInput = req.body && typeof req.body === 'object' && Array.isArray(req.body.received_lines)
+            ? req.body.received_lines
+            : null;
+        let effectiveLines = [];
+        if (receivedLinesInput && receivedLinesInput.length > 0) {
+            const validationErrors = [];
+            for (const line of receivedLinesInput) {
+                const itemId = parseInt(line.item_id, 10);
+                const qty = parseFloat(line.quantity);
+                const mode = String(line.mode || '').trim().toLowerCase();
+                if (Number.isNaN(itemId) || !lineItemsById.has(itemId)) {
+                    validationErrors.push(`Invalid line item id: ${line.item_id}`);
+                    continue;
+                }
+                if (!['add', 'adjust'].includes(mode)) {
+                    validationErrors.push(`Invalid mode for line ${itemId}: ${line.mode}`);
+                    continue;
+                }
+                if (!(qty > 0)) {
+                    validationErrors.push(`Quantity must be greater than zero for line ${itemId}`);
+                    continue;
+                }
+                effectiveLines.push({ item_id: itemId, quantity: qty, mode });
+            }
+            if (validationErrors.length > 0) {
+                return res.status(400).json({ success: false, error: validationErrors.join('; ') });
+            }
+        } else {
+            const quantitiesByItemId = req.body && typeof req.body === 'object' ? (req.body.received_quantities || {}) : {};
+            effectiveLines = (order.items || []).map((item) => {
+                const raw = quantitiesByItemId[item.id];
+                const qty = raw === undefined || raw === null || raw === '' ? parseFloat(item.quantity || 0) : parseFloat(raw);
+                return { item_id: item.id, quantity: qty, mode: receiveMode };
+            }).filter((line) => line.quantity > 0);
         }
-        const quantitiesByItemId = req.body && typeof req.body === 'object' ? (req.body.received_quantities || {}) : {};
+        if (effectiveLines.length === 0) {
+            return res.status(400).json({ success: false, error: 'No valid receive lines were provided' });
+        }
         const userId = req.session.production_user ? req.session.production_user.id : null;
-        for (const item of order.items || []) {
-            const raw = quantitiesByItemId[item.id];
-            const qty = raw === undefined || raw === null || raw === '' ? parseFloat(item.quantity || 0) : parseFloat(raw);
-            if (!(qty > 0)) continue;
+        for (const line of effectiveLines) {
+            const item = lineItemsById.get(line.item_id);
             await ProductionDatabase.recordStockMovement({
                 stock_item_id: item.stock_item_id,
-                movement_type: receiveMode === 'adjust' ? 'adjustment' : 'in',
-                quantity: qty,
+                movement_type: line.mode === 'adjust' ? 'adjustment' : 'in',
+                quantity: line.quantity,
                 reference: `PO ${order.po_number}`,
                 user_id: userId,
-                cost_gbp: parseFloat(item.unit_cost_gbp || 0) * qty
+                cost_gbp: parseFloat(item.unit_cost_gbp || 0) * line.quantity
             });
         }
         const updatedOrder = await ProductionDatabase.updatePurchaseOrderStatus(poId, 'received');
