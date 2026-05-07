@@ -58,6 +58,7 @@
             <!-- Always visible items -->
             <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
             <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
+            <a href="inspections.html" class="btn btn-secondary btn-sm admin-or-office">Inspections</a>
             
             <!-- Admin Dropdown (admin-only) -->
             <div class="navbar-dropdown admin-only">
@@ -109,6 +110,16 @@
                 <h2>My Tasks</h2>
             </div>
             <div id="myTasks">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="card admin-or-office" id="complianceInspectionsCard" style="margin-top: 20px;">
+            <div class="card-header">
+                <h2>Compliance Inspections</h2>
+                <a href="inspections.html" class="btn btn-secondary btn-sm">Open Inspections</a>
+            </div>
+            <div id="overdueInspections" class="dashboard-card-scroll">
                 <div class="loading">Loading...</div>
             </div>
         </div>
@@ -348,6 +359,46 @@
             } catch (error) {
                 document.getElementById('myTasks').innerHTML = '<p>Error loading tasks</p>';
             }
+            
+            // Compliance inspections (admin/office only)
+            if (user.role === 'admin' || user.role === 'office') {
+                try {
+                    const inspData = await apiCall('/inspections/overdue');
+                    const inspDiv = document.getElementById('overdueInspections');
+                    const list = (inspData.inspections || []).slice(0, 8);
+                    const typeLabel = (t) => ({
+                        ladder: 'Ladder',
+                        emergency_lighting: 'Emergency Lighting',
+                        lev: 'LEV'
+                    }[t] || t);
+                    if (list.length === 0) {
+                        inspDiv.innerHTML = '<p>No inspections due in the next 7 days</p>';
+                    } else {
+                        inspDiv.innerHTML = list.map((row) => {
+                            const urg = row.urgency || (row.next_inspection_date <= new Date().toISOString().split('T')[0] ? 'overdue' : 'due_soon');
+                            const bg = urg === 'overdue' ? '#f8d7da' : '#fff3cd';
+                            const fg = urg === 'overdue' ? '#721c24' : '#856404';
+                            return `
+                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: ${bg};">
+                                    <strong style="color: ${fg};">${typeLabel(row.asset_type)} — ${escapeHtml(row.asset_name)}</strong><br>
+                                    <small style="color: ${fg};">${row.location ? escapeHtml(row.location) + ' · ' : ''}Due: ${formatDate(row.next_inspection_date)}</small>
+                                    <br>
+                                    <a href="inspections.html?asset=${row.id}" style="font-size: 11px; color: ${fg}; text-decoration: underline; margin-top: 4px; display: inline-block;">Inspect →</a>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                } catch (e) {
+                    document.getElementById('overdueInspections').innerHTML = '<p>Error loading inspections</p>';
+                }
+            }
+        }
+        
+        function escapeHtml(s) {
+            if (s == null) return '';
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
         }
         
         loadDashboard();

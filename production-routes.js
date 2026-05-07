@@ -5273,6 +5273,134 @@ router.delete('/reminders/:id', requireProductionAuth, requireAdminOrOffice, asy
     }
 });
 
+// ============ COMPLIANCE INSPECTIONS ============
+
+router.get('/inspections/overdue', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const inspections = await ProductionDatabase.getInspectionsDashboardDue();
+        res.json({ success: true, inspections });
+    } catch (error) {
+        console.error('Get inspections overdue error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to get inspections' });
+    }
+});
+
+router.get('/inspections/assets', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const asset_type = req.query.asset_type || null;
+        const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
+        const filters = { only_active: !includeInactive };
+        if (asset_type) filters.asset_type = asset_type;
+        const assets = await ProductionDatabase.getInspectionAssets(filters);
+        res.json({ success: true, assets });
+    } catch (error) {
+        console.error('Get inspection assets error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to list assets' });
+    }
+});
+
+router.post('/inspections/assets', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const body = req.body || {};
+        const asset = await ProductionDatabase.createInspectionAsset({
+            ...body,
+            created_by_user_id: req.session.production_user.id
+        });
+        res.json({ success: true, asset });
+    } catch (error) {
+        console.error('Create inspection asset error:', error);
+        const msg = error.message || 'Failed to create asset';
+        res.status(400).json({ success: false, error: msg });
+    }
+});
+
+router.get('/inspections/assets/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const assetId = parseInt(req.params.id, 10);
+        if (Number.isNaN(assetId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const asset = await ProductionDatabase.getInspectionAssetById(assetId);
+        if (!asset) {
+            return res.status(404).json({ success: false, error: 'Asset not found' });
+        }
+        res.json({ success: true, asset });
+    } catch (error) {
+        console.error('Get inspection asset error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get asset' });
+    }
+});
+
+router.put('/inspections/assets/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const assetId = parseInt(req.params.id, 10);
+        if (Number.isNaN(assetId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const asset = await ProductionDatabase.updateInspectionAsset(assetId, req.body || {});
+        if (!asset) {
+            return res.status(404).json({ success: false, error: 'Asset not found' });
+        }
+        res.json({ success: true, asset });
+    } catch (error) {
+        console.error('Update inspection asset error:', error);
+        res.status(400).json({ success: false, error: error.message || 'Failed to update asset' });
+    }
+});
+
+router.delete('/inspections/assets/:id', requireProductionAuth, requireAdmin, async (req, res) => {
+    try {
+        const assetId = parseInt(req.params.id, 10);
+        if (Number.isNaN(assetId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const existing = await ProductionDatabase.getInspectionAssetById(assetId);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: 'Asset not found' });
+        }
+        await ProductionDatabase.deleteInspectionAsset(assetId);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete inspection asset error:', error);
+        res.status(500).json({ success: false, error: 'Failed to deactivate asset' });
+    }
+});
+
+router.get('/inspections/assets/:id/records', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const assetId = parseInt(req.params.id, 10);
+        if (Number.isNaN(assetId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const limit = req.query.limit;
+        const records = await ProductionDatabase.getInspectionRecordsForAsset(assetId, { limit });
+        res.json({ success: true, records });
+    } catch (error) {
+        console.error('Get inspection records error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get records' });
+    }
+});
+
+router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const assetId = parseInt(req.params.id, 10);
+        if (Number.isNaN(assetId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const u = req.session.production_user;
+        const record = await ProductionDatabase.createInspectionRecord(assetId, {
+            ...(req.body || {}),
+            inspector_user_id: u.id,
+            inspector_name: u.username
+        });
+        res.json({ success: true, record });
+    } catch (error) {
+        console.error('Create inspection record error:', error);
+        const status = error.message && error.message.includes('required') ? 400 : 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to save inspection' });
+    }
+});
+
 // ============ PLANNER ROUTES ============
 
 router.get('/planner', requireProductionAuth, async (req, res) => {

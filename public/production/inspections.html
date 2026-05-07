@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compliance Inspections - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            <h1>Compliance Inspections</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <div class="navbar-dropdown admin-or-office">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">Production</button>
+                <div class="dropdown-menu">
+                    <a href="dashboard.html" class="dropdown-item">Dashboard</a>
+                    <a href="stock.html" class="dropdown-item">Raw Materials</a>
+                    <a href="production-orders.html" class="dropdown-item">Works Orders</a>
+                    <a href="installations.html" class="dropdown-item">Installation Calendar</a>
+                </div>
+            </div>
+            <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
+            <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
+            <a href="inspections.html" class="btn btn-secondary btn-sm admin-or-office">Inspections</a>
+            <div class="navbar-dropdown admin-only">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">Admin</button>
+                <div class="dropdown-menu">
+                    <a href="users.html" class="dropdown-item">Users</a>
+                    <a href="backups.html" class="dropdown-item">Backups</a>
+                </div>
+            </div>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Filters</h2>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; padding: 12px;">
+                <div class="form-group" style="margin: 0;">
+                    <label class="form-label">Asset type</label>
+                    <select id="filterType" class="form-select" onchange="renderAssetSections()">
+                        <option value="">All types</option>
+                        <option value="ladder">Ladder</option>
+                        <option value="emergency_lighting">Emergency Lighting</option>
+                        <option value="lev">LEV</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label class="form-label">Status</label>
+                    <select id="filterStatus" class="form-select" onchange="renderAssetSections()">
+                        <option value="all">All</option>
+                        <option value="due_now">Due now / overdue</option>
+                        <option value="due_soon">Due soon (7 days)</option>
+                        <option value="ok">Up to date</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label>
+                        <input type="checkbox" id="includeInactive" onchange="loadAssets()"> Include inactive assets
+                    </label>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="showAssetModal(null)">Add asset</button>
+            </div>
+        </div>
+
+        <div id="sectionsHost"></div>
+    </div>
+
+    <!-- Inspect modal -->
+    <div id="inspectModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Record inspection</h3>
+                <button class="modal-close" onclick="hideModal('inspectModal')">&times;</button>
+            </div>
+            <form id="inspectForm">
+                <input type="hidden" id="inspectAssetId">
+                <p id="inspectAssetSummary" style="margin-bottom: 12px; color: #495057;"></p>
+                <div class="form-group">
+                    <label class="form-label">Inspection date</label>
+                    <input type="date" id="inspectDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Result</label>
+                    <div>
+                        <label><input type="radio" name="inspectStatus" value="pass" checked onchange="toggleDefectsRequired()"> Pass</label>
+                        <label style="margin-left: 16px;"><input type="radio" name="inspectStatus" value="fail" onchange="toggleDefectsRequired()"> Fail</label>
+                    </div>
+                </div>
+                <div class="form-group" id="defectsGroup" style="display: none;">
+                    <label class="form-label">Defects *</label>
+                    <textarea id="inspectDefects" class="form-input" rows="3" placeholder="Describe defects"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Notes</label>
+                    <textarea id="inspectNotes" class="form-input" rows="2" placeholder="Optional notes"></textarea>
+                </div>
+                <div class="text-right">
+                    <button type="button" class="btn btn-secondary" onclick="hideModal('inspectModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- History modal -->
+    <div id="historyModal" class="modal">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h3 id="historyTitle">Inspection history</h3>
+                <button class="modal-close" onclick="hideModal('historyModal')">&times;</button>
+            </div>
+            <div id="historyBody" style="max-height: 400px; overflow: auto;"></div>
+        </div>
+    </div>
+
+    <!-- Add/Edit asset modal -->
+    <div id="assetModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="assetModalTitle">Add asset</h3>
+                <button class="modal-close" onclick="hideModal('assetModal')">&times;</button>
+            </div>
+            <form id="assetForm">
+                <input type="hidden" id="assetEditId">
+                <div class="form-group">
+                    <label class="form-label">Type *</label>
+                    <select id="assetType" class="form-select" required>
+                        <option value="ladder">Ladder</option>
+                        <option value="emergency_lighting">Emergency Lighting</option>
+                        <option value="lev">LEV</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Name *</label>
+                    <input type="text" id="assetName" class="form-input" required placeholder="e.g. Ladder #1 — Workshop">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Location</label>
+                    <input type="text" id="assetLocation" class="form-input" placeholder="e.g. Reception">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Identifier / tag</label>
+                    <input type="text" id="assetIdentifier" class="form-input" placeholder="Serial or asset tag">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Frequency (days)</label>
+                    <input type="number" id="assetFrequency" class="form-input" min="1" value="30">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Next inspection due</label>
+                    <input type="date" id="assetNextDue" class="form-input">
+                </div>
+                <div class="form-group" id="assetActiveRow">
+                    <label><input type="checkbox" id="assetActive" checked> Active</label>
+                </div>
+                <div class="text-right">
+                    <button type="button" class="btn btn-secondary" onclick="hideModal('assetModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let allAssets = [];
+
+        const TYPE_LABEL = {
+            ladder: 'Ladder',
+            emergency_lighting: 'Emergency Lighting',
+            lev: 'LEV'
+        };
+
+        function escapeHtml(s) {
+            if (s == null || s === '') return '';
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function todayStr() {
+            return new Date().toISOString().split('T')[0];
+        }
+
+        function addDaysStr(dateStr, days) {
+            const d = new Date(dateStr + 'T12:00:00');
+            d.setDate(d.getDate() + days);
+            return d.toISOString().split('T')[0];
+        }
+
+        function bucketFor(asset) {
+            const next = asset.next_inspection_date;
+            const today = todayStr();
+            const soon = addDaysStr(today, 7);
+            if (next <= today) return 'due_now';
+            if (next <= soon) return 'due_soon';
+            return 'ok';
+        }
+
+        async function init() {
+            if (await restrictStaffAccess()) return;
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            if (currentUser.role !== 'admin' && currentUser.role !== 'office') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            await initNavbar();
+            await loadAssets();
+
+            const params = new URLSearchParams(window.location.search);
+            const assetId = params.get('asset');
+            if (assetId) {
+                await showInspectModal(parseInt(assetId, 10));
+            }
+
+            document.getElementById('inspectForm').addEventListener('submit', submitInspect);
+            document.getElementById('assetForm').addEventListener('submit', submitAsset);
+        }
+
+        async function loadAssets() {
+            const inc = document.getElementById('includeInactive').checked;
+            const url = '/inspections/assets' + (inc ? '?include_inactive=true' : '');
+
+            try {
+                const data = await apiCall(url);
+                allAssets = data.assets || [];
+                renderAssetSections();
+            } catch (e) {
+                document.getElementById('sectionsHost').innerHTML = '<div class="card"><p>Error loading assets</p></div>';
+            }
+        }
+
+        function renderAssetSections() {
+            const statusFilter = document.getElementById('filterStatus').value;
+            const typeFilter = document.getElementById('filterType').value;
+
+            let rows = allAssets.slice();
+            if (typeFilter) {
+                rows = rows.filter(a => a.asset_type === typeFilter);
+            }
+
+            const dueNow = rows.filter(a => bucketFor(a) === 'due_now');
+            const dueSoon = rows.filter(a => bucketFor(a) === 'due_soon');
+            const ok = rows.filter(a => bucketFor(a) === 'ok');
+
+            const section = (title, color, items) => {
+                const inner = items.length === 0
+                    ? '<p style="color:#6c757d;">None in this category.</p>'
+                    : items.map(renderAssetCard).join('');
+                return `
+                    <div class="card" style="margin-bottom: 16px; border-left: 4px solid ${color};">
+                        <div class="card-header"><h2>${title}</h2></div>
+                        <div style="padding: 12px;">${inner}</div>
+                    </div>
+                `;
+            };
+
+            let html = '';
+            if (statusFilter === 'all') {
+                html += section('Due now / overdue', '#dc3545', dueNow);
+                html += section('Due soon (within 7 days)', '#ffc107', dueSoon);
+                html += section('Up to date', '#28a745', ok);
+            } else if (statusFilter === 'due_now') {
+                html += section('Due now / overdue', '#dc3545', dueNow);
+            } else if (statusFilter === 'due_soon') {
+                html += section('Due soon (within 7 days)', '#ffc107', dueSoon);
+            } else if (statusFilter === 'ok') {
+                html += section('Up to date', '#28a745', ok);
+            }
+
+            document.getElementById('sectionsHost').innerHTML = html || '<div class="card"><p>No assets match filters.</p></div>';
+        }
+
+        function renderAssetCard(a) {
+            const active = a.is_active === true || a.is_active === 1;
+            const badge = TYPE_LABEL[a.asset_type] || a.asset_type;
+            const adminDel = currentUser.role === 'admin'
+                ? `<button type="button" class="btn btn-danger btn-sm" onclick="deactivateAsset(${a.id})">Deactivate</button>`
+                : '';
+            return `
+                <div style="padding: 12px; margin-bottom: 10px; border: 1px solid #e9ecef; border-radius: 6px; background: #fafafa;">
+                    <div style="display:flex; flex-wrap:wrap; justify-content: space-between; gap: 8px; align-items: flex-start;">
+                        <div>
+                            <strong>${escapeHtml(a.asset_name)}</strong>
+                            <span class="badge badge-info" style="margin-left:8px;">${escapeHtml(badge)}</span>
+                            ${!active ? '<span class="badge badge-secondary">Inactive</span>' : ''}
+                            <div style="font-size: 13px; color: #495057; margin-top: 4px;">
+                                ${a.location ? escapeHtml(a.location) + ' · ' : ''}
+                                ${a.identifier ? 'ID: ' + escapeHtml(a.identifier) + ' · ' : ''}
+                                Every ${a.frequency_days} days
+                            </div>
+                            <div style="font-size: 13px; margin-top: 4px;">
+                                Last: ${a.last_inspection_date ? formatDate(a.last_inspection_date) : '—'}
+                                · Next due: <strong>${formatDate(a.next_inspection_date)}</strong>
+                            </div>
+                        </div>
+                        <div style="display:flex; flex-wrap:wrap; gap: 6px;">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="showInspectModal(${a.id})" ${!active ? 'disabled' : ''}>Inspect now</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="showHistoryModal(${a.id})">History</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="showAssetModal(${a.id})">Edit</button>
+                            ${adminDel}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function showInspectModal(assetId) {
+            let a = allAssets.find(x => x.id === assetId) || null;
+            if (!a) {
+                try {
+                    const data = await apiCall('/inspections/assets/' + assetId);
+                    a = data.asset;
+                } catch (e) {
+                    alert('Asset not found or you do not have access.');
+                    return;
+                }
+            }
+            const assetActive = a.is_active === true || a.is_active === 1;
+            if (!assetActive) {
+                alert('This asset is inactive.');
+                return;
+            }
+            openInspect(a);
+        }
+
+        function openInspect(a) {
+            document.getElementById('inspectAssetId').value = a.id;
+            document.getElementById('inspectAssetSummary').innerHTML =
+                `<strong>${escapeHtml(a.asset_name)}</strong> (${TYPE_LABEL[a.asset_type] || a.asset_type})`;
+            document.getElementById('inspectDate').value = todayStr();
+            document.querySelector('input[name="inspectStatus"][value="pass"]').checked = true;
+            document.getElementById('inspectDefects').value = '';
+            document.getElementById('inspectNotes').value = '';
+            toggleDefectsRequired();
+            document.getElementById('inspectModal').classList.add('show');
+        }
+
+        function toggleDefectsRequired() {
+            const fail = document.querySelector('input[name="inspectStatus"]:checked').value === 'fail';
+            document.getElementById('defectsGroup').style.display = fail ? 'block' : 'none';
+            document.getElementById('inspectDefects').required = fail;
+        }
+
+        async function submitInspect(e) {
+            e.preventDefault();
+            const assetId = parseInt(document.getElementById('inspectAssetId').value, 10);
+            const status = document.querySelector('input[name="inspectStatus"]:checked').value;
+            const body = {
+                status,
+                inspection_date: document.getElementById('inspectDate').value,
+                defects: document.getElementById('inspectDefects').value,
+                notes: document.getElementById('inspectNotes').value || null
+            };
+            try {
+                await apiCall('/inspections/assets/' + assetId + '/records', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                hideModal('inspectModal');
+                await loadAssets();
+            } catch (err) {
+                alert(err.message || 'Failed to save');
+            }
+        }
+
+        async function showHistoryModal(assetId) {
+            document.getElementById('historyTitle').textContent = 'Inspection history';
+            document.getElementById('historyBody').innerHTML = '<div class="loading">Loading...</div>';
+            document.getElementById('historyModal').classList.add('show');
+            try {
+                const data = await apiCall('/inspections/assets/' + assetId + '/records?limit=100');
+                const records = data.records || [];
+                const a = allAssets.find(x => x.id === assetId);
+                if (a) {
+                    document.getElementById('historyTitle').textContent = 'History — ' + a.asset_name;
+                }
+                if (records.length === 0) {
+                    document.getElementById('historyBody').innerHTML = '<p>No records yet.</p>';
+                    return;
+                }
+                document.getElementById('historyBody').innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Inspector</th>
+                                <th>Result</th>
+                                <th>Defects</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${records.map(r => `
+                                <tr>
+                                    <td>${formatDate(r.inspection_date)}</td>
+                                    <td>${escapeHtml(r.inspector_name || r.inspector_username || '')}</td>
+                                    <td><span class="badge ${r.status === 'pass' ? 'badge-success' : 'badge-danger'}">${r.status}</span></td>
+                                    <td>${escapeHtml(r.defects || '')}</td>
+                                    <td>${escapeHtml(r.notes || '')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (e) {
+                document.getElementById('historyBody').innerHTML = '<p>Error loading history</p>';
+            }
+        }
+
+        function showAssetModal(id) {
+            document.getElementById('assetEditId').value = id || '';
+            if (!id) {
+                document.getElementById('assetModalTitle').textContent = 'Add asset';
+                document.getElementById('assetType').value = 'ladder';
+                document.getElementById('assetName').value = '';
+                document.getElementById('assetLocation').value = '';
+                document.getElementById('assetIdentifier').value = '';
+                document.getElementById('assetFrequency').value = '30';
+                const d = new Date();
+                d.setDate(d.getDate() + 30);
+                document.getElementById('assetNextDue').value = d.toISOString().split('T')[0];
+                document.getElementById('assetActive').checked = true;
+            } else {
+                const a = allAssets.find(x => x.id === id);
+                if (!a) return;
+                document.getElementById('assetModalTitle').textContent = 'Edit asset';
+                document.getElementById('assetType').value = a.asset_type;
+                document.getElementById('assetName').value = a.asset_name;
+                document.getElementById('assetLocation').value = a.location || '';
+                document.getElementById('assetIdentifier').value = a.identifier || '';
+                document.getElementById('assetFrequency').value = a.frequency_days || 30;
+                document.getElementById('assetNextDue').value = a.next_inspection_date || '';
+                document.getElementById('assetActive').checked = a.is_active === true || a.is_active === 1;
+            }
+            document.getElementById('assetModal').classList.add('show');
+        }
+
+        async function submitAsset(e) {
+            e.preventDefault();
+            const id = document.getElementById('assetEditId').value;
+            const payload = {
+                asset_type: document.getElementById('assetType').value,
+                asset_name: document.getElementById('assetName').value.trim(),
+                location: document.getElementById('assetLocation').value || null,
+                identifier: document.getElementById('assetIdentifier').value || null,
+                frequency_days: parseInt(document.getElementById('assetFrequency').value, 10) || 30,
+                next_inspection_date: document.getElementById('assetNextDue').value,
+                is_active: document.getElementById('assetActive').checked
+            };
+            try {
+                if (id) {
+                    await apiCall('/inspections/assets/' + id, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    await apiCall('/inspections/assets', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+                hideModal('assetModal');
+                await loadAssets();
+            } catch (err) {
+                alert(err.message || 'Save failed');
+            }
+        }
+
+        async function deactivateAsset(id) {
+            if (!confirm('Deactivate this asset? (Admin only)')) return;
+            try {
+                await apiCall('/inspections/assets/' + id, { method: 'DELETE' });
+                await loadAssets();
+            } catch (err) {
+                alert(err.message || 'Failed');
+            }
+        }
+
+        init();
+    </script>
+    <footer class="footer">
+        <div class="footer-content">
+            <p>&copy; <script>document.write(new Date().getFullYear())</script> Production System.</p>
+        </div>
+    </footer>
+</body>
+</html>

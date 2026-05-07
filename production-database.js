@@ -599,6 +599,62 @@ function initializeSQLite() {
         console.log('⚠️ Stock check reminders migration check skipped:', error.message);
     }
     
+    // Compliance inspection assets and audit records
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS inspection_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev')),
+            asset_name TEXT NOT NULL,
+            location TEXT,
+            identifier TEXT,
+            frequency_days INTEGER NOT NULL DEFAULT 30,
+            last_inspection_date TEXT,
+            next_inspection_date TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_by_user_id INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
+        )
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS inspection_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id INTEGER NOT NULL,
+            inspector_user_id INTEGER,
+            inspector_name TEXT,
+            inspection_date TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pass', 'fail')),
+            defects TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (asset_id) REFERENCES inspection_assets(id) ON DELETE CASCADE,
+            FOREIGN KEY (inspector_user_id) REFERENCES production_users(id)
+        )
+    `);
+    try {
+        const seedCount = db.prepare('SELECT COUNT(*) AS c FROM inspection_assets').get();
+        if (seedCount && seedCount.c === 0) {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+            db.prepare(
+                `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, 1, NULL)`
+            ).run('ladder', 'Example Ladder #1', 'Workshop', 'LD-001', 30, yesterday);
+            db.prepare(
+                `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, 1, NULL)`
+            ).run('emergency_lighting', 'Example Emergency Light — Reception', 'Reception', 'EL-R01', 30, yesterday);
+            db.prepare(
+                `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, 1, NULL)`
+            ).run('lev', 'Example LEV — Welding Bay', 'Welding Bay', 'LEV-WB1', 30, today);
+            console.log('✅ Seeded example compliance inspection assets');
+        }
+    } catch (e) {
+        console.log('⚠️ Inspection assets seed skipped:', e.message);
+    }
+    
     // Tasks table
     db.exec(`
         CREATE TABLE IF NOT EXISTS tasks (
@@ -1965,6 +2021,61 @@ async function initializePostgreSQL() {
             END $$;
         `);
         console.log('✅ Checked/added user assignment and text reminder columns to stock_check_reminders');
+        
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS inspection_assets (
+                id SERIAL PRIMARY KEY,
+                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev')),
+                asset_name VARCHAR(255) NOT NULL,
+                location TEXT,
+                identifier TEXT,
+                frequency_days INTEGER NOT NULL DEFAULT 30,
+                last_inspection_date DATE,
+                next_inspection_date DATE NOT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_by_user_id INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS inspection_records (
+                id SERIAL PRIMARY KEY,
+                asset_id INTEGER NOT NULL REFERENCES inspection_assets(id) ON DELETE CASCADE,
+                inspector_user_id INTEGER REFERENCES production_users(id),
+                inspector_name TEXT,
+                inspection_date DATE NOT NULL,
+                status VARCHAR(10) NOT NULL CHECK(status IN ('pass', 'fail')),
+                defects TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        try {
+            const seedRes = await pool.query('SELECT COUNT(*)::int AS c FROM inspection_assets');
+            if (seedRes.rows[0].c === 0) {
+                const today = new Date().toISOString().split('T')[0];
+                const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+                await pool.query(
+                    `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                     VALUES ('ladder', $1, $2, $3, 30, NULL, $4, TRUE, NULL)`,
+                    ['Example Ladder #1', 'Workshop', 'LD-001', yesterday]
+                );
+                await pool.query(
+                    `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                     VALUES ('emergency_lighting', $1, $2, $3, 30, NULL, $4, TRUE, NULL)`,
+                    ['Example Emergency Light — Reception', 'Reception', 'EL-R01', yesterday]
+                );
+                await pool.query(
+                    `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                     VALUES ('lev', $1, $2, $3, 30, NULL, $4, TRUE, NULL)`,
+                    ['Example LEV — Welding Bay', 'Welding Bay', 'LEV-WB1', today]
+                );
+                console.log('✅ Seeded example compliance inspection assets (PostgreSQL)');
+            }
+        } catch (seedErr) {
+            console.log('⚠️ Inspection assets seed skipped:', seedErr.message);
+        }
         
         // Tasks
         await pool.query(`
@@ -12391,6 +12502,325 @@ class ProductionDatabase {
         } else {
             db.prepare(`DELETE FROM stock_check_reminders WHERE id = ?`).run(id);
         }
+    }
+    
+    // ============ COMPLIANCE INSPECTIONS ============
+    
+    static INSPECTION_ASSET_TYPES = ['ladder', 'emergency_lighting', 'lev'];
+    
+    static async createInspectionAsset(data) {
+        const assetType = data.asset_type;
+        if (!this.INSPECTION_ASSET_TYPES.includes(assetType)) {
+            throw new Error('Invalid asset_type');
+        }
+        const assetName = (data.asset_name || '').trim();
+        if (!assetName) throw new Error('asset_name is required');
+        const frequencyDays = Math.max(1, parseInt(String(data.frequency_days || 30), 10) || 30);
+        let nextDate = data.next_inspection_date;
+        if (!nextDate) {
+            const d = new Date();
+            d.setDate(d.getDate() + frequencyDays);
+            nextDate = d.toISOString().split('T')[0];
+        }
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 RETURNING *`,
+                [
+                    assetType,
+                    assetName,
+                    data.location || null,
+                    data.identifier || null,
+                    frequencyDays,
+                    data.last_inspection_date || null,
+                    nextDate,
+                    data.is_active !== false,
+                    data.created_by_user_id || null
+                ]
+            );
+            return result.rows[0];
+        }
+        const stmt = db.prepare(
+            `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        const info = stmt.run(
+            assetType,
+            assetName,
+            data.location || null,
+            data.identifier || null,
+            frequencyDays,
+            data.last_inspection_date || null,
+            nextDate,
+            data.is_active !== false ? 1 : 0,
+            data.created_by_user_id || null
+        );
+        return this.getInspectionAssetById(info.lastInsertRowid);
+    }
+    
+    static async getInspectionAssetById(id) {
+        const aid = parseInt(id, 10);
+        if (Number.isNaN(aid)) return null;
+        if (isPostgreSQL) {
+            const r = await pool.query(`SELECT * FROM inspection_assets WHERE id = $1`, [aid]);
+            return r.rows[0] || null;
+        }
+        return db.prepare(`SELECT * FROM inspection_assets WHERE id = ?`).get(aid) || null;
+    }
+    
+    static async updateInspectionAsset(id, data) {
+        const existing = await this.getInspectionAssetById(id);
+        if (!existing) return null;
+        const updates = [];
+        const values = [];
+        let pi = 1;
+        const push = (col, val) => {
+            if (isPostgreSQL) {
+                updates.push(`${col} = $${pi++}`);
+            } else {
+                updates.push(`${col} = ?`);
+            }
+            values.push(val);
+        };
+        if (data.asset_type !== undefined) {
+            if (!this.INSPECTION_ASSET_TYPES.includes(data.asset_type)) throw new Error('Invalid asset_type');
+            push('asset_type', data.asset_type);
+        }
+        if (data.asset_name !== undefined) push('asset_name', String(data.asset_name).trim());
+        if (data.location !== undefined) push('location', data.location || null);
+        if (data.identifier !== undefined) push('identifier', data.identifier || null);
+        if (data.frequency_days !== undefined) {
+            push('frequency_days', Math.max(1, parseInt(String(data.frequency_days), 10) || 30));
+        }
+        if (data.last_inspection_date !== undefined) push('last_inspection_date', data.last_inspection_date || null);
+        if (data.next_inspection_date !== undefined) push('next_inspection_date', data.next_inspection_date);
+        if (data.is_active !== undefined) {
+            push('is_active', isPostgreSQL ? !!data.is_active : data.is_active ? 1 : 0);
+        }
+        if (updates.length === 0) return existing;
+        if (isPostgreSQL) {
+            updates.push('updated_at = CURRENT_TIMESTAMP');
+            values.push(parseInt(id, 10));
+            const result = await pool.query(
+                `UPDATE inspection_assets SET ${updates.join(', ')} WHERE id = $${values.length} RETURNING *`,
+                values
+            );
+            return result.rows[0] || null;
+        }
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        values.push(parseInt(id, 10));
+        db.prepare(`UPDATE inspection_assets SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+        return this.getInspectionAssetById(id);
+    }
+    
+    /** Soft delete: set is_active false */
+    static async deleteInspectionAsset(id) {
+        return this.updateInspectionAsset(id, { is_active: false });
+    }
+    
+    static async getInspectionAssets(filters = {}) {
+        const onlyActive = filters.only_active !== false;
+        const assetType = filters.asset_type;
+        const onlyOverdue = filters.only_overdue === true;
+        const onlyDueSoon = filters.only_due_soon === true;
+        const today = new Date().toISOString().split('T')[0];
+        const soon = new Date();
+        soon.setDate(soon.getDate() + 7);
+        const soonStr = soon.toISOString().split('T')[0];
+        
+        let where = [];
+        const params = [];
+        let idx = 1;
+        if (onlyActive) {
+            where.push(isPostgreSQL ? 'a.is_active = TRUE' : 'a.is_active = 1');
+        }
+        if (assetType) {
+            where.push(isPostgreSQL ? `a.asset_type = $${idx}` : 'a.asset_type = ?');
+            params.push(assetType);
+            idx++;
+        }
+        if (onlyOverdue) {
+            where.push(isPostgreSQL ? `a.next_inspection_date <= $${idx}` : 'a.next_inspection_date <= ?');
+            params.push(today);
+            idx++;
+        }
+        if (onlyDueSoon) {
+            where.push(
+                isPostgreSQL
+                    ? `(a.next_inspection_date > $${idx} AND a.next_inspection_date <= $${idx + 1})`
+                    : '(a.next_inspection_date > ? AND a.next_inspection_date <= ?)'
+            );
+            params.push(today, soonStr);
+            idx += 2;
+        }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const q = `SELECT a.*, u.username AS created_by_username
+                   FROM inspection_assets a
+                   LEFT JOIN production_users u ON a.created_by_user_id = u.id
+                   ${whereSql}
+                   ORDER BY a.next_inspection_date ASC, a.asset_name ASC`;
+        if (isPostgreSQL) {
+            const r = await pool.query(q, params);
+            return r.rows;
+        }
+        return params.length ? db.prepare(q).all(...params) : db.prepare(q).all();
+    }
+    
+    static async getOverdueInspections() {
+        const today = new Date().toISOString().split('T')[0];
+        const active = isPostgreSQL ? 'a.is_active = TRUE' : 'a.is_active = 1';
+        const sql = `SELECT a.*, u.username AS created_by_username
+                     FROM inspection_assets a
+                     LEFT JOIN production_users u ON a.created_by_user_id = u.id
+                     WHERE ${active} AND a.next_inspection_date <= `;
+        if (isPostgreSQL) {
+            const r = await pool.query(`${sql}$1`, [today]);
+            return r.rows;
+        }
+        return db.prepare(`${sql}?`).all(today);
+    }
+    
+    /** Overdue (next <= today) and due within 7 days (today < next <= today+7), active only */
+    static async getInspectionsDashboardDue() {
+        const today = new Date().toISOString().split('T')[0];
+        const soon = new Date();
+        soon.setDate(soon.getDate() + 7);
+        const soonStr = soon.toISOString().split('T')[0];
+        const active = isPostgreSQL ? 'a.is_active = TRUE' : 'a.is_active = 1';
+        if (isPostgreSQL) {
+            const r = await pool.query(
+                `SELECT a.*, u.username AS created_by_username,
+                        CASE WHEN a.next_inspection_date <= $1::date THEN 'overdue'
+                             WHEN a.next_inspection_date <= $2::date THEN 'due_soon'
+                             ELSE 'ok' END AS urgency
+                 FROM inspection_assets a
+                 LEFT JOIN production_users u ON a.created_by_user_id = u.id
+                 WHERE ${active}
+                   AND (
+                     a.next_inspection_date <= $1::date
+                     OR (a.next_inspection_date > $1::date AND a.next_inspection_date <= $2::date)
+                   )
+                 ORDER BY a.next_inspection_date ASC, a.asset_name ASC`,
+                [today, soonStr]
+            );
+            return r.rows;
+        }
+        const rows = db
+            .prepare(
+                `SELECT a.*, u.username AS created_by_username
+                 FROM inspection_assets a
+                 LEFT JOIN production_users u ON a.created_by_user_id = u.id
+                 WHERE ${active}
+                   AND (
+                     a.next_inspection_date <= ?
+                     OR (a.next_inspection_date > ? AND a.next_inspection_date <= ?)
+                   )
+                 ORDER BY a.next_inspection_date ASC, a.asset_name ASC`
+            )
+            .all(today, today, soonStr);
+        return rows.map((row) => ({
+            ...row,
+            urgency: row.next_inspection_date <= today ? 'overdue' : 'due_soon'
+        }));
+    }
+    
+    static async getInspectionRecordsForAsset(assetId, opts = {}) {
+        const limit = Math.min(500, Math.max(1, parseInt(String(opts.limit || 100), 10) || 100));
+        const aid = parseInt(assetId, 10);
+        if (isPostgreSQL) {
+            const r = await pool.query(
+                `SELECT r.*, u.username AS inspector_username
+                 FROM inspection_records r
+                 LEFT JOIN production_users u ON r.inspector_user_id = u.id
+                 WHERE r.asset_id = $1
+                 ORDER BY r.inspection_date DESC, r.created_at DESC
+                 LIMIT $2`,
+                [aid, limit]
+            );
+            return r.rows;
+        }
+        return db
+            .prepare(
+                `SELECT r.*, u.username AS inspector_username
+                 FROM inspection_records r
+                 LEFT JOIN production_users u ON r.inspector_user_id = u.id
+                 WHERE r.asset_id = ?
+                 ORDER BY r.inspection_date DESC, r.created_at DESC
+                 LIMIT ?`
+            )
+            .all(aid, limit);
+    }
+    
+    static async createInspectionRecord(assetId, data) {
+        const asset = await this.getInspectionAssetById(assetId);
+        if (!asset || !(isPostgreSQL ? asset.is_active : asset.is_active === 1)) {
+            throw new Error('Asset not found or inactive');
+        }
+        const status = data.status === 'fail' ? 'fail' : 'pass';
+        let defects = data.defects != null ? String(data.defects).trim() : '';
+        const notes = data.notes != null ? String(data.notes).trim() : null;
+        if (status === 'fail' && !defects) {
+            throw new Error('defects are required when status is fail');
+        }
+        if (status === 'pass') defects = defects || null;
+        let inspectionDate = data.inspection_date || new Date().toISOString().split('T')[0];
+        const inspectorUserId = data.inspector_user_id != null ? parseInt(data.inspector_user_id, 10) : null;
+        const inspectorName = data.inspector_name || null;
+        const freq = Math.max(1, parseInt(String(asset.frequency_days || 30), 10) || 30);
+        
+        const nextD = new Date(inspectionDate + 'T12:00:00');
+        nextD.setDate(nextD.getDate() + freq);
+        const nextInspectionDate = nextD.toISOString().split('T')[0];
+        
+        if (isPostgreSQL) {
+            await pool.query('BEGIN');
+            try {
+                const ins = await pool.query(
+                    `INSERT INTO inspection_records (asset_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                     VALUES ($1, $2, $3, $4::date, $5, $6, $7)
+                     RETURNING *`,
+                    [parseInt(assetId, 10), inspectorUserId, inspectorName, inspectionDate, status, defects || null, notes]
+                );
+                await pool.query(
+                    `UPDATE inspection_assets
+                     SET last_inspection_date = $1::date,
+                         next_inspection_date = $2::date,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $3`,
+                    [inspectionDate, nextInspectionDate, parseInt(assetId, 10)]
+                );
+                await pool.query('COMMIT');
+                return ins.rows[0];
+            } catch (e) {
+                await pool.query('ROLLBACK');
+                throw e;
+            }
+        }
+        const rid = db.transaction(() => {
+            const rec = db
+                .prepare(
+                    `INSERT INTO inspection_records (asset_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`
+                )
+                .run(
+                    parseInt(assetId, 10),
+                    inspectorUserId,
+                    inspectorName,
+                    inspectionDate,
+                    status,
+                    defects || null,
+                    notes
+                );
+            db.prepare(
+                `UPDATE inspection_assets
+                 SET last_inspection_date = ?, next_inspection_date = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`
+            ).run(inspectionDate, nextInspectionDate, parseInt(assetId, 10));
+            return rec.lastInsertRowid;
+        })();
+        const row = db.prepare(`SELECT * FROM inspection_records WHERE id = ?`).get(rid);
+        return row;
     }
     
     // ============ HOLIDAY OPERATIONS ============
