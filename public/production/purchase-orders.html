@@ -44,6 +44,12 @@
                     <div class="form-group"><label class="form-label">Expected Date</label><input id="poExpectedDate" type="date" class="form-input"></div>
                     <div class="form-group"><label class="form-label">Supplier *</label><select id="poSupplier" class="form-select" required></select></div>
                 </div>
+                <div class="form-group">
+                    <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
+                        <input id="poOneOffPurchase" type="checkbox" style="width: auto;">
+                        <span>One-off purchase (allow no line items)</span>
+                    </label>
+                </div>
                 <div class="form-group"><label class="form-label">Notes</label><textarea id="poNotes" class="form-textarea"></textarea></div>
                 <h4>Line Items</h4>
                 <table class="table">
@@ -147,12 +153,13 @@
                 }
                 container.innerHTML = `
                     <table class="table">
-                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Status</th><th>Order Date</th><th>Expected</th><th>Subtotal</th><th>Actions</th></tr></thead>
+                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Type</th><th>Status</th><th>Order Date</th><th>Expected</th><th>Subtotal</th><th>Actions</th></tr></thead>
                         <tbody>
                             ${rows.map((o) => `
                                 <tr>
                                     <td><strong>${escapeHtml(o.po_number)}</strong></td>
                                     <td>${escapeHtml(o.supplier_name || '-')}</td>
+                                    <td>${o.is_one_off_purchase ? '<span class="badge badge-warning">One-off</span>' : '<span class="badge badge-secondary">Standard</span>'}</td>
                                     <td><span class="badge badge-info">${escapeHtml(o.status || '')}</span></td>
                                     <td>${formatDate(o.order_date)}</td>
                                     <td>${formatDate(o.expected_date)}</td>
@@ -183,10 +190,20 @@
         }
 
         async function receivePo(id) {
-            if (!confirm('Receive this PO and post stock in movements for each line item?')) return;
+            const modeInput = prompt('Receive mode: type "add" to add stock (default) or "adjust" to set exact stock quantity.', 'add');
+            if (modeInput === null) return;
+            const receiveMode = (modeInput || 'add').trim().toLowerCase();
+            if (!['add', 'adjust'].includes(receiveMode)) {
+                showAlert('Invalid receive mode. Use add or adjust.', 'error');
+                return;
+            }
+            const msg = receiveMode === 'adjust'
+                ? 'Receive this PO in ADJUST mode? This sets stock to exact quantities entered per line.'
+                : 'Receive this PO in ADD mode? This adds quantities onto current stock.';
+            if (!confirm(msg)) return;
             try {
-                await apiCall(`/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify({}) });
-                showAlert('Purchase order received and stock updated', 'success');
+                await apiCall(`/purchase-orders/${id}/receive`, { method: 'POST', body: JSON.stringify({ receive_mode: receiveMode }) });
+                showAlert(`Purchase order received (${receiveMode} mode)`, 'success');
                 await loadOrders();
             } catch (error) {
                 showAlert(error.message || 'Failed to receive purchase order', 'error');
@@ -205,8 +222,9 @@
                 quantity: parseFloat(i.quantity || 0),
                 unit_cost_gbp: parseFloat(i.unit_cost_gbp || 0)
             })).filter((i) => !Number.isNaN(i.stock_item_id) && i.quantity > 0);
-            if (!payloadItems.length) {
-                showAlert('Add at least one valid line item', 'error');
+            const isOneOffPurchase = document.getElementById('poOneOffPurchase').checked;
+            if (!payloadItems.length && !isOneOffPurchase) {
+                showAlert('Add at least one valid line item or mark this as one-off purchase', 'error');
                 return;
             }
             const payload = {
@@ -214,6 +232,7 @@
                 order_date: document.getElementById('poOrderDate').value,
                 expected_date: document.getElementById('poExpectedDate').value || null,
                 notes: document.getElementById('poNotes').value.trim() || null,
+                is_one_off_purchase: isOneOffPurchase,
                 items: payloadItems
             };
             try {

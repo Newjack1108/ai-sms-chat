@@ -294,6 +294,7 @@ function initializeSQLite() {
             expected_date TEXT,
             notes TEXT,
             subtotal_gbp REAL DEFAULT 0,
+            is_one_off_purchase INTEGER NOT NULL DEFAULT 0,
             created_by INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -317,6 +318,18 @@ function initializeSQLite() {
             FOREIGN KEY (stock_item_id) REFERENCES stock_items(id)
         )
     `);
+
+    // Migrate purchase_orders to add is_one_off_purchase
+    try {
+        const poColumns = db.prepare(`PRAGMA table_info(purchase_orders)`).all();
+        const hasOneOffFlag = poColumns.some(col => col.name === 'is_one_off_purchase');
+        if (!hasOneOffFlag) {
+            db.exec(`ALTER TABLE purchase_orders ADD COLUMN is_one_off_purchase INTEGER NOT NULL DEFAULT 0`);
+            console.log('✅ Added is_one_off_purchase column to purchase_orders table');
+        }
+    } catch (error) {
+        console.log('⚠️ Purchase orders migration check skipped:', error.message);
+    }
     
     // Product orders table
     db.exec(`
@@ -1464,6 +1477,7 @@ async function initializePostgreSQL() {
                 expected_date DATE,
                 notes TEXT,
                 subtotal_gbp DECIMAL(12,2) DEFAULT 0,
+                is_one_off_purchase BOOLEAN NOT NULL DEFAULT FALSE,
                 created_by INTEGER REFERENCES production_users(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1482,6 +1496,18 @@ async function initializePostgreSQL() {
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        `);
+
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'purchase_orders' AND column_name = 'is_one_off_purchase'
+                ) THEN
+                    ALTER TABLE purchase_orders ADD COLUMN is_one_off_purchase BOOLEAN NOT NULL DEFAULT FALSE;
+                END IF;
+            END $$;
         `);
         
         // Product orders
@@ -5538,7 +5564,8 @@ class ProductionDatabase {
 
     static async createPurchaseOrder(data) {
         const items = Array.isArray(data.items) ? data.items : [];
-        if (items.length === 0) {
+        const isOneOffPurchase = !!data.is_one_off_purchase;
+        if (items.length === 0 && !isOneOffPurchase) {
             throw new Error('At least one purchase order item is required');
         }
         const orderDate = data.order_date || new Date().toISOString().slice(0, 10);
@@ -5547,10 +5574,10 @@ class ProductionDatabase {
             try {
                 const poNumber = await this.getNextPurchaseOrderNumber(orderDate);
                 const poResult = await pool.query(
-                    `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, created_by, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, 0, $7, CURRENT_TIMESTAMP)
+                    `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, is_one_off_purchase, created_by, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, CURRENT_TIMESTAMP)
                      RETURNING id`,
-                    [poNumber, data.supplier_id, data.status || 'draft', orderDate, data.expected_date || null, data.notes || null, data.created_by || null]
+                    [poNumber, data.supplier_id, data.status || 'draft', orderDate, data.expected_date || null, data.notes || null, isOneOffPurchase, data.created_by || null]
                 );
                 const poId = poResult.rows[0].id;
                 let subtotal = 0;
@@ -5590,8 +5617,8 @@ class ProductionDatabase {
             const nextSeq = last ? (parseInt(String(last).split('-')[2], 10) + 1) : 1;
             const poNumber = `${prefix}${String(nextSeq).padStart(4, '0')}`;
             const poInfo = db.prepare(
-                `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, created_by, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP)`
+                `INSERT INTO purchase_orders (po_number, supplier_id, status, order_date, expected_date, notes, subtotal_gbp, is_one_off_purchase, created_by, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, CURRENT_TIMESTAMP)`
             ).run(
                 poNumber,
                 payload.supplier_id,
@@ -5599,6 +5626,7 @@ class ProductionDatabase {
                 payload.order_date,
                 payload.expected_date || null,
                 payload.notes || null,
+                payload.is_one_off_purchase ? 1 : 0,
                 payload.created_by || null
             );
             const poId = poInfo.lastInsertRowid;

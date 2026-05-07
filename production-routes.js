@@ -687,22 +687,21 @@ router.get('/purchase-orders/:id', requireProductionAuth, async (req, res) => {
 
 router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { supplier_id, order_date, expected_date, status, notes, items } = req.body;
+        const { supplier_id, order_date, expected_date, status, notes, items, is_one_off_purchase } = req.body;
         const supplierId = parseInt(supplier_id, 10);
+        const isOneOffPurchase = !!is_one_off_purchase;
         if (Number.isNaN(supplierId)) {
             return res.status(400).json({ success: false, error: 'Valid supplier_id is required' });
         }
-        if (!Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ success: false, error: 'At least one line item is required' });
-        }
-        const normalizedItems = items.map((item) => ({
+        const incomingItems = Array.isArray(items) ? items : [];
+        const normalizedItems = incomingItems.map((item) => ({
             stock_item_id: parseInt(item.stock_item_id, 10),
             quantity: parseFloat(item.quantity || 0),
             unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
             notes: item.notes || null
         })).filter((item) => !Number.isNaN(item.stock_item_id) && item.quantity > 0);
-        if (normalizedItems.length === 0) {
-            return res.status(400).json({ success: false, error: 'Line items must include stock_item_id and quantity > 0' });
+        if (normalizedItems.length === 0 && !isOneOffPurchase) {
+            return res.status(400).json({ success: false, error: 'At least one valid line item is required unless this is marked as a one-off purchase' });
         }
         const order = await ProductionDatabase.createPurchaseOrder({
             supplier_id: supplierId,
@@ -710,6 +709,7 @@ router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, asy
             expected_date: expected_date || null,
             status: status || 'draft',
             notes: notes || null,
+            is_one_off_purchase: isOneOffPurchase,
             created_by: req.session.production_user ? req.session.production_user.id : null,
             items: normalizedItems
         });
@@ -790,6 +790,13 @@ router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminO
         if (!order) {
             return res.status(404).json({ success: false, error: 'Purchase order not found' });
         }
+        const receiveMode = String((req.body && req.body.receive_mode) || 'add').trim().toLowerCase();
+        if (!['add', 'adjust'].includes(receiveMode)) {
+            return res.status(400).json({ success: false, error: 'receive_mode must be either add or adjust' });
+        }
+        if (!order.items || order.items.length === 0) {
+            return res.status(400).json({ success: false, error: 'Cannot receive this purchase order because it has no line items' });
+        }
         const quantitiesByItemId = req.body && typeof req.body === 'object' ? (req.body.received_quantities || {}) : {};
         const userId = req.session.production_user ? req.session.production_user.id : null;
         for (const item of order.items || []) {
@@ -798,7 +805,7 @@ router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminO
             if (!(qty > 0)) continue;
             await ProductionDatabase.recordStockMovement({
                 stock_item_id: item.stock_item_id,
-                movement_type: 'in',
+                movement_type: receiveMode === 'adjust' ? 'adjustment' : 'in',
                 quantity: qty,
                 reference: `PO ${order.po_number}`,
                 user_id: userId,
