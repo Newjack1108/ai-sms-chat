@@ -326,6 +326,29 @@
                     <label class="form-label">Notes</label>
                     <textarea id="installationNotes" class="form-input" rows="3"></textarea>
                 </div>
+
+                <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
+                    <h4 style="margin-bottom: 10px;">Pre-Fitting Checklist (6 questions)</h4>
+                    <div id="preFittingChecklistContainer"></div>
+                </div>
+
+                <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
+                    <h4 style="margin-bottom: 10px;">Completion Checklist (5 questions)</h4>
+                    <div id="completionChecklistContainer"></div>
+                </div>
+
+                <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
+                    <h4 style="margin-bottom: 10px;">Job Photos (Cloudinary)</h4>
+                    <small style="display: block; margin-bottom: 8px;">Upload up to 6 stage photos from this installation.</small>
+                    <div id="photoUploadContainer"></div>
+                </div>
+
+                <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
+                    <h4 style="margin-bottom: 10px;">Customer Sign-Off</h4>
+                    <small style="display: block; margin-bottom: 8px;">Generate and share a secure customer link for signature, consent, and emoji satisfaction.</small>
+                    <button type="button" id="generateSignoffLinkBtn" class="btn btn-secondary btn-sm">Generate Customer Sign-Off Link</button>
+                    <div id="signoffLinkDisplay" style="margin-top: 8px;"></div>
+                </div>
                 
                 <div class="form-group">
                     <label class="form-label">Assigned Users</label>
@@ -372,6 +395,31 @@
         let users = [];
         let editingInstallationId = null;
         let canManageInstallations = false;
+        const PRE_FITTING_QUESTIONS = [
+            { key: 'site_access_confirmed', label: 'Site access is confirmed' },
+            { key: 'area_clear_for_install', label: 'Install area is clear and ready' },
+            { key: 'materials_checked', label: 'All required materials are on-site' },
+            { key: 'safety_briefing_done', label: 'Safety briefing completed' },
+            { key: 'customer_present_or_contacted', label: 'Customer is present or contacted' },
+            { key: 'measurements_verified', label: 'Measurements verified before fitting' }
+        ];
+        const COMPLETION_QUESTIONS = [
+            { key: 'fit_finish_checked', label: 'Fit and finish checked' },
+            { key: 'site_left_clean', label: 'Site left clean and tidy' },
+            { key: 'customer_walkthrough_complete', label: 'Customer walkthrough completed' },
+            { key: 'waste_removed', label: 'Waste removed from site' },
+            { key: 'snagging_resolved', label: 'Snagging items resolved' }
+        ];
+        const PHOTO_STAGES = [
+            { key: 'arrival', label: 'Arrival' },
+            { key: 'before', label: 'Before work' },
+            { key: 'in_progress_1', label: 'In progress 1' },
+            { key: 'in_progress_2', label: 'In progress 2' },
+            { key: 'after', label: 'After fitting' },
+            { key: 'customer_handover', label: 'Customer handover' }
+        ];
+        let checklistData = { pre_fitting: {}, completion: {} };
+        let installationPhotos = [];
         
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -426,6 +474,8 @@
             if (woSel) {
                 woSel.addEventListener('change', () => refreshWorksOrderTravelHint(null));
             }
+            const signoffBtn = document.getElementById('generateSignoffLinkBtn');
+            if (signoffBtn) signoffBtn.addEventListener('click', generateSignoffLink);
         });
         
         function formatWorksOrderOptionLabel(order) {
@@ -839,6 +889,113 @@
             }
             refreshWorksOrderTravelHint(order.travel_time_hours_round_trip);
         }
+
+        function renderYesNoChecklist(containerId, questions, type) {
+            const container = document.getElementById(containerId);
+            const answers = checklistData[type] || {};
+            container.innerHTML = questions.map((q) => `
+                <div style="display: grid; grid-template-columns: 1fr 140px; gap: 10px; margin-bottom: 8px; align-items: center;">
+                    <label>${q.label}</label>
+                    <select class="form-select" data-checklist-type="${type}" data-question-key="${q.key}">
+                        <option value="">Select...</option>
+                        <option value="yes" ${answers[q.key] === true ? 'selected' : ''}>Yes</option>
+                        <option value="no" ${answers[q.key] === false ? 'selected' : ''}>No</option>
+                    </select>
+                </div>
+            `).join('');
+        }
+
+        function bindChecklistInputs() {
+            document.querySelectorAll('select[data-checklist-type]').forEach((input) => {
+                input.addEventListener('change', (event) => {
+                    const type = event.target.dataset.checklistType;
+                    const key = event.target.dataset.questionKey;
+                    const value = event.target.value;
+                    if (!checklistData[type]) checklistData[type] = {};
+                    if (!value) delete checklistData[type][key];
+                    else checklistData[type][key] = value === 'yes';
+                });
+            });
+        }
+
+        function renderPhotoUploadRows() {
+            const container = document.getElementById('photoUploadContainer');
+            container.innerHTML = PHOTO_STAGES.map((stage) => {
+                const existing = installationPhotos.find(p => p.stage_label === stage.key);
+                return `
+                    <div style="display: grid; grid-template-columns: 180px 1fr auto; gap: 10px; margin-bottom: 8px; align-items: center;">
+                        <label>${stage.label}</label>
+                        <input type="file" accept="image/*" id="photoInput_${stage.key}" class="form-input">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="uploadInstallationPhoto('${stage.key}')">Upload</button>
+                        <div style="grid-column: 2 / span 2; font-size: 12px; color: ${existing ? '#198754' : '#6c757d'};">
+                            ${existing ? `Uploaded: <a href="${existing.image_url}" target="_blank">view photo</a>` : 'Not uploaded yet'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function fileToDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function uploadInstallationPhoto(stageKey) {
+            if (!editingInstallationId) return showAlert('Save the installation first, then upload photos.', 'error');
+            const input = document.getElementById(`photoInput_${stageKey}`);
+            const file = input?.files?.[0];
+            if (!file) return showAlert('Please choose an image to upload.', 'error');
+            try {
+                const imageDataUrl = await fileToDataUrl(file);
+                const result = await apiCall(`/installations/${editingInstallationId}/photos`, {
+                    method: 'POST',
+                    body: JSON.stringify({ stage_label: stageKey, image_data_url: imageDataUrl })
+                });
+                installationPhotos = result.photos || [];
+                renderPhotoUploadRows();
+                showAlert('Photo uploaded successfully');
+            } catch (error) {
+                showAlert('Photo upload failed: ' + error.message, 'error');
+            }
+        }
+
+        async function generateSignoffLink() {
+            if (!editingInstallationId) return showAlert('Save the installation first, then generate a sign-off link.', 'error');
+            try {
+                const result = await apiCall(`/installations/${editingInstallationId}/signoff-link`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                document.getElementById('signoffLinkDisplay').innerHTML = `
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 10px;">
+                        <div style="font-size: 12px; color: #6c757d;">Share this link with customer:</div>
+                        <a href="${result.signoff_url}" target="_blank">${result.signoff_url}</a>
+                    </div>
+                `;
+            } catch (error) {
+                showAlert('Could not generate sign-off link: ' + error.message, 'error');
+            }
+        }
+
+        async function loadInstallationChecklistData(id) {
+            if (!id) {
+                checklistData = { pre_fitting: {}, completion: {} };
+                installationPhotos = [];
+                document.getElementById('signoffLinkDisplay').innerHTML = '';
+            } else {
+                const result = await apiCall(`/installations/${id}/checklists`);
+                checklistData = result.checklists || { pre_fitting: {}, completion: {} };
+                installationPhotos = result.photos || [];
+            }
+            renderYesNoChecklist('preFittingChecklistContainer', PRE_FITTING_QUESTIONS, 'pre_fitting');
+            renderYesNoChecklist('completionChecklistContainer', COMPLETION_QUESTIONS, 'completion');
+            bindChecklistInputs();
+            renderPhotoUploadRows();
+        }
         
         function showAddInstallationModal() {
             if (!canManageInstallations) return;
@@ -857,6 +1014,7 @@
             document.getElementById('perDaySettings').style.display = 'none';
             document.getElementById('perDayTable').innerHTML = '';
             refreshWorksOrderTravelHint(null);
+            loadInstallationChecklistData(null);
             showModal('installationModal');
         }
         
@@ -913,6 +1071,7 @@
                 
                 checkAvailability();
                 refreshWorksOrderTravelHint(inst.travel_time_hours_round_trip);
+                await loadInstallationChecklistData(inst.id);
                 showModal('installationModal');
             } catch (error) {
                 showAlert('Error loading installation: ' + error.message, 'error');
@@ -1226,8 +1385,18 @@
                 status: document.getElementById('installationStatus').value,
                 notes: document.getElementById('installationNotes').value || null,
                 assigned_users: assignedUsers,
-                days: document.getElementById('enablePerDaySettings').checked ? dayOverrides : []
+                days: document.getElementById('enablePerDaySettings').checked ? dayOverrides : [],
+                pre_fitting: checklistData.pre_fitting || {},
+                completion: checklistData.completion || {}
             };
+
+            if (formData.status === 'completed') {
+                const completionAnswered = COMPLETION_QUESTIONS.every(q => Object.prototype.hasOwnProperty.call(formData.completion, q.key));
+                if (!completionAnswered) {
+                    showAlert('Please answer all 5 completion checklist questions before marking completed.', 'error');
+                    return;
+                }
+            }
             
             try {
                 if (editingInstallationId) {
@@ -1297,6 +1466,11 @@
                                 inst.assigned_users.map(u => `<li>${u.username}${u.role ? ` (${u.role})` : ''}</li>`).join('') : 
                                 '<li>No users assigned</li>'}
                         </ul>
+                        <h5>Completion Sign-Off:</h5>
+                        <p>${inst.signoff?.signature_data_url ? 'Customer signature received' : 'Awaiting customer signature'}</p>
+                        <p>${inst.signoff?.satisfaction_emoji ? `Satisfaction: ${inst.signoff.satisfaction_emoji}` : 'Satisfaction not submitted yet'}</p>
+                        <h5>Uploaded Photos:</h5>
+                        <p>${Array.isArray(inst.photos) ? inst.photos.length : 0} uploaded</p>
                         ${loadSheetSection}
                         <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px;">
                             <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>

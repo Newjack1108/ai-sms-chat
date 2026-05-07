@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Installation Completion Sign-Off</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; }
+        .wrap { max-width: 760px; margin: 24px auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 1px 10px rgba(0,0,0,0.08); }
+        .row { margin-bottom: 14px; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; }
+        input, select, button { font: inherit; }
+        input[type="text"], input[type="tel"] { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; }
+        .emojiRow { display: flex; gap: 10px; flex-wrap: wrap; }
+        .emojiItem { border: 1px solid #d0d7de; border-radius: 6px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+        .emojiItem.selected { border-color: #0d6efd; background: #eef5ff; }
+        #signatureCanvas { width: 100%; height: 220px; border: 1px dashed #6c757d; border-radius: 4px; touch-action: none; }
+        .actions { display: flex; gap: 10px; margin-top: 12px; }
+        .btn { border: 0; border-radius: 4px; padding: 10px 14px; cursor: pointer; }
+        .btn-primary { background: #0d6efd; color: #fff; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+        .muted { color: #6c757d; font-size: 13px; }
+        .error { color: #dc3545; margin-top: 8px; }
+        .success { color: #198754; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h2>Installation Completion Sign-Off</h2>
+        <p class="muted" id="jobMeta">Loading installation details...</p>
+        <div class="row">
+            <label for="signerName">Your name</label>
+            <input id="signerName" type="text" placeholder="Customer name">
+        </div>
+        <div class="row">
+            <label for="signerPhone">Your phone (optional)</label>
+            <input id="signerPhone" type="tel" placeholder="Phone number">
+        </div>
+        <div class="row">
+            <label>May we use installation photos on social media?</label>
+            <label><input type="radio" name="socialConsent" value="yes"> Yes</label>
+            <label><input type="radio" name="socialConsent" value="no"> No</label>
+        </div>
+        <div class="row">
+            <label>How happy are you with the install service?</label>
+            <div class="emojiRow" id="emojiRow">
+                <div class="emojiItem" data-value="very_happy">😀 Very happy</div>
+                <div class="emojiItem" data-value="happy">🙂 Happy</div>
+                <div class="emojiItem" data-value="neutral">😐 Neutral</div>
+                <div class="emojiItem" data-value="unhappy">🙁 Unhappy</div>
+                <div class="emojiItem" data-value="very_unhappy">😞 Very unhappy</div>
+            </div>
+        </div>
+        <div class="row">
+            <label>Customer completion signature</label>
+            <canvas id="signatureCanvas"></canvas>
+            <div class="actions">
+                <button type="button" class="btn btn-secondary" id="clearSigBtn">Clear signature</button>
+            </div>
+        </div>
+        <div class="actions">
+            <button type="button" class="btn btn-primary" id="submitBtn">Submit Sign-Off</button>
+        </div>
+        <div id="statusMessage"></div>
+    </div>
+    <script>
+        const API_BASE = '/production/api';
+        const token = new URLSearchParams(window.location.search).get('token');
+        const canvas = document.getElementById('signatureCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        let selectedEmoji = null;
+
+        function setStatus(message, type) {
+            const el = document.getElementById('statusMessage');
+            el.className = type || '';
+            el.textContent = message || '';
+        }
+
+        function resizeCanvas() {
+            const ratio = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.floor(rect.width * ratio);
+            canvas.height = Math.floor(rect.height * ratio);
+            ctx.scale(ratio, ratio);
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = '#111';
+        }
+
+        function pointFromEvent(ev) {
+            const rect = canvas.getBoundingClientRect();
+            const touch = ev.touches && ev.touches[0];
+            const clientX = touch ? touch.clientX : ev.clientX;
+            const clientY = touch ? touch.clientY : ev.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function hasSignature() {
+            const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let i = 3; i < pixels.length; i += 4) {
+                if (pixels[i] !== 0) return true;
+            }
+            return false;
+        }
+
+        async function fetchJson(path, options = {}) {
+            const response = await fetch(`${API_BASE}${path}`, {
+                ...options,
+                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Request failed');
+            return data;
+        }
+
+        async function loadDetails() {
+            if (!token) {
+                setStatus('Missing sign-off token in URL.', 'error');
+                return;
+            }
+            try {
+                const data = await fetchJson(`/installations/public/signoff/${encodeURIComponent(token)}`);
+                const inst = data.installation;
+                document.getElementById('jobMeta').textContent =
+                    `Installation #${inst.id} · ${inst.location || 'Location not set'} · ${inst.start_date || ''}`;
+            } catch (error) {
+                setStatus(error.message, 'error');
+            }
+        }
+
+        function bindEvents() {
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+            const start = (ev) => {
+                isDrawing = true;
+                const p = pointFromEvent(ev);
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ev.preventDefault();
+            };
+            const move = (ev) => {
+                if (!isDrawing) return;
+                const p = pointFromEvent(ev);
+                ctx.lineTo(p.x, p.y);
+                ctx.stroke();
+                ev.preventDefault();
+            };
+            const end = (ev) => {
+                isDrawing = false;
+                ev.preventDefault();
+            };
+            canvas.addEventListener('mousedown', start);
+            canvas.addEventListener('mousemove', move);
+            canvas.addEventListener('mouseup', end);
+            canvas.addEventListener('mouseleave', end);
+            canvas.addEventListener('touchstart', start, { passive: false });
+            canvas.addEventListener('touchmove', move, { passive: false });
+            canvas.addEventListener('touchend', end, { passive: false });
+            document.getElementById('clearSigBtn').addEventListener('click', () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+            document.querySelectorAll('.emojiItem').forEach(item => {
+                item.addEventListener('click', () => {
+                    document.querySelectorAll('.emojiItem').forEach(el => el.classList.remove('selected'));
+                    item.classList.add('selected');
+                    selectedEmoji = item.dataset.value;
+                });
+            });
+            document.getElementById('submitBtn').addEventListener('click', async () => {
+                try {
+                    const signerName = document.getElementById('signerName').value.trim();
+                    const signerPhone = document.getElementById('signerPhone').value.trim();
+                    const consentInput = document.querySelector('input[name="socialConsent"]:checked');
+                    if (!consentInput) throw new Error('Please answer social media consent.');
+                    if (!selectedEmoji) throw new Error('Please select an emoji satisfaction option.');
+                    if (!hasSignature()) throw new Error('Please provide a signature before submitting.');
+                    const payload = {
+                        signer_name: signerName || null,
+                        signer_phone: signerPhone || null,
+                        social_media_consent: consentInput.value === 'yes',
+                        satisfaction_emoji: selectedEmoji,
+                        signature_data_url: canvas.toDataURL('image/png')
+                    };
+                    await fetchJson(`/installations/public/signoff/${encodeURIComponent(token)}`, {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                    });
+                    setStatus('Thank you. Your sign-off has been submitted successfully.', 'success');
+                    document.getElementById('submitBtn').disabled = true;
+                } catch (error) {
+                    setStatus(error.message, 'error');
+                }
+            });
+        }
+
+        bindEvents();
+        loadDetails();
+    </script>
+</body>
+</html>

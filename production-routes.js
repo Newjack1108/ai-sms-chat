@@ -4,6 +4,8 @@ const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
 const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManager, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
+const crypto = require('crypto');
+const { v2: cloudinary } = require('cloudinary');
 const {
     londonYmd,
     londonMondayYmd,
@@ -46,6 +48,29 @@ function isPendingAmendmentUniqueViolation(error) {
 /** Canonical product types used in Production and LeadLock push. */
 const CANONICAL_PRODUCT_TYPES = new Set(['stables', 'sheds', 'cabins', 'other']);
 const LEADLOCK_CATEGORY_VALUES = new Set(['stables', 'sheds', 'cabins']);
+const PRE_FITTING_QUESTION_KEYS = [
+    'site_access_confirmed',
+    'area_clear_for_install',
+    'materials_checked',
+    'safety_briefing_done',
+    'customer_present_or_contacted',
+    'measurements_verified'
+];
+const COMPLETION_QUESTION_KEYS = [
+    'fit_finish_checked',
+    'site_left_clean',
+    'customer_walkthrough_complete',
+    'waste_removed',
+    'snagging_resolved'
+];
+const ALLOWED_SATISFACTION_EMOJIS = ['very_happy', 'happy', 'neutral', 'unhappy', 'very_unhappy'];
+const INSTALLATION_PHOTO_STAGE_KEYS = ['arrival', 'before', 'in_progress_1', 'in_progress_2', 'after', 'customer_handover'];
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 /**
  * Normalise DB / driver values so the optional-extra checkbox always drives sales correctly.
@@ -2312,6 +2337,48 @@ router.post('/orders/:id/installations', requireProductionAuth, requireManager, 
 
 // ============ INSTALLATION ROUTES ============
 
+function normalizeChecklistPayload(payload, allowedKeys) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const normalized = {};
+    for (const key of allowedKeys) {
+        if (source[key] === undefined) continue;
+        normalized[key] = source[key] === true || source[key] === 1 || source[key] === '1' || source[key] === 'true';
+    }
+    return normalized;
+}
+
+function checklistComplete(answers, requiredKeys) {
+    return requiredKeys.every(key => Object.prototype.hasOwnProperty.call(answers || {}, key));
+}
+
+function slugifyFolderName(value, fallback = 'customer') {
+    const raw = (value || '').toString().trim().toLowerCase();
+    const slug = raw
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60);
+    return slug || fallback;
+}
+
+function getCompletionGateResult(installation) {
+    const completionAnswers = installation?.checklists?.completion || {};
+    const signoff = installation?.signoff;
+    const blockers = [];
+    if (!checklistComplete(completionAnswers, COMPLETION_QUESTION_KEYS)) {
+        blockers.push('All 5 completion checklist questions must be answered.');
+    }
+    if (!signoff || !signoff.signature_data_url) {
+        blockers.push('Customer signature is required.');
+    }
+    if (!signoff || signoff.social_media_consent === null || signoff.social_media_consent === undefined) {
+        blockers.push('Social media consent answer is required.');
+    }
+    if (!signoff || !ALLOWED_SATISFACTION_EMOJIS.includes(signoff.satisfaction_emoji)) {
+        blockers.push('Customer emoji satisfaction rating is required.');
+    }
+    return { ok: blockers.length === 0, blockers };
+}
+
 router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
@@ -2360,6 +2427,215 @@ router.get('/installations/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.get('/installations/:id/checklists', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        res.json({
+            success: true,
+            checklists: installation.checklists || { pre_fitting: {}, completion: {} },
+            signoff: installation.signoff || null,
+            photos: installation.photos || []
+        });
+    } catch (error) {
+        console.error('Get installation checklists error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get installation checklist data' });
+    }
+});
+
+router.put('/installations/:id/checklists', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        const preFitting = normalizeChecklistPayload(req.body.pre_fitting, PRE_FITTING_QUESTION_KEYS);
+        const completion = normalizeChecklistPayload(req.body.completion, COMPLETION_QUESTION_KEYS);
+        if (Object.keys(preFitting).length > 0) {
+            await ProductionDatabase.upsertInstallationChecklist(installationId, 'pre_fitting', preFitting, req.session.production_user?.id || null);
+        }
+        if (Object.keys(completion).length > 0) {
+            await ProductionDatabase.upsertInstallationChecklist(installationId, 'completion', completion, req.session.production_user?.id || null);
+        }
+        const updated = await ProductionDatabase.getInstallationById(installationId);
+        res.json({
+            success: true,
+            checklists: updated.checklists || { pre_fitting: {}, completion: {} },
+            signoff: updated.signoff || null,
+            photos: updated.photos || []
+        });
+    } catch (error) {
+        console.error('Update installation checklists error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update checklist responses' });
+    }
+});
+
+router.post('/installations/:id/signoff-link', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        const token = crypto.randomBytes(24).toString('hex');
+        const expiresAt = req.body.expires_at || new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+        await ProductionDatabase.createInstallationSignoffToken(
+            installationId,
+            token,
+            expiresAt,
+            req.session.production_user?.id || null
+        );
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const signoffUrl = `${baseUrl}/production/installation-completion-signoff.html?token=${encodeURIComponent(token)}`;
+        res.json({ success: true, token, expires_at: expiresAt, signoff_url: signoffUrl });
+    } catch (error) {
+        console.error('Create installation signoff link error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create customer signoff link' });
+    }
+});
+
+router.get('/installations/:id/photos', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        const photos = await ProductionDatabase.getInstallationPhotos(installationId);
+        res.json({ success: true, photos });
+    } catch (error) {
+        console.error('Get installation photos error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get installation photos' });
+    }
+});
+
+router.post('/installations/:id/photos', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const installation = await ProductionDatabase.getInstallationById(installationId);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        const { stage_label, image_data_url } = req.body || {};
+        if (!INSTALLATION_PHOTO_STAGE_KEYS.includes(stage_label)) {
+            return res.status(400).json({ success: false, error: 'Invalid photo stage label' });
+        }
+        if (!image_data_url || typeof image_data_url !== 'string') {
+            return res.status(400).json({ success: false, error: 'Photo image_data_url is required' });
+        }
+        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+            return res.status(503).json({ success: false, error: 'Cloudinary is not configured on this server' });
+        }
+
+        let customerName = null;
+        if (installation.works_order_id) {
+            const order = await ProductionDatabase.getProductOrderById(installation.works_order_id);
+            customerName = order?.customer_name || null;
+        }
+        const customerSlug = slugifyFolderName(customerName, 'unknown_customer');
+        const uploadResult = await cloudinary.uploader.upload(image_data_url, {
+            folder: `installation_photos/${customerSlug}_${installationId}`,
+            public_id: `installation_${installationId}_${stage_label}_${Date.now()}`
+        });
+
+        const photos = await ProductionDatabase.addInstallationPhoto(installationId, {
+            stage_label,
+            image_url: uploadResult.secure_url,
+            cloudinary_public_id: uploadResult.public_id,
+            uploaded_by: req.session.production_user?.id || null
+        });
+
+        res.json({ success: true, photos });
+    } catch (error) {
+        console.error('Upload installation photo error:', error);
+        res.status(500).json({ success: false, error: 'Failed to upload installation photo' });
+    }
+});
+
+router.get('/installations/public/signoff/:token', async (req, res) => {
+    try {
+        const token = req.params.token;
+        const tokenRow = await ProductionDatabase.getInstallationSignoffByToken(token);
+        if (!tokenRow) {
+            return res.status(404).json({ success: false, error: 'Invalid signoff link' });
+        }
+        if (tokenRow.used_at) {
+            return res.status(400).json({ success: false, error: 'This signoff link has already been used' });
+        }
+        if (tokenRow.expires_at && new Date(tokenRow.expires_at).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, error: 'This signoff link has expired' });
+        }
+        const installation = await ProductionDatabase.getInstallationById(tokenRow.installation_id);
+        if (!installation) {
+            return res.status(404).json({ success: false, error: 'Installation not found' });
+        }
+        res.json({
+            success: true,
+            installation: {
+                id: installation.id,
+                works_order_id: installation.works_order_id,
+                start_date: installation.start_date,
+                end_date: installation.end_date,
+                location: installation.location,
+                address: installation.address
+            }
+        });
+    } catch (error) {
+        console.error('Get public signoff data error:', error);
+        res.status(500).json({ success: false, error: 'Failed to load signoff details' });
+    }
+});
+
+router.post('/installations/public/signoff/:token', async (req, res) => {
+    try {
+        const token = req.params.token;
+        const tokenRow = await ProductionDatabase.getInstallationSignoffByToken(token);
+        if (!tokenRow) {
+            return res.status(404).json({ success: false, error: 'Invalid signoff link' });
+        }
+        if (tokenRow.used_at) {
+            return res.status(400).json({ success: false, error: 'This signoff link has already been used' });
+        }
+        if (tokenRow.expires_at && new Date(tokenRow.expires_at).getTime() < Date.now()) {
+            return res.status(400).json({ success: false, error: 'This signoff link has expired' });
+        }
+        const {
+            signer_name,
+            signer_phone,
+            signature_data_url,
+            social_media_consent,
+            satisfaction_emoji
+        } = req.body || {};
+        if (!signature_data_url) {
+            return res.status(400).json({ success: false, error: 'Customer signature is required' });
+        }
+        if (social_media_consent === undefined || social_media_consent === null) {
+            return res.status(400).json({ success: false, error: 'Social media consent answer is required' });
+        }
+        if (!ALLOWED_SATISFACTION_EMOJIS.includes(satisfaction_emoji)) {
+            return res.status(400).json({ success: false, error: 'Please select how happy you are with the install service' });
+        }
+        await ProductionDatabase.saveInstallationSignoff(tokenRow.installation_id, {
+            signer_name,
+            signer_phone,
+            signature_data_url,
+            social_media_consent,
+            satisfaction_emoji
+        });
+        await ProductionDatabase.markInstallationSignoffTokenUsed(token);
+        const installation = await ProductionDatabase.getInstallationById(tokenRow.installation_id);
+        const gate = getCompletionGateResult(installation);
+        res.json({ success: true, signoff_complete: true, completion_requirements_met: gate.ok, blockers: gate.blockers });
+    } catch (error) {
+        console.error('Submit public signoff error:', error);
+        res.status(500).json({ success: false, error: 'Failed to submit signoff' });
+    }
+});
+
 router.post('/installations', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days } = req.body;
@@ -2404,7 +2680,7 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
 router.put('/installations/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id);
-        const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days } = req.body;
+        const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days, pre_fitting, completion } = req.body;
         
         const updateData = {};
         if (works_order_id !== undefined) updateData.works_order_id = works_order_id;
@@ -2430,6 +2706,27 @@ router.put('/installations/:id', requireProductionAuth, requireManager, async (r
         // Validate date range if both dates are provided
         if (updateData.start_date && updateData.end_date && updateData.end_date < updateData.start_date) {
             return res.status(400).json({ success: false, error: 'End date must be greater than or equal to start date' });
+        }
+
+        const preFittingPayload = normalizeChecklistPayload(pre_fitting, PRE_FITTING_QUESTION_KEYS);
+        const completionPayload = normalizeChecklistPayload(completion, COMPLETION_QUESTION_KEYS);
+        if (Object.keys(preFittingPayload).length > 0) {
+            await ProductionDatabase.upsertInstallationChecklist(installationId, 'pre_fitting', preFittingPayload, req.session.production_user?.id || null);
+        }
+        if (Object.keys(completionPayload).length > 0) {
+            await ProductionDatabase.upsertInstallationChecklist(installationId, 'completion', completionPayload, req.session.production_user?.id || null);
+        }
+
+        if (updateData.status === 'completed') {
+            const currentInstallation = await ProductionDatabase.getInstallationById(installationId);
+            const gate = getCompletionGateResult(currentInstallation);
+            if (!gate.ok) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Cannot mark installation as completed yet: ${gate.blockers.join(' ')}`,
+                    blockers: gate.blockers
+                });
+            }
         }
         
         const installation = await ProductionDatabase.updateInstallation(installationId, updateData);

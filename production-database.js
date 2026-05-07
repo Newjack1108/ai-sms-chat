@@ -1247,6 +1247,70 @@ function initializeSQLite() {
             UNIQUE(installation_id, day_date)
         )
     `);
+
+    // Installation checklist responses
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_checklist_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            checklist_type TEXT NOT NULL CHECK(checklist_type IN ('pre_fitting', 'completion')),
+            question_key TEXT NOT NULL,
+            answer INTEGER NOT NULL CHECK(answer IN (0, 1)),
+            updated_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            FOREIGN KEY (updated_by) REFERENCES production_users(id),
+            UNIQUE(installation_id, checklist_type, question_key)
+        )
+    `);
+
+    // Installation customer sign-off + consent
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_signoffs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL UNIQUE,
+            signer_name TEXT,
+            signer_phone TEXT,
+            signature_data_url TEXT,
+            social_media_consent INTEGER CHECK(social_media_consent IN (0, 1)),
+            satisfaction_emoji TEXT,
+            signed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE
+        )
+    `);
+
+    // Installation sign-off tokens for customer links
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_signoff_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            expires_at TEXT,
+            used_at TEXT,
+            created_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES production_users(id)
+        )
+    `);
+
+    // Installation photos (Cloudinary metadata)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            stage_label TEXT NOT NULL,
+            image_url TEXT NOT NULL,
+            cloudinary_public_id TEXT,
+            uploaded_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            FOREIGN KEY (uploaded_by) REFERENCES production_users(id)
+        )
+    `);
     
     // Migrate installations table to support multi-day
     try {
@@ -1297,6 +1361,9 @@ function initializeSQLite() {
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id);
         CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date);
+        CREATE INDEX IF NOT EXISTS idx_installation_checklist_installation ON installation_checklist_responses(installation_id, checklist_type);
+        CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token);
+        CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id);
     `);
     
     ensureSQLitePendingAmendmentUniqueness();
@@ -2551,6 +2618,59 @@ async function initializePostgreSQL() {
                 UNIQUE(installation_id, day_date)
             )
         `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_checklist_responses (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                checklist_type VARCHAR(32) NOT NULL CHECK(checklist_type IN ('pre_fitting', 'completion')),
+                question_key VARCHAR(100) NOT NULL,
+                answer BOOLEAN NOT NULL,
+                updated_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(installation_id, checklist_type, question_key)
+            )
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_signoffs (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL UNIQUE REFERENCES installations(id) ON DELETE CASCADE,
+                signer_name VARCHAR(255),
+                signer_phone VARCHAR(255),
+                signature_data_url TEXT,
+                social_media_consent BOOLEAN,
+                satisfaction_emoji VARCHAR(32),
+                signed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_signoff_tokens (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                token VARCHAR(128) NOT NULL UNIQUE,
+                expires_at TIMESTAMP,
+                used_at TIMESTAMP,
+                created_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_photos (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                stage_label VARCHAR(100) NOT NULL,
+                image_url TEXT NOT NULL,
+                cloudinary_public_id VARCHAR(255),
+                uploaded_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         
         // Migrate installations table to support multi-day
         try {
@@ -2610,6 +2730,9 @@ async function initializePostgreSQL() {
         // Create indexes for installation_days
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_installation ON installation_days(installation_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_days_date ON installation_days(day_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_checklist_installation ON installation_checklist_responses(installation_id, checklist_type)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id)`);
         
         await ensurePostgresPendingAmendmentUniqueness();
         
@@ -6916,6 +7039,20 @@ class ProductionDatabase {
     }
     
     // ============ INSTALLATION OPERATIONS ============
+
+    static toBooleanValue(value) {
+        if (value === true || value === 1 || value === '1') return true;
+        if (typeof value === 'string' && value.toLowerCase() === 'true') return true;
+        return false;
+    }
+
+    static normalizeChecklistResponses(rows = []) {
+        const result = {};
+        for (const row of rows) {
+            result[row.question_key] = this.toBooleanValue(row.answer);
+        }
+        return result;
+    }
     
     static async createInstallation(data) {
         // Support both old (installation_date) and new (start_date/end_date) formats for backward compatibility
@@ -7138,7 +7275,212 @@ class ProductionDatabase {
         } catch (err) {
             installation.installation_days = [];
         }
+        try {
+            installation.checklists = await this.getInstallationChecklists(id);
+        } catch (err) {
+            installation.checklists = { pre_fitting: {}, completion: {} };
+        }
+        try {
+            installation.signoff = await this.getInstallationSignoff(id);
+        } catch (err) {
+            installation.signoff = null;
+        }
+        try {
+            installation.photos = await this.getInstallationPhotos(id);
+        } catch (err) {
+            installation.photos = [];
+        }
         return installation;
+    }
+
+    static async getInstallationChecklists(installationId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT checklist_type, question_key, answer
+                 FROM installation_checklist_responses
+                 WHERE installation_id = $1`,
+                [installationId]
+            );
+            const preRows = result.rows.filter(r => r.checklist_type === 'pre_fitting');
+            const completionRows = result.rows.filter(r => r.checklist_type === 'completion');
+            return {
+                pre_fitting: this.normalizeChecklistResponses(preRows),
+                completion: this.normalizeChecklistResponses(completionRows)
+            };
+        }
+        const rows = db.prepare(
+            `SELECT checklist_type, question_key, answer
+             FROM installation_checklist_responses
+             WHERE installation_id = ?`
+        ).all(installationId);
+        const preRows = rows.filter(r => r.checklist_type === 'pre_fitting');
+        const completionRows = rows.filter(r => r.checklist_type === 'completion');
+        return {
+            pre_fitting: this.normalizeChecklistResponses(preRows),
+            completion: this.normalizeChecklistResponses(completionRows)
+        };
+    }
+
+    static async upsertInstallationChecklist(installationId, checklistType, responses, userId = null) {
+        const entries = Object.entries(responses || {});
+        for (const [questionKey, answer] of entries) {
+            const boolAnswer = this.toBooleanValue(answer);
+            if (isPostgreSQL) {
+                await pool.query(
+                    `INSERT INTO installation_checklist_responses
+                     (installation_id, checklist_type, question_key, answer, updated_by)
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT (installation_id, checklist_type, question_key)
+                     DO UPDATE SET answer = EXCLUDED.answer, updated_by = EXCLUDED.updated_by, updated_at = CURRENT_TIMESTAMP`,
+                    [installationId, checklistType, questionKey, boolAnswer, userId]
+                );
+            } else {
+                db.prepare(
+                    `INSERT INTO installation_checklist_responses
+                     (installation_id, checklist_type, question_key, answer, updated_by, updated_at)
+                     VALUES (?, ?, ?, ?, ?, datetime('now'))
+                     ON CONFLICT(installation_id, checklist_type, question_key)
+                     DO UPDATE SET answer = excluded.answer, updated_by = excluded.updated_by, updated_at = datetime('now')`
+                ).run(installationId, checklistType, questionKey, boolAnswer ? 1 : 0, userId);
+            }
+        }
+        return this.getInstallationChecklists(installationId);
+    }
+
+    static async createInstallationSignoffToken(installationId, token, expiresAt, createdBy = null) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO installation_signoff_tokens (installation_id, token, expires_at, created_by)
+                 VALUES ($1, $2, $3, $4)`,
+                [installationId, token, expiresAt || null, createdBy]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO installation_signoff_tokens (installation_id, token, expires_at, created_by)
+                 VALUES (?, ?, ?, ?)`
+            ).run(installationId, token, expiresAt || null, createdBy);
+        }
+        return { token, installation_id: installationId, expires_at: expiresAt || null };
+    }
+
+    static async getInstallationSignoffByToken(token) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM installation_signoff_tokens WHERE token = $1`,
+                [token]
+            );
+            return result.rows[0] || null;
+        }
+        return db.prepare(`SELECT * FROM installation_signoff_tokens WHERE token = ?`).get(token) || null;
+    }
+
+    static async markInstallationSignoffTokenUsed(token) {
+        if (isPostgreSQL) {
+            await pool.query(`UPDATE installation_signoff_tokens SET used_at = CURRENT_TIMESTAMP WHERE token = $1`, [token]);
+        } else {
+            db.prepare(`UPDATE installation_signoff_tokens SET used_at = datetime('now') WHERE token = ?`).run(token);
+        }
+    }
+
+    static async saveInstallationSignoff(installationId, data) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO installation_signoffs
+                 (installation_id, signer_name, signer_phone, signature_data_url, social_media_consent, satisfaction_emoji, signed_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+                 ON CONFLICT (installation_id)
+                 DO UPDATE SET
+                    signer_name = EXCLUDED.signer_name,
+                    signer_phone = EXCLUDED.signer_phone,
+                    signature_data_url = EXCLUDED.signature_data_url,
+                    social_media_consent = EXCLUDED.social_media_consent,
+                    satisfaction_emoji = EXCLUDED.satisfaction_emoji,
+                    signed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP`,
+                [
+                    installationId,
+                    data.signer_name || null,
+                    data.signer_phone || null,
+                    data.signature_data_url,
+                    this.toBooleanValue(data.social_media_consent),
+                    data.satisfaction_emoji
+                ]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO installation_signoffs
+                 (installation_id, signer_name, signer_phone, signature_data_url, social_media_consent, satisfaction_emoji, signed_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                 ON CONFLICT(installation_id)
+                 DO UPDATE SET
+                    signer_name = excluded.signer_name,
+                    signer_phone = excluded.signer_phone,
+                    signature_data_url = excluded.signature_data_url,
+                    social_media_consent = excluded.social_media_consent,
+                    satisfaction_emoji = excluded.satisfaction_emoji,
+                    signed_at = datetime('now'),
+                    updated_at = datetime('now')`
+            ).run(
+                installationId,
+                data.signer_name || null,
+                data.signer_phone || null,
+                data.signature_data_url,
+                this.toBooleanValue(data.social_media_consent) ? 1 : 0,
+                data.satisfaction_emoji
+            );
+        }
+        return this.getInstallationSignoff(installationId);
+    }
+
+    static async getInstallationSignoff(installationId) {
+        let row;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM installation_signoffs WHERE installation_id = $1`,
+                [installationId]
+            );
+            row = result.rows[0] || null;
+        } else {
+            row = db.prepare(`SELECT * FROM installation_signoffs WHERE installation_id = ?`).get(installationId) || null;
+        }
+        if (!row) return null;
+        return {
+            ...row,
+            social_media_consent: this.toBooleanValue(row.social_media_consent)
+        };
+    }
+
+    static async addInstallationPhoto(installationId, data) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO installation_photos (installation_id, stage_label, image_url, cloudinary_public_id, uploaded_by)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [installationId, data.stage_label, data.image_url, data.cloudinary_public_id || null, data.uploaded_by || null]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO installation_photos (installation_id, stage_label, image_url, cloudinary_public_id, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?)`
+            ).run(installationId, data.stage_label, data.image_url, data.cloudinary_public_id || null, data.uploaded_by || null);
+        }
+        return this.getInstallationPhotos(installationId);
+    }
+
+    static async getInstallationPhotos(installationId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM installation_photos
+                 WHERE installation_id = $1
+                 ORDER BY created_at ASC`,
+                [installationId]
+            );
+            return result.rows;
+        }
+        return db.prepare(
+            `SELECT * FROM installation_photos
+             WHERE installation_id = ?
+             ORDER BY created_at ASC`
+        ).all(installationId);
     }
     
     static async getLeadlockWorkOrderItems(orderId) {
