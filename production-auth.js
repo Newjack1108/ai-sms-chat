@@ -123,7 +123,8 @@ async function loginProductionUser(username, password) {
             user: {
                 id: parseInt(user.id),
                 username: user.username,
-                role: user.role
+                role: user.role,
+                is_driver: !!(user.is_driver === true || user.is_driver === 1)
             }
         };
     } catch (error) {

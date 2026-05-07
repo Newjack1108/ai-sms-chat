@@ -282,8 +282,27 @@ router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) =
     }
 });
 
-router.get('/me', requireProductionAuth, (req, res) => {
-    res.json({ success: true, user: req.session.production_user });
+router.get('/me', requireProductionAuth, async (req, res) => {
+    try {
+        const sid = parseInt(req.session.production_user.id, 10);
+        const row = await ProductionDatabase.getUserById(sid);
+        if (!row) {
+            req.session.production_authenticated = false;
+            req.session.production_user = null;
+            return res.status(401).json({ success: false, error: 'User not found', requiresLogin: true });
+        }
+        const user = {
+            id: parseInt(row.id, 10),
+            username: row.username,
+            role: row.role,
+            is_driver: !!(row.is_driver === true || row.is_driver === 1)
+        };
+        req.session.production_user = user;
+        res.json({ success: true, user });
+    } catch (error) {
+        console.error('Get me error:', error);
+        res.status(500).json({ success: false, error: 'Failed to load user' });
+    }
 });
 
 // Manual admin creation endpoint (for troubleshooting - remove in production if desired)
@@ -340,10 +359,27 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
         if (!['admin', 'office', 'staff', 'installer'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
+
+        let isDriver =
+            req.body.is_driver === true ||
+            req.body.is_driver === 'true' ||
+            req.body.is_driver === 1 ||
+            req.body.is_driver === '1';
+        if (role === 'admin' || role === 'office') {
+            isDriver = false;
+        }
         
         const passwordHash = await hashPassword(password);
-        const user = await ProductionDatabase.createUser(username, passwordHash, role);
-        res.json({ success: true, user: { id: user.id, username: user.username, role: user.role } });
+        const user = await ProductionDatabase.createUser(username, passwordHash, role, isDriver);
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                is_driver: !!(user.is_driver === true || user.is_driver === 1)
+            }
+        });
     } catch (error) {
         console.error('Create user error:', error);
         console.error('Error details:', error.message);
@@ -378,15 +414,47 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
             const passwordHash = await hashPassword(password);
             await ProductionDatabase.updateUserPassword(userId, passwordHash);
         }
+
+        const driverFieldPresent =
+            req.body &&
+            Object.prototype.hasOwnProperty.call(req.body, 'is_driver') &&
+            req.body.is_driver !== undefined &&
+            req.body.is_driver !== null;
+
+        const profileUpdate = username || role || driverFieldPresent;
         
-        if (username || role) {
+        if (profileUpdate) {
             const user = await ProductionDatabase.getUserById(userId);
+            if (!user) {
+                return res.status(404).json({ success: false, error: 'User not found' });
+            }
+            const nextRole = role || user.role;
+            let isDriverUpdate = undefined;
+            if (driverFieldPresent) {
+                isDriverUpdate =
+                    req.body.is_driver === true ||
+                    req.body.is_driver === 'true' ||
+                    req.body.is_driver === 1 ||
+                    req.body.is_driver === '1';
+            }
+            if (nextRole === 'admin' || nextRole === 'office') {
+                isDriverUpdate = false;
+            }
             const updatedUser = await ProductionDatabase.updateUser(
                 userId,
                 username || user.username,
-                role || user.role
+                nextRole,
+                isDriverUpdate
             );
-            res.json({ success: true, user: { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role } });
+            res.json({
+                success: true,
+                user: {
+                    id: updatedUser.id,
+                    username: updatedUser.username,
+                    role: updatedUser.role,
+                    is_driver: !!(updatedUser.is_driver === true || updatedUser.is_driver === 1)
+                }
+            });
         } else {
             res.json({ success: true });
         }
@@ -3279,6 +3347,13 @@ router.get('/inspections/daily/current', requireProductionAuth, async (req, res)
 router.put('/inspections/daily/current', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
+        const account = await ProductionDatabase.getUserById(userId);
+        if (!account || !(account.is_driver === true || account.is_driver === 1)) {
+            return res.status(403).json({
+                success: false,
+                error: 'Daily vehicle inspection is not required for this account'
+            });
+        }
         const date = req.body?.inspection_date || londonYmd(new Date());
         const vehicleResponses = normalizeInspectionResponses(req.body?.vehicle, DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS);
         const trailerAttached = req.body?.trailer_attached === true || req.body?.trailer_attached === 1 || req.body?.trailer_attached === '1' || req.body?.trailer_attached === 'true';
@@ -3351,7 +3426,12 @@ router.get('/inspections/daily/history', requireProductionAuth, requireManager, 
             vehicle_registration: req.query.vehicle_registration || null
         });
         const users = await ProductionDatabase.getAllUsers();
-        const activeFitters = (users || []).filter(u => (u.role === 'installer' || u.role === 'staff') && (u.status === null || u.status === 'active'));
+        const activeFitters = (users || []).filter(
+            u =>
+                (u.role === 'installer' || u.role === 'staff') &&
+                (u.status === null || u.status === 'active') &&
+                !!(u.is_driver === true || u.is_driver === 1)
+        );
         const historyByUser = new Set(history.map(row => Number(row.inspected_by_user_id)));
         const missingUsers = activeFitters
             .filter(u => !historyByUser.has(Number(u.id)))
@@ -3388,12 +3468,15 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
         }
 
-        const todayInspection = await ProductionDatabase.getDailyVehicleInspection(userId, londonYmd(new Date()));
-        if (!todayInspection) {
-            return res.status(400).json({
-                success: false,
-                error: 'Daily vehicle inspection is required before first departure. Please complete your vehicle check.'
-            });
+        const isDriver = !!(user?.is_driver === true || user?.is_driver === 1);
+        if (isDriver) {
+            const todayInspection = await ProductionDatabase.getDailyVehicleInspection(userId, londonYmd(new Date()));
+            if (!todayInspection) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Daily vehicle inspection is required before first departure. Please complete your vehicle check.'
+                });
+            }
         }
         
         // FIRST: Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
@@ -3642,21 +3725,25 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const status = await ProductionDatabase.getCurrentClockStatus(userId);
+        const userRow = await ProductionDatabase.getUserById(userId);
+        const inspectionRequired = !!(userRow?.is_driver === true || userRow?.is_driver === 1);
         
         // Check if user has already completed a clock in/out cycle today
         const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         const hasCompletedToday = completedEntriesCount >= 1;
-        const inspection = await ProductionDatabase.getDailyVehicleInspection(userId, today);
-        const inspectionWarnings = getInspectionWarnings(inspection);
+        const inspection = inspectionRequired
+            ? await ProductionDatabase.getDailyVehicleInspection(userId, today)
+            : null;
+        const inspectionWarnings = inspection ? getInspectionWarnings(inspection) : [];
         
         res.json({ 
             success: true, 
             status,
             hasCompletedToday: hasCompletedToday,
             dailyInspection: {
-                required: true,
-                completed: !!inspection,
+                required: inspectionRequired,
+                completed: inspectionRequired ? !!inspection : true,
                 inspection: inspection || null,
                 warnings: inspectionWarnings
             }

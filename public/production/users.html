@@ -53,12 +53,19 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Role *</label>
-                    <select id="userRole" class="form-select" required>
+                    <select id="userRole" class="form-select" required onchange="updateDriverFieldVisibility()">
                         <option value="staff">Staff</option>
                         <option value="installer">Installers</option>
                         <option value="office">Office</option>
                         <option value="admin">Admin</option>
                     </select>
+                </div>
+                <div class="form-group" id="userDriverRow" style="display: none;">
+                    <label class="form-label">Daily vehicle check (driver)</label>
+                    <label style="display: block; font-weight: normal;">
+                        <input type="checkbox" id="userIsDriver"> User must complete the daily vehicle / trailer inspection before clock-in
+                    </label>
+                    <small style="color: #6c757d;">Applies to Staff and Installers only. Office and Admin are never required to complete this.</small>
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('userModal')" class="btn btn-secondary">Cancel</button>
@@ -102,6 +109,7 @@
                             <tr>
                                 <th>Username</th>
                                 <th>Role</th>
+                                <th>Driver</th>
                                 <th>Status</th>
                                 <th>Created</th>
                                 <th>Actions</th>
@@ -120,10 +128,18 @@
                                         statusBtn = `<button onclick="setUserStatus(${user.id}, 'left_company')" class="btn btn-warning btn-sm">Mark as left company</button>`;
                                     }
                                 }
+                                const isDriver = !!(user.is_driver === true || user.is_driver === 1);
+                                const driverCell =
+                                    user.role === 'staff' || user.role === 'installer'
+                                        ? isDriver
+                                            ? '<span class="badge badge-warning">Yes</span>'
+                                            : '<span class="badge badge-secondary">No</span>'
+                                        : '—';
                                 return `
                                 <tr>
                                     <td><strong>${user.username}</strong></td>
                                     <td><span class="badge badge-info">${user.role === 'manager' ? 'office' : user.role}</span></td>
+                                    <td>${driverCell}</td>
                                     <td><span class="badge ${isLeft ? 'badge-secondary' : 'badge-success'}">${isLeft ? 'Left company' : 'Active'}</span></td>
                                     <td>${formatDate(user.created_at)}</td>
                                     <td>
@@ -141,12 +157,25 @@
             }
         }
         
+        function updateDriverFieldVisibility() {
+            const role = document.getElementById('userRole').value;
+            const row = document.getElementById('userDriverRow');
+            if (role === 'staff' || role === 'installer') {
+                row.style.display = 'block';
+            } else {
+                row.style.display = 'none';
+                document.getElementById('userIsDriver').checked = false;
+            }
+        }
+
         function showAddUserModal() {
             document.getElementById('userModalTitle').textContent = 'Add User';
             document.getElementById('userForm').reset();
             document.getElementById('userId').value = '';
+            document.getElementById('userIsDriver').checked = false;
             document.getElementById('passwordRequired').style.display = 'inline';
             document.getElementById('userPassword').required = true;
+            updateDriverFieldVisibility();
             showModal('userModal');
         }
         
@@ -161,9 +190,11 @@
                 document.getElementById('userUsername').value = user.username;
                 // Map 'manager' to 'office' for backward compatibility
                 document.getElementById('userRole').value = user.role === 'manager' ? 'office' : user.role;
+                document.getElementById('userIsDriver').checked = !!(user.is_driver === true || user.is_driver === 1);
                 document.getElementById('userPassword').value = '';
                 document.getElementById('passwordRequired').style.display = 'none';
                 document.getElementById('userPassword').required = false;
+                updateDriverFieldVisibility();
                 showModal('userModal');
             } catch (error) {
                 showAlert('Error loading user', 'error');
@@ -202,13 +233,18 @@
             const username = document.getElementById('userUsername').value;
             const password = document.getElementById('userPassword').value;
             const role = document.getElementById('userRole').value;
+            const isDriver = document.getElementById('userIsDriver').checked;
             
             try {
                 if (id) {
                     // Update user
+                    const body = { username, role, password: password || null };
+                    if (role === 'staff' || role === 'installer') {
+                        body.is_driver = isDriver;
+                    }
                     await apiCall(`/users/${id}`, {
                         method: 'PUT',
-                        body: JSON.stringify({ username, role, password: password || null })
+                        body: JSON.stringify(body)
                     });
                     showAlert('User updated');
                 } else {
@@ -217,9 +253,13 @@
                         showAlert('Password is required for new users', 'error');
                         return;
                     }
+                    const body = { username, password, role };
+                    if (role === 'staff' || role === 'installer') {
+                        body.is_driver = isDriver;
+                    }
                     await apiCall('/users', {
                         method: 'POST',
-                        body: JSON.stringify({ username, password, role })
+                        body: JSON.stringify(body)
                     });
                     showAlert('User created');
                 }

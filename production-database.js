@@ -129,6 +129,7 @@ function initializeSQLite() {
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+            is_driver INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     `);
@@ -975,6 +976,18 @@ function initializeSQLite() {
         console.log('⚠️ Status column migration check skipped:', error.message);
     }
     
+    // Migrate production_users to add is_driver (daily vehicle check required when true)
+    try {
+        const userColsDriver = db.prepare("PRAGMA table_info(production_users)").all();
+        const hasIsDriver = userColsDriver.some(c => c.name === 'is_driver');
+        if (!hasIsDriver) {
+            db.exec("ALTER TABLE production_users ADD COLUMN is_driver INTEGER DEFAULT 0");
+            console.log('✅ Added is_driver column to production_users');
+        }
+    } catch (error) {
+        console.log('⚠️ is_driver column migration check skipped:', error.message);
+    }
+    
     // Migrate production_users role constraint to include 'installer' role
     try {
         const tableInfoInstaller = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
@@ -1482,6 +1495,7 @@ async function initializePostgreSQL() {
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+                is_driver BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -2370,6 +2384,20 @@ async function initializePostgreSQL() {
             console.log('⚠️ Status column migration check skipped:', error.message);
         }
         
+        // Migrate production_users to add is_driver (daily vehicle check required when true)
+        try {
+            const isDriverColCheck = await pool.query(`
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'production_users' AND column_name = 'is_driver'
+            `);
+            if (isDriverColCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE production_users ADD COLUMN is_driver BOOLEAN DEFAULT FALSE`);
+                console.log('✅ Added is_driver column to production_users (PostgreSQL)');
+            }
+        } catch (error) {
+            console.log('⚠️ is_driver column migration check skipped:', error.message);
+        }
+        
         // Migrate existing panels table to add new columns
         await pool.query(`
             DO $$ 
@@ -2931,16 +2959,19 @@ async function initializePostgreSQL() {
 class ProductionDatabase {
     // ============ USER OPERATIONS ============
     
-    static async createUser(username, passwordHash, role) {
+    static async createUser(username, passwordHash, role, isDriver = false) {
+        const driverVal = !!isDriver;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO production_users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING *`,
-                [username, passwordHash, role]
+                `INSERT INTO production_users (username, password_hash, role, is_driver) VALUES ($1, $2, $3, $4) RETURNING *`,
+                [username, passwordHash, role, driverVal]
             );
             return result.rows[0];
         } else {
-            const stmt = db.prepare(`INSERT INTO production_users (username, password_hash, role) VALUES (?, ?, ?)`);
-            const info = stmt.run(username, passwordHash, role);
+            const stmt = db.prepare(
+                `INSERT INTO production_users (username, password_hash, role, is_driver) VALUES (?, ?, ?, ?)`
+            );
+            const info = stmt.run(username, passwordHash, role, driverVal ? 1 : 0);
             return this.getUserById(info.lastInsertRowid);
         }
     }
@@ -2965,22 +2996,42 @@ class ProductionDatabase {
     
     static async getAllUsers() {
         if (isPostgreSQL) {
-            const result = await pool.query(`SELECT id, username, role, created_at, status FROM production_users ORDER BY created_at DESC`);
+            const result = await pool.query(
+                `SELECT id, username, role, created_at, status, is_driver FROM production_users ORDER BY created_at DESC`
+            );
             return result.rows;
         } else {
-            return db.prepare(`SELECT id, username, role, created_at, status FROM production_users ORDER BY created_at DESC`).all();
+            return db
+                .prepare(
+                    `SELECT id, username, role, created_at, status, is_driver FROM production_users ORDER BY created_at DESC`
+                )
+                .all();
         }
     }
     
-    static async updateUser(id, username, role) {
+    static async updateUser(id, username, role, isDriver) {
+        const existing = await this.getUserById(id);
+        if (!existing) return null;
+        let driverVal =
+            isDriver === undefined
+                ? !!(existing.is_driver === true || existing.is_driver === 1)
+                : !!isDriver;
+        if (role === 'admin' || role === 'office') {
+            driverVal = false;
+        }
         if (isPostgreSQL) {
             const result = await pool.query(
-                `UPDATE production_users SET username = $1, role = $2 WHERE id = $3 RETURNING *`,
-                [username, role, id]
+                `UPDATE production_users SET username = $1, role = $2, is_driver = $3 WHERE id = $4 RETURNING *`,
+                [username, role, driverVal, id]
             );
             return result.rows[0];
         } else {
-            db.prepare(`UPDATE production_users SET username = ?, role = ? WHERE id = ?`).run(username, role, id);
+            db.prepare(`UPDATE production_users SET username = ?, role = ?, is_driver = ? WHERE id = ?`).run(
+                username,
+                role,
+                driverVal ? 1 : 0,
+                id
+            );
             return this.getUserById(id);
         }
     }

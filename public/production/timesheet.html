@@ -662,12 +662,14 @@
             
             // Load initial data
             try {
-                await Promise.all([
-                    loadNotices(),
-                    loadJobs(),
-                    loadClockStatus(),
-                    loadDailyInspection()
-                ]);
+                const initialLoads = [loadNotices(), loadJobs(), loadClockStatus()];
+                if (isCurrentUserDriver()) {
+                    initialLoads.push(loadDailyInspection());
+                } else {
+                    const inspectionCard = document.getElementById('dailyInspectionCard');
+                    if (inspectionCard) inspectionCard.style.display = 'none';
+                }
+                await Promise.all(initialLoads);
             } catch (error) {
                 console.error('Error loading initial data:', error);
                 showAlert('Error loading some data. Please refresh the page.', 'error');
@@ -822,8 +824,13 @@
             const clockOutBtn = document.getElementById('clockOutBtn');
             const inspectionStatus = document.getElementById('dailyInspectionStatus');
             if (inspectionStatus) {
-                inspectionStatus.textContent = dailyInspection ? 'Completed for today' : 'Not completed';
-                inspectionStatus.style.color = dailyInspection ? '#27ae60' : '#c0392b';
+                if (!isCurrentUserDriver()) {
+                    inspectionStatus.textContent = 'Not required';
+                    inspectionStatus.style.color = '#666';
+                } else {
+                    inspectionStatus.textContent = dailyInspection ? 'Completed for today' : 'Not completed';
+                    inspectionStatus.style.color = dailyInspection ? '#27ae60' : '#c0392b';
+                }
             }
             
             if (currentStatus) {
@@ -861,8 +868,12 @@
             }
         }
         
+        function isCurrentUserDriver() {
+            return !!(currentUser && (currentUser.is_driver === true || currentUser.is_driver === 1));
+        }
+
         async function handleClockIn() {
-            if (!dailyInspection) {
+            if (isCurrentUserDriver() && !dailyInspection) {
                 showAlert('Complete your Daily Vehicle Check before clocking in.', 'error');
                 return;
             }
