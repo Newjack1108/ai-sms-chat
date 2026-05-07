@@ -2379,11 +2379,41 @@ function getCompletionGateResult(installation) {
     return { ok: blockers.length === 0, blockers };
 }
 
+function isManagerLikeRole(role) {
+    return role === 'admin' || role === 'office' || role === 'manager';
+}
+
+function isInstallerAssignedToInstallation(installation, userId) {
+    return Array.isArray(installation?.assigned_users) &&
+        installation.assigned_users.some(u => Number(u.user_id) === Number(userId));
+}
+
+async function requireAssignedInstallerOrManager(req, res, installationId) {
+    const user = req.session.production_user;
+    const installation = await ProductionDatabase.getInstallationById(installationId);
+    if (!installation) {
+        res.status(404).json({ success: false, error: 'Installation not found' });
+        return { allowed: false, installation: null };
+    }
+    if (isManagerLikeRole(user?.role)) {
+        return { allowed: true, installation };
+    }
+    if (user?.role === 'installer' && isInstallerAssignedToInstallation(installation, user.id)) {
+        return { allowed: true, installation };
+    }
+    res.status(403).json({ success: false, error: 'You are not assigned to this installation' });
+    return { allowed: false, installation: null };
+}
+
 router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
         const endDate = req.query.end_date || null;
-        const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        let installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        const user = req.session.production_user;
+        if (user?.role === 'installer') {
+            installations = installations.filter(inst => isInstallerAssignedToInstallation(inst, user.id));
+        }
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
@@ -2420,6 +2450,10 @@ router.get('/installations/:id', requireProductionAuth, async (req, res) => {
         if (!installation) {
             return res.status(404).json({ success: false, error: 'Installation not found' });
         }
+        const user = req.session.production_user;
+        if (user?.role === 'installer' && !isInstallerAssignedToInstallation(installation, user.id)) {
+            return res.status(403).json({ success: false, error: 'You are not assigned to this installation' });
+        }
         res.json({ success: true, installation });
     } catch (error) {
         console.error('Get installation error:', error);
@@ -2430,10 +2464,9 @@ router.get('/installations/:id', requireProductionAuth, async (req, res) => {
 router.get('/installations/:id/checklists', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
-        const installation = await ProductionDatabase.getInstallationById(installationId);
-        if (!installation) {
-            return res.status(404).json({ success: false, error: 'Installation not found' });
-        }
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const installation = auth.installation;
         res.json({
             success: true,
             checklists: installation.checklists || { pre_fitting: {}, completion: {} },
@@ -2449,10 +2482,8 @@ router.get('/installations/:id/checklists', requireProductionAuth, async (req, r
 router.put('/installations/:id/checklists', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
-        const installation = await ProductionDatabase.getInstallationById(installationId);
-        if (!installation) {
-            return res.status(404).json({ success: false, error: 'Installation not found' });
-        }
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
         const preFitting = normalizeChecklistPayload(req.body.pre_fitting, PRE_FITTING_QUESTION_KEYS);
         const completion = normalizeChecklistPayload(req.body.completion, COMPLETION_QUESTION_KEYS);
         if (Object.keys(preFitting).length > 0) {
@@ -2477,10 +2508,9 @@ router.put('/installations/:id/checklists', requireProductionAuth, async (req, r
 router.post('/installations/:id/signoff-link', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
-        const installation = await ProductionDatabase.getInstallationById(installationId);
-        if (!installation) {
-            return res.status(404).json({ success: false, error: 'Installation not found' });
-        }
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const installation = auth.installation;
         const token = crypto.randomBytes(24).toString('hex');
         const expiresAt = req.body.expires_at || new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
         await ProductionDatabase.createInstallationSignoffToken(
@@ -2501,10 +2531,8 @@ router.post('/installations/:id/signoff-link', requireProductionAuth, async (req
 router.get('/installations/:id/photos', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
-        const installation = await ProductionDatabase.getInstallationById(installationId);
-        if (!installation) {
-            return res.status(404).json({ success: false, error: 'Installation not found' });
-        }
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
         const photos = await ProductionDatabase.getInstallationPhotos(installationId);
         res.json({ success: true, photos });
     } catch (error) {
@@ -2516,10 +2544,9 @@ router.get('/installations/:id/photos', requireProductionAuth, async (req, res) 
 router.post('/installations/:id/photos', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
-        const installation = await ProductionDatabase.getInstallationById(installationId);
-        if (!installation) {
-            return res.status(404).json({ success: false, error: 'Installation not found' });
-        }
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const installation = auth.installation;
         const { stage_label, image_data_url } = req.body || {};
         if (!INSTALLATION_PHOTO_STAGE_KEYS.includes(stage_label)) {
             return res.status(400).json({ success: false, error: 'Invalid photo stage label' });
@@ -2677,10 +2704,31 @@ router.post('/installations', requireProductionAuth, requireManager, async (req,
     }
 });
 
-router.put('/installations/:id', requireProductionAuth, requireManager, async (req, res) => {
+router.put('/installations/:id', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id);
+        const user = req.session.production_user;
+        const isManagerLike = isManagerLikeRole(user?.role);
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
         const { works_order_id, installation_date, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, assigned_users, days, pre_fitting, completion } = req.body;
+
+        if (!isManagerLike) {
+            const installerAllowedFields = new Set(['notes', 'status', 'pre_fitting', 'completion']);
+            const disallowed = Object.keys(req.body || {}).filter(k => !installerAllowedFields.has(k));
+            if (disallowed.length > 0) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Installers can only update checklist responses, notes, and status'
+                });
+            }
+            if (status !== undefined && !['in_progress', 'completed'].includes(status)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Installers can only set status to in_progress or completed'
+                });
+            }
+        }
         
         const updateData = {};
         if (works_order_id !== undefined) updateData.works_order_id = works_order_id;

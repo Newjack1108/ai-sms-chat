@@ -394,7 +394,9 @@
         let worksOrders = [];
         let users = [];
         let editingInstallationId = null;
+        let currentUser = null;
         let canManageInstallations = false;
+        let canInstallerActions = false;
         const PRE_FITTING_QUESTIONS = [
             { key: 'site_access_confirmed', label: 'Site access is confirmed' },
             { key: 'area_clear_for_install', label: 'Install area is clear and ready' },
@@ -424,16 +426,17 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
             if (await restrictStaffAccess()) return;
-            const user = await checkAuth();
-            if (!user) return;
+            currentUser = await checkAuth();
+            if (!currentUser) return;
             
             canManageInstallations =
-                user.role === 'admin' ||
-                user.role === 'office' ||
-                user.role === 'manager';
+                currentUser.role === 'admin' ||
+                currentUser.role === 'office' ||
+                currentUser.role === 'manager';
+            canInstallerActions = currentUser.role === 'installer';
             
             const home = document.getElementById('productionHomeNav');
-            if (home && (user.role === 'installer' || user.role === 'staff')) {
+            if (home && (currentUser.role === 'installer' || currentUser.role === 'staff')) {
                 home.href = 'timesheet.html';
                 home.textContent = 'Timesheet';
             }
@@ -1019,7 +1022,7 @@
         }
         
         async function showEditInstallationModal(id) {
-            if (!canManageInstallations) return;
+            if (!canManageInstallations && !canInstallerActions) return;
             try {
                 editingInstallationId = id;
                 const result = await apiCall(`/installations/${id}`);
@@ -1069,9 +1072,25 @@
                     document.getElementById('perDaySettings').style.display = 'none';
                 }
                 
-                checkAvailability();
+                if (canManageInstallations) {
+                    checkAvailability();
+                } else {
+                    document.getElementById('availabilityCheck').innerHTML = '';
+                }
                 refreshWorksOrderTravelHint(inst.travel_time_hours_round_trip);
                 await loadInstallationChecklistData(inst.id);
+
+                if (canInstallerActions && !canManageInstallations) {
+                    document.getElementById('installationWorksOrder').disabled = true;
+                    document.getElementById('installationStartDate').disabled = true;
+                    document.getElementById('installationEndDate').disabled = true;
+                    document.getElementById('installationDuration').disabled = true;
+                    document.getElementById('installationLocation').disabled = true;
+                    document.getElementById('installationAddress').disabled = true;
+                    document.getElementById('enablePerDaySettings').disabled = true;
+                    document.getElementById('addUserSelect').disabled = true;
+                    document.getElementById('addUserRole').disabled = true;
+                }
                 showModal('installationModal');
             } catch (error) {
                 showAlert('Error loading installation: ' + error.message, 'error');
@@ -1390,8 +1409,18 @@
                 completion: checklistData.completion || {}
             };
 
-            if (formData.status === 'completed') {
-                const completionAnswered = COMPLETION_QUESTIONS.every(q => Object.prototype.hasOwnProperty.call(formData.completion, q.key));
+            const isInstallerOnlySession = canInstallerActions && !canManageInstallations;
+            const payload = isInstallerOnlySession
+                ? {
+                    status: formData.status,
+                    notes: formData.notes,
+                    pre_fitting: formData.pre_fitting,
+                    completion: formData.completion
+                }
+                : formData;
+
+            if (payload.status === 'completed') {
+                const completionAnswered = COMPLETION_QUESTIONS.every(q => Object.prototype.hasOwnProperty.call(payload.completion || {}, q.key));
                 if (!completionAnswered) {
                     showAlert('Please answer all 5 completion checklist questions before marking completed.', 'error');
                     return;
@@ -1402,7 +1431,7 @@
                 if (editingInstallationId) {
                     await apiCall(`/installations/${editingInstallationId}`, {
                         method: 'PUT',
-                        body: JSON.stringify(formData)
+                        body: JSON.stringify(payload)
                     });
                     showAlert('Installation updated successfully');
                 } else {
@@ -1425,6 +1454,12 @@
             try {
                 const result = await apiCall(`/installations/${id}`);
                 const inst = result.installation;
+                const isAssignedInstaller = !!(
+                    canInstallerActions &&
+                    currentUser &&
+                    Array.isArray(inst.assigned_users) &&
+                    inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                );
 
                 let loadSheetSection = '';
                 if (inst.works_order_id) {
@@ -1477,6 +1512,8 @@
                             ${canManageInstallations ? `
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
                             <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>` : ''}
+                            ${isAssignedInstaller && !canManageInstallations ? `
+                            <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Complete Checklist</button>` : ''}
                         </div>
                     </div>
                 `;
