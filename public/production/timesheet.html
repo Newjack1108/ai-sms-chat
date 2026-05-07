@@ -95,6 +95,24 @@
             padding: 30px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
+
+        .inspection-card {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 16px;
+        }
+
+        .inspection-warning {
+            background: #fff3cd;
+            border: 1px solid #ffe08a;
+            color: #856404;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 13px;
+        }
         
         .job-select-group {
             margin-bottom: 25px;
@@ -456,6 +474,35 @@
             
             <!-- Clock Controls -->
             <div class="clock-controls">
+                <div id="dailyInspectionCard" class="inspection-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+                        <strong>Daily Vehicle Check</strong>
+                        <span id="dailyInspectionStatus" style="font-size:12px; color:#666;">Loading...</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="vehicleRegistration">Vehicle Registration *</label>
+                        <input id="vehicleRegistration" class="form-control" placeholder="e.g. AB12 CDE">
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label style="display:flex; align-items:center; gap:8px;">
+                            <input type="checkbox" id="trailerAttachedCheck" style="width:auto; margin:0;" onchange="toggleTrailerInspection()">
+                            <span>Trailer attached today</span>
+                        </label>
+                    </div>
+                    <div class="form-group" id="trailerRegistrationGroup" style="display:none;">
+                        <label for="trailerRegistration">Trailer Registration</label>
+                        <input id="trailerRegistration" class="form-control" placeholder="Optional unless trailer attached">
+                    </div>
+                    <div id="vehicleInspectionQuestions"></div>
+                    <div id="trailerInspectionQuestions" style="display:none;"></div>
+                    <div class="form-group" style="margin-top:10px;">
+                        <label for="inspectionNotes">Notes</label>
+                        <textarea id="inspectionNotes" class="form-control" rows="2" placeholder="Optional comments"></textarea>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="saveDailyInspection()">Save Daily Check</button>
+                    <div id="inspectionWarningBanner" class="inspection-warning" style="display:none;"></div>
+                </div>
+
                 <div class="job-select-group" id="jobSelectGroup" style="display: none;">
                     <label class="form-label">Select Job/Site *</label>
                     <select id="jobSelect" class="form-select" required>
@@ -587,6 +634,8 @@
         let currentLocation = null;
         let hasCompletedToday = false;
         let locationError = false;
+        let dailyInspection = null;
+        let inspectionQuestionConfig = { vehicle: [], trailer: [] };
         
         async function init() {
             console.log('=== INIT FUNCTION CALLED ===');
@@ -616,7 +665,8 @@
                 await Promise.all([
                     loadNotices(),
                     loadJobs(),
-                    loadClockStatus()
+                    loadClockStatus(),
+                    loadDailyInspection()
                 ]);
             } catch (error) {
                 console.error('Error loading initial data:', error);
@@ -770,6 +820,11 @@
             const jobSelectGroup = document.getElementById('jobSelectGroup');
             const clockInBtn = document.getElementById('clockInBtn');
             const clockOutBtn = document.getElementById('clockOutBtn');
+            const inspectionStatus = document.getElementById('dailyInspectionStatus');
+            if (inspectionStatus) {
+                inspectionStatus.textContent = dailyInspection ? 'Completed for today' : 'Not completed';
+                inspectionStatus.style.color = dailyInspection ? '#27ae60' : '#c0392b';
+            }
             
             if (currentStatus) {
                 // Clocked in
@@ -807,6 +862,11 @@
         }
         
         async function handleClockIn() {
+            if (!dailyInspection) {
+                showAlert('Complete your Daily Vehicle Check before clocking in.', 'error');
+                return;
+            }
+
             const jobId = document.getElementById('jobSelect').value;
             if (!jobId) {
                 showAlert('Please select a job/site', 'error');
@@ -896,6 +956,103 @@
             } finally {
                 clockOutBtn.disabled = false;
                 clockOutBtn.textContent = 'Clock Out';
+            }
+        }
+
+        function renderInspectionQuestions(containerId, section, questions, responses) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = `
+                <div style="margin: 10px 0 6px; font-weight: 600;">${section === 'vehicle' ? 'Vehicle Checks' : 'Trailer Checks'}</div>
+                ${questions.map(q => {
+                    const row = responses?.[q.key] || {};
+                    const selected = row.answer || '';
+                    return `
+                        <div style="padding:8px; border:1px solid #e5e5e5; border-radius:6px; margin-bottom:8px;">
+                            <div style="font-size:13px; margin-bottom:6px;">
+                                ${q.key.replace(/_/g, ' ')}${q.critical ? ' (critical)' : ''}
+                            </div>
+                            <div style="display:flex; gap:12px; font-size:13px;">
+                                <label><input type="radio" name="${section}-${q.key}" value="pass" ${selected === 'pass' ? 'checked' : ''}> Pass</label>
+                                <label><input type="radio" name="${section}-${q.key}" value="fail" ${selected === 'fail' ? 'checked' : ''}> Fail</label>
+                                <label><input type="radio" name="${section}-${q.key}" value="na" ${selected === 'na' ? 'checked' : ''}> N/A</label>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            `;
+        }
+
+        async function loadDailyInspection() {
+            try {
+                const data = await apiCall('/inspections/daily/current');
+                inspectionQuestionConfig = data.questions || { vehicle: [], trailer: [] };
+                dailyInspection = data.inspection || null;
+                const responses = dailyInspection?.responses || {};
+                document.getElementById('vehicleRegistration').value = dailyInspection?.vehicle_registration || '';
+                document.getElementById('trailerAttachedCheck').checked = !!dailyInspection?.trailer_attached;
+                document.getElementById('trailerRegistration').value = dailyInspection?.trailer_registration || '';
+                document.getElementById('inspectionNotes').value = dailyInspection?.notes || '';
+                renderInspectionQuestions('vehicleInspectionQuestions', 'vehicle', inspectionQuestionConfig.vehicle || [], responses.vehicle || {});
+                renderInspectionQuestions('trailerInspectionQuestions', 'trailer', inspectionQuestionConfig.trailer || [], responses.trailer || {});
+                toggleTrailerInspection();
+                const warningBanner = document.getElementById('inspectionWarningBanner');
+                if ((data.warnings || []).length > 0) {
+                    warningBanner.style.display = 'block';
+                    warningBanner.textContent = 'Critical checks failed. Recorded and manager notified; continue with caution policy.';
+                } else {
+                    warningBanner.style.display = 'none';
+                    warningBanner.textContent = '';
+                }
+                updateUI();
+            } catch (error) {
+                console.error('Error loading daily inspection:', error);
+            }
+        }
+
+        function toggleTrailerInspection() {
+            const enabled = document.getElementById('trailerAttachedCheck').checked;
+            document.getElementById('trailerInspectionQuestions').style.display = enabled ? 'block' : 'none';
+            document.getElementById('trailerRegistrationGroup').style.display = enabled ? 'block' : 'none';
+        }
+
+        async function saveDailyInspection() {
+            const vehicleRegistration = document.getElementById('vehicleRegistration').value.trim();
+            const trailerAttached = document.getElementById('trailerAttachedCheck').checked;
+            const trailerRegistration = document.getElementById('trailerRegistration').value.trim();
+            const notes = document.getElementById('inspectionNotes').value.trim();
+            if (!vehicleRegistration) {
+                showAlert('Vehicle registration is required', 'error');
+                return;
+            }
+            const vehicle = {};
+            (inspectionQuestionConfig.vehicle || []).forEach(q => {
+                const selected = document.querySelector(`input[name="vehicle-${q.key}"]:checked`);
+                if (selected) vehicle[q.key] = { answer: selected.value };
+            });
+            const trailer = {};
+            if (trailerAttached) {
+                (inspectionQuestionConfig.trailer || []).forEach(q => {
+                    const selected = document.querySelector(`input[name="trailer-${q.key}"]:checked`);
+                    if (selected) trailer[q.key] = { answer: selected.value };
+                });
+            }
+            try {
+                await apiCall('/inspections/daily/current', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        vehicle_registration: vehicleRegistration,
+                        trailer_attached: trailerAttached,
+                        trailer_registration: trailerRegistration || null,
+                        notes,
+                        vehicle,
+                        trailer
+                    })
+                });
+                showAlert('Daily vehicle check saved', 'success');
+                await loadDailyInspection();
+            } catch (error) {
+                showAlert(error.message || 'Failed to save daily inspection', 'error');
             }
         }
         

@@ -65,6 +65,21 @@ const COMPLETION_QUESTION_KEYS = [
 ];
 const ALLOWED_SATISFACTION_EMOJIS = ['very_happy', 'happy', 'neutral', 'unhappy', 'very_unhappy'];
 const INSTALLATION_PHOTO_STAGE_KEYS = ['arrival', 'before', 'in_progress_1', 'in_progress_2', 'after', 'customer_handover'];
+const DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS = [
+    { key: 'lights_working', critical: true },
+    { key: 'brakes_ok', critical: true },
+    { key: 'tyres_condition_ok', critical: true },
+    { key: 'mirrors_and_glass_ok', critical: true },
+    { key: 'fluid_leaks_none', critical: true },
+    { key: 'load_secured', critical: true },
+    { key: 'documents_present', critical: false }
+];
+const DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS = [
+    { key: 'trailer_lights_working', critical: true },
+    { key: 'trailer_tow_hitch_secure', critical: true },
+    { key: 'trailer_tyres_condition_ok', critical: true },
+    { key: 'trailer_load_secured', critical: true }
+];
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -2383,6 +2398,44 @@ function isManagerLikeRole(role) {
     return role === 'admin' || role === 'office' || role === 'manager';
 }
 
+function normalizeInspectionAnswer(value) {
+    const normalized = String(value || '').toLowerCase().trim();
+    if (normalized === 'pass' || normalized === 'fail' || normalized === 'na') {
+        return normalized;
+    }
+    return null;
+}
+
+function normalizeInspectionResponses(payload, questionDefinitions) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const normalized = [];
+    for (const question of questionDefinitions) {
+        const row = source[question.key];
+        const answer = normalizeInspectionAnswer(row?.answer ?? row);
+        if (!answer) continue;
+        normalized.push({
+            question_key: question.key,
+            answer,
+            is_critical: !!question.critical,
+            comment: row && typeof row === 'object' ? (row.comment || '').toString().slice(0, 500) : null
+        });
+    }
+    return normalized;
+}
+
+function getInspectionWarnings(inspection) {
+    const warnings = [];
+    const responses = inspection?.responses || {};
+    for (const section of ['vehicle', 'trailer']) {
+        for (const [questionKey, item] of Object.entries(responses[section] || {})) {
+            if (item?.is_critical && item?.answer === 'fail') {
+                warnings.push(`${section}:${questionKey}`);
+            }
+        }
+    }
+    return warnings;
+}
+
 function isInstallerAssignedToInstallation(installation, userId) {
     return Array.isArray(installation?.assigned_users) &&
         installation.assigned_users.some(u => Number(u.user_id) === Number(userId));
@@ -3202,6 +3255,125 @@ router.delete('/timesheet/notices/:id', requireProductionAuth, requireAdminOrOff
 
 // ============ CLOCK ON/OFF ROUTES (Weekly Timesheet System) ============
 
+router.get('/inspections/daily/current', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const date = req.query.date || londonYmd(new Date());
+        const inspection = await ProductionDatabase.getDailyVehicleInspection(userId, date);
+        res.json({
+            success: true,
+            inspection_date: date,
+            questions: {
+                vehicle: DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS,
+                trailer: DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS
+            },
+            inspection,
+            warnings: getInspectionWarnings(inspection)
+        });
+    } catch (error) {
+        console.error('Get daily inspection error:', error);
+        res.status(500).json({ success: false, error: 'Failed to load daily inspection' });
+    }
+});
+
+router.put('/inspections/daily/current', requireProductionAuth, async (req, res) => {
+    try {
+        const userId = req.session.production_user.id;
+        const date = req.body?.inspection_date || londonYmd(new Date());
+        const vehicleResponses = normalizeInspectionResponses(req.body?.vehicle, DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS);
+        const trailerAttached = req.body?.trailer_attached === true || req.body?.trailer_attached === 1 || req.body?.trailer_attached === '1' || req.body?.trailer_attached === 'true';
+        const trailerResponses = trailerAttached
+            ? normalizeInspectionResponses(req.body?.trailer, DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS)
+            : [];
+        const requiredVehicleKeys = new Set(DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS.map(q => q.key));
+        const presentVehicleKeys = new Set(vehicleResponses.map(r => r.question_key));
+        const missingVehicleKeys = [...requiredVehicleKeys].filter(key => !presentVehicleKeys.has(key));
+        if (missingVehicleKeys.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: `All vehicle inspection checks are required. Missing: ${missingVehicleKeys.join(', ')}`
+            });
+        }
+        if (trailerAttached) {
+            const requiredTrailerKeys = new Set(DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS.map(q => q.key));
+            const presentTrailerKeys = new Set(trailerResponses.map(r => r.question_key));
+            const missingTrailerKeys = [...requiredTrailerKeys].filter(key => !presentTrailerKeys.has(key));
+            if (missingTrailerKeys.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: `All trailer inspection checks are required when a trailer is attached. Missing: ${missingTrailerKeys.join(', ')}`
+                });
+            }
+        }
+        const allResponses = [
+            ...vehicleResponses.map(row => ({ ...row, section: 'vehicle' })),
+            ...trailerResponses.map(row => ({ ...row, section: 'trailer' }))
+        ];
+        const criticalFailCount = allResponses.filter(r => r.is_critical && r.answer === 'fail').length;
+        const overallStatus = criticalFailCount > 0 ? 'warning' : 'pass';
+        const inspection = await ProductionDatabase.upsertDailyVehicleInspection({
+            inspection_date: date,
+            inspected_by_user_id: userId,
+            vehicle_registration: (req.body?.vehicle_registration || '').toString().trim() || null,
+            trailer_attached: trailerAttached,
+            trailer_registration: trailerAttached ? ((req.body?.trailer_registration || '').toString().trim() || null) : null,
+            notes: (req.body?.notes || '').toString().trim() || null,
+            overall_status: overallStatus,
+            critical_fail_count: criticalFailCount,
+            responses: allResponses
+        });
+        const warnings = getInspectionWarnings(inspection);
+        if (warnings.length > 0) {
+            const user = req.session.production_user;
+            await ProductionDatabase.createTimesheetNotice(
+                `Vehicle inspection warning (${user?.username || `user ${userId}`})`,
+                `Critical daily vehicle/trailer checks failed on ${date}: ${warnings.join(', ')}`,
+                'high',
+                null,
+                userId
+            );
+        }
+        res.json({ success: true, inspection, warnings });
+    } catch (error) {
+        console.error('Upsert daily inspection error:', error);
+        res.status(500).json({ success: false, error: 'Failed to save daily inspection' });
+    }
+});
+
+router.get('/inspections/daily/history', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const dateFrom = req.query.date_from || londonYmd(new Date());
+        const dateTo = req.query.date_to || dateFrom;
+        const history = await ProductionDatabase.getDailyVehicleInspectionHistory({
+            date_from: dateFrom,
+            date_to: dateTo,
+            user_id: req.query.user_id || null,
+            vehicle_registration: req.query.vehicle_registration || null
+        });
+        const users = await ProductionDatabase.getAllUsers();
+        const activeFitters = (users || []).filter(u => (u.role === 'installer' || u.role === 'staff') && (u.status === null || u.status === 'active'));
+        const historyByUser = new Set(history.map(row => Number(row.inspected_by_user_id)));
+        const missingUsers = activeFitters
+            .filter(u => !historyByUser.has(Number(u.id)))
+            .map(u => ({ id: u.id, username: u.username, role: u.role }));
+        res.json({
+            success: true,
+            date_from: dateFrom,
+            date_to: dateTo,
+            inspections: history,
+            summary: {
+                total: history.length,
+                warning_count: history.filter(row => row.overall_status === 'warning').length,
+                incomplete_count: missingUsers.length
+            },
+            missing_users: missingUsers
+        });
+    } catch (error) {
+        console.error('Get daily inspection history error:', error);
+        res.status(500).json({ success: false, error: 'Failed to load daily inspection history' });
+    }
+});
+
 // Clock in/out (aliases for backward compatibility, also available as /clock/clock-in and /clock/clock-out)
 router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
     try {
@@ -3214,6 +3386,14 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
         
         if (!job_id) {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
+        }
+
+        const todayInspection = await ProductionDatabase.getDailyVehicleInspection(userId, londonYmd(new Date()));
+        if (!todayInspection) {
+            return res.status(400).json({
+                success: false,
+                error: 'Daily vehicle inspection is required before first departure. Please complete your vehicle check.'
+            });
         }
         
         // FIRST: Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
@@ -3467,11 +3647,19 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
         const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         const hasCompletedToday = completedEntriesCount >= 1;
+        const inspection = await ProductionDatabase.getDailyVehicleInspection(userId, today);
+        const inspectionWarnings = getInspectionWarnings(inspection);
         
         res.json({ 
             success: true, 
             status,
-            hasCompletedToday: hasCompletedToday
+            hasCompletedToday: hasCompletedToday,
+            dailyInspection: {
+                required: true,
+                completed: !!inspection,
+                inspection: inspection || null,
+                warnings: inspectionWarnings
+            }
         });
     } catch (error) {
         console.error('Get clock status error:', error);

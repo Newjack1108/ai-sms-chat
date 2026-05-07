@@ -1365,6 +1365,45 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token);
         CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id);
     `);
+
+    // Daily fitter vehicle/trailer inspections
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_vehicle_inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_date TEXT NOT NULL,
+            inspected_by_user_id INTEGER NOT NULL,
+            vehicle_registration TEXT,
+            trailer_attached INTEGER NOT NULL DEFAULT 0 CHECK(trailer_attached IN (0, 1)),
+            trailer_registration TEXT,
+            notes TEXT,
+            overall_status TEXT NOT NULL DEFAULT 'pass' CHECK(overall_status IN ('pass', 'warning')),
+            critical_fail_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (inspected_by_user_id) REFERENCES production_users(id),
+            UNIQUE(inspection_date, inspected_by_user_id)
+        )
+    `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_vehicle_inspection_responses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_id INTEGER NOT NULL,
+            section TEXT NOT NULL CHECK(section IN ('vehicle', 'trailer')),
+            question_key TEXT NOT NULL,
+            answer TEXT NOT NULL CHECK(answer IN ('pass', 'fail', 'na')),
+            is_critical INTEGER NOT NULL DEFAULT 0 CHECK(is_critical IN (0, 1)),
+            comment TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (inspection_id) REFERENCES daily_vehicle_inspections(id) ON DELETE CASCADE,
+            UNIQUE(inspection_id, section, question_key)
+        )
+    `);
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_daily_vehicle_inspections_date_user ON daily_vehicle_inspections(inspection_date, inspected_by_user_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_vehicle_inspections_status ON daily_vehicle_inspections(overall_status, inspection_date);
+        CREATE INDEX IF NOT EXISTS idx_daily_vehicle_responses_inspection ON daily_vehicle_inspection_responses(inspection_id, section);
+    `);
     
     ensureSQLitePendingAmendmentUniqueness();
     
@@ -2733,6 +2772,40 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_checklist_installation ON installation_checklist_responses(installation_id, checklist_type)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id)`);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS daily_vehicle_inspections (
+                id SERIAL PRIMARY KEY,
+                inspection_date DATE NOT NULL,
+                inspected_by_user_id INTEGER NOT NULL REFERENCES production_users(id),
+                vehicle_registration VARCHAR(50),
+                trailer_attached BOOLEAN NOT NULL DEFAULT FALSE,
+                trailer_registration VARCHAR(50),
+                notes TEXT,
+                overall_status VARCHAR(32) NOT NULL DEFAULT 'pass' CHECK(overall_status IN ('pass', 'warning')),
+                critical_fail_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(inspection_date, inspected_by_user_id)
+            )
+        `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS daily_vehicle_inspection_responses (
+                id SERIAL PRIMARY KEY,
+                inspection_id INTEGER NOT NULL REFERENCES daily_vehicle_inspections(id) ON DELETE CASCADE,
+                section VARCHAR(20) NOT NULL CHECK(section IN ('vehicle', 'trailer')),
+                question_key VARCHAR(100) NOT NULL,
+                answer VARCHAR(20) NOT NULL CHECK(answer IN ('pass', 'fail', 'na')),
+                is_critical BOOLEAN NOT NULL DEFAULT FALSE,
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(inspection_id, section, question_key)
+            )
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_vehicle_inspections_date_user ON daily_vehicle_inspections(inspection_date, inspected_by_user_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_vehicle_inspections_status ON daily_vehicle_inspections(overall_status, inspection_date)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_vehicle_responses_inspection ON daily_vehicle_inspection_responses(inspection_id, section)`);
         
         await ensurePostgresPendingAmendmentUniqueness();
         
@@ -7053,6 +7126,19 @@ class ProductionDatabase {
         }
         return result;
     }
+
+    static normalizeInspectionResponses(rows = []) {
+        const grouped = { vehicle: {}, trailer: {} };
+        for (const row of rows) {
+            if (!grouped[row.section]) continue;
+            grouped[row.section][row.question_key] = {
+                answer: row.answer,
+                is_critical: this.toBooleanValue(row.is_critical),
+                comment: row.comment || null
+            };
+        }
+        return grouped;
+    }
     
     static async createInstallation(data) {
         // Support both old (installation_date) and new (start_date/end_date) formats for backward compatibility
@@ -7481,6 +7567,217 @@ class ProductionDatabase {
              WHERE installation_id = ?
              ORDER BY created_at ASC`
         ).all(installationId);
+    }
+
+    static async getDailyVehicleInspection(userId, inspectionDate) {
+        if (isPostgreSQL) {
+            const headerResult = await pool.query(
+                `SELECT dvi.*, u.username AS inspected_by_username
+                 FROM daily_vehicle_inspections dvi
+                 LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+                 WHERE dvi.inspected_by_user_id = $1 AND dvi.inspection_date = $2`,
+                [userId, inspectionDate]
+            );
+            const header = headerResult.rows[0] || null;
+            if (!header) return null;
+            const responseResult = await pool.query(
+                `SELECT section, question_key, answer, is_critical, comment
+                 FROM daily_vehicle_inspection_responses
+                 WHERE inspection_id = $1`,
+                [header.id]
+            );
+            return {
+                ...header,
+                trailer_attached: this.toBooleanValue(header.trailer_attached),
+                responses: this.normalizeInspectionResponses(responseResult.rows)
+            };
+        }
+
+        const header = db.prepare(
+            `SELECT dvi.*, u.username AS inspected_by_username
+             FROM daily_vehicle_inspections dvi
+             LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+             WHERE dvi.inspected_by_user_id = ? AND dvi.inspection_date = ?`
+        ).get(userId, inspectionDate);
+        if (!header) return null;
+        const rows = db.prepare(
+            `SELECT section, question_key, answer, is_critical, comment
+             FROM daily_vehicle_inspection_responses
+             WHERE inspection_id = ?`
+        ).all(header.id);
+        return {
+            ...header,
+            trailer_attached: this.toBooleanValue(header.trailer_attached),
+            responses: this.normalizeInspectionResponses(rows)
+        };
+    }
+
+    static async upsertDailyVehicleInspection(payload) {
+        const {
+            inspection_date,
+            inspected_by_user_id,
+            vehicle_registration,
+            trailer_attached,
+            trailer_registration,
+            notes,
+            overall_status,
+            critical_fail_count,
+            responses = []
+        } = payload;
+
+        if (isPostgreSQL) {
+            const headerResult = await pool.query(
+                `INSERT INTO daily_vehicle_inspections
+                 (inspection_date, inspected_by_user_id, vehicle_registration, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT (inspection_date, inspected_by_user_id)
+                 DO UPDATE SET
+                    vehicle_registration = EXCLUDED.vehicle_registration,
+                    trailer_attached = EXCLUDED.trailer_attached,
+                    trailer_registration = EXCLUDED.trailer_registration,
+                    notes = EXCLUDED.notes,
+                    overall_status = EXCLUDED.overall_status,
+                    critical_fail_count = EXCLUDED.critical_fail_count,
+                    updated_at = CURRENT_TIMESTAMP
+                 RETURNING *`,
+                [
+                    inspection_date,
+                    inspected_by_user_id,
+                    vehicle_registration || null,
+                    this.toBooleanValue(trailer_attached),
+                    trailer_registration || null,
+                    notes || null,
+                    overall_status || 'pass',
+                    Number(critical_fail_count || 0)
+                ]
+            );
+            const header = headerResult.rows[0];
+            for (const response of responses) {
+                await pool.query(
+                    `INSERT INTO daily_vehicle_inspection_responses
+                     (inspection_id, section, question_key, answer, is_critical, comment)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (inspection_id, section, question_key)
+                     DO UPDATE SET
+                        answer = EXCLUDED.answer,
+                        is_critical = EXCLUDED.is_critical,
+                        comment = EXCLUDED.comment,
+                        updated_at = CURRENT_TIMESTAMP`,
+                    [
+                        header.id,
+                        response.section,
+                        response.question_key,
+                        response.answer,
+                        this.toBooleanValue(response.is_critical),
+                        response.comment || null
+                    ]
+                );
+            }
+            return this.getDailyVehicleInspection(inspected_by_user_id, inspection_date);
+        }
+
+        const upsertHeader = db.prepare(
+            `INSERT INTO daily_vehicle_inspections
+             (inspection_date, inspected_by_user_id, vehicle_registration, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             ON CONFLICT(inspection_date, inspected_by_user_id)
+             DO UPDATE SET
+                vehicle_registration = excluded.vehicle_registration,
+                trailer_attached = excluded.trailer_attached,
+                trailer_registration = excluded.trailer_registration,
+                notes = excluded.notes,
+                overall_status = excluded.overall_status,
+                critical_fail_count = excluded.critical_fail_count,
+                updated_at = datetime('now')`
+        );
+        upsertHeader.run(
+            inspection_date,
+            inspected_by_user_id,
+            vehicle_registration || null,
+            this.toBooleanValue(trailer_attached) ? 1 : 0,
+            trailer_registration || null,
+            notes || null,
+            overall_status || 'pass',
+            Number(critical_fail_count || 0)
+        );
+        const header = db.prepare(
+            `SELECT * FROM daily_vehicle_inspections WHERE inspection_date = ? AND inspected_by_user_id = ?`
+        ).get(inspection_date, inspected_by_user_id);
+        for (const response of responses) {
+            db.prepare(
+                `INSERT INTO daily_vehicle_inspection_responses
+                 (inspection_id, section, question_key, answer, is_critical, comment, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                 ON CONFLICT(inspection_id, section, question_key)
+                 DO UPDATE SET
+                    answer = excluded.answer,
+                    is_critical = excluded.is_critical,
+                    comment = excluded.comment,
+                    updated_at = datetime('now')`
+            ).run(
+                header.id,
+                response.section,
+                response.question_key,
+                response.answer,
+                this.toBooleanValue(response.is_critical) ? 1 : 0,
+                response.comment || null
+            );
+        }
+        return this.getDailyVehicleInspection(inspected_by_user_id, inspection_date);
+    }
+
+    static async getDailyVehicleInspectionHistory(filters = {}) {
+        const dateFrom = filters.date_from || londonYmd(new Date());
+        const dateTo = filters.date_to || dateFrom;
+        const userId = filters.user_id ? Number(filters.user_id) : null;
+        const vehicleRegistration = (filters.vehicle_registration || '').trim();
+        if (isPostgreSQL) {
+            const values = [dateFrom, dateTo];
+            const where = ['dvi.inspection_date BETWEEN $1 AND $2'];
+            let index = 3;
+            if (userId) {
+                where.push(`dvi.inspected_by_user_id = $${index++}`);
+                values.push(userId);
+            }
+            if (vehicleRegistration) {
+                where.push(`LOWER(COALESCE(dvi.vehicle_registration, '')) LIKE $${index++}`);
+                values.push(`%${vehicleRegistration.toLowerCase()}%`);
+            }
+            const result = await pool.query(
+                `SELECT dvi.*, u.username AS inspected_by_username
+                 FROM daily_vehicle_inspections dvi
+                 LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+                 WHERE ${where.join(' AND ')}
+                 ORDER BY dvi.inspection_date DESC, u.username ASC`,
+                values
+            );
+            return result.rows.map(row => ({
+                ...row,
+                trailer_attached: this.toBooleanValue(row.trailer_attached)
+            }));
+        }
+
+        const params = [dateFrom, dateTo];
+        const where = [`dvi.inspection_date BETWEEN ? AND ?`];
+        if (userId) {
+            where.push(`dvi.inspected_by_user_id = ?`);
+            params.push(userId);
+        }
+        if (vehicleRegistration) {
+            where.push(`LOWER(COALESCE(dvi.vehicle_registration, '')) LIKE ?`);
+            params.push(`%${vehicleRegistration.toLowerCase()}%`);
+        }
+        const rows = db.prepare(
+            `SELECT dvi.*, u.username AS inspected_by_username
+             FROM daily_vehicle_inspections dvi
+             LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+             WHERE ${where.join(' AND ')}
+             ORDER BY dvi.inspection_date DESC, u.username ASC`
+        ).all(...params);
+        return rows.map(row => ({
+            ...row,
+            trailer_attached: this.toBooleanValue(row.trailer_attached)
+        }));
     }
     
     static async getLeadlockWorkOrderItems(orderId) {

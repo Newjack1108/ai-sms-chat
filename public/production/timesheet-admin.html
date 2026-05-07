@@ -77,6 +77,20 @@
                 <div class="loading">Loading...</div>
             </div>
         </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Daily Vehicle Inspection Compliance</h2>
+                <button onclick="loadDailyInspectionDashboard()" class="btn btn-secondary btn-sm">Refresh</button>
+            </div>
+            <div style="padding: 12px 20px; border-bottom: 1px solid #eee;">
+                <label style="font-size: 13px; color: #666;">Date</label>
+                <input type="date" id="inspectionDashboardDate" class="form-input" style="max-width: 220px;" onchange="loadDailyInspectionDashboard()">
+            </div>
+            <div id="inspectionDashboardList">
+                <div class="loading">Loading inspections...</div>
+            </div>
+        </div>
         
         <!-- Time Amendment Review -->
         <div class="card">
@@ -528,11 +542,16 @@
                 loadOffClockStaff(),
                 loadJobs(),
                 loadNotices(),
-                loadPendingAmendments()
+                loadPendingAmendments(),
+                loadDailyInspectionDashboard()
             ]);
             
             // Initialize payroll week selector to current week
             const weekSelect = document.getElementById('payrollWeekSelect');
+            const inspectionDate = document.getElementById('inspectionDashboardDate');
+            if (inspectionDate && !inspectionDate.value) {
+                inspectionDate.value = londonYmd(new Date());
+            }
             if (weekSelect) {
                 // Check if there's a selected week from dashboard reminder
                 const selectedWeek = localStorage.getItem('selectedWeek');
@@ -920,6 +939,65 @@
                 `;
             } catch (error) {
                 document.getElementById('noticesList').innerHTML = '<p>Error loading notices</p>';
+            }
+        }
+
+        async function loadDailyInspectionDashboard() {
+            const listEl = document.getElementById('inspectionDashboardList');
+            const dateInput = document.getElementById('inspectionDashboardDate');
+            const selectedDate = dateInput?.value || londonYmd(new Date());
+            if (dateInput && !dateInput.value) {
+                dateInput.value = selectedDate;
+            }
+            try {
+                const data = await apiCall(`/inspections/daily/history?date_from=${encodeURIComponent(selectedDate)}&date_to=${encodeURIComponent(selectedDate)}`);
+                const inspections = data.inspections || [];
+                const missing = data.missing_users || [];
+                if (inspections.length === 0 && missing.length === 0) {
+                    listEl.innerHTML = '<p style="padding: 20px;">No fitter records found for this date.</p>';
+                    return;
+                }
+                listEl.innerHTML = `
+                    <div style="padding: 12px 20px; background: #f8f9fa; border-bottom: 1px solid #eee;">
+                        <strong>Summary:</strong>
+                        ${data.summary?.total || 0} submitted,
+                        ${data.summary?.warning_count || 0} warning,
+                        ${data.summary?.incomplete_count || 0} missing
+                    </div>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fitter</th>
+                                <th>Vehicle</th>
+                                <th>Trailer</th>
+                                <th>Status</th>
+                                <th>Critical Fails</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${inspections.map(row => `
+                                <tr>
+                                    <td>${row.inspected_by_username || row.inspected_by_user_id}</td>
+                                    <td>${row.vehicle_registration || '-'}</td>
+                                    <td>${row.trailer_attached ? (row.trailer_registration || 'Attached') : 'No'}</td>
+                                    <td><span class="badge ${row.overall_status === 'warning' ? 'badge-warning' : 'badge-success'}">${row.overall_status}</span></td>
+                                    <td>${row.critical_fail_count || 0}</td>
+                                </tr>
+                            `).join('')}
+                            ${missing.map(user => `
+                                <tr>
+                                    <td>${user.username}</td>
+                                    <td>-</td>
+                                    <td>-</td>
+                                    <td><span class="badge badge-danger">missing</span></td>
+                                    <td>-</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                listEl.innerHTML = '<p style="padding: 20px; color: #e74c3c;">Failed to load vehicle inspection compliance.</p>';
             }
         }
         
