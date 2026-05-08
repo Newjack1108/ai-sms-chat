@@ -6,14 +6,10 @@
 
 ### 🟢 Clock In (Start Work)
 
-Before your first departure, complete the **Daily Vehicle Check** on the timesheet page.
-
 **Step 1:** Open Timesheet page  
-**Step 2:** Fill in Daily Vehicle Check (and trailer checks if towing)  
-**Step 3:** Save the check  
-**Step 4:** Pick your job/site from the list  
-**Step 5:** Click **"Clock In"**  
-**Step 6:** Allow location access (or click Continue)
+**Step 2:** Pick your job/site from the list  
+**Step 3:** Click **"Clock In"**  
+**Step 4:** Allow location access (or click Continue)
 
 ✅ **Done!** You'll see green "Clocked In" status
 
@@ -30,13 +26,18 @@ Before your first departure, complete the **Daily Vehicle Check** on the timeshe
 
 ### 🚐 Daily Vehicle And Trailer Check
 
-Complete this once per day before leaving to site.
+Complete this once per day after clocking in (your check time is on the clock).
 
 **What to do:**
 - Enter vehicle registration
 - Complete all vehicle safety checks
 - If towing, tick **Trailer attached** and complete trailer checks
 - Add notes if needed and click **Save Daily Check**
+
+You must complete and save this check before:
+- Clocking out
+- Adding/changing daily activities
+- Changing day settings (overnight/day type) for today
 
 If any critical item is marked **Fail**, your check is still saved but a warning is logged for manager follow-up.
 

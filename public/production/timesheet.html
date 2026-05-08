@@ -479,6 +479,9 @@
                         <strong>Daily Vehicle Check</strong>
                         <span id="dailyInspectionStatus" style="font-size:12px; color:#666;">Loading...</span>
                     </div>
+                    <div id="inspectionRequiredBanner" class="inspection-warning" style="display:none; margin-bottom:10px;">
+                        Inspection required now: complete and save this check before clock out, activities, or day edits.
+                    </div>
                     <div class="form-group">
                         <label for="vehicleRegistration">Vehicle Registration *</label>
                         <input id="vehicleRegistration" class="form-control" placeholder="e.g. AB12 CDE">
@@ -636,6 +639,7 @@
         let locationError = false;
         let dailyInspection = null;
         let inspectionQuestionConfig = { vehicle: [], trailer: [] };
+        let inspectionBlockedWhileClockedIn = false;
         
         async function init() {
             console.log('=== INIT FUNCTION CALLED ===');
@@ -794,6 +798,8 @@
                         });
                     }
                     
+                    const statusInspection = data.dailyInspection || {};
+                    inspectionBlockedWhileClockedIn = !!statusInspection.blockedWhileClockedIn;
                     updateUI();
                     
                     // Reload weekly timesheet when status changes (e.g., clock in/out) to refresh activities
@@ -822,6 +828,7 @@
             const jobSelectGroup = document.getElementById('jobSelectGroup');
             const clockInBtn = document.getElementById('clockInBtn');
             const clockOutBtn = document.getElementById('clockOutBtn');
+            const inspectionRequiredBanner = document.getElementById('inspectionRequiredBanner');
             const inspectionStatus = document.getElementById('dailyInspectionStatus');
             if (inspectionStatus) {
                 if (!isCurrentUserDriver()) {
@@ -846,6 +853,15 @@
                 jobSelectGroup.style.display = 'none';
                 clockInBtn.style.display = 'none';
                 clockOutBtn.style.display = 'block';
+                if (isCurrentUserDriver() && inspectionBlockedWhileClockedIn) {
+                    inspectionRequiredBanner.style.display = 'block';
+                    clockOutBtn.disabled = true;
+                    clockOutBtn.style.opacity = '0.6';
+                } else {
+                    inspectionRequiredBanner.style.display = 'none';
+                    clockOutBtn.disabled = false;
+                    clockOutBtn.style.opacity = '1';
+                }
             } else {
                 // Not clocked in
                 clockStatus.className = 'clock-status';
@@ -865,6 +881,7 @@
                 jobSelectGroup.style.display = 'block';
                 clockInBtn.style.display = 'block';
                 clockOutBtn.style.display = 'none';
+                inspectionRequiredBanner.style.display = 'none';
             }
         }
         
@@ -873,11 +890,6 @@
         }
 
         async function handleClockIn() {
-            if (isCurrentUserDriver() && !dailyInspection) {
-                showAlert('Complete your Daily Vehicle Check before clocking in.', 'error');
-                return;
-            }
-
             const jobId = document.getElementById('jobSelect').value;
             if (!jobId) {
                 showAlert('Please select a job/site', 'error');
@@ -935,6 +947,10 @@
         }
         
         async function handleClockOut() {
+            if (isCurrentUserDriver() && inspectionBlockedWhileClockedIn) {
+                showAlert('Complete your Daily Vehicle Check before clocking out.', 'error');
+                return;
+            }
             if (!currentLocation && !locationError) {
                 showAlert('Getting your location...', 'error');
                 requestLocation();
@@ -999,6 +1015,7 @@
                 const data = await apiCall('/inspections/daily/current');
                 inspectionQuestionConfig = data.questions || { vehicle: [], trailer: [] };
                 dailyInspection = data.inspection || null;
+                inspectionBlockedWhileClockedIn = !!(currentStatus && isCurrentUserDriver() && !dailyInspection);
                 const responses = dailyInspection?.responses || {};
                 document.getElementById('vehicleRegistration').value = dailyInspection?.vehicle_registration || '';
                 document.getElementById('trailerAttachedCheck').checked = !!dailyInspection?.trailer_attached;
@@ -1019,6 +1036,14 @@
             } catch (error) {
                 console.error('Error loading daily inspection:', error);
             }
+        }
+
+        function isInspectionBlockingActionsForDate(dateStr) {
+            if (!isCurrentUserDriver()) return false;
+            if (!currentStatus) return false;
+            if (!inspectionBlockedWhileClockedIn) return false;
+            const today = londonYmd(new Date());
+            return (dateStr || '') === today;
         }
 
         function toggleTrailerInspection() {
@@ -1576,6 +1601,10 @@
         }
         
         async function addActivity(dateStr) {
+            if (isInspectionBlockingActionsForDate(dateStr)) {
+                showAlert('Complete your Daily Vehicle Check before adding activities.', 'error');
+                return;
+            }
             const input = document.getElementById(`activity-input-${dateStr}`);
             if (!input || !input.value.trim()) {
                 showAlert('Please enter an activity', 'error');
@@ -1668,6 +1697,10 @@
         }
         
         async function deleteActivity(dateStr, index) {
+            if (isInspectionBlockingActionsForDate(dateStr)) {
+                showAlert('Complete your Daily Vehicle Check before changing activities.', 'error');
+                return;
+            }
             if (!confirm('Delete this activity?')) return;
             
             if (!currentWeekStart) {
@@ -1761,6 +1794,12 @@
         }
         
         async function saveOvernightAway(date, overnightAway) {
+            if (isInspectionBlockingActionsForDate(date)) {
+                showAlert('Complete your Daily Vehicle Check before changing day settings.', 'error');
+                const checkbox = document.getElementById(`overnight-${date}`);
+                if (checkbox) checkbox.checked = !overnightAway;
+                return;
+            }
             if (!currentWeekStart) return;
             
             // Preserve checkbox state during save
@@ -1820,6 +1859,13 @@
         }
         
         async function saveDayType(date, dayType) {
+            if (isInspectionBlockingActionsForDate(date)) {
+                showAlert('Complete your Daily Vehicle Check before changing day type.', 'error');
+                if (currentWeekStart) {
+                    await loadWeeklyTimesheet(currentWeekStart);
+                }
+                return;
+            }
             if (!currentWeekStart) return;
             
             const select = document.getElementById(`day-type-${date}`);

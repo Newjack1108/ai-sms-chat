@@ -71,8 +71,7 @@ const DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS = [
     { key: 'tyres_condition_ok', critical: true },
     { key: 'mirrors_and_glass_ok', critical: true },
     { key: 'fluid_leaks_none', critical: true },
-    { key: 'load_secured', critical: true },
-    { key: 'documents_present', critical: false }
+    { key: 'load_secured', critical: true }
 ];
 const DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS = [
     { key: 'trailer_lights_working', critical: true },
@@ -2504,6 +2503,32 @@ function getInspectionWarnings(inspection) {
     return warnings;
 }
 
+async function getInspectionRequirementState(userId, targetDate = null) {
+    const account = await ProductionDatabase.getUserById(userId);
+    const inspectionRequired = !!(account?.is_driver === true || account?.is_driver === 1);
+    const date = targetDate || londonYmd(new Date());
+    if (!inspectionRequired) {
+        return { inspectionRequired: false, inspectionCompleted: true, date, inspection: null };
+    }
+    const inspection = await ProductionDatabase.getDailyVehicleInspection(userId, date);
+    return { inspectionRequired, inspectionCompleted: !!inspection, date, inspection };
+}
+
+async function requireDailyInspectionIfDriver(req, res, userId, targetDate = null) {
+    const state = await getInspectionRequirementState(userId, targetDate);
+    if (!state.inspectionRequired || state.inspectionCompleted) {
+        return { allowed: true, state };
+    }
+    res.status(400).json({
+        success: false,
+        error: 'Daily vehicle/trailer inspection must be completed after clock-in before continuing timesheet actions.',
+        inspection_required: true,
+        inspection_completed: false,
+        inspection_date: state.date
+    });
+    return { allowed: false, state };
+}
+
 function isInstallerAssignedToInstallation(installation, userId) {
     return Array.isArray(installation?.assigned_users) &&
         installation.assigned_users.some(u => Number(u.user_id) === Number(userId));
@@ -3240,7 +3265,16 @@ router.post('/timesheet/clock-out', requireProductionAuth, async (req, res) => {
 router.get('/timesheet/active', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const activeClockIns = await ProductionDatabase.getActiveClockIns();
-        res.json({ success: true, clockIns: activeClockIns });
+        const today = londonYmd(new Date());
+        const withInspectionState = await Promise.all((activeClockIns || []).map(async entry => {
+            const inspectionState = await getInspectionRequirementState(entry.user_id, today);
+            return {
+                ...entry,
+                inspection_required: inspectionState.inspectionRequired,
+                inspection_completed: inspectionState.inspectionCompleted
+            };
+        }));
+        res.json({ success: true, clockIns: withInspectionState });
     } catch (error) {
         console.error('Get active clock ins error:', error);
         console.error('Error stack:', error.stack);
@@ -3468,17 +3502,6 @@ router.post('/clock/clock-in', requireProductionAuth, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Job/site is required' });
         }
 
-        const isDriver = !!(user?.is_driver === true || user?.is_driver === 1);
-        if (isDriver) {
-            const todayInspection = await ProductionDatabase.getDailyVehicleInspection(userId, londonYmd(new Date()));
-            if (!todayInspection) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Daily vehicle inspection is required before first departure. Please complete your vehicle check.'
-                });
-            }
-        }
-        
         // FIRST: Auto-clock-out any old entries that weren't clocked out (prevents cross-day overlaps)
         // This must happen before checking for duplicates to ensure old entries are closed
         try {
@@ -3560,6 +3583,8 @@ router.post('/clock/clock-out', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const { latitude, longitude } = req.body;
+        const inspectionGate = await requireDailyInspectionIfDriver(req, res, userId, londonYmd(new Date()));
+        if (!inspectionGate.allowed) return;
         
         const entry = await ProductionDatabase.clockOut(userId, latitude, longitude);
         if (!entry) {
@@ -3725,16 +3750,14 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const status = await ProductionDatabase.getCurrentClockStatus(userId);
-        const userRow = await ProductionDatabase.getUserById(userId);
-        const inspectionRequired = !!(userRow?.is_driver === true || userRow?.is_driver === 1);
+        const today = londonYmd(new Date());
+        const inspectionState = await getInspectionRequirementState(userId, today);
+        const inspectionRequired = inspectionState.inspectionRequired;
         
         // Check if user has already completed a clock in/out cycle today
-        const today = londonYmd(new Date());
         const completedEntriesCount = await ProductionDatabase.countEntriesForDate(userId, today);
         const hasCompletedToday = completedEntriesCount >= 1;
-        const inspection = inspectionRequired
-            ? await ProductionDatabase.getDailyVehicleInspection(userId, today)
-            : null;
+        const inspection = inspectionState.inspection || null;
         const inspectionWarnings = inspection ? getInspectionWarnings(inspection) : [];
         
         res.json({ 
@@ -3745,7 +3768,8 @@ router.get('/clock/status', requireProductionAuth, async (req, res) => {
                 required: inspectionRequired,
                 completed: inspectionRequired ? !!inspection : true,
                 inspection: inspection || null,
-                warnings: inspectionWarnings
+                warnings: inspectionWarnings,
+                blockedWhileClockedIn: !!status && inspectionRequired && !inspection
             }
         });
     } catch (error) {
@@ -3893,6 +3917,13 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
         const weekStartDate = req.params.weekStart;
         const entryDate = req.params.date;
         const { daily_notes, overnight_away, day_type } = req.body;
+        const today = londonYmd(new Date());
+        const currentStatus = await ProductionDatabase.getCurrentClockStatus(userId);
+        const isOnClockToday = !!currentStatus && (londonYmd(new Date(currentStatus.clock_in_time)) === today);
+        if (isOnClockToday && entryDate === today) {
+            const inspectionGate = await requireDailyInspectionIfDriver(req, res, userId, today);
+            if (!inspectionGate.allowed) return;
+        }
         
         const weeklyTimesheet = await ProductionDatabase.getOrCreateWeeklyTimesheet(userId, weekStartDate);
         const dailyEntry = await ProductionDatabase.getOrCreateDailyEntry(weeklyTimesheet.id, entryDate);

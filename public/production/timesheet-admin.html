@@ -731,6 +731,7 @@
                                 <th>Staff Member</th>
                                 <th>Job/Site</th>
                                 <th>Clock In Time</th>
+                                <th>Inspection</th>
                                 <th>Location</th>
                             </tr>
                         </thead>
@@ -746,6 +747,14 @@
                                         <td><strong>${entry.username || 'Unknown'}</strong></td>
                                         <td>${entry.job_name || 'Unknown'}</td>
                                         <td>${formatDateTime(clockInTime)}</td>
+                                        <td>
+                                            ${entry.inspection_required
+                                                ? (entry.inspection_completed
+                                                    ? '<span class="badge badge-success">Completed</span>'
+                                                    : '<span class="badge badge-danger">Missing (on clock)</span>')
+                                                : '<span class="badge badge-secondary">Not required</span>'
+                                            }
+                                        </td>
                                         <td>
                                             <small>${location}</small>
                                             ${hasLocation ? `
