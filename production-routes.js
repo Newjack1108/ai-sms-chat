@@ -5274,9 +5274,47 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
                 // Continue with empty array instead of failing completely
             }
         }
+
+        // Get failed daily vehicle inspection reminders (only for admin/office roles)
+        let vehicleInspectionReminders = [];
+        if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
+            try {
+                const today = londonYmd(new Date());
+                const inspectionRows = await ProductionDatabase.getDailyVehicleInspectionHistory({
+                    date_from: today,
+                    date_to: today
+                });
+                const failedInspections = inspectionRows.filter(row => row.overall_status === 'warning');
+                vehicleInspectionReminders = await Promise.all(failedInspections.map(async row => {
+                    const detail = await ProductionDatabase.getDailyVehicleInspectionById(row.id);
+                    const issues = detail ? getInspectionIssues(detail) : [];
+                    return {
+                        type: 'vehicle_inspection_issue',
+                        inspection_id: row.id,
+                        inspection_date: row.inspection_date,
+                        inspected_by_user_id: row.inspected_by_user_id,
+                        inspected_by_username: row.inspected_by_username,
+                        vehicle_registration: row.vehicle_registration,
+                        trailer_registration: row.trailer_registration,
+                        issue_count: issues.length,
+                        issues: issues.map(issue => ({
+                            label: issue.label,
+                            section: issue.section,
+                            is_critical: issue.is_critical,
+                            comment: issue.comment || null
+                        })),
+                        reminder_text: `${row.inspected_by_username || 'Driver'} reported ${issues.length || row.critical_fail_count || 1} vehicle issue${(issues.length || row.critical_fail_count || 1) === 1 ? '' : 's'}`
+                    };
+                }));
+            } catch (vehicleInspectionError) {
+                console.error('Error getting vehicle inspection reminders:', vehicleInspectionError);
+                console.error('Stack:', vehicleInspectionError.stack);
+            }
+        }
         
         // Combine both types of reminders
         const allReminders = [
+            ...vehicleInspectionReminders,
             ...stockReminders.map(r => ({ ...r, type: 'stock_check' })),
             ...timesheetReminders
         ];

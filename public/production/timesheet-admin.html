@@ -549,6 +549,15 @@
             
             // Request location permission for clock in/out
             requestLocation();
+
+            const inspectionDate = document.getElementById('inspectionDashboardDate');
+            const selectedInspectionDate = localStorage.getItem('inspectionDashboardDate');
+            if (inspectionDate) {
+                inspectionDate.value = selectedInspectionDate || londonYmd(new Date());
+                if (selectedInspectionDate) {
+                    localStorage.removeItem('inspectionDashboardDate');
+                }
+            }
             
             await Promise.all([
                 loadAdminClockStatus(),
@@ -562,10 +571,6 @@
             
             // Initialize payroll week selector to current week
             const weekSelect = document.getElementById('payrollWeekSelect');
-            const inspectionDate = document.getElementById('inspectionDashboardDate');
-            if (inspectionDate && !inspectionDate.value) {
-                inspectionDate.value = londonYmd(new Date());
-            }
             if (weekSelect) {
                 // Check if there's a selected week from dashboard reminder
                 const selectedWeek = localStorage.getItem('selectedWeek');

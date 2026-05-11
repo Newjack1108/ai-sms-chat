@@ -285,7 +285,23 @@
 
                 if (remindersData.reminders && remindersData.reminders.length > 0) {
                     remindersHtml += remindersData.reminders.slice(0, 5).map(reminder => {
-                        if (reminder.type === 'timesheet_approval') {
+                        if (reminder.type === 'vehicle_inspection_issue') {
+                            const issuesPreview = (reminder.issues || []).slice(0, 2).map(issue => issue.label).join(', ');
+                            return `
+                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #f8d7da;">
+                                    <strong style="color: #721c24;">Vehicle inspection issue: ${reminder.inspected_by_username || 'Driver'}</strong><br>
+                                    <small style="color: #721c24;">
+                                        Vehicle: ${reminder.vehicle_registration || 'Unknown'}${issuesPreview ? ` | ${issuesPreview}` : ''}
+                                    </small>
+                                    <br>
+                                    <a href="timesheet-admin.html"
+                                       onclick="localStorage.setItem('inspectionDashboardDate', '${reminder.inspection_date}');"
+                                       style="font-size: 11px; color: #721c24; text-decoration: underline; margin-top: 4px; display: inline-block;">
+                                        Review Vehicle Checklist →
+                                    </a>
+                                </div>
+                            `;
+                        } else if (reminder.type === 'timesheet_approval') {
                             const weekStart = new Date(reminder.week_start_date);
                             const weekStartFormatted = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
                             return `
