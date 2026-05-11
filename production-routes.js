@@ -801,12 +801,37 @@ router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, asy
             return res.status(400).json({ success: false, error: 'Valid supplier_id is required' });
         }
         const incomingItems = Array.isArray(items) ? items : [];
-        const normalizedItems = incomingItems.map((item) => ({
-            stock_item_id: parseInt(item.stock_item_id, 10),
-            quantity: parseFloat(item.quantity || 0),
-            unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
-            notes: item.notes || null
-        })).filter((item) => !Number.isNaN(item.stock_item_id) && item.quantity > 0);
+        const normalizedItems = incomingItems.map((item) => {
+            const stockItemId = parseInt(item.stock_item_id, 10);
+            const quantity = parseFloat(item.quantity || 0);
+            const customItemName = item.custom_item_name ? String(item.custom_item_name).trim() : '';
+            const customUnit = item.custom_unit ? String(item.custom_unit).trim() : '';
+            if (!(quantity > 0)) return null;
+            if (!Number.isNaN(stockItemId) && stockItemId > 0) {
+                return {
+                    stock_item_id: stockItemId,
+                    custom_item_name: null,
+                    custom_unit: null,
+                    quantity,
+                    unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
+                    notes: item.notes || null
+                };
+            }
+            if (customItemName) {
+                return {
+                    stock_item_id: null,
+                    custom_item_name: customItemName,
+                    custom_unit: customUnit || 'item',
+                    quantity,
+                    unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
+                    notes: item.notes || null
+                };
+            }
+            return null;
+        }).filter(Boolean);
+        if (!isOneOffPurchase && normalizedItems.some((item) => item.custom_item_name)) {
+            return res.status(400).json({ success: false, error: 'Custom line items are only allowed on one-off purchases' });
+        }
         if (normalizedItems.length === 0 && !isOneOffPurchase) {
             return res.status(400).json({ success: false, error: 'At least one valid line item is required unless this is marked as a one-off purchase' });
         }
@@ -856,11 +881,25 @@ router.post('/purchase-orders/:id/items', requireProductionAuth, requireAdminOrO
         const stockItemId = parseInt(req.body.stock_item_id, 10);
         const quantity = parseFloat(req.body.quantity || 0);
         const unitCost = parseFloat(req.body.unit_cost_gbp || 0);
-        if (Number.isNaN(poId) || Number.isNaN(stockItemId) || quantity <= 0) {
-            return res.status(400).json({ success: false, error: 'Valid ids and quantity are required' });
+        const customItemName = req.body.custom_item_name ? String(req.body.custom_item_name).trim() : '';
+        const customUnit = req.body.custom_unit ? String(req.body.custom_unit).trim() : '';
+        if (Number.isNaN(poId) || quantity <= 0) {
+            return res.status(400).json({ success: false, error: 'Valid purchase order id and quantity are required' });
+        }
+        const existingOrder = await ProductionDatabase.getPurchaseOrderById(poId);
+        if (!existingOrder) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        if (customItemName && !existingOrder.is_one_off_purchase) {
+            return res.status(400).json({ success: false, error: 'Custom line items are only allowed on one-off purchases' });
+        }
+        if (Number.isNaN(stockItemId) && !customItemName) {
+            return res.status(400).json({ success: false, error: 'Provide either a stock item or a custom item name' });
         }
         const order = await ProductionDatabase.addPurchaseOrderItem(poId, {
-            stock_item_id: stockItemId,
+            stock_item_id: Number.isNaN(stockItemId) ? null : stockItemId,
+            custom_item_name: customItemName || null,
+            custom_unit: customItemName ? (customUnit || 'item') : null,
             quantity,
             unit_cost_gbp: unitCost,
             notes: req.body.notes || null
@@ -963,6 +1002,9 @@ router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminO
         const userId = req.session.production_user ? req.session.production_user.id : null;
         for (const line of effectiveLines) {
             const item = lineItemsById.get(line.item_id);
+            if (!item || !item.stock_item_id) {
+                continue;
+            }
             await ProductionDatabase.recordStockMovement({
                 stock_item_id: item.stock_item_id,
                 movement_type: line.mode === 'adjust' ? 'adjustment' : 'in',
@@ -2503,6 +2545,30 @@ function getInspectionWarnings(inspection) {
     return warnings;
 }
 
+function formatInspectionQuestionLabel(questionKey) {
+    return String(questionKey || '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, chr => chr.toUpperCase());
+}
+
+function getInspectionIssues(inspection) {
+    const issues = [];
+    const responses = inspection?.responses || {};
+    for (const section of ['vehicle', 'trailer']) {
+        for (const [questionKey, item] of Object.entries(responses[section] || {})) {
+            if (item?.answer !== 'fail') continue;
+            issues.push({
+                section,
+                question_key: questionKey,
+                label: formatInspectionQuestionLabel(questionKey),
+                is_critical: !!item?.is_critical,
+                comment: item?.comment || null
+            });
+        }
+    }
+    return issues;
+}
+
 async function getInspectionRequirementState(userId, targetDate = null) {
     const account = await ProductionDatabase.getUserById(userId);
     const inspectionRequired = !!(account?.is_driver === true || account?.is_driver === 1);
@@ -3370,7 +3436,8 @@ router.get('/inspections/daily/current', requireProductionAuth, async (req, res)
                 trailer: DAILY_VEHICLE_INSPECTION_TRAILER_QUESTIONS
             },
             inspection,
-            warnings: getInspectionWarnings(inspection)
+            warnings: getInspectionWarnings(inspection),
+            issues: getInspectionIssues(inspection)
         });
     } catch (error) {
         console.error('Get daily inspection error:', error);
@@ -3431,18 +3498,23 @@ router.put('/inspections/daily/current', requireProductionAuth, async (req, res)
             critical_fail_count: criticalFailCount,
             responses: allResponses
         });
+        const issues = getInspectionIssues(inspection);
         const warnings = getInspectionWarnings(inspection);
-        if (warnings.length > 0) {
+        if (issues.length > 0) {
             const user = req.session.production_user;
+            const issueSummary = issues.map(issue => {
+                const detail = issue.comment ? ` (${issue.comment})` : '';
+                return `${issue.section}: ${issue.label}${detail}`;
+            }).join('; ');
             await ProductionDatabase.createTimesheetNotice(
-                `Vehicle inspection warning (${user?.username || `user ${userId}`})`,
-                `Critical daily vehicle/trailer checks failed on ${date}: ${warnings.join(', ')}`,
+                `Vehicle checklist issue (${user?.username || `user ${userId}`})`,
+                `Vehicle/trailer checklist issues reported on ${date}: ${issueSummary}`,
                 'high',
                 null,
                 userId
             );
         }
-        res.json({ success: true, inspection, warnings });
+        res.json({ success: true, inspection, warnings, issues });
     } catch (error) {
         console.error('Upsert daily inspection error:', error);
         res.status(500).json({ success: false, error: 'Failed to save daily inspection' });
@@ -3453,12 +3525,26 @@ router.get('/inspections/daily/history', requireProductionAuth, requireManager, 
     try {
         const dateFrom = req.query.date_from || londonYmd(new Date());
         const dateTo = req.query.date_to || dateFrom;
-        const history = await ProductionDatabase.getDailyVehicleInspectionHistory({
+        const historyRows = await ProductionDatabase.getDailyVehicleInspectionHistory({
             date_from: dateFrom,
             date_to: dateTo,
             user_id: req.query.user_id || null,
             vehicle_registration: req.query.vehicle_registration || null
         });
+        const history = await Promise.all((historyRows || []).map(async row => {
+            const detail = await ProductionDatabase.getDailyVehicleInspectionById(row.id);
+            const issues = detail ? getInspectionIssues(detail) : [];
+            return {
+                ...row,
+                issue_count: issues.length,
+                issue_summary: issues.map(issue => ({
+                    section: issue.section,
+                    label: issue.label,
+                    is_critical: issue.is_critical,
+                    comment: issue.comment || null
+                }))
+            };
+        }));
         const users = await ProductionDatabase.getAllUsers();
         const activeFitters = (users || []).filter(
             u =>
@@ -3485,6 +3571,28 @@ router.get('/inspections/daily/history', requireProductionAuth, requireManager, 
     } catch (error) {
         console.error('Get daily inspection history error:', error);
         res.status(500).json({ success: false, error: 'Failed to load daily inspection history' });
+    }
+});
+
+router.get('/inspections/daily/:id', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const inspectionId = parseInt(req.params.id, 10);
+        if (Number.isNaN(inspectionId)) {
+            return res.status(400).json({ success: false, error: 'Invalid inspection id' });
+        }
+        const inspection = await ProductionDatabase.getDailyVehicleInspectionById(inspectionId);
+        if (!inspection) {
+            return res.status(404).json({ success: false, error: 'Inspection not found' });
+        }
+        res.json({
+            success: true,
+            inspection,
+            issues: getInspectionIssues(inspection),
+            warnings: getInspectionWarnings(inspection)
+        });
+    } catch (error) {
+        console.error('Get daily inspection detail error:', error);
+        res.status(500).json({ success: false, error: 'Failed to load inspection detail' });
     }
 });
 

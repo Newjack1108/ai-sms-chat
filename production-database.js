@@ -309,7 +309,9 @@ function initializeSQLite() {
         CREATE TABLE IF NOT EXISTS purchase_order_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             purchase_order_id INTEGER NOT NULL,
-            stock_item_id INTEGER NOT NULL,
+            stock_item_id INTEGER,
+            custom_item_name TEXT,
+            custom_unit TEXT,
             quantity REAL NOT NULL,
             unit_cost_gbp REAL NOT NULL DEFAULT 0,
             line_total_gbp REAL NOT NULL DEFAULT 0,
@@ -330,6 +332,49 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Purchase orders migration check skipped:', error.message);
+    }
+
+    // Migrate purchase_order_items to allow custom non-stock lines
+    try {
+        const poiColumns = db.prepare(`PRAGMA table_info(purchase_order_items)`).all();
+        const hasCustomName = poiColumns.some(col => col.name === 'custom_item_name');
+        const hasCustomUnit = poiColumns.some(col => col.name === 'custom_unit');
+        const stockItemColumn = poiColumns.find(col => col.name === 'stock_item_id');
+        const stockItemIsNotNull = !!stockItemColumn && stockItemColumn.notnull === 1;
+        if (!hasCustomName || !hasCustomUnit || stockItemIsNotNull) {
+            db.exec(`
+                ALTER TABLE purchase_order_items RENAME TO purchase_order_items_old;
+
+                CREATE TABLE purchase_order_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    purchase_order_id INTEGER NOT NULL,
+                    stock_item_id INTEGER,
+                    custom_item_name TEXT,
+                    custom_unit TEXT,
+                    quantity REAL NOT NULL,
+                    unit_cost_gbp REAL NOT NULL DEFAULT 0,
+                    line_total_gbp REAL NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+                    FOREIGN KEY (stock_item_id) REFERENCES stock_items(id)
+                );
+
+                INSERT INTO purchase_order_items (
+                    id, purchase_order_id, stock_item_id, custom_item_name, custom_unit,
+                    quantity, unit_cost_gbp, line_total_gbp, notes, created_at
+                )
+                SELECT
+                    id, purchase_order_id, stock_item_id, NULL, NULL,
+                    quantity, unit_cost_gbp, line_total_gbp, notes, created_at
+                FROM purchase_order_items_old;
+
+                DROP TABLE purchase_order_items_old;
+            `);
+            console.log('✅ Migrated purchase_order_items to support custom non-stock lines');
+        }
+    } catch (error) {
+        console.log('⚠️ Purchase order items migration check skipped:', error.message);
     }
     
     // Product orders table
@@ -1665,7 +1710,9 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS purchase_order_items (
                 id SERIAL PRIMARY KEY,
                 purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
-                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
+                stock_item_id INTEGER REFERENCES stock_items(id),
+                custom_item_name VARCHAR(255),
+                custom_unit VARCHAR(100),
                 quantity DECIMAL(12,2) NOT NULL,
                 unit_cost_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
                 line_total_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -1682,6 +1729,34 @@ async function initializePostgreSQL() {
                     WHERE table_name = 'purchase_orders' AND column_name = 'is_one_off_purchase'
                 ) THEN
                     ALTER TABLE purchase_orders ADD COLUMN is_one_off_purchase BOOLEAN NOT NULL DEFAULT FALSE;
+                END IF;
+            END $$;
+        `);
+
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'purchase_order_items' AND column_name = 'custom_item_name'
+                ) THEN
+                    ALTER TABLE purchase_order_items ADD COLUMN custom_item_name VARCHAR(255);
+                END IF;
+
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'purchase_order_items' AND column_name = 'custom_unit'
+                ) THEN
+                    ALTER TABLE purchase_order_items ADD COLUMN custom_unit VARCHAR(100);
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'purchase_order_items'
+                      AND column_name = 'stock_item_id'
+                      AND is_nullable = 'NO'
+                ) THEN
+                    ALTER TABLE purchase_order_items ALTER COLUMN stock_item_id DROP NOT NULL;
                 END IF;
             END $$;
         `);
@@ -5819,9 +5894,12 @@ class ProductionDatabase {
             po = result.rows[0] || null;
             if (!po) return null;
             const itemsResult = await pool.query(
-                `SELECT poi.*, si.name AS stock_item_name, si.unit AS stock_item_unit
+                `SELECT poi.*,
+                        COALESCE(si.name, poi.custom_item_name) AS stock_item_name,
+                        COALESCE(si.unit, poi.custom_unit) AS stock_item_unit,
+                        CASE WHEN poi.stock_item_id IS NULL THEN TRUE ELSE FALSE END AS is_custom_item
                  FROM purchase_order_items poi
-                 INNER JOIN stock_items si ON si.id = poi.stock_item_id
+                 LEFT JOIN stock_items si ON si.id = poi.stock_item_id
                  WHERE poi.purchase_order_id = $1
                  ORDER BY poi.id ASC`,
                 [id]
@@ -5837,9 +5915,12 @@ class ProductionDatabase {
         ).get(id) || null;
         if (!po) return null;
         po.items = db.prepare(
-            `SELECT poi.*, si.name AS stock_item_name, si.unit AS stock_item_unit
+            `SELECT poi.*,
+                    COALESCE(si.name, poi.custom_item_name) AS stock_item_name,
+                    COALESCE(si.unit, poi.custom_unit) AS stock_item_unit,
+                    CASE WHEN poi.stock_item_id IS NULL THEN 1 ELSE 0 END AS is_custom_item
              FROM purchase_order_items poi
-             INNER JOIN stock_items si ON si.id = poi.stock_item_id
+             LEFT JOIN stock_items si ON si.id = poi.stock_item_id
              WHERE poi.purchase_order_id = ?
              ORDER BY poi.id ASC`
         ).all(id);
@@ -5945,9 +6026,9 @@ class ProductionDatabase {
                     const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                     subtotal += lineTotal;
                     await pool.query(
-                        `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
-                         VALUES ($1, $2, $3, $4, $5, $6)`,
-                        [poId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null]
+                        `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                        [poId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null]
                     );
                 }
                 await pool.query(
@@ -5990,15 +6071,15 @@ class ProductionDatabase {
             const poId = poInfo.lastInsertRowid;
             let subtotal = 0;
             const insertItem = db.prepare(
-                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
-                 VALUES (?, ?, ?, ?, ?, ?)`
+                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
             for (const item of payload.items) {
                 const qty = parseFloat(item.quantity || 0);
                 const unitCost = parseFloat(item.unit_cost_gbp || 0);
                 const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                 subtotal += lineTotal;
-                insertItem.run(poId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null);
+                insertItem.run(poId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
             }
             db.prepare(`UPDATE purchase_orders SET subtotal_gbp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
                 .run(parseFloat(subtotal.toFixed(2)), poId);
@@ -6026,9 +6107,9 @@ class ProductionDatabase {
         const lineTotal = parseFloat((qty * unitCost).toFixed(2));
         if (isPostgreSQL) {
             await pool.query(
-                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6)`,
-                [purchaseOrderId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null]
+                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [purchaseOrderId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null]
             );
             const subtotalResult = await pool.query(
                 `SELECT COALESCE(SUM(line_total_gbp), 0)::numeric AS subtotal
@@ -6043,9 +6124,9 @@ class ProductionDatabase {
             return this.getPurchaseOrderById(purchaseOrderId);
         }
         db.prepare(
-            `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, quantity, unit_cost_gbp, line_total_gbp, notes)
-             VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(purchaseOrderId, item.stock_item_id, qty, unitCost, lineTotal, item.notes || null);
+            `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(purchaseOrderId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
         const subtotalRow = db.prepare(
             `SELECT COALESCE(SUM(line_total_gbp), 0) AS subtotal
              FROM purchase_order_items
@@ -7767,6 +7848,49 @@ class ProductionDatabase {
              FROM daily_vehicle_inspection_responses
              WHERE inspection_id = ?`
         ).all(header.id);
+        return {
+            ...header,
+            trailer_attached: this.toBooleanValue(header.trailer_attached),
+            responses: this.normalizeInspectionResponses(rows)
+        };
+    }
+
+    static async getDailyVehicleInspectionById(inspectionId) {
+        if (isPostgreSQL) {
+            const headerResult = await pool.query(
+                `SELECT dvi.*, u.username AS inspected_by_username
+                 FROM daily_vehicle_inspections dvi
+                 LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+                 WHERE dvi.id = $1`,
+                [inspectionId]
+            );
+            const header = headerResult.rows[0] || null;
+            if (!header) return null;
+            const responseResult = await pool.query(
+                `SELECT section, question_key, answer, is_critical, comment
+                 FROM daily_vehicle_inspection_responses
+                 WHERE inspection_id = $1`,
+                [inspectionId]
+            );
+            return {
+                ...header,
+                trailer_attached: this.toBooleanValue(header.trailer_attached),
+                responses: this.normalizeInspectionResponses(responseResult.rows)
+            };
+        }
+
+        const header = db.prepare(
+            `SELECT dvi.*, u.username AS inspected_by_username
+             FROM daily_vehicle_inspections dvi
+             LEFT JOIN production_users u ON u.id = dvi.inspected_by_user_id
+             WHERE dvi.id = ?`
+        ).get(inspectionId);
+        if (!header) return null;
+        const rows = db.prepare(
+            `SELECT section, question_key, answer, is_critical, comment
+             FROM daily_vehicle_inspection_responses
+             WHERE inspection_id = ?`
+        ).all(inspectionId);
         return {
             ...header,
             trailer_attached: this.toBooleanValue(header.trailer_attached),

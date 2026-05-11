@@ -275,6 +275,20 @@
         </div>
     </div>
     
+    <div id="inspectionDetailModal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>Vehicle Checklist Detail</h3>
+                <button class="modal-close" onclick="hideModal('inspectionDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="inspectionDetailContent">
+                    <div class="loading">Loading checklist...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Amendment Review Modal -->
     <div id="amendmentReviewModal" class="modal">
         <div class="modal-content" style="max-width: 600px;">
@@ -980,7 +994,8 @@
                                 <th>Vehicle</th>
                                 <th>Trailer</th>
                                 <th>Status</th>
-                                <th>Critical Fails</th>
+                                <th>Issues</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -990,7 +1005,21 @@
                                     <td>${row.vehicle_registration || '-'}</td>
                                     <td>${row.trailer_attached ? (row.trailer_registration || 'Attached') : 'No'}</td>
                                     <td><span class="badge ${row.overall_status === 'warning' ? 'badge-warning' : 'badge-success'}">${row.overall_status}</span></td>
-                                    <td>${row.critical_fail_count || 0}</td>
+                                    <td>
+                                        ${(row.issue_summary || []).length > 0
+                                            ? (row.issue_summary || []).map(issue => `
+                                                <div style="margin-bottom:4px;">
+                                                    <span class="badge ${issue.is_critical ? 'badge-danger' : 'badge-warning'}">${issue.is_critical ? 'Critical' : 'Issue'}</span>
+                                                    ${escapeHtml(issue.label || '')}
+                                                    ${issue.comment ? `<div style="font-size:11px; color:#666; margin-top:2px;">${escapeHtml(issue.comment)}</div>` : ''}
+                                                </div>
+                                            `).join('')
+                                            : '<span style="color:#666;">None</span>'
+                                        }
+                                    </td>
+                                    <td>
+                                        <button onclick="showInspectionDetail(${row.id})" class="btn btn-info btn-sm">View Checklist</button>
+                                    </td>
                                 </tr>
                             `).join('')}
                             ${missing.map(user => `
@@ -1000,6 +1029,7 @@
                                     <td>-</td>
                                     <td><span class="badge badge-danger">missing</span></td>
                                     <td>-</td>
+                                    <td>-</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -1007,6 +1037,87 @@
                 `;
             } catch (error) {
                 listEl.innerHTML = '<p style="padding: 20px; color: #e74c3c;">Failed to load vehicle inspection compliance.</p>';
+            }
+        }
+
+        function renderInspectionResponseRows(sectionLabel, responses) {
+            const entries = Object.entries(responses || {});
+            if (entries.length === 0) {
+                return `
+                    <div style="margin-top: 12px;">
+                        <h4 style="margin-bottom: 8px;">${sectionLabel}</h4>
+                        <p style="color: #666;">No responses recorded.</p>
+                    </div>
+                `;
+            }
+            return `
+                <div style="margin-top: 12px;">
+                    <h4 style="margin-bottom: 8px;">${sectionLabel}</h4>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Check</th>
+                                <th>Answer</th>
+                                <th>Comment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${entries.map(([key, item]) => `
+                                <tr>
+                                    <td>${escapeHtml(String(key).replace(/_/g, ' '))}${item?.is_critical ? ' <span class="badge badge-danger">Critical</span>' : ''}</td>
+                                    <td>
+                                        <span class="badge ${item?.answer === 'fail' ? 'badge-danger' : (item?.answer === 'pass' ? 'badge-success' : 'badge-secondary')}">
+                                            ${escapeHtml((item?.answer || '').toUpperCase() || 'UNKNOWN')}
+                                        </span>
+                                    </td>
+                                    <td>${item?.comment ? escapeHtml(item.comment) : '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        async function showInspectionDetail(inspectionId) {
+            const contentEl = document.getElementById('inspectionDetailContent');
+            contentEl.innerHTML = '<div class="loading">Loading checklist...</div>';
+            showModal('inspectionDetailModal');
+            try {
+                const data = await apiCall(`/inspections/daily/${inspectionId}`);
+                const inspection = data.inspection;
+                const issues = data.issues || [];
+                contentEl.innerHTML = `
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+                        <div><strong>Fitter:</strong><br>${escapeHtml(inspection.inspected_by_username || '')}</div>
+                        <div><strong>Date:</strong><br>${escapeHtml(inspection.inspection_date || '')}</div>
+                        <div><strong>Vehicle:</strong><br>${escapeHtml(inspection.vehicle_registration || '-')}</div>
+                        <div><strong>Trailer:</strong><br>${inspection.trailer_attached ? escapeHtml(inspection.trailer_registration || 'Attached') : 'No'}</div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <strong>Status:</strong>
+                        <span class="badge ${inspection.overall_status === 'warning' ? 'badge-warning' : 'badge-success'}">${escapeHtml(inspection.overall_status || 'pass')}</span>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <strong>Reported Issues</strong>
+                        ${issues.length > 0 ? `
+                            <div style="margin-top:8px;">
+                                ${issues.map(issue => `
+                                    <div style="padding:8px; border:1px solid #f0d98a; background:#fff8e1; border-radius:6px; margin-bottom:8px;">
+                                        <div><strong>${escapeHtml(issue.section)}:</strong> ${escapeHtml(issue.label || '')}</div>
+                                        <div style="font-size:12px; color:#666;">${issue.is_critical ? 'Critical issue' : 'Issue reported'}</div>
+                                        ${issue.comment ? `<div style="margin-top:4px;">${escapeHtml(issue.comment)}</div>` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<p style="color:#666; margin-top:8px;">No issues were reported on this checklist.</p>'}
+                    </div>
+                    ${inspection.notes ? `<div style="margin-bottom:16px;"><strong>Overall Notes:</strong><div style="margin-top:6px; padding:8px; background:#f8f9fa; border-radius:6px;">${escapeHtml(inspection.notes)}</div></div>` : ''}
+                    ${renderInspectionResponseRows('Vehicle Checks', inspection.responses?.vehicle)}
+                    ${inspection.trailer_attached ? renderInspectionResponseRows('Trailer Checks', inspection.responses?.trailer) : ''}
+                `;
+            } catch (error) {
+                contentEl.innerHTML = `<p style="color:#e74c3c;">Failed to load inspection detail: ${escapeHtml(error.message || 'Unknown error')}</p>`;
             }
         }
         

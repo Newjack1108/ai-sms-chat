@@ -994,6 +994,7 @@
                 ${questions.map(q => {
                     const row = responses?.[q.key] || {};
                     const selected = row.answer || '';
+                    const comment = row.comment || '';
                     return `
                         <div style="padding:8px; border:1px solid #e5e5e5; border-radius:6px; margin-bottom:8px;">
                             <div style="font-size:13px; margin-bottom:6px;">
@@ -1003,6 +1004,14 @@
                                 <label><input type="radio" name="${section}-${q.key}" value="pass" ${selected === 'pass' ? 'checked' : ''}> Pass</label>
                                 <label><input type="radio" name="${section}-${q.key}" value="fail" ${selected === 'fail' ? 'checked' : ''}> Fail</label>
                                 <label><input type="radio" name="${section}-${q.key}" value="na" ${selected === 'na' ? 'checked' : ''}> N/A</label>
+                            </div>
+                            <div style="margin-top:8px;">
+                                <textarea
+                                    id="${section}-${q.key}-comment"
+                                    rows="2"
+                                    placeholder="Issue details (optional)"
+                                    style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:12px;"
+                                >${escapeHtml(comment)}</textarea>
                             </div>
                         </div>
                     `;
@@ -1025,9 +1034,9 @@
                 renderInspectionQuestions('trailerInspectionQuestions', 'trailer', inspectionQuestionConfig.trailer || [], responses.trailer || {});
                 toggleTrailerInspection();
                 const warningBanner = document.getElementById('inspectionWarningBanner');
-                if ((data.warnings || []).length > 0) {
+                if ((data.issues || []).length > 0) {
                     warningBanner.style.display = 'block';
-                    warningBanner.textContent = 'Critical checks failed. Recorded and manager notified; continue with caution policy.';
+                    warningBanner.textContent = 'Checklist issues have been recorded and reported to the manager.';
                 } else {
                     warningBanner.style.display = 'none';
                     warningBanner.textContent = '';
@@ -1064,13 +1073,15 @@
             const vehicle = {};
             (inspectionQuestionConfig.vehicle || []).forEach(q => {
                 const selected = document.querySelector(`input[name="vehicle-${q.key}"]:checked`);
-                if (selected) vehicle[q.key] = { answer: selected.value };
+                const comment = document.getElementById(`vehicle-${q.key}-comment`)?.value?.trim() || '';
+                if (selected) vehicle[q.key] = { answer: selected.value, comment };
             });
             const trailer = {};
             if (trailerAttached) {
                 (inspectionQuestionConfig.trailer || []).forEach(q => {
                     const selected = document.querySelector(`input[name="trailer-${q.key}"]:checked`);
-                    if (selected) trailer[q.key] = { answer: selected.value };
+                    const comment = document.getElementById(`trailer-${q.key}-comment`)?.value?.trim() || '';
+                    if (selected) trailer[q.key] = { answer: selected.value, comment };
                 });
             }
             try {

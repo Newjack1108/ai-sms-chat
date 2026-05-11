@@ -53,11 +53,12 @@
                 <div class="form-group"><label class="form-label">Notes</label><textarea id="poNotes" class="form-textarea"></textarea></div>
                 <h4>Line Items</h4>
                 <table class="table">
-                    <thead><tr><th>Raw Material</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th></th></tr></thead>
+                    <thead><tr><th>Type</th><th>Item</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th></th></tr></thead>
                     <tbody id="lineItemsBody"></tbody>
                 </table>
                 <div style="margin-bottom: 12px;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="addLineItem()">Add Line Item</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addLineItem('raw_material')">Add Raw Material</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="addCustomLineBtn" onclick="addLineItem('custom')" style="display: none;">Add Custom Line</button>
                 </div>
                 <div style="font-weight: 600; margin-bottom: 12px;">Subtotal: <span id="subtotalLabel">£0.00</span></div>
                 <div class="text-right">
@@ -75,6 +76,16 @@
                 <button class="modal-close" onclick="hideModal('receiveModal')">&times;</button>
             </div>
             <div id="receiveModalContent"><div class="loading">Loading...</div></div>
+        </div>
+    </div>
+
+    <div id="viewModal" class="modal">
+        <div class="modal-content" style="max-width: 980px;">
+            <div class="modal-header">
+                <h3 id="viewModalTitle">Purchase Order Details</h3>
+                <button class="modal-close" onclick="hideModal('viewModal')">&times;</button>
+            </div>
+            <div id="viewModalContent"><div class="loading">Loading...</div></div>
         </div>
     </div>
 
@@ -105,17 +116,48 @@
             stockItems = data.items || [];
         }
 
+        function isOneOffPurchaseSelected() {
+            const checkbox = document.getElementById('poOneOffPurchase');
+            return !!(checkbox && checkbox.checked);
+        }
+
+        function escapeAttr(text) {
+            return escapeHtml(text).replace(/"/g, '&quot;');
+        }
+
         function renderLineItems() {
             const tbody = document.getElementById('lineItemsBody');
+            const allowCustom = isOneOffPurchaseSelected();
+            const addCustomBtn = document.getElementById('addCustomLineBtn');
+            if (addCustomBtn) {
+                addCustomBtn.style.display = allowCustom ? '' : 'none';
+            }
             tbody.innerHTML = lineItems.map((item, i) => {
+                const lineType = item.line_type || (item.custom_item_name ? 'custom' : 'raw_material');
                 const total = (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0;
+                const selectedStock = stockItems.find((s) => String(s.id) === String(item.stock_item_id));
                 return `
                     <tr>
                         <td>
-                            <select class="form-select" onchange="updateLineItem(${i}, 'stock_item_id', this.value)">
-                                <option value="">Select raw material</option>
-                                ${stockItems.map((s) => `<option value="${s.id}" ${String(item.stock_item_id) === String(s.id) ? 'selected' : ''}>${escapeHtml(s.name)} (${escapeHtml(s.unit || 'unit')})</option>`).join('')}
+                            <select class="form-select" onchange="updateLineItem(${i}, 'line_type', this.value)">
+                                <option value="raw_material" ${lineType === 'raw_material' ? 'selected' : ''}>Raw Material</option>
+                                ${allowCustom ? `<option value="custom" ${lineType === 'custom' ? 'selected' : ''}>Custom</option>` : ''}
                             </select>
+                        </td>
+                        <td>
+                            ${lineType === 'custom'
+                                ? `<input type="text" class="form-input" value="${escapeAttr(item.custom_item_name || '')}" placeholder="Custom item name" onchange="updateLineItem(${i}, 'custom_item_name', this.value)">`
+                                : `<select class="form-select" onchange="updateLineItem(${i}, 'stock_item_id', this.value)">
+                                    <option value="">Select raw material</option>
+                                    ${stockItems.map((s) => `<option value="${s.id}" ${String(item.stock_item_id) === String(s.id) ? 'selected' : ''}>${escapeHtml(s.name)} (${escapeHtml(s.unit || 'unit')})</option>`).join('')}
+                                </select>`
+                            }
+                        </td>
+                        <td>
+                            ${lineType === 'custom'
+                                ? `<input type="text" class="form-input" value="${escapeAttr(item.custom_unit || 'item')}" placeholder="Unit" onchange="updateLineItem(${i}, 'custom_unit', this.value)">`
+                                : `<span>${escapeHtml(selectedStock?.unit || '-')}</span>`
+                            }
                         </td>
                         <td><input type="number" min="0.01" step="0.01" class="form-input" value="${item.quantity || ''}" onchange="updateLineItem(${i}, 'quantity', this.value)"></td>
                         <td><input type="number" min="0" step="0.01" class="form-input" value="${item.unit_cost_gbp || ''}" onchange="updateLineItem(${i}, 'unit_cost_gbp', this.value)"></td>
@@ -128,8 +170,15 @@
             document.getElementById('subtotalLabel').textContent = formatCurrency(subtotal);
         }
 
-        function addLineItem() {
-            lineItems.push({ stock_item_id: '', quantity: '', unit_cost_gbp: '' });
+        function addLineItem(type = 'raw_material') {
+            lineItems.push({
+                line_type: type,
+                stock_item_id: '',
+                custom_item_name: '',
+                custom_unit: type === 'custom' ? 'item' : '',
+                quantity: '',
+                unit_cost_gbp: ''
+            });
             renderLineItems();
         }
 
@@ -139,6 +188,19 @@
         }
 
         function updateLineItem(index, key, value) {
+            if (key === 'line_type') {
+                const current = lineItems[index] || {};
+                lineItems[index] = {
+                    line_type: value,
+                    stock_item_id: '',
+                    custom_item_name: '',
+                    custom_unit: value === 'custom' ? (current.custom_unit || 'item') : '',
+                    quantity: current.quantity || '',
+                    unit_cost_gbp: current.unit_cost_gbp || ''
+                };
+                renderLineItems();
+                return;
+            }
             lineItems[index][key] = value;
             renderLineItems();
         }
@@ -147,9 +209,10 @@
             document.getElementById('poForm').reset();
             document.getElementById('poOrderDate').value = londonYmd(new Date());
             lineItems = [];
-            addLineItem();
+            addLineItem('raw_material');
             const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(document.getElementById('poOrderDate').value)}`);
             document.getElementById('poNumberPreview').value = numberData.po_number || '';
+            renderLineItems();
             showModal('poModal');
         }
 
@@ -194,8 +257,40 @@
             try {
                 const data = await apiCall(`/purchase-orders/${id}`);
                 const o = data.order;
-                const lines = (o.items || []).map((it) => `${it.stock_item_name}: ${it.quantity} x ${formatCurrency(it.unit_cost_gbp)} = ${formatCurrency(it.line_total_gbp)}`).join('\n');
-                alert(`PO ${o.po_number}\nSupplier: ${o.supplier_name}\nStatus: ${o.status}\n\n${lines}`);
+                document.getElementById('viewModalTitle').textContent = `Purchase Order ${o.po_number}`;
+                document.getElementById('viewModalContent').innerHTML = `
+                    <div class="grid grid-2" style="margin-bottom: 16px;">
+                        <div><strong>Supplier:</strong> ${escapeHtml(o.supplier_name || '-')}</div>
+                        <div><strong>Status:</strong> <span class="badge badge-info">${escapeHtml(o.status || '')}</span></div>
+                        <div><strong>Order Date:</strong> ${formatDate(o.order_date)}</div>
+                        <div><strong>Expected Date:</strong> ${formatDate(o.expected_date)}</div>
+                        <div><strong>Type:</strong> ${o.is_one_off_purchase ? '<span class="badge badge-warning">One-off</span>' : '<span class="badge badge-secondary">Standard</span>'}</div>
+                        <div><strong>Subtotal:</strong> ${formatCurrency(o.subtotal_gbp || 0)}</div>
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <strong>Notes:</strong><br>
+                        <div style="margin-top: 6px; white-space: pre-wrap;">${escapeHtml(o.notes || '-')}</div>
+                    </div>
+                    <table class="table">
+                        <thead><tr><th>Type</th><th>Item</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Total</th></tr></thead>
+                        <tbody>
+                            ${(o.items || []).length === 0 ? '<tr><td colspan="6">No line items</td></tr>' : (o.items || []).map((it) => `
+                                <tr>
+                                    <td>${it.is_custom_item ? '<span class="badge badge-warning">Custom</span>' : '<span class="badge badge-secondary">Raw Material</span>'}</td>
+                                    <td>${escapeHtml(it.stock_item_name || '-')}</td>
+                                    <td>${escapeHtml(it.stock_item_unit || '-')}</td>
+                                    <td>${it.quantity}</td>
+                                    <td>${formatCurrency(it.unit_cost_gbp || 0)}</td>
+                                    <td>${formatCurrency(it.line_total_gbp || 0)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    <div class="text-right">
+                        <button type="button" class="btn btn-secondary" onclick="hideModal('viewModal')">Close</button>
+                    </div>
+                `;
+                showModal('viewModal');
             } catch (error) {
                 showAlert(error.message || 'Failed to load purchase order', 'error');
             }
@@ -228,10 +323,14 @@
                                             data-item-id="${item.id}" value="${item.quantity}" style="max-width: 140px;">
                                     </td>
                                     <td>
-                                        <select class="form-select receive-mode" data-item-id="${item.id}" style="max-width: 220px;">
-                                            <option value="add">Add to stock</option>
-                                            <option value="adjust">Adjust stock to exact qty</option>
-                                        </select>
+                                        ${item.is_custom_item
+                                            ? `<input type="hidden" class="receive-mode" data-item-id="${item.id}" value="add">
+                                               <span class="badge badge-secondary">No stock update</span>`
+                                            : `<select class="form-select receive-mode" data-item-id="${item.id}" style="max-width: 220px;">
+                                                <option value="add">Add to stock</option>
+                                                <option value="adjust">Adjust stock to exact qty</option>
+                                            </select>`
+                                        }
                                     </td>
                                 </tr>
                             `).join('')}
@@ -301,14 +400,46 @@
             document.getElementById('poNumberPreview').value = numberData.po_number || '';
         });
 
+        document.getElementById('poOneOffPurchase').addEventListener('change', (e) => {
+            if (!e.target.checked && lineItems.some((item) => (item.line_type || 'raw_material') === 'custom')) {
+                lineItems = lineItems.filter((item) => (item.line_type || 'raw_material') !== 'custom');
+                if (lineItems.length === 0) {
+                    addLineItem('raw_material');
+                    return;
+                }
+            }
+            renderLineItems();
+        });
+
         document.getElementById('poForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const payloadItems = lineItems.map((i) => ({
-                stock_item_id: parseInt(i.stock_item_id, 10),
-                quantity: parseFloat(i.quantity || 0),
-                unit_cost_gbp: parseFloat(i.unit_cost_gbp || 0)
-            })).filter((i) => !Number.isNaN(i.stock_item_id) && i.quantity > 0);
+            const payloadItems = lineItems.map((i) => {
+                const quantity = parseFloat(i.quantity || 0);
+                const unitCost = parseFloat(i.unit_cost_gbp || 0);
+                const lineType = i.line_type || (i.custom_item_name ? 'custom' : 'raw_material');
+                if (lineType === 'custom') {
+                    return {
+                        custom_item_name: (i.custom_item_name || '').trim(),
+                        custom_unit: (i.custom_unit || 'item').trim() || 'item',
+                        quantity,
+                        unit_cost_gbp: unitCost
+                    };
+                }
+                return {
+                    stock_item_id: parseInt(i.stock_item_id, 10),
+                    quantity,
+                    unit_cost_gbp: unitCost
+                };
+            }).filter((i) => {
+                if (!(i.quantity > 0)) return false;
+                if (i.custom_item_name !== undefined) return !!i.custom_item_name;
+                return !Number.isNaN(i.stock_item_id);
+            });
             const isOneOffPurchase = document.getElementById('poOneOffPurchase').checked;
+            if (!isOneOffPurchase && payloadItems.some((item) => item.custom_item_name)) {
+                showAlert('Custom line items are only allowed on one-off purchases', 'error');
+                return;
+            }
             if (!payloadItems.length && !isOneOffPurchase) {
                 showAlert('Add at least one valid line item or mark this as one-off purchase', 'error');
                 return;
