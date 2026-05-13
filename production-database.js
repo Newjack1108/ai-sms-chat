@@ -26,6 +26,10 @@ const {
 let db;
 let dbPath;
 
+function payrollEligibleRoleClause(alias = 'u') {
+    return `(${alias}.role = 'staff' OR ${alias}.role = 'installer' OR ${alias}.role = 'office' OR ${alias}.role = 'admin' OR ${alias}.role = 'manager')`;
+}
+
 // Initialize SQLite if PostgreSQL not available
 if (!isPostgreSQL) {
     // Use same path logic as main database
@@ -11660,7 +11664,7 @@ class ProductionDatabase {
                  INNER JOIN weekly_timesheets wt ON u.id = wt.user_id AND wt.week_start_date = $1::date
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  LEFT JOIN production_users approver ON wt.approved_by = approver.id
-                 WHERE (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                 WHERE ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
@@ -11690,7 +11694,7 @@ class ProductionDatabase {
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  LEFT JOIN production_users approver ON wt.approved_by = approver.id
                  WHERE wt.week_start_date = ?
-                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
                  GROUP BY u.id, u.username, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
@@ -12559,7 +12563,7 @@ class ProductionDatabase {
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date < $1
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = FALSE)
-                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND ${payrollEligibleRoleClause('u')}
                    AND tde.total_hours > 0
                  GROUP BY wt.week_start_date
                  HAVING COUNT(DISTINCT wt.user_id) > 0
@@ -12576,7 +12580,7 @@ class ProductionDatabase {
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
                  WHERE wt.week_start_date < ?
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = 0)
-                   AND (u.role = 'staff' OR u.role = 'office' OR u.role = 'admin' OR u.role = 'manager')
+                   AND ${payrollEligibleRoleClause('u')}
                    AND tde.total_hours > 0
                  GROUP BY wt.week_start_date
                  HAVING COUNT(DISTINCT wt.user_id) > 0
