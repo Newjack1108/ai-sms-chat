@@ -1067,9 +1067,11 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${entries.map(([key, item]) => `
+                            ${entries.map(([key, item]) => {
+                                const isCriticalFailure = item?.is_critical && item?.answer === 'fail';
+                                return `
                                 <tr>
-                                    <td>${escapeHtml(String(key).replace(/_/g, ' '))}${item?.is_critical ? ' <span class="badge badge-danger">Critical</span>' : ''}</td>
+                                    <td>${escapeHtml(String(key).replace(/_/g, ' '))}${isCriticalFailure ? ' <span class="badge badge-danger">Critical</span>' : ''}</td>
                                     <td>
                                         <span class="badge ${item?.answer === 'fail' ? 'badge-danger' : (item?.answer === 'pass' ? 'badge-success' : 'badge-secondary')}">
                                             ${escapeHtml((item?.answer || '').toUpperCase() || 'UNKNOWN')}
@@ -1077,7 +1079,8 @@
                                     </td>
                                     <td>${item?.comment ? escapeHtml(item.comment) : '-'}</td>
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </tbody>
                     </table>
                 </div>

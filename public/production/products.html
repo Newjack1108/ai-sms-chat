@@ -28,8 +28,8 @@
                 <button onclick="showAddProductModal()" class="btn btn-primary admin-only">Add Product</button>
             </div>
             <div class="tabs" style="margin-bottom: 0;">
-                <button class="tab-btn active" onclick="filterProducts('all')" id="tab-all">All Products</button>
-                <button class="tab-btn" onclick="filterProducts('Standard Product')" id="tab-standard">Standard Product</button>
+                <button class="tab-btn" onclick="filterProducts('all')" id="tab-all">All Products</button>
+                <button class="tab-btn active" onclick="filterProducts('Standard Product')" id="tab-standard">Standard Product</button>
                 <button class="tab-btn" onclick="filterProducts('Customer Product')" id="tab-customer">Customer Product</button>
                 <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
                 <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
@@ -156,7 +156,7 @@
         let components = [];
         let suppliersDb = [];
         let currentProductId = null;
-        let selectedCategory = 'all';
+        let selectedCategory = 'Standard Product';
         let allProducts = [];
         let productsPage = 1;
         let productsTotal = 0;

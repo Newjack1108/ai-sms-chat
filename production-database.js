@@ -6521,6 +6521,8 @@ class ProductionDatabase {
         
         return {
             order_id: orderId,
+            customer_name: order.customer_name || null,
+            customer_phone: order.customer_phone || null,
             products: productsList,
             components,
             built_items: builtItems,
@@ -7548,6 +7550,7 @@ class ProductionDatabase {
                 if (isPostgreSQL) {
                     const orderResult = await pool.query(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
+                         po.customer_name,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -7558,6 +7561,7 @@ class ProductionDatabase {
                     if (row) {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
+                        installation.customer_name = row.customer_name;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
                             ? Number(row.travel_time_hours_round_trip)
@@ -7566,6 +7570,7 @@ class ProductionDatabase {
                 } else {
                     const row = db.prepare(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
+                         po.customer_name,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -7574,6 +7579,7 @@ class ProductionDatabase {
                     if (row) {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
+                        installation.customer_name = row.customer_name;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
                             ? Number(row.travel_time_hours_round_trip)
@@ -8178,6 +8184,7 @@ class ProductionDatabase {
             let query = `SELECT i.*, 
                          ${dateSelect},
                          po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                         po.customer_name,
                          fp.name as product_name,
                          u.username as created_by_name
                          FROM installations i

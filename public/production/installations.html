@@ -638,7 +638,7 @@
                 return s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
             };
             const instStatusLabel = (s) => (s == null || s === '') ? '-' : String(s).replace(/_/g, ' ');
-            let html = '<table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            let html = '<table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Customer</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
             list.forEach(inst => {
                 const isAssignedInstaller = !!(
                     canInstallerActions &&
@@ -650,12 +650,14 @@
                 const startD = inst.start_date || inst.installation_date || '—';
                 const endD = inst.end_date || startD || '—';
                 const productName = inst.product_name ? (inst.order_id ? `Order #${inst.order_id} – ${inst.product_name}` : inst.product_name) : '—';
+                const customerCell = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
                 const loc = inst.location || '—';
                 const woStatus = orderStatusLabel(inst.order_status);
                 const status = instStatusLabel(inst.status);
                 html += `<tr>
                     <td>${formatDate(startD)}</td>
                     <td>${formatDate(endD)}</td>
+                    <td>${customerCell}</td>
                     <td>${productName}</td>
                     <td><span class="badge badge-secondary">${woStatus}</span></td>
                     <td>${loc}</td>
@@ -750,11 +752,13 @@
                     const canOpen = canManageInstallations || isAssignedInstaller;
                     const instStartDate = inst.start_date || inst.installation_date;
                     const instEndDate = inst.end_date || instStartDate;
-                    const title = inst.isMultiDay ? 
-                        `${inst.product_name || 'Installation'} (${instStartDate} to ${instEndDate})` :
-                        `${inst.product_name || 'Installation'}`;
-                    html += `<div class="installation-block ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? title : `${title} - Not allocated`}">
-                        ${inst.product_name || 'Installation'}
+                    const block = formatInstallationBlockLabel(inst);
+                    const title = inst.isMultiDay ?
+                        `${block.title} (${instStartDate} to ${instEndDate})` :
+                        block.title;
+                    const titleAttr = (canOpen ? title : `${title} - Not allocated`).replace(/"/g, '&quot;');
+                    html += `<div class="installation-block ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${titleAttr}">
+                        ${escapeHtml(block.primary)}
                         ${inst.isMultiDay ? '<span class="user-badge">Multi-day</span>' : ''}
                         ${inst.assigned_users && inst.assigned_users.length > 0 ? `<span class="user-badge">${inst.assigned_users.length} user(s)</span>` : ''}
                     </div>`;
@@ -823,8 +827,10 @@
                         );
                         const canOpen = canManageInstallations || isAssignedInstaller;
                         const timeLabel = inst.start_time ? `${inst.start_time} - ` : '';
-                        html += `<div class="monthly-installation-item ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? 'Open installation' : 'Not allocated'}">
-                            ${timeLabel}${inst.product_name || 'Installation'}
+                        const block = formatInstallationBlockLabel(inst);
+                        const monthTitle = (canOpen ? block.title : `${block.title} - Not allocated`).replace(/"/g, '&quot;');
+                        html += `<div class="monthly-installation-item ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${monthTitle}">
+                            ${timeLabel}${escapeHtml(block.primary)}
                         </div>`;
                     });
                     if (dayInsts.length > 3) {
@@ -898,8 +904,11 @@
                 const canOpen = canManageInstallations || isAssignedInstaller;
                 const dateRange = inst.isMultiDay ? 
                     ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
-                html += `<div class="daily-installation ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${canOpen ? 'Open installation' : 'Not allocated'}">
-                    <strong>${inst.product_name || 'Installation'}</strong>${dateRange}<br>
+                const block = formatInstallationBlockLabel(inst);
+                const dailyTitle = (canOpen ? block.title : `${block.title} - Not allocated`).replace(/"/g, '&quot;');
+                html += `<div class="daily-installation ${inst.status}" ${canOpen ? `onclick="showInstallationDetails(${inst.id})"` : ''} title="${dailyTitle}">
+                    <strong>${escapeHtml(block.primary)}</strong>${dateRange}<br>
+                    ${block.secondary ? `<small>${escapeHtml(block.secondary)}</small><br>` : ''}
                     ${inst.duration_hours ? `<small>Duration: ${inst.duration_hours} hours</small><br>` : ''}
                     ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
                     ${inst.assigned_users && inst.assigned_users.length > 0 ? 
@@ -1559,11 +1568,18 @@
                     }
                 }
                 
+                const customerDisplay = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
+                const worksOrderCell = inst.works_order_id
+                    ? ((inst.customer_name || '').trim()
+                        ? `${escapeHtml(inst.customer_name.trim())} – Order #${inst.works_order_id} – ${escapeHtml(inst.product_name || 'Unknown')}`
+                        : `Order #${inst.works_order_id} - ${escapeHtml(inst.product_name || 'Unknown')}`)
+                    : 'None';
                 let html = `
                     <div style="padding: 20px;">
                         <h4>Installation #${inst.id}</h4>
                         <table class="table">
-                            <tr><th>Works Order:</th><td>${inst.works_order_id ? `Order #${inst.works_order_id} - ${inst.product_name || 'Unknown'}` : 'None'}</td></tr>
+                            <tr><th>Customer:</th><td>${customerDisplay}</td></tr>
+                            <tr><th>Works Order:</th><td>${worksOrderCell}</td></tr>
                             <tr><th>Date:</th><td>${formatDate(inst.installation_date)}</td></tr>
                             <tr><th>Duration:</th><td>${inst.duration_hours} hours</td></tr>
                             ${inst.travel_time_hours_round_trip != null && inst.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(inst.travel_time_hours_round_trip)) ? `<tr><th>LeadLock drive (round trip):</th><td>${parseFloat(inst.travel_time_hours_round_trip).toFixed(2)} h</td></tr>` : ''}

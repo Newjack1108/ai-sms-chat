@@ -226,6 +226,36 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function formatCustomerName(name) {
+    const trimmed = (name || '').trim();
+    return trimmed || '—';
+}
+
+/** Calendar block label: customer name primary, product in tooltip/subtitle. */
+function formatInstallationBlockLabel(inst) {
+    const name = (inst && inst.customer_name || '').trim();
+    const product = (inst && inst.product_name) || 'Installation';
+    if (name) {
+        return { primary: name, secondary: product, title: `${name} — ${product}` };
+    }
+    return { primary: product, secondary: '', title: product };
+}
+
+/** Customer + phone header for load sheets (modal, print, embed). */
+function renderLoadSheetCustomerHeader(loadSheet) {
+    if (!loadSheet) {
+        return '';
+    }
+    const nameRaw = (loadSheet.customer_name || '').trim();
+    const nameDisplay = nameRaw ? escapeHtml(nameRaw) : '—';
+    const phoneRaw = (loadSheet.customer_phone || '').trim();
+    const phoneDisplay = phoneRaw ? escapeHtml(phoneRaw) : '—';
+    return `<div style="margin-bottom: 16px; padding: 12px 16px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px;">
+<p style="margin: 0 0 6px 0; font-size: 16px;"><strong>Customer:</strong> ${nameDisplay}</p>
+<p style="margin: 0; font-size: 16px;"><strong>Phone:</strong> ${phoneDisplay}</p>
+</div>`;
+}
+
 /** Product line for load sheet heading (matches production-orders display). */
 function getLoadSheetProductsDisplay(loadSheet) {
     if (!loadSheet) {
@@ -248,6 +278,7 @@ function renderLoadSheetReadOnlyHtml(loadSheet) {
     if (!loadSheet) {
         return '';
     }
+    let html = renderLoadSheetCustomerHeader(loadSheet);
     const components = loadSheet.components || [];
     const builtItems = loadSheet.built_items || [];
     const rawMaterials = loadSheet.raw_materials || [];
@@ -264,8 +295,6 @@ function renderLoadSheetReadOnlyHtml(loadSheet) {
     const builtHasSparesCol = builtItems.some(bi => bi.spares && bi.spares.length > 0);
     const rawHasLocCol = rawMaterials.some(rm => rm.location);
     const rawHasSparesCol = rawMaterials.some(rm => rm.spares && rm.spares.length > 0);
-
-    let html = '';
 
     if (components.length > 0) {
         html += `<h4>Components Required</h4>

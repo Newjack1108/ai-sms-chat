@@ -579,12 +579,16 @@
                 return;
             }
             
-            checkboxesDiv.innerHTML = orders.map(order => `
+            checkboxesDiv.innerHTML = orders.map(order => {
+                const customerPart = (order.customer_name || '').trim()
+                    ? ` - ${escapeHtml(order.customer_name.trim())}`
+                    : '';
+                return `
                 <label style="display: block; margin-bottom: 10px;">
                     <input type="checkbox" value="${order.id}" style="margin-right: 8px;">
-                    ${order.product_name} - Qty: ${order.quantity} (${order.status})
-                </label>
-            `).join('');
+                    ${order.product_name || 'Unknown'}${customerPart} - Qty: ${order.quantity} (${order.status})
+                </label>`;
+            }).join('');
         }
         
         function showAddQuoteModal() {
@@ -993,6 +997,7 @@
                             <button onclick="printLoadSheetPDF(${orderId})" class="btn btn-primary">Print PDF</button>
                         </div>
                         <div class="requirements-section" id="loadSheetContent">
+                            ${renderLoadSheetCustomerHeader(loadSheet)}
                             ${loadSheet.components.length > 0 ? `
                             <h4>Components Required</h4>
                             <table class="table">
@@ -1316,6 +1321,7 @@
                             <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold;">Load Sheet</h1>
                             <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
                             <p style="margin: 0; font-size: 14px; color: #666;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                            ${renderLoadSheetCustomerHeader(loadSheet).replace(/margin-bottom: 16px/g, 'margin: 12px auto 0; max-width: 480px; text-align: left')}
                         </div>
                         
                         ${loadSheet.components.length > 0 ? `

@@ -211,6 +211,7 @@
                             <thead>
                                 <tr>
                                     <th>Product</th>
+                                    <th>Customer</th>
                                     <th>Quantity</th>
                                     <th>Status</th>
                                     <th>Order Date</th>
@@ -221,6 +222,7 @@
                                 ${recentOrdersList.map(order => `
                                     <tr>
                                         <td>${order.product_name || 'Unknown'}</td>
+                                        <td>${order.customer_name || '-'}</td>
                                         <td>${order.quantity}</td>
                                         <td><span class="badge badge-info">${order.status}</span></td>
                                         <td>${formatDate(order.order_date)}</td>
