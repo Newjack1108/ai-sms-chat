@@ -34,6 +34,9 @@
                 <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
                 <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
             </div>
+            <div style="padding: 12px 0;">
+                <input id="productSearchInput" type="text" class="form-input" placeholder="Search by name, description, category, type or status..." autocomplete="off">
+            </div>
             <div id="productsList">
                 <div class="loading">Loading...</div>
             </div>
@@ -160,6 +163,8 @@
         let allProducts = [];
         let productsPage = 1;
         let productsTotal = 0;
+        let productSearchQuery = '';
+        let productSearchDebounce = null;
         const PRODUCTS_PAGE_SIZE = 25;
 
         function normalizeProductTypeForSelect(value) {
@@ -256,6 +261,18 @@
             productsPage = Math.max(1, p);
             loadProducts();
         }
+
+        function onProductSearchInput() {
+            const next = (document.getElementById('productSearchInput').value || '').trim();
+            if (productSearchDebounce) clearTimeout(productSearchDebounce);
+            productSearchDebounce = setTimeout(() => {
+                productSearchDebounce = null;
+                if (next === productSearchQuery) return;
+                productSearchQuery = next;
+                productsPage = 1;
+                loadProducts();
+            }, 300);
+        }
         
         async function loadProducts() {
             try {
@@ -265,6 +282,9 @@
                 });
                 if (selectedCategory !== 'all') {
                     qs.set('category', selectedCategory);
+                }
+                if (productSearchQuery) {
+                    qs.set('search', productSearchQuery);
                 }
                 const data = await apiCall(`/products?${qs.toString()}`);
                 const productsList = document.getElementById('productsList');
@@ -276,7 +296,10 @@
                 }
                 
                 if (rows.length === 0) {
-                    productsList.innerHTML = '<p>No products found</p>' + renderProductsPager();
+                    const emptyMsg = productSearchQuery
+                        ? `No products match "${escapeHtml(productSearchQuery)}"`
+                        : 'No products found';
+                    productsList.innerHTML = `<p>${emptyMsg}</p>` + renderProductsPager();
                     allProducts = [];
                     return;
                 }
@@ -308,7 +331,10 @@
             const filteredProducts = allProducts;
             
             if (filteredProducts.length === 0) {
-                productsList.innerHTML = '<p>No products found in this category</p>' + renderProductsPager();
+                const emptyMsg = productSearchQuery
+                    ? `No products match "${escapeHtml(productSearchQuery)}"`
+                    : 'No products found in this category';
+                productsList.innerHTML = `<p>${emptyMsg}</p>` + renderProductsPager();
                 return;
             }
             
@@ -813,6 +839,8 @@
             }
         });
         
+        document.getElementById('productSearchInput').addEventListener('input', onProductSearchInput);
+
         init();
     </script>
     

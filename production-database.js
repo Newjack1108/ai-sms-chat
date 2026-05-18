@@ -5688,6 +5688,7 @@ class ProductionDatabase {
         const offset = (page - 1) * pageSize;
         const status = opts.status && String(opts.status).trim() ? String(opts.status).trim() : null;
         const category = opts.category && String(opts.category).trim() ? String(opts.category).trim() : null;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
         const baseFrom = `FROM finished_products fp`;
         const syncSub = `(SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at`;
         const condsPg = [];
@@ -5705,6 +5706,26 @@ class ProductionDatabase {
             paramsPg.push(category);
             condsLite.push('fp.category = ?');
             paramsLite.push(category);
+        }
+        if (search) {
+            const pattern = `%${search}%`;
+            condsPg.push(`(
+                fp.name ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.description, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.category, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.product_type, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.status, '') ILIKE $${paramsPg.length + 1}
+            )`);
+            paramsPg.push(pattern);
+            const patternLite = `%${search.toLowerCase()}%`;
+            condsLite.push(`(
+                LOWER(fp.name) LIKE ?
+                OR LOWER(COALESCE(fp.description, '')) LIKE ?
+                OR LOWER(COALESCE(fp.category, '')) LIKE ?
+                OR LOWER(COALESCE(fp.product_type, '')) LIKE ?
+                OR LOWER(COALESCE(fp.status, '')) LIKE ?
+            )`);
+            paramsLite.push(patternLite, patternLite, patternLite, patternLite, patternLite);
         }
         const whereSql = condsPg.length ? `WHERE ${condsPg.join(' AND ')}` : '';
         const whereSqlLite = condsLite.length ? `WHERE ${condsLite.join(' AND ')}` : '';

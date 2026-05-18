@@ -1667,11 +1667,13 @@ router.get('/products', requireProductionAuth, async (req, res) => {
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
         const status = req.query.status ? String(req.query.status).trim() : null;
         const category = req.query.category ? String(req.query.category).trim() : null;
+        const search = req.query.search ? String(req.query.search).trim() : null;
         const { products, total, page: p, page_size } = await ProductionDatabase.getProductsPaged({
             page,
             pageSize,
             status: status || null,
-            category: category || null
+            category: category || null,
+            search: search || null
         });
         res.json({ success: true, products, total, page: p, page_size });
     } catch (error) {
