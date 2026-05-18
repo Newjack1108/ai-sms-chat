@@ -2309,11 +2309,19 @@ router.get('/orders', requireProductionAuth, async (req, res) => {
     try {
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
         const includeProducts = req.query.include_products !== '0' && req.query.include_products !== 'false';
+        let statusIn = null;
+        if (req.query.status && String(req.query.status).trim()) {
+            statusIn = String(req.query.status)
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean);
+        }
         const { orders, total, page: p, page_size } = await ProductionDatabase.getProductOrdersPaged({
             page,
             pageSize,
             quoteOnly: false,
-            includeProducts
+            includeProducts,
+            statusIn
         });
         res.json({ success: true, orders, total, page: p, page_size });
     } catch (error) {
@@ -2378,10 +2386,34 @@ router.get('/orders/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.patch('/orders/:id/flags', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (!orderId) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        if (!Array.isArray(req.body.workflow_flags)) {
+            return res.status(400).json({ success: false, error: 'workflow_flags must be an array' });
+        }
+        const order = await ProductionDatabase.updateProductOrder(orderId, {
+            workflow_flags: req.body.workflow_flags
+        });
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Patch order flags error:', error);
+        const msg = error.message || 'Failed to update order flags';
+        const status = msg.includes('Invalid workflow flag') || msg.includes('must be an array') ? 400 : 500;
+        res.status(status).json({ success: false, error: msg });
+    }
+});
+
 router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id);
-        const { product_id, quantity, order_date, status, customer_name, notes } = req.body;
+        const { product_id, quantity, order_date, status, customer_name, notes, workflow_flags } = req.body;
         
         const updateData = {};
         if (product_id !== undefined) updateData.product_id = parseInt(product_id);
@@ -2390,6 +2422,7 @@ router.put('/orders/:id', requireProductionAuth, requireManager, async (req, res
         if (status !== undefined) updateData.status = status;
         if (customer_name !== undefined) updateData.customer_name = customer_name;
         if (notes !== undefined) updateData.notes = notes == null ? null : String(notes);
+        if (workflow_flags !== undefined) updateData.workflow_flags = workflow_flags;
         
         const order = await ProductionDatabase.updateProductOrder(orderId, updateData);
         res.json({ success: true, order });

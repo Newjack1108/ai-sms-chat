@@ -498,6 +498,10 @@ function initializeSQLite() {
                 console.log(`✅ Added ${col} column to product_orders table`);
             }
         }
+        if (!tableInfo.some(c => c.name === 'workflow_flags')) {
+            db.exec(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
+            console.log('✅ Added workflow_flags column to product_orders table');
+        }
     } catch (error) {
         console.log('⚠️ Product orders migration check skipped:', error.message);
     }
@@ -1938,6 +1942,14 @@ async function initializePostgreSQL() {
                     console.log(`✅ Added ${col.name} column to product_orders table`);
                 }
             }
+            const workflowFlagsCheck = await pool.query(`
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'product_orders' AND column_name = 'workflow_flags'
+            `);
+            if (workflowFlagsCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
+                console.log('✅ Added workflow_flags column to product_orders table');
+            }
         } catch (error) {
             console.log('⚠️ Product orders migration check skipped:', error.message);
         }
@@ -3035,7 +3047,86 @@ async function initializePostgreSQL() {
 }
 
 // Production Database Class
+const WORK_ORDER_FLAG_SLUGS = [
+    'on_hold',
+    'collection',
+    'waiting_access_sheet',
+    'booked_out',
+    'on_hold_weather',
+    'on_hold_planning',
+    'activity_timeline',
+    'do_not_contact'
+];
+
 class ProductionDatabase {
+    static get WORK_ORDER_FLAG_SLUGS() {
+        return WORK_ORDER_FLAG_SLUGS;
+    }
+
+    static normalizeWorkflowFlagsInput(flags) {
+        if (!Array.isArray(flags)) {
+            throw new Error('workflow_flags must be an array');
+        }
+        const seen = new Set();
+        const out = [];
+        for (const f of flags) {
+            const slug = String(f).trim();
+            if (!slug) continue;
+            if (!WORK_ORDER_FLAG_SLUGS.includes(slug)) {
+                throw new Error(`Invalid workflow flag: ${slug}`);
+            }
+            if (!seen.has(slug)) {
+                seen.add(slug);
+                out.push(slug);
+            }
+        }
+        return out;
+    }
+
+    static parseWorkflowFlagsFromDb(raw) {
+        if (raw == null || raw === '') return [];
+        let parsed = raw;
+        if (typeof raw === 'string') {
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                return [];
+            }
+        }
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map(s => String(s).trim())
+            .filter(slug => WORK_ORDER_FLAG_SLUGS.includes(slug))
+            .filter((slug, i, arr) => arr.indexOf(slug) === i);
+    }
+
+    static attachWorkflowFlagsToOrder(order) {
+        if (!order) return order;
+        order.workflow_flags = ProductionDatabase.parseWorkflowFlagsFromDb(order.workflow_flags);
+        return order;
+    }
+
+    static _buildProductOrdersWhere(opts = {}) {
+        const quoteOnly = !!opts.quoteOnly;
+        const statusIn = Array.isArray(opts.statusIn) && opts.statusIn.length > 0
+            ? [...new Set(opts.statusIn.map(s => String(s).trim()).filter(Boolean))]
+            : null;
+        const conditions = [];
+        const params = [];
+        if (quoteOnly) {
+            conditions.push(`po.status = 'quote'`);
+        } else {
+            conditions.push(`(po.status IS NULL OR po.status != 'quote')`);
+            if (statusIn && statusIn.length > 0) {
+                const placeholders = statusIn.map(() => '?').join(', ');
+                conditions.push(`po.status IN (${placeholders})`);
+                params.push(...statusIn);
+            }
+        }
+        const sql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        return { sql, params };
+    }
+
     // ============ USER OPERATIONS ============
     
     static async createUser(username, passwordHash, role, isDriver = false) {
@@ -7021,6 +7112,7 @@ class ProductionDatabase {
                 await this.syncLeadlockItemsToOrderProducts(id);
             }
             order.products = await this.getOrderProducts(id);
+            ProductionDatabase.attachWorkflowFlagsToOrder(order);
         }
         
         return order;
@@ -7057,28 +7149,29 @@ class ProductionDatabase {
      * @param {number} opts.pageSize max 100
      * @param {boolean} opts.quoteOnly if true, only status = quote; if false, exclude quotes
      * @param {boolean} opts.includeProducts default true
+     * @param {string[]} opts.statusIn optional status filter (e.g. pending, in_progress)
      */
     static async getProductOrdersPaged(opts = {}) {
         const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
-        const quoteOnly = !!opts.quoteOnly;
         const includeProducts = opts.includeProducts !== false;
-        const whereSql = quoteOnly
-            ? `WHERE po.status = 'quote'`
-            : `WHERE (po.status IS NULL OR po.status != 'quote')`;
+        const { sql: whereSql, params: whereParams } = ProductionDatabase._buildProductOrdersWhere(opts);
         let total;
         if (isPostgreSQL) {
             const countRes = await pool.query(
-                `SELECT COUNT(*)::int AS c FROM product_orders po ${whereSql}`
+                `SELECT COUNT(*)::int AS c FROM product_orders po ${whereSql}`,
+                whereParams
             );
             total = countRes.rows[0].c;
         } else {
-            const row = db.prepare(`SELECT COUNT(*) AS c FROM product_orders po ${whereSql}`).get();
+            const row = db.prepare(`SELECT COUNT(*) AS c FROM product_orders po ${whereSql}`).get(...whereParams);
             total = row.c;
         }
         let orders;
         if (isPostgreSQL) {
+            const limitParam = whereParams.length + 1;
+            const offsetParam = whereParams.length + 2;
             const result = await pool.query(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
                  FROM product_orders po
@@ -7086,8 +7179,8 @@ class ProductionDatabase {
                  LEFT JOIN production_users u ON po.created_by = u.id
                  ${whereSql}
                  ORDER BY po.created_at DESC
-                 LIMIT $1 OFFSET $2`,
-                [pageSize, offset]
+                 LIMIT $${limitParam} OFFSET $${offsetParam}`,
+                [...whereParams, pageSize, offset]
             );
             orders = result.rows;
         } else {
@@ -7099,7 +7192,7 @@ class ProductionDatabase {
                  ${whereSql}
                  ORDER BY po.created_at DESC
                  LIMIT ? OFFSET ?`
-            ).all(pageSize, offset);
+            ).all(...whereParams, pageSize, offset);
         }
         if (includeProducts && orders.length > 0) {
             await this.attachOrderProductsBatch(orders);
@@ -7107,6 +7200,9 @@ class ProductionDatabase {
             for (const o of orders) {
                 o.products = [];
             }
+        }
+        for (const o of orders) {
+            ProductionDatabase.attachWorkflowFlagsToOrder(o);
         }
         return { orders, total, page, page_size: pageSize };
     }
@@ -7190,6 +7286,12 @@ class ProductionDatabase {
             values.push(data.notes == null ? null : String(data.notes));
             paramIndex++;
         }
+        if (data.workflow_flags !== undefined) {
+            const normalized = ProductionDatabase.normalizeWorkflowFlagsInput(data.workflow_flags);
+            updates.push(`workflow_flags = $${paramIndex}`);
+            values.push(JSON.stringify(normalized));
+            paramIndex++;
+        }
         
         if (updates.length === 0) {
             return currentOrder;
@@ -7224,7 +7326,7 @@ class ProductionDatabase {
                 console.log(`✅ Depreciated stock for product order #${id} (quantity: ${orderQuantity})`);
             }
             
-            return updatedOrder;
+            return await this.getProductOrderById(id);
         } else {
             const setClause = updates.map((update, idx) => {
                 const field = update.split(' = ')[0];

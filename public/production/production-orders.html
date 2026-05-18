@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="stylesheet" href="common.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         .requirements-section h4 {
@@ -94,6 +95,142 @@
         .table td:last-child .btn:last-child {
             margin-right: 0;
         }
+        .orders-view-toggle {
+            display: inline-flex;
+            gap: 0;
+            margin-right: 10px;
+        }
+        .orders-view-toggle .btn.active {
+            background: #667eea;
+            color: #fff;
+            border-color: #667eea;
+        }
+        .wo-board-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+            align-items: center;
+        }
+        .wo-flag-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 20px;
+            background: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            color: #495057;
+        }
+        .wo-flag-filter:hover {
+            border-color: #667eea;
+        }
+        .wo-flag-filter.active {
+            background: #667eea;
+            border-color: #667eea;
+            color: #fff;
+        }
+        .wo-flag-filter.active .wo-flag-badge {
+            background: rgba(255,255,255,0.2);
+            color: inherit;
+        }
+        .wo-board-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        .wo-order-card {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 14px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        .wo-order-card.status-pending {
+            border-left-color: #6c757d;
+        }
+        .wo-order-card.status-in_progress {
+            border-left-color: #667eea;
+        }
+        .wo-order-card__header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .wo-order-card__title {
+            font-weight: 700;
+            font-size: 15px;
+            margin: 0;
+        }
+        .wo-order-card__meta {
+            font-size: 12px;
+            color: #6c757d;
+            margin: 4px 0;
+        }
+        .wo-order-card__flags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 10px 0;
+            min-height: 4px;
+        }
+        .wo-order-card__actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        .wo-flag-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .wo-flag-badge--compact .wo-flag-badge__label {
+            max-width: 90px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .wo-flag-badge--warning { background: #fff3cd; color: #856404; }
+        .wo-flag-badge--info { background: #d1ecf1; color: #0c5460; }
+        .wo-flag-badge--primary { background: #cce5ff; color: #004085; }
+        .wo-flag-badge--secondary { background: #e2e3e5; color: #383d41; }
+        .wo-flag-badge--danger { background: #f8d7da; color: #721c24; }
+        .wo-status-flags {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-start;
+        }
+        .wo-flag-checkboxes {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .wo-flag-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            margin: 0;
+        }
+        .wo-flag-checkbox input {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -123,10 +260,22 @@
         <div class="card">
             <div class="card-header">
                 <h2>Works Orders</h2>
-                <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
+                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div class="orders-view-toggle" role="group" aria-label="Works orders view">
+                        <button type="button" id="ordersViewTableBtn" class="btn btn-secondary btn-sm active" onclick="setOrdersViewMode('table')">Table</button>
+                        <button type="button" id="ordersViewBoardBtn" class="btn btn-secondary btn-sm" onclick="setOrdersViewMode('board')">Board</button>
+                    </div>
+                    <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
+                </div>
             </div>
             <div id="ordersList">
                 <div class="loading">Loading...</div>
+            </div>
+            <div id="ordersBoard" style="display: none;">
+                <div class="wo-board-toolbar" id="woBoardFilters"></div>
+                <div id="ordersBoardGrid" class="wo-board-grid">
+                    <div class="loading">Loading...</div>
+                </div>
             </div>
         </div>
         
@@ -274,6 +423,10 @@
                         <option value="cancelled">Cancelled</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Workflow flags</label>
+                    <div id="editOrderFlagsCheckboxes" class="wo-flag-checkboxes"></div>
+                </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('editOrderModal')" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">Update Works Order</button>
@@ -292,6 +445,25 @@
             <div id="sparesContent">
                 <div class="loading">Loading...</div>
             </div>
+        </div>
+    </div>
+    
+    <!-- Manage workflow flags modal -->
+    <div id="manageFlagsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Manage flags</h3>
+                <button class="modal-close" onclick="hideModal('manageFlagsModal')">&times;</button>
+            </div>
+            <form id="manageFlagsForm">
+                <input type="hidden" id="manageFlagsOrderId">
+                <p class="text-muted" style="font-size: 0.9rem; margin-bottom: 12px;">Select all that apply to this works order.</p>
+                <div id="manageFlagsCheckboxes" class="wo-flag-checkboxes"></div>
+                <div class="text-right" style="margin-top: 16px;">
+                    <button type="button" onclick="hideModal('manageFlagsModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save flags</button>
+                </div>
+            </form>
         </div>
     </div>
     
@@ -337,6 +509,134 @@
         let panels = [];
         let stockItems = [];
         let currentOrderId = null;
+        let boardOrders = [];
+        let boardFlagFilter = 'all';
+        const ORDERS_VIEW_STORAGE_KEY = 'production_orders_view_mode';
+        let ordersViewMode = localStorage.getItem(ORDERS_VIEW_STORAGE_KEY) || 'table';
+        
+        function setOrdersViewMode(mode) {
+            ordersViewMode = mode === 'board' ? 'board' : 'table';
+            localStorage.setItem(ORDERS_VIEW_STORAGE_KEY, ordersViewMode);
+            applyOrdersViewMode();
+            loadOrders();
+        }
+        
+        function applyOrdersViewMode() {
+            const isBoard = ordersViewMode === 'board';
+            document.getElementById('ordersList').style.display = isBoard ? 'none' : '';
+            document.getElementById('ordersBoard').style.display = isBoard ? '' : 'none';
+            document.getElementById('ordersViewTableBtn').classList.toggle('active', !isBoard);
+            document.getElementById('ordersViewBoardBtn').classList.toggle('active', isBoard);
+        }
+        
+        function formatOrderProductsDisplay(order) {
+            if (order.products && order.products.length > 0) {
+                return order.products.map(p =>
+                    `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
+                ).join(', ');
+            }
+            return `${escapeHtml(order.product_name || 'Unknown')} (x${order.quantity || 1})`;
+        }
+        
+        function renderWoBoardFilters() {
+            const toolbar = document.getElementById('woBoardFilters');
+            if (!toolbar) return;
+            let html = `<button type="button" class="wo-flag-filter${boardFlagFilter === 'all' ? ' active' : ''}" data-flag-filter="all" onclick="setBoardFlagFilter('all')">All</button>`;
+            WORK_ORDER_FLAGS.forEach(def => {
+                const active = boardFlagFilter === def.slug ? ' active' : '';
+                html += `<button type="button" class="wo-flag-filter${active}" data-flag-filter="${def.slug}" onclick="setBoardFlagFilter('${def.slug}')">` +
+                    `<span class="wo-flag-badge wo-flag-badge--${def.tone}"><i class="fa-solid ${def.icon}" aria-hidden="true"></i><span class="wo-flag-badge__label">${escapeHtml(def.label)}</span></span>` +
+                    `</button>`;
+            });
+            toolbar.innerHTML = html;
+        }
+        
+        function setBoardFlagFilter(slug) {
+            boardFlagFilter = slug;
+            renderWoBoardFilters();
+            renderOrdersBoard();
+        }
+        
+        function orderMatchesBoardFlagFilter(order) {
+            if (boardFlagFilter === 'all') return true;
+            const flags = parseWorkflowFlags(order);
+            return flags.includes(boardFlagFilter);
+        }
+        
+        function renderOrdersBoard() {
+            const grid = document.getElementById('ordersBoardGrid');
+            if (!grid) return;
+            const filtered = boardOrders.filter(orderMatchesBoardFlagFilter);
+            if (filtered.length === 0) {
+                grid.innerHTML = '<p>No works orders match this filter.</p>';
+                return;
+            }
+            grid.innerHTML = filtered.map(order => {
+                const status = (order.status || 'pending').toLowerCase();
+                const statusLabel = status === 'in_progress' ? 'In progress' : 'Pending';
+                const flags = parseWorkflowFlags(order);
+                const flagsHtml = renderWorkOrderFlagBadges(flags);
+                const notesRaw = order.notes != null ? String(order.notes) : '';
+                const notesTrim = notesRaw.trim();
+                const notesShort = notesTrim.length > 60 ? notesTrim.slice(0, 58) + '…' : notesTrim;
+                const travelRt = order.travel_time_hours_round_trip;
+                const travelText = travelRt != null && travelRt !== '' && !Number.isNaN(parseFloat(travelRt))
+                    ? `${parseFloat(travelRt).toFixed(2)} h rt`
+                    : '';
+                const refParts = [];
+                if (order.sales_order_ref) refParts.push(escapeHtml(String(order.sales_order_ref)));
+                if (order.leadlock_order_id) refParts.push('LeadLock ' + escapeHtml(String(order.leadlock_order_id)));
+                const refLine = refParts.length ? refParts.join(' · ') : '';
+                return `
+                <article class="wo-order-card status-${status.replace(/[^a-z0-9_]/g, '_')}" data-order-id="${order.id}">
+                    <div class="wo-order-card__header">
+                        <h3 class="wo-order-card__title">#${order.id} ${escapeHtml(order.customer_name || 'No customer')}</h3>
+                        <span class="badge badge-info">${escapeHtml(statusLabel)}</span>
+                    </div>
+                    <p class="wo-order-card__meta"><strong>${formatOrderProductsDisplay(order)}</strong></p>
+                    ${refLine ? `<p class="wo-order-card__meta">${refLine}</p>` : ''}
+                    <p class="wo-order-card__meta">${formatDate(order.order_date)}${travelText ? ' · Travel ' + travelText : ''}</p>
+                    ${notesTrim ? `<p class="wo-order-card__meta" title="${escapeHtml(notesTrim)}">${escapeHtml(notesShort)}</p>` : ''}
+                    <div class="wo-order-card__flags">${flagsHtml || '<span class="text-muted" style="font-size: 11px;">No flags</span>'}</div>
+                    <div class="wo-order-card__actions">
+                        <button type="button" onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
+                        <button type="button" onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
+                        <button type="button" onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
+                        <button type="button" onclick="showUpdateStatusModal(${order.id}, '${(order.status || '').replace(/'/g, "\\'")}')" class="btn btn-secondary btn-sm">Status</button>
+                    </div>
+                </article>`;
+            }).join('');
+        }
+        
+        async function loadOrdersBoard() {
+            const grid = document.getElementById('ordersBoardGrid');
+            if (grid) grid.innerHTML = '<div class="loading">Loading...</div>';
+            try {
+                const data = await apiCall('/orders?status=pending,in_progress&page=1&page_size=100&include_products=1');
+                boardOrders = data.orders || [];
+                orders = boardOrders;
+                renderWoBoardFilters();
+                renderOrdersBoard();
+                updateOrdersCheckboxes();
+            } catch (error) {
+                if (grid) grid.innerHTML = '<p>Error loading works orders board</p>';
+            }
+        }
+        
+        function showManageFlagsModal(orderId) {
+            const order = boardOrders.find(o => o.id === orderId) || orders.find(o => o.id === orderId);
+            const flags = order ? parseWorkflowFlags(order) : [];
+            document.getElementById('manageFlagsOrderId').value = orderId;
+            document.getElementById('manageFlagsCheckboxes').innerHTML = renderWorkOrderFlagCheckboxes(flags);
+            showModal('manageFlagsModal');
+        }
+        
+        async function saveOrderFlags(orderId, workflow_flags) {
+            await apiCall(`/orders/${orderId}/flags`, {
+                method: 'PATCH',
+                body: JSON.stringify({ workflow_flags })
+            });
+        }
         
         async function init() {
             // Redirect staff users
@@ -347,6 +647,7 @@
             initNavbar();
             await Promise.all([loadProducts(), loadComponents(), loadPanels(), loadStockItems()]);
             loadQuotes();
+            applyOrdersViewMode();
             loadOrders();
         }
         
@@ -481,6 +782,10 @@
         }
         
         async function loadOrders() {
+            applyOrdersViewMode();
+            if (ordersViewMode === 'board') {
+                return loadOrdersBoard();
+            }
             try {
                 const data = await apiCall(`/orders?page=${ordersPage}&page_size=${ORDERS_PAGE_SIZE}`);
                 orders = data.orders || [];
@@ -547,7 +852,7 @@
                                     <td style="max-width: 200px;" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesShort) : '—'}</td>
                                     <td>${travelCell}</td>
                                     <td>${totalQuantity}</td>
-                                    <td><span class="badge badge-info">${order.status}</span></td>
+                                    <td><div class="wo-status-flags"><span class="badge badge-info">${escapeHtml(order.status || '')}</span>${renderWorkOrderFlagBadges(parseWorkflowFlags(order), { compact: true })}</div></td>
                                     <td>${formatDate(order.order_date)}</td>
                                     <td>${order.created_by_name || '-'}</td>
                                     <td>
@@ -555,6 +860,7 @@
                                         <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
                                         <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Spares</button>
                                         <button onclick="bookInstallation(${order.id})" class="btn btn-info btn-sm">Book Installation</button>
+                                        <button onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
                                         <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Status</button>
                                         <button onclick="showEditOrderModal(${order.id})" class="btn btn-info btn-sm">Edit</button>
                                         <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
@@ -2081,6 +2387,8 @@
                 document.getElementById('editOrderCustomerName').value = order.customer_name || '';
                 document.getElementById('editOrderNotes').value = order.notes != null ? String(order.notes) : '';
                 document.getElementById('editOrderStatus').value = order.status;
+                document.getElementById('editOrderFlagsCheckboxes').innerHTML =
+                    renderWorkOrderFlagCheckboxes(parseWorkflowFlags(order));
                 
                 const travelGroup = document.getElementById('editOrderTravelGroup');
                 const travelInput = document.getElementById('editOrderTravelTime');
@@ -2252,6 +2560,22 @@
             await updateOrderStatus(orderId, status);
         });
         
+        document.getElementById('manageFlagsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            try {
+                const orderId = parseInt(document.getElementById('manageFlagsOrderId').value, 10);
+                const workflow_flags = collectWorkflowFlagsFromContainer(
+                    document.getElementById('manageFlagsCheckboxes')
+                );
+                await saveOrderFlags(orderId, workflow_flags);
+                showAlert('Flags updated');
+                hideModal('manageFlagsModal');
+                loadOrders();
+            } catch (error) {
+                showAlert(error.message, 'error');
+            }
+        });
+        
         document.getElementById('editOrderForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             try {
@@ -2264,7 +2588,10 @@
                         order_date: document.getElementById('editOrderDate').value,
                         customer_name: document.getElementById('editOrderCustomerName').value || null,
                         notes: document.getElementById('editOrderNotes').value,
-                        status: document.getElementById('editOrderStatus').value
+                        status: document.getElementById('editOrderStatus').value,
+                        workflow_flags: collectWorkflowFlagsFromContainer(
+                            document.getElementById('editOrderFlagsCheckboxes')
+                        )
                     })
                 });
                 showAlert('Order updated successfully');

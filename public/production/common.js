@@ -706,6 +706,79 @@ document.addEventListener('click', function(event) {
     }
 });
 
+/** Works order workflow flag definitions (slug, label, icon, badge tone). */
+const WORK_ORDER_FLAGS = [
+    { slug: 'on_hold', label: 'On Hold', icon: 'fa-pause-circle', tone: 'warning' },
+    { slug: 'collection', label: 'Collection', icon: 'fa-truck', tone: 'info' },
+    { slug: 'waiting_access_sheet', label: 'Waiting for access sheet', icon: 'fa-file-lines', tone: 'info' },
+    { slug: 'booked_out', label: 'Booked out', icon: 'fa-calendar-check', tone: 'primary' },
+    { slug: 'on_hold_weather', label: 'On Hold (Weather)', icon: 'fa-cloud-rain', tone: 'warning' },
+    { slug: 'on_hold_planning', label: 'On Hold (Planning)', icon: 'fa-clipboard-list', tone: 'warning' },
+    { slug: 'activity_timeline', label: 'See activity timeline', icon: 'fa-clock-rotate-left', tone: 'secondary' },
+    { slug: 'do_not_contact', label: 'Do not Contact', icon: 'fa-phone-slash', tone: 'danger' }
+];
+
+const WORK_ORDER_FLAG_BY_SLUG = Object.fromEntries(WORK_ORDER_FLAGS.map(f => [f.slug, f]));
+
+function parseWorkflowFlags(orderOrFlags) {
+    let raw = orderOrFlags;
+    if (orderOrFlags && typeof orderOrFlags === 'object' && !Array.isArray(orderOrFlags)) {
+        raw = orderOrFlags.workflow_flags;
+    }
+    if (raw == null || raw === '') return [];
+    let parsed = raw;
+    if (typeof raw === 'string') {
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            return [];
+        }
+    }
+    if (!Array.isArray(parsed)) return [];
+    const slugs = new Set(WORK_ORDER_FLAGS.map(f => f.slug));
+    return parsed
+        .map(s => String(s).trim())
+        .filter(slug => slugs.has(slug))
+        .filter((slug, i, arr) => arr.indexOf(slug) === i);
+}
+
+function renderWorkOrderFlagBadges(flags, options = {}) {
+    const compact = !!options.compact;
+    const list = parseWorkflowFlags(flags);
+    if (!list.length) return '';
+    return list.map(slug => {
+        const def = WORK_ORDER_FLAG_BY_SLUG[slug];
+        if (!def) return '';
+        const shortLabel = compact && def.label.length > 18
+            ? def.label.slice(0, 16) + '…'
+            : def.label;
+        return `<span class="wo-flag-badge wo-flag-badge--${def.tone}${compact ? ' wo-flag-badge--compact' : ''}" title="${escapeHtml(def.label)}">` +
+            `<i class="fa-solid ${def.icon}" aria-hidden="true"></i>` +
+            `<span class="wo-flag-badge__label">${escapeHtml(shortLabel)}</span>` +
+            `</span>`;
+    }).join('');
+}
+
+function renderWorkOrderFlagCheckboxes(selectedFlags, inputName = 'workflow_flag') {
+    const selected = new Set(parseWorkflowFlags(selectedFlags));
+    return WORK_ORDER_FLAGS.map(def => {
+        const checked = selected.has(def.slug) ? ' checked' : '';
+        return `<label class="wo-flag-checkbox">` +
+            `<input type="checkbox" name="${inputName}" value="${def.slug}"${checked}>` +
+            `<span class="wo-flag-badge wo-flag-badge--${def.tone}">` +
+            `<i class="fa-solid ${def.icon}" aria-hidden="true"></i>` +
+            `<span class="wo-flag-badge__label">${escapeHtml(def.label)}</span>` +
+            `</span>` +
+            `</label>`;
+    }).join('');
+}
+
+function collectWorkflowFlagsFromContainer(container) {
+    if (!container) return [];
+    return Array.from(container.querySelectorAll('input[name="workflow_flag"]:checked'))
+        .map(el => el.value);
+}
+
 // Default working hours: 8am start; 5pm end Mon-Thu/Sat/Sun, 3pm end Friday
 function getDefaultWorkTimes(date) {
     const d = date instanceof Date ? date : new Date(date);
