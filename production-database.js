@@ -3106,7 +3106,7 @@ class ProductionDatabase {
         return order;
     }
 
-    static _buildProductOrdersWhere(opts = {}) {
+    static _buildProductOrdersWhere(opts = {}, { postgres = false } = {}) {
         const quoteOnly = !!opts.quoteOnly;
         const statusIn = Array.isArray(opts.statusIn) && opts.statusIn.length > 0
             ? [...new Set(opts.statusIn.map(s => String(s).trim()).filter(Boolean))]
@@ -3118,7 +3118,10 @@ class ProductionDatabase {
         } else {
             conditions.push(`(po.status IS NULL OR po.status != 'quote')`);
             if (statusIn && statusIn.length > 0) {
-                const placeholders = statusIn.map(() => '?').join(', ');
+                const startIdx = params.length + 1;
+                const placeholders = statusIn.map((_, i) =>
+                    postgres ? `$${startIdx + i}` : '?'
+                ).join(', ');
                 conditions.push(`po.status IN (${placeholders})`);
                 params.push(...statusIn);
             }
@@ -7156,7 +7159,10 @@ class ProductionDatabase {
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
         const includeProducts = opts.includeProducts !== false;
-        const { sql: whereSql, params: whereParams } = ProductionDatabase._buildProductOrdersWhere(opts);
+        const { sql: whereSql, params: whereParams } = ProductionDatabase._buildProductOrdersWhere(
+            opts,
+            { postgres: isPostgreSQL }
+        );
         let total;
         if (isPostgreSQL) {
             const countRes = await pool.query(
