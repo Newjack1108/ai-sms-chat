@@ -264,10 +264,47 @@ function getLoadSheetProductsDisplay(loadSheet) {
     const products = loadSheet.products;
     if (products && products.length > 0) {
         return products
-            .map(p => `${p.product_name || 'Unknown'} (x${p.quantity})`)
+            .map((p) => {
+                const prefix = p.is_optional_extra ? '[Extra] ' : '';
+                return `${prefix}${p.product_name || 'Unknown'} (x${p.quantity})`;
+            })
             .join(', ');
     }
     return `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
+}
+
+/** LeadLock lines with no production BOM — display-only on load sheets. */
+function renderLoadSheetSalesOnlyLinesHtml(loadSheet) {
+    const lines = loadSheet && loadSheet.sales_only_lines;
+    if (!lines || !lines.length) {
+        return '';
+    }
+    const rows = lines
+        .map((line) => {
+            const install =
+                line.install_hours != null && !Number.isNaN(parseFloat(line.install_hours))
+                    ? parseFloat(line.install_hours).toFixed(2)
+                    : '—';
+            const boxes =
+                line.number_of_boxes != null && !Number.isNaN(parseInt(line.number_of_boxes, 10))
+                    ? String(line.number_of_boxes)
+                    : '—';
+            return `<tr>
+<td><strong>${escapeHtml(line.product_name || 'Unknown')}</strong></td>
+<td>${escapeHtml(String(line.quantity ?? 1))}</td>
+<td>${line.description ? escapeHtml(line.description) : '—'}</td>
+<td>${install}</td>
+<td>${escapeHtml(boxes)}</td>
+</tr>`;
+        })
+        .join('');
+    return `<h4>Sales extras (no BOM)</h4>
+<table class="table">
+<thead><tr>
+<th>Item</th><th>Qty</th><th>Description</th><th>Install hrs</th><th>Boxes</th>
+</tr></thead>
+<tbody>${rows}</tbody>
+</table>`;
 }
 
 /**
@@ -279,6 +316,7 @@ function renderLoadSheetReadOnlyHtml(loadSheet) {
         return '';
     }
     let html = renderLoadSheetCustomerHeader(loadSheet);
+    html += renderLoadSheetSalesOnlyLinesHtml(loadSheet);
     const components = loadSheet.components || [];
     const builtItems = loadSheet.built_items || [];
     const rawMaterials = loadSheet.raw_materials || [];

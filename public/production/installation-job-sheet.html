@@ -145,10 +145,38 @@
             return `<tr><th>${esc(label)}</th><td>${v}</td></tr>`;
         }
 
+        function renderJobSheetSalesOnlyLines(lines) {
+            if (!lines || !lines.length) return '';
+            const rows = lines.map(line => `<tr>
+                        <td><strong>${esc(line.product_name || 'Unknown')}</strong></td>
+                        <td>${esc(String(line.quantity ?? 1))}</td>
+                        <td>${line.description ? esc(line.description) : '—'}</td>
+                        <td>${line.install_hours != null ? esc(String(line.install_hours)) : '—'}</td>
+                        <td>${line.number_of_boxes != null ? esc(String(line.number_of_boxes)) : '—'}</td>
+                    </tr>`).join('');
+            return `
+                    <h3 style="margin-top: 16px; font-size: 1rem;">Sales extras (no BOM)</h3>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Qty</th>
+                                <th>Description</th>
+                                <th>Install hrs</th>
+                                <th>Boxes</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+        }
+
         function renderJobSheet(data) {
             const inst = data.installation;
             const order = data.order;
-            const leadlock = data.leadlock_items || [];
+            const salesOnly = data.sales_only_lines || [];
+            const products = (data.line_items && data.line_items.length)
+                ? data.line_items
+                : (order && order.products) ? order.products : [];
 
             const startD = inst.start_date || inst.installation_date;
             const endD = inst.end_date || startD;
@@ -187,19 +215,21 @@
 
             let orderSection = '';
             if (order) {
-                const products = order.products || [];
                 let productsTable = '<p class="muted">No products on this order.</p>';
                 if (products.length > 0) {
                     const prow = products.map(p => {
-                        const extras = [];
-                        if (p.product_description) extras.push(esc(p.product_description));
-                        if (p.estimated_install_time != null) extras.push(`Est. install: ${esc(p.estimated_install_time)} h`);
-                        if (p.number_of_boxes != null) extras.push(`Boxes: ${esc(p.number_of_boxes)}`);
-                        if (p.estimated_travel_time != null) extras.push(`Est. travel: ${esc(p.estimated_travel_time)} h`);
-                        if (p.finished_product_type) extras.push(`Type: ${esc(p.finished_product_type)}`);
-                        const detail = extras.length ? `<div class="muted" style="margin-top:4px;">${extras.join(' · ')}</div>` : '';
+                        const extraBadge = p.is_optional_extra
+                            ? '<span style="font-size:0.75rem;background:#fff3cd;padding:2px 6px;border-radius:4px;margin-right:6px;">Extra</span>'
+                            : '';
+                        const details = [];
+                        if (p.product_description) details.push(esc(p.product_description));
+                        if (p.estimated_install_time != null) details.push(`Est. install: ${esc(p.estimated_install_time)} h`);
+                        if (p.number_of_boxes != null) details.push(`Boxes: ${esc(p.number_of_boxes)}`);
+                        if (p.estimated_travel_time != null) details.push(`Est. travel: ${esc(p.estimated_travel_time)} h`);
+                        if (p.finished_product_type) details.push(`Type: ${esc(p.finished_product_type)}`);
+                        const detail = details.length ? `<div class="muted" style="margin-top:4px;">${details.join(' · ')}</div>` : '';
                         return `<tr>
-                            <td>${esc(p.product_name || 'Product')}</td>
+                            <td>${extraBadge}${esc(p.product_name || 'Product')}</td>
                             <td>${esc(p.quantity)}</td>
                             <td>${detail || '—'}</td>
                         </tr>`;
@@ -211,30 +241,7 @@
                         </table>`;
                 }
 
-                let leadlockBlock = '';
-                if (leadlock.length > 0) {
-                    const lrows = leadlock.map(li => `<tr>
-                        <td>${esc(li.product_name || '—')}</td>
-                        <td>${li.quantity != null ? esc(li.quantity) : '—'}</td>
-                        <td>${li.description ? esc(li.description) : '—'}</td>
-                        <td>${li.install_hours != null ? esc(li.install_hours) : '—'}</td>
-                        <td>${li.number_of_boxes != null ? esc(li.number_of_boxes) : '—'}</td>
-                    </tr>`).join('');
-                    leadlockBlock = `
-                        <h2>Sales line items</h2>
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Item</th>
-                                    <th>Qty</th>
-                                    <th>Description</th>
-                                    <th>Install hrs</th>
-                                    <th>Boxes</th>
-                                </tr>
-                            </thead>
-                            <tbody>${lrows}</tbody>
-                        </table>`;
-                }
+                const salesOnlyBlock = renderJobSheetSalesOnlyLines(salesOnly);
 
                 orderSection = `
                     <h2>Works order</h2>
@@ -256,9 +263,9 @@
                         ${row('Phone', order.customer_phone ? esc(order.customer_phone) : '—')}
                         ${row('Email', order.customer_email ? esc(order.customer_email) : '—')}
                     </table>
-                    <h2>Products (production)</h2>
+                    <h2>Products</h2>
                     ${productsTable}
-                    ${leadlockBlock}
+                    ${salesOnlyBlock}
                     ${order.notes ? `<h2>Order notes</h2><div class="notes-block">${esc(order.notes)}</div>` : ''}`;
             } else {
                 orderSection = `<h2>Works order</h2><p class="muted">No works order linked to this installation.</p>`;

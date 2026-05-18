@@ -6288,6 +6288,125 @@ class ProductionDatabase {
         }
     }
     
+    static isLeadlockPlaceholderProduct(product) {
+        if (!product) return false;
+        return String(product.name || '').trim().toLowerCase() === 'leadlock order';
+    }
+    
+    /** Resolve a finished product from a LeadLock line (by product_id or name). */
+    static async resolveProductFromLeadlockItem(item) {
+        if (!item) return null;
+        if (item.product_id != null) {
+            const pid = parseInt(item.product_id, 10);
+            if (!isNaN(pid) && pid > 0) {
+                const p = await this.getProductById(pid);
+                if (p && !this.isLeadlockPlaceholderProduct(p)) return p;
+            }
+        }
+        if (item.product_name) {
+            const p = await this.getProductByName(item.product_name);
+            if (p && !this.isLeadlockPlaceholderProduct(p)) return p;
+        }
+        return null;
+    }
+    
+    /**
+     * Idempotent: ensure order_products reflects LeadLock lines (matched extras included).
+     * Consolidates duplicate rows per product_id; LeadLock quantities are authoritative.
+     */
+    static async syncLeadlockItemsToOrderProducts(orderId) {
+        const leadlockItems = await this.getLeadlockWorkOrderItems(orderId);
+        if (!leadlockItems.length) return;
+        
+        const desiredQty = new Map();
+        for (const item of leadlockItems) {
+            const product = await this.resolveProductFromLeadlockItem(item);
+            if (!product) continue;
+            const qty = parseInt(item.quantity, 10) || 1;
+            desiredQty.set(product.id, (desiredQty.get(product.id) || 0) + qty);
+        }
+        if (desiredQty.size === 0) return;
+        
+        const existing = await this.getOrderProducts(orderId);
+        const rowsByProductId = new Map();
+        for (const row of existing) {
+            const pid = row.product_id;
+            if (!rowsByProductId.has(pid)) rowsByProductId.set(pid, []);
+            rowsByProductId.get(pid).push(row);
+        }
+        
+        for (const [productId, targetQty] of desiredQty) {
+            const rows = rowsByProductId.get(productId) || [];
+            if (rows.length === 0) {
+                if (isPostgreSQL) {
+                    await pool.query(
+                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES ($1, $2, $3)`,
+                        [orderId, productId, targetQty]
+                    );
+                } else {
+                    db.prepare(
+                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES (?, ?, ?)`
+                    ).run(orderId, productId, targetQty);
+                }
+            } else {
+                const keep = rows[0];
+                const currentQty = parseInt(keep.quantity, 10) || 0;
+                if (currentQty !== targetQty) {
+                    if (isPostgreSQL) {
+                        await pool.query(
+                            `UPDATE order_products SET quantity = $1 WHERE id = $2`,
+                            [targetQty, keep.id]
+                        );
+                    } else {
+                        db.prepare(`UPDATE order_products SET quantity = ? WHERE id = ?`).run(targetQty, keep.id);
+                    }
+                }
+                for (let i = 1; i < rows.length; i++) {
+                    if (isPostgreSQL) {
+                        await pool.query(`DELETE FROM order_products WHERE id = $1`, [rows[i].id]);
+                    } else {
+                        db.prepare(`DELETE FROM order_products WHERE id = ?`).run(rows[i].id);
+                    }
+                }
+            }
+        }
+    }
+    
+    /** Sync LeadLock lines into order_products; return production lines + unmatched sales extras. */
+    static async getOrderLineItemsForProduction(orderId) {
+        await this.syncLeadlockItemsToOrderProducts(orderId);
+        const orderProducts = await this.getOrderProducts(orderId);
+        const leadlockItems = await this.getLeadlockWorkOrderItems(orderId);
+        const salesOnlyLines = [];
+        
+        for (const item of leadlockItems) {
+            const product = await this.resolveProductFromLeadlockItem(item);
+            if (!product) {
+                salesOnlyLines.push({
+                    product_name: item.product_name || 'Unknown',
+                    quantity: parseInt(item.quantity, 10) || 1,
+                    description: item.description || null,
+                    install_hours: item.install_hours != null ? parseFloat(item.install_hours) : null,
+                    number_of_boxes: item.number_of_boxes != null ? parseInt(item.number_of_boxes, 10) : null
+                });
+            }
+        }
+        
+        for (const op of orderProducts) {
+            if (!op.product_id) continue;
+            try {
+                const fp = await this.getProductById(op.product_id);
+                if (fp) {
+                    op.is_optional_extra = !!(fp.is_optional_extra === true || fp.is_optional_extra === 1);
+                }
+            } catch (e) {
+                op.is_optional_extra = false;
+            }
+        }
+        
+        return { orderProducts, salesOnlyLines };
+    }
+    
     static async getLoadSheet(orderId) {
         // Get the order with all products
         const order = await this.getProductOrderById(orderId);
@@ -6295,16 +6414,18 @@ class ProductionDatabase {
             throw new Error('Order not found');
         }
         
-        // Get all products for this order (from order_products table)
-        const orderProducts = order.products || [];
+        const { orderProducts, salesOnlyLines } = await this.getOrderLineItemsForProduction(orderId);
         
-        // Fallback to old format if no products in order_products
+        // Fallback to old format if no products in order_products (skip LeadLock placeholder)
         if (orderProducts.length === 0 && order.product_id) {
-            orderProducts.push({
-                product_id: order.product_id,
-                quantity: order.quantity || 1,
-                product_name: order.product_name
-            });
+            const headerProduct = await this.getProductById(order.product_id);
+            if (headerProduct && !this.isLeadlockPlaceholderProduct(headerProduct)) {
+                orderProducts.push({
+                    product_id: order.product_id,
+                    quantity: order.quantity || 1,
+                    product_name: order.product_name || headerProduct.name
+                });
+            }
         }
         
         // Get spares for this order
@@ -6508,7 +6629,8 @@ class ProductionDatabase {
         const productsList = orderProducts.map(op => ({
             product_id: op.product_id,
             product_name: op.product_name || 'Unknown',
-            quantity: parseFloat(op.quantity || 1)
+            quantity: parseFloat(op.quantity || 1),
+            is_optional_extra: !!op.is_optional_extra
         }));
         
         let travelTimeHoursRoundTrip = null;
@@ -6531,7 +6653,8 @@ class ProductionDatabase {
             estimated_load_time: totalLoadTime,
             estimated_install_time: totalInstallTime,
             estimated_travel_time: totalTravelTime,
-            travel_time_hours_round_trip: travelTimeHoursRoundTrip
+            travel_time_hours_round_trip: travelTimeHoursRoundTrip,
+            sales_only_lines: salesOnlyLines
         };
     }
     
@@ -6721,12 +6844,6 @@ class ProductionDatabase {
                         parseInt(item.number_of_boxes, 10) || 1
                     ]
                 );
-                if (matchedProduct) {
-                    await pool.query(
-                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES ($1, $2, $3)`,
-                        [orderId, matchedProduct.id, qty]
-                    );
-                }
             } else {
                 db.prepare(
                     `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
@@ -6741,14 +6858,10 @@ class ProductionDatabase {
                     parseFloat(item.install_hours) || 0,
                     parseInt(item.number_of_boxes, 10) || 1
                 );
-                if (matchedProduct) {
-                    db.prepare(
-                        `INSERT INTO order_products (order_id, product_id, quantity) VALUES (?, ?, ?)`
-                    ).run(orderId, matchedProduct.id, qty);
-                }
             }
         }
         
+        await this.syncLeadlockItemsToOrderProducts(orderId);
         return this.getProductOrderById(orderId);
     }
     
@@ -6904,7 +7017,9 @@ class ProductionDatabase {
         }
         
         if (order) {
-            // Get all products for this order
+            if (order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '') {
+                await this.syncLeadlockItemsToOrderProducts(id);
+            }
             order.products = await this.getOrderProducts(id);
         }
         
@@ -8102,29 +8217,34 @@ class ProductionDatabase {
         }
         let order = null;
         let leadlock_items = [];
+        let sales_only_lines = [];
+        let line_items = [];
         const orderId = installation.works_order_id;
         if (orderId) {
             order = await this.getProductOrderById(orderId);
-            if (order && Array.isArray(order.products)) {
-                for (const p of order.products) {
-                    if (!p.product_id) continue;
-                    try {
-                        const fp = await this.getProductById(p.product_id);
-                        if (fp) {
-                            p.product_description = fp.description ?? null;
-                            p.estimated_install_time = fp.estimated_install_time ?? null;
-                            p.number_of_boxes = fp.number_of_boxes ?? null;
-                            p.estimated_travel_time = fp.estimated_travel_time ?? null;
-                            p.finished_product_type = fp.product_type ?? null;
-                        }
-                    } catch (e) {
-                        console.log('getInstallationJobSheet: product enrich failed', e.message);
+            const { orderProducts, salesOnlyLines } = await this.getOrderLineItemsForProduction(orderId);
+            sales_only_lines = salesOnlyLines;
+            order.products = orderProducts;
+            line_items = orderProducts;
+            for (const p of line_items) {
+                if (!p.product_id) continue;
+                try {
+                    const fp = await this.getProductById(p.product_id);
+                    if (fp) {
+                        p.product_description = fp.description ?? null;
+                        p.estimated_install_time = fp.estimated_install_time ?? null;
+                        p.number_of_boxes = fp.number_of_boxes ?? null;
+                        p.estimated_travel_time = fp.estimated_travel_time ?? null;
+                        p.finished_product_type = fp.product_type ?? null;
+                        p.is_optional_extra = !!(fp.is_optional_extra === true || fp.is_optional_extra === 1);
                     }
+                } catch (e) {
+                    console.log('getInstallationJobSheet: product enrich failed', e.message);
                 }
             }
             leadlock_items = await this.getLeadlockWorkOrderItems(orderId);
         }
-        return { installation, order, leadlock_items };
+        return { installation, order, leadlock_items, line_items, sales_only_lines };
     }
     
     static async getAllInstallations(startDate = null, endDate = null) {

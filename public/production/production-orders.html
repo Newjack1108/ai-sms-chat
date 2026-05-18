@@ -973,16 +973,7 @@
                     console.error('Error loading saved checkbox states:', error);
                 }
                 
-                // Build products display
-                let productsDisplay = '';
-                if (loadSheet.products && loadSheet.products.length > 0) {
-                    productsDisplay = loadSheet.products.map(p => 
-                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
-                    ).join(', ');
-                } else {
-                    // Fallback to old format
-                    productsDisplay = `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
-                }
+                const productsDisplay = escapeHtml(getLoadSheetProductsDisplay(loadSheet));
                 
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
@@ -998,6 +989,7 @@
                         </div>
                         <div class="requirements-section" id="loadSheetContent">
                             ${renderLoadSheetCustomerHeader(loadSheet)}
+                            ${renderLoadSheetSalesOnlyLinesHtml(loadSheet)}
                             ${loadSheet.components.length > 0 ? `
                             <h4>Components Required</h4>
                             <table class="table">
@@ -1303,16 +1295,7 @@
                     });
                 }
                 
-                // Build products display for print
-                let printProductsDisplay = '';
-                if (loadSheet.products && loadSheet.products.length > 0) {
-                    printProductsDisplay = loadSheet.products.map(p => 
-                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
-                    ).join(', ');
-                } else {
-                    // Fallback to old format
-                    printProductsDisplay = `${loadSheet.product_name || 'Unknown'} (x${loadSheet.quantity || 1})`;
-                }
+                const printProductsDisplay = escapeHtml(getLoadSheetProductsDisplay(loadSheet));
                 
                 // Create print-friendly HTML
                 const printHTML = `
@@ -1323,6 +1306,7 @@
                             <p style="margin: 0; font-size: 14px; color: #666;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
                             ${renderLoadSheetCustomerHeader(loadSheet).replace(/margin-bottom: 16px/g, 'margin: 12px auto 0; max-width: 480px; text-align: left')}
                         </div>
+                        ${renderLoadSheetSalesOnlyLinesHtml(loadSheet)}
                         
                         ${loadSheet.components.length > 0 ? `
                         <div class="table-section">

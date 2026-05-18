@@ -2643,7 +2643,9 @@ router.get('/installations/:id/job-sheet', requireProductionAuth, async (req, re
             success: true,
             installation: data.installation,
             order: data.order,
-            leadlock_items: data.leadlock_items || []
+            leadlock_items: data.leadlock_items || [],
+            line_items: data.line_items || [],
+            sales_only_lines: data.sales_only_lines || []
         });
     } catch (error) {
         console.error('Get installation job sheet error:', error);
