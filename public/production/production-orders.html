@@ -155,6 +155,17 @@
         .wo-order-card.status-in_progress {
             border-left-color: #667eea;
         }
+        .wo-order-card.status-completed,
+        .wo-order-card.status-complete {
+            border-left-color: #28a745;
+        }
+        .wo-board-toolbar__scope {
+            display: inline-flex;
+            gap: 6px;
+            margin-right: 10px;
+            padding-right: 10px;
+            border-right: 1px solid #dee2e6;
+        }
         .wo-order-card__header {
             display: flex;
             justify-content: space-between;
@@ -489,6 +500,11 @@
         let currentOrderId = null;
         let boardOrders = [];
         let boardFlagFilter = 'all';
+        const BOARD_STATUS_SCOPE_KEY = 'production_orders_board_scope';
+        let boardStatusScope = (() => {
+            const s = localStorage.getItem(BOARD_STATUS_SCOPE_KEY);
+            return s === 'completed' ? 'completed' : 'active';
+        })();
         const ORDERS_VIEW_STORAGE_KEY = 'production_orders_view_mode';
         let ordersViewMode = localStorage.getItem(ORDERS_VIEW_STORAGE_KEY) || 'table';
         
@@ -518,10 +534,42 @@
             return `${escapeHtml(order.product_name || 'Unknown')} (x${order.quantity || 1})`;
         }
         
+        function getBoardStatusApiParam() {
+            return boardStatusScope === 'completed' ? 'completed,complete' : 'pending,in_progress';
+        }
+
+        function formatBoardOrderStatusLabel(status) {
+            const s = (status || 'pending').toLowerCase();
+            if (s === 'in_progress') return 'In progress';
+            if (s === 'completed' || s === 'complete' || s === 'finished') return 'Completed';
+            if (s === 'cancelled') return 'Cancelled';
+            return 'Pending';
+        }
+
+        function boardOrderStatusBadgeClass(status) {
+            const s = (status || 'pending').toLowerCase();
+            if (s === 'completed' || s === 'complete' || s === 'finished') return 'badge-success';
+            if (s === 'cancelled') return 'badge-secondary';
+            return 'badge-info';
+        }
+
+        function setBoardStatusScope(scope) {
+            boardStatusScope = scope === 'completed' ? 'completed' : 'active';
+            localStorage.setItem(BOARD_STATUS_SCOPE_KEY, boardStatusScope);
+            boardFlagFilter = 'all';
+            loadOrdersBoard();
+        }
+
         function renderWoBoardFilters() {
             const toolbar = document.getElementById('woBoardFilters');
             if (!toolbar) return;
-            let html = `<button type="button" class="wo-flag-filter${boardFlagFilter === 'all' ? ' active' : ''}" data-flag-filter="all" onclick="setBoardFlagFilter('all')">All</button>`;
+            const activeScopeClass = boardStatusScope === 'active' ? ' active' : '';
+            const completedScopeClass = boardStatusScope === 'completed' ? ' active' : '';
+            let html = `<span class="wo-board-toolbar__scope" role="group" aria-label="Board order status">` +
+                `<button type="button" class="wo-flag-filter${activeScopeClass}" onclick="setBoardStatusScope('active')">Active</button>` +
+                `<button type="button" class="wo-flag-filter${completedScopeClass}" onclick="setBoardStatusScope('completed')">Completed</button>` +
+                `</span>`;
+            html += `<button type="button" class="wo-flag-filter${boardFlagFilter === 'all' ? ' active' : ''}" data-flag-filter="all" onclick="setBoardFlagFilter('all')">All</button>`;
             WORK_ORDER_FLAGS.forEach(def => {
                 const active = boardFlagFilter === def.slug ? ' active' : '';
                 html += `<button type="button" class="wo-flag-filter${active}" data-flag-filter="${def.slug}" onclick="setBoardFlagFilter('${def.slug}')">` +
@@ -550,16 +598,23 @@
             if (filtered.length === 0) {
                 let emptyMsg = 'No works orders match this filter.';
                 if (boardOrders.length === 0) {
-                    emptyMsg = orderSearchQuery
-                        ? `No works orders match "${escapeHtml(orderSearchQuery)}"`
-                        : 'No works orders found';
+                    if (orderSearchQuery) {
+                        emptyMsg = `No works orders match "${escapeHtml(orderSearchQuery)}"`;
+                    } else if (orderLeadlockOnly) {
+                        emptyMsg = 'No LeadLock works orders found';
+                    } else if (boardStatusScope === 'completed') {
+                        emptyMsg = 'No completed works orders found';
+                    } else {
+                        emptyMsg = 'No active works orders found';
+                    }
                 }
                 grid.innerHTML = `<p>${emptyMsg}</p>`;
                 return;
             }
             grid.innerHTML = filtered.map(order => {
                 const status = (order.status || 'pending').toLowerCase();
-                const statusLabel = status === 'in_progress' ? 'In progress' : 'Pending';
+                const statusLabel = formatBoardOrderStatusLabel(status);
+                const statusBadgeClass = boardOrderStatusBadgeClass(status);
                 const flags = parseWorkflowFlags(order);
                 const flagsHtml = renderWorkOrderFlagBadges(flags);
                 const notesRaw = order.notes != null ? String(order.notes) : '';
@@ -577,7 +632,7 @@
                 <article class="wo-order-card status-${status.replace(/[^a-z0-9_]/g, '_')}" data-order-id="${order.id}">
                     <div class="wo-order-card__header">
                         <h3 class="wo-order-card__title">#${order.id} ${escapeHtml(order.customer_name || 'No customer')}</h3>
-                        <span class="badge badge-info">${escapeHtml(statusLabel)}</span>
+                        <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
                     </div>
                     <p class="wo-order-card__meta"><strong>${formatOrderProductsDisplay(order)}</strong></p>
                     ${refLine ? `<p class="wo-order-card__meta">${refLine}</p>` : ''}
@@ -599,7 +654,7 @@
             if (grid) grid.innerHTML = '<div class="loading">Loading...</div>';
             try {
                 const qs = new URLSearchParams({
-                    status: 'pending,in_progress',
+                    status: getBoardStatusApiParam(),
                     page: '1',
                     page_size: '100',
                     include_products: '1',
