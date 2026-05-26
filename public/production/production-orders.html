@@ -258,8 +258,20 @@
                     <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
                 </div>
             </div>
-            <div style="padding: 12px 0;">
-                <input id="orderSearchInput" type="text" class="form-input" placeholder="Search customer, LeadLock ref, product, status, notes..." autocomplete="off">
+            <div style="padding: 12px 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                <input id="orderSearchInput" type="text" class="form-input" placeholder="Search customer, LeadLock ref, product, status, notes..." autocomplete="off" style="flex: 1; min-width: 220px;">
+                <label style="display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; white-space: nowrap;">
+                    <input type="checkbox" id="orderLeadlockOnly" style="width: auto;">
+                    <span>LeadLock only</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap;">
+                    <span>Per page</span>
+                    <select id="ordersPageSizeSelect" class="form-select" style="width: auto; min-width: 72px;" onchange="onOrdersPageSizeChange()">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </label>
             </div>
             <div id="ordersList">
                 <div class="loading">Loading...</div>
@@ -463,9 +475,14 @@
         let orders = [];
         let ordersTotal = 0;
         let ordersPage = 1;
-        const ORDERS_PAGE_SIZE = 25;
+        const ORDERS_PAGE_SIZE_KEY = 'production_orders_page_size';
+        let ordersPageSize = (() => {
+            const n = parseInt(localStorage.getItem(ORDERS_PAGE_SIZE_KEY), 10);
+            return [25, 50, 100].includes(n) ? n : 25;
+        })();
         let orderSearchQuery = '';
         let orderSearchDebounce = null;
+        let orderLeadlockOnly = false;
         let components = [];
         let panels = [];
         let stockItems = [];
@@ -583,9 +600,11 @@
                     status: 'pending,in_progress',
                     page: '1',
                     page_size: '100',
-                    include_products: '1'
+                    include_products: '1',
+                    sort: 'order_date'
                 });
                 if (orderSearchQuery) qs.set('search', orderSearchQuery);
+                if (orderLeadlockOnly) qs.set('leadlock_only', '1');
                 const data = await apiCall(`/orders?${qs.toString()}`);
                 boardOrders = data.orders || [];
                 orders = boardOrders;
@@ -663,15 +682,51 @@
             }
         }
         
+        function buildOrdersQueryParams() {
+            const qs = new URLSearchParams({
+                page: String(ordersPage),
+                page_size: String(ordersPageSize)
+            });
+            if (orderSearchQuery) qs.set('search', orderSearchQuery);
+            if (orderLeadlockOnly) qs.set('leadlock_only', '1');
+            return qs;
+        }
+
+        function renderOrdersListSummary() {
+            if (ordersTotal === 0) return '';
+            const start = (ordersPage - 1) * ordersPageSize + 1;
+            const end = Math.min(ordersPage * ordersPageSize, ordersTotal);
+            let msg = `Showing ${start}–${end} of ${ordersTotal} works orders (newest first).`;
+            if (ordersTotal > ordersPageSize) {
+                msg += ' Older orders are on later pages — use search, LeadLock only, or increase per page.';
+            }
+            return `<p class="text-muted" style="margin-bottom: 12px; font-size: 0.9rem;">${msg}</p>`;
+        }
+
         function renderOrdersPager() {
-            const totalPages = Math.max(1, Math.ceil(ordersTotal / ORDERS_PAGE_SIZE));
-            if (ordersTotal <= ORDERS_PAGE_SIZE) return '';
+            const totalPages = Math.max(1, Math.ceil(ordersTotal / ordersPageSize));
+            if (ordersTotal <= ordersPageSize) return '';
             return `
                 <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                     <span>Page ${ordersPage} of ${totalPages} (${ordersTotal} orders)</span>
                     <button type="button" class="btn btn-secondary btn-sm" ${ordersPage <= 1 ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage - 1})">Previous</button>
                     <button type="button" class="btn btn-secondary btn-sm" ${ordersPage >= totalPages ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage + 1})">Next</button>
                 </div>`;
+        }
+
+        function onOrdersPageSizeChange() {
+            const sel = document.getElementById('ordersPageSizeSelect');
+            const n = parseInt(sel.value, 10);
+            ordersPageSize = [25, 50, 100].includes(n) ? n : 25;
+            localStorage.setItem(ORDERS_PAGE_SIZE_KEY, String(ordersPageSize));
+            ordersPage = 1;
+            loadOrders();
+        }
+
+        function onOrderLeadlockOnlyChange() {
+            orderLeadlockOnly = !!document.getElementById('orderLeadlockOnly').checked;
+            ordersPage = 1;
+            loadOrders();
         }
         
         function goOrdersPage(p) {
@@ -697,12 +752,7 @@
                 return loadOrdersBoard();
             }
             try {
-                const qs = new URLSearchParams({
-                    page: String(ordersPage),
-                    page_size: String(ORDERS_PAGE_SIZE)
-                });
-                if (orderSearchQuery) qs.set('search', orderSearchQuery);
-                const data = await apiCall(`/orders?${qs.toString()}`);
+                const data = await apiCall(`/orders?${buildOrdersQueryParams().toString()}`);
                 orders = data.orders || [];
                 ordersTotal = typeof data.total === 'number' ? data.total : orders.length;
                 if (orders.length === 0 && ordersTotal > 0 && ordersPage > 1) {
@@ -712,15 +762,19 @@
                 const ordersList = document.getElementById('ordersList');
                 
                 if (orders.length === 0) {
-                    const emptyMsg = orderSearchQuery
-                        ? `No works orders match "${escapeHtml(orderSearchQuery)}"`
-                        : 'No works orders found';
+                    let emptyMsg = 'No works orders found';
+                    if (orderSearchQuery) {
+                        emptyMsg = `No works orders match "${escapeHtml(orderSearchQuery)}"`;
+                    } else if (orderLeadlockOnly) {
+                        emptyMsg = 'No LeadLock works orders found';
+                    }
                     ordersList.innerHTML = `<p>${emptyMsg}</p>` + renderOrdersPager();
                     updateOrdersCheckboxes();
                     return;
                 }
                 
                 ordersList.innerHTML = `
+                    ${renderOrdersListSummary()}
                     <table class="table">
                         <thead>
                             <tr>
@@ -762,11 +816,15 @@
                                 const travelCell = travelRt != null && travelRt !== '' && !Number.isNaN(parseFloat(travelRt))
                                     ? parseFloat(travelRt).toFixed(2)
                                     : '—';
+                                const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+                                const leadlockBadge = isLeadlock
+                                    ? `<span class="badge badge-secondary" style="margin-right: 6px;" title="LeadLock ${escapeHtml(String(order.leadlock_order_id))}">LeadLock</span>`
+                                    : '';
                                 
                                 return `
                                 <tr>
                                     <td><strong>${productsDisplay}</strong></td>
-                                    <td>${order.customer_name || '-'}</td>
+                                    <td>${leadlockBadge}${escapeHtml(order.customer_name || '-')}</td>
                                     <td style="max-width: 200px;" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesShort) : '—'}</td>
                                     <td>${travelCell}</td>
                                     <td>${totalQuantity}</td>
@@ -2344,6 +2402,8 @@
         }
         
         document.getElementById('orderSearchInput').addEventListener('input', onOrderSearchInput);
+        document.getElementById('orderLeadlockOnly').addEventListener('change', onOrderLeadlockOnlyChange);
+        document.getElementById('ordersPageSizeSelect').value = String(ordersPageSize);
 
         init();
     </script>

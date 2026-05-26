@@ -257,7 +257,7 @@ router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) =
         if (!Array.isArray(body.items) || body.items.length === 0) {
             return res.status(400).json({ success: false, error: 'items array is required and must not be empty' });
         }
-        const order = await ProductionDatabase.createLeadLockWorkOrder({
+        const payload = {
             order_number: body.order_number,
             order_id: body.order_id,
             customer_name: body.customer_name,
@@ -272,9 +272,17 @@ router.post('/webhooks/work-orders', validateLeadLockWebhook, async (req, res) =
             created_at: body.created_at,
             notes: body.notes == null ? '' : String(body.notes),
             travel_time_hours_round_trip: body.travel_time_hours_round_trip
-        });
-        console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
-        res.status(200).json({ success: true, work_order_id: String(order.id) });
+        };
+        const existingBefore = payload.order_id != null && String(payload.order_id).trim() !== ''
+            ? await ProductionDatabase.getProductOrderByLeadlockOrderId(payload.order_id)
+            : null;
+        const order = await ProductionDatabase.createLeadLockWorkOrder(payload);
+        if (existingBefore) {
+            console.log(`LeadLock webhook: updated existing work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
+        } else {
+            console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
+        }
+        res.status(200).json({ success: true, work_order_id: String(order.id), updated: !!existingBefore });
     } catch (error) {
         console.error('LeadLock work order webhook error:', error);
         res.status(500).json({ success: false, error: error.message || 'Failed to create work order' });
@@ -2319,13 +2327,17 @@ router.get('/orders', requireProductionAuth, async (req, res) => {
                 .filter(Boolean);
         }
         const search = req.query.search ? String(req.query.search).trim() : null;
+        const leadlockOnly = req.query.leadlock_only === '1' || req.query.leadlock_only === 'true';
+        const sortBy = req.query.sort === 'order_date' ? 'order_date' : 'created_at';
         const { orders, total, page: p, page_size } = await ProductionDatabase.getProductOrdersPaged({
             page,
             pageSize,
             quoteOnly: false,
             includeProducts,
             statusIn,
-            search: search || null
+            search: search || null,
+            leadlockOnly,
+            sortBy
         });
         res.json({ success: true, orders, total, page: p, page_size });
     } catch (error) {

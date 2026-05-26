@@ -3112,6 +3112,7 @@ class ProductionDatabase {
             ? [...new Set(opts.statusIn.map(s => String(s).trim()).filter(Boolean))]
             : null;
         const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
+        const leadlockOnly = !!opts.leadlockOnly;
         const conditions = [];
         const params = [];
         if (quoteOnly) {
@@ -3176,8 +3177,20 @@ class ProductionDatabase {
                 );
             }
         }
+        if (leadlockOnly) {
+            conditions.push(`(po.leadlock_order_id IS NOT NULL AND TRIM(COALESCE(po.leadlock_order_id, '')) <> '')`);
+        }
         const sql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
         return { sql, params };
+    }
+
+    static _productOrdersOrderBySql(sortBy, { postgres = false } = {}) {
+        if (sortBy === 'order_date') {
+            return postgres
+                ? 'ORDER BY po.order_date DESC NULLS LAST, po.id DESC'
+                : 'ORDER BY po.order_date DESC, po.id DESC';
+        }
+        return 'ORDER BY po.created_at DESC';
     }
 
     // ============ USER OPERATIONS ============
@@ -6920,7 +6933,142 @@ class ProductionDatabase {
         }
     }
     
+    static async getProductOrderByLeadlockOrderId(leadlockOrderId) {
+        if (leadlockOrderId == null) return null;
+        const id = String(leadlockOrderId).trim();
+        if (!id) return null;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT id FROM product_orders WHERE leadlock_order_id = $1 ORDER BY id DESC LIMIT 1`,
+                [id]
+            );
+            if (!result.rows[0]) return null;
+            return this.getProductOrderById(result.rows[0].id);
+        }
+        const row = db.prepare(
+            `SELECT id FROM product_orders WHERE leadlock_order_id = ? ORDER BY id DESC LIMIT 1`
+        ).get(id);
+        if (!row) return null;
+        return this.getProductOrderById(row.id);
+    }
+
+    static async replaceLeadlockWorkOrderItems(orderId, items) {
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM leadlock_work_order_items WHERE order_id = $1`, [orderId]);
+        } else {
+            db.prepare(`DELETE FROM leadlock_work_order_items WHERE order_id = ?`).run(orderId);
+        }
+        for (const item of items) {
+            let matchedProduct = null;
+            if (item.product_id != null) {
+                const pid = parseInt(item.product_id, 10);
+                if (!isNaN(pid) && pid > 0) {
+                    matchedProduct = await this.getProductById(pid);
+                }
+            }
+            if (!matchedProduct && item.product_name) {
+                matchedProduct = await this.getProductByName(item.product_name);
+            }
+            const qty = parseInt(item.quantity, 10) || 1;
+            const productIdForItem = matchedProduct ? matchedProduct.id : null;
+            if (isPostgreSQL) {
+                await pool.query(
+                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                    [
+                        orderId,
+                        productIdForItem,
+                        item.product_name || null,
+                        qty,
+                        item.description || null,
+                        parseFloat(item.unit_price) || 0,
+                        parseFloat(item.install_hours) || 0,
+                        parseInt(item.number_of_boxes, 10) || 1
+                    ]
+                );
+            } else {
+                db.prepare(
+                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                ).run(
+                    orderId,
+                    productIdForItem,
+                    item.product_name || null,
+                    qty,
+                    item.description || null,
+                    parseFloat(item.unit_price) || 0,
+                    parseFloat(item.install_hours) || 0,
+                    parseInt(item.number_of_boxes, 10) || 1
+                );
+            }
+        }
+        await this.syncLeadlockItemsToOrderProducts(orderId);
+    }
+
+    static async refreshLeadLockWorkOrderFromPayload(orderId, payload) {
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
+        const shippingBoxesCount = items.reduce((sum, i) => sum + (parseInt(i.number_of_boxes, 10) || 0), 0);
+        let travelTimeHoursRoundTrip = null;
+        if (payload.travel_time_hours_round_trip !== undefined && payload.travel_time_hours_round_trip !== null && payload.travel_time_hours_round_trip !== '') {
+            const t = typeof payload.travel_time_hours_round_trip === 'number'
+                ? payload.travel_time_hours_round_trip
+                : parseFloat(payload.travel_time_hours_round_trip);
+            if (Number.isFinite(t)) travelTimeHoursRoundTrip = t;
+        }
+        let orderDate = (payload.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) orderDate = new Date().toISOString().slice(0, 10);
+        const salesOrderRef = payload.order_number ? `LeadLock-${payload.order_number}` : `LeadLock-${payload.order_id || Date.now()}`;
+        const installationBooked = payload.installation_booked === true || payload.installation_booked === 'true';
+        const salesNotes = payload.notes == null ? '' : String(payload.notes);
+
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE product_orders SET
+                    order_date = $1, customer_name = $2, sales_order_ref = $3,
+                    customer_postcode = $4, customer_address = $5, customer_email = $6, customer_phone = $7,
+                    currency = $8, total_amount = $9, installation_booked = $10,
+                    labour_estimate_hours = $11, shipping_boxes_count = $12,
+                    travel_time_hours_round_trip = $13, notes = $14
+                 WHERE id = $15`,
+                [
+                    orderDate, payload.customer_name || null, salesOrderRef,
+                    payload.customer_postcode || null, payload.customer_address || null,
+                    payload.customer_email || null, payload.customer_phone || null,
+                    payload.currency || null, parseFloat(payload.total_amount) || null, installationBooked,
+                    labourEstimateHours || null, shippingBoxesCount || null,
+                    travelTimeHoursRoundTrip, salesNotes, orderId
+                ]
+            );
+        } else {
+            db.prepare(
+                `UPDATE product_orders SET
+                    order_date = ?, customer_name = ?, sales_order_ref = ?,
+                    customer_postcode = ?, customer_address = ?, customer_email = ?, customer_phone = ?,
+                    currency = ?, total_amount = ?, installation_booked = ?,
+                    labour_estimate_hours = ?, shipping_boxes_count = ?,
+                    travel_time_hours_round_trip = ?, notes = ?
+                 WHERE id = ?`
+            ).run(
+                orderDate, payload.customer_name || null, salesOrderRef,
+                payload.customer_postcode || null, payload.customer_address || null,
+                payload.customer_email || null, payload.customer_phone || null,
+                payload.currency || null, parseFloat(payload.total_amount) || null, installationBooked ? 1 : 0,
+                labourEstimateHours || null, shippingBoxesCount || null,
+                travelTimeHoursRoundTrip, salesNotes, orderId
+            );
+        }
+        await this.replaceLeadlockWorkOrderItems(orderId, items);
+        return this.getProductOrderById(orderId);
+    }
+
     static async createLeadLockWorkOrder(payload) {
+        if (payload.order_id != null && String(payload.order_id).trim() !== '') {
+            const existing = await this.getProductOrderByLeadlockOrderId(payload.order_id);
+            if (existing) {
+                return this.refreshLeadLockWorkOrderFromPayload(existing.id, payload);
+            }
+        }
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
         const shippingBoxesCount = items.reduce((sum, i) => sum + (parseInt(i.number_of_boxes, 10) || 0), 0);
@@ -6980,53 +7128,8 @@ class ProductionDatabase {
             );
             orderId = info.lastInsertRowid;
         }
-        
-        for (const item of items) {
-            let matchedProduct = null;
-            if (item.product_id != null) {
-                const pid = parseInt(item.product_id, 10);
-                if (!isNaN(pid) && pid > 0) {
-                    matchedProduct = await this.getProductById(pid);
-                }
-            }
-            if (!matchedProduct && item.product_name) {
-                matchedProduct = await this.getProductByName(item.product_name);
-            }
-            const qty = parseInt(item.quantity, 10) || 1;
-            const productIdForItem = matchedProduct ? matchedProduct.id : null;
-            if (isPostgreSQL) {
-                await pool.query(
-                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                    [
-                        orderId,
-                        productIdForItem,
-                        item.product_name || null,
-                        qty,
-                        item.description || null,
-                        parseFloat(item.unit_price) || 0,
-                        parseFloat(item.install_hours) || 0,
-                        parseInt(item.number_of_boxes, 10) || 1
-                    ]
-                );
-            } else {
-                db.prepare(
-                    `INSERT INTO leadlock_work_order_items (order_id, product_id, product_name, quantity, description, unit_price, install_hours, number_of_boxes)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-                ).run(
-                    orderId,
-                    productIdForItem,
-                    item.product_name || null,
-                    qty,
-                    item.description || null,
-                    parseFloat(item.unit_price) || 0,
-                    parseFloat(item.install_hours) || 0,
-                    parseInt(item.number_of_boxes, 10) || 1
-                );
-            }
-        }
-        
-        await this.syncLeadlockItemsToOrderProducts(orderId);
+
+        await this.replaceLeadlockWorkOrderItems(orderId, items);
         return this.getProductOrderById(orderId);
     }
     
@@ -7224,12 +7327,15 @@ class ProductionDatabase {
      * @param {boolean} opts.quoteOnly if true, only status = quote; if false, exclude quotes
      * @param {boolean} opts.includeProducts default true
      * @param {string[]} opts.statusIn optional status filter (e.g. pending, in_progress)
+     * @param {string} opts.sortBy 'order_date' or 'created_at' (default)
      */
     static async getProductOrdersPaged(opts = {}) {
         const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
         const includeProducts = opts.includeProducts !== false;
+        const sortBy = opts.sortBy === 'order_date' ? 'order_date' : 'created_at';
+        const orderBySql = ProductionDatabase._productOrdersOrderBySql(sortBy, { postgres: isPostgreSQL });
         const { sql: whereSql, params: whereParams } = ProductionDatabase._buildProductOrdersWhere(
             opts,
             { postgres: isPostgreSQL }
@@ -7256,7 +7362,7 @@ class ProductionDatabase {
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
                  ${ordersFromJoin}
                  ${whereSql}
-                 ORDER BY po.created_at DESC
+                 ${orderBySql}
                  LIMIT $${limitParam} OFFSET $${offsetParam}`,
                 [...whereParams, pageSize, offset]
             );
@@ -7266,7 +7372,7 @@ class ProductionDatabase {
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
                  ${ordersFromJoin}
                  ${whereSql}
-                 ORDER BY po.created_at DESC
+                 ${orderBySql}
                  LIMIT ? OFFSET ?`
             ).all(...whereParams, pageSize, offset);
         }
