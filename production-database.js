@@ -3111,6 +3111,7 @@ class ProductionDatabase {
         const statusIn = Array.isArray(opts.statusIn) && opts.statusIn.length > 0
             ? [...new Set(opts.statusIn.map(s => String(s).trim()).filter(Boolean))]
             : null;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
         const conditions = [];
         const params = [];
         if (quoteOnly) {
@@ -3124,6 +3125,55 @@ class ProductionDatabase {
                 ).join(', ');
                 conditions.push(`po.status IN (${placeholders})`);
                 params.push(...statusIn);
+            }
+        }
+        if (search) {
+            const pattern = `%${search}%`;
+            if (postgres) {
+                const p = params.length + 1;
+                conditions.push(`(
+                    COALESCE(po.customer_name, '') ILIKE $${p}
+                    OR COALESCE(po.sales_order_ref, '') ILIKE $${p}
+                    OR COALESCE(po.leadlock_order_id, '') ILIKE $${p}
+                    OR COALESCE(po.notes, '') ILIKE $${p}
+                    OR COALESCE(po.status, '') ILIKE $${p}
+                    OR COALESCE(fp.name, '') ILIKE $${p}
+                    OR COALESCE(u.username, '') ILIKE $${p}
+                    OR EXISTS (
+                        SELECT 1 FROM order_products op
+                        JOIN finished_products fp2 ON op.product_id = fp2.id
+                        WHERE op.order_id = po.id AND COALESCE(fp2.name, '') ILIKE $${p}
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM leadlock_work_order_items li
+                        WHERE li.order_id = po.id AND COALESCE(li.product_name, '') ILIKE $${p}
+                    )
+                )`);
+                params.push(pattern);
+            } else {
+                const patternLite = `%${search.toLowerCase()}%`;
+                conditions.push(`(
+                    LOWER(COALESCE(po.customer_name, '')) LIKE ?
+                    OR LOWER(COALESCE(po.sales_order_ref, '')) LIKE ?
+                    OR LOWER(COALESCE(po.leadlock_order_id, '')) LIKE ?
+                    OR LOWER(COALESCE(po.notes, '')) LIKE ?
+                    OR LOWER(COALESCE(po.status, '')) LIKE ?
+                    OR LOWER(COALESCE(fp.name, '')) LIKE ?
+                    OR LOWER(COALESCE(u.username, '')) LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM order_products op
+                        JOIN finished_products fp2 ON op.product_id = fp2.id
+                        WHERE op.order_id = po.id AND LOWER(COALESCE(fp2.name, '')) LIKE ?
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM leadlock_work_order_items li
+                        WHERE li.order_id = po.id AND LOWER(COALESCE(li.product_name, '')) LIKE ?
+                    )
+                )`);
+                params.push(
+                    patternLite, patternLite, patternLite, patternLite, patternLite,
+                    patternLite, patternLite, patternLite, patternLite
+                );
             }
         }
         const sql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -7184,15 +7234,18 @@ class ProductionDatabase {
             opts,
             { postgres: isPostgreSQL }
         );
+        const ordersFromJoin = `FROM product_orders po
+                 LEFT JOIN finished_products fp ON po.product_id = fp.id
+                 LEFT JOIN production_users u ON po.created_by = u.id`;
         let total;
         if (isPostgreSQL) {
             const countRes = await pool.query(
-                `SELECT COUNT(*)::int AS c FROM product_orders po ${whereSql}`,
+                `SELECT COUNT(*)::int AS c ${ordersFromJoin} ${whereSql}`,
                 whereParams
             );
             total = countRes.rows[0].c;
         } else {
-            const row = db.prepare(`SELECT COUNT(*) AS c FROM product_orders po ${whereSql}`).get(...whereParams);
+            const row = db.prepare(`SELECT COUNT(*) AS c ${ordersFromJoin} ${whereSql}`).get(...whereParams);
             total = row.c;
         }
         let orders;
@@ -7201,9 +7254,7 @@ class ProductionDatabase {
             const offsetParam = whereParams.length + 2;
             const result = await pool.query(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
-                 FROM product_orders po
-                 LEFT JOIN finished_products fp ON po.product_id = fp.id
-                 LEFT JOIN production_users u ON po.created_by = u.id
+                 ${ordersFromJoin}
                  ${whereSql}
                  ORDER BY po.created_at DESC
                  LIMIT $${limitParam} OFFSET $${offsetParam}`,
@@ -7213,9 +7264,7 @@ class ProductionDatabase {
         } else {
             orders = db.prepare(
                 `SELECT po.*, fp.name as product_name, u.username as created_by_name
-                 FROM product_orders po
-                 LEFT JOIN finished_products fp ON po.product_id = fp.id
-                 LEFT JOIN production_users u ON po.created_by = u.id
+                 ${ordersFromJoin}
                  ${whereSql}
                  ORDER BY po.created_at DESC
                  LIMIT ? OFFSET ?`

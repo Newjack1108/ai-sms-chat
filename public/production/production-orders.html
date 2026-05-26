@@ -258,6 +258,9 @@
                     <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
                 </div>
             </div>
+            <div style="padding: 12px 0;">
+                <input id="orderSearchInput" type="text" class="form-input" placeholder="Search customer, LeadLock ref, product, status, notes..." autocomplete="off">
+            </div>
             <div id="ordersList">
                 <div class="loading">Loading...</div>
             </div>
@@ -461,6 +464,8 @@
         let ordersTotal = 0;
         let ordersPage = 1;
         const ORDERS_PAGE_SIZE = 25;
+        let orderSearchQuery = '';
+        let orderSearchDebounce = null;
         let components = [];
         let panels = [];
         let stockItems = [];
@@ -524,7 +529,13 @@
             if (!grid) return;
             const filtered = boardOrders.filter(orderMatchesBoardFlagFilter);
             if (filtered.length === 0) {
-                grid.innerHTML = '<p>No works orders match this filter.</p>';
+                let emptyMsg = 'No works orders match this filter.';
+                if (boardOrders.length === 0) {
+                    emptyMsg = orderSearchQuery
+                        ? `No works orders match "${escapeHtml(orderSearchQuery)}"`
+                        : 'No works orders found';
+                }
+                grid.innerHTML = `<p>${emptyMsg}</p>`;
                 return;
             }
             grid.innerHTML = filtered.map(order => {
@@ -568,7 +579,14 @@
             const grid = document.getElementById('ordersBoardGrid');
             if (grid) grid.innerHTML = '<div class="loading">Loading...</div>';
             try {
-                const data = await apiCall('/orders?status=pending,in_progress&page=1&page_size=100&include_products=1');
+                const qs = new URLSearchParams({
+                    status: 'pending,in_progress',
+                    page: '1',
+                    page_size: '100',
+                    include_products: '1'
+                });
+                if (orderSearchQuery) qs.set('search', orderSearchQuery);
+                const data = await apiCall(`/orders?${qs.toString()}`);
                 boardOrders = data.orders || [];
                 orders = boardOrders;
                 renderWoBoardFilters();
@@ -660,6 +678,18 @@
             ordersPage = Math.max(1, p);
             loadOrders();
         }
+
+        function onOrderSearchInput() {
+            const next = (document.getElementById('orderSearchInput').value || '').trim();
+            if (orderSearchDebounce) clearTimeout(orderSearchDebounce);
+            orderSearchDebounce = setTimeout(() => {
+                orderSearchDebounce = null;
+                if (next === orderSearchQuery) return;
+                orderSearchQuery = next;
+                ordersPage = 1;
+                loadOrders();
+            }, 300);
+        }
         
         async function loadOrders() {
             applyOrdersViewMode();
@@ -667,7 +697,12 @@
                 return loadOrdersBoard();
             }
             try {
-                const data = await apiCall(`/orders?page=${ordersPage}&page_size=${ORDERS_PAGE_SIZE}`);
+                const qs = new URLSearchParams({
+                    page: String(ordersPage),
+                    page_size: String(ORDERS_PAGE_SIZE)
+                });
+                if (orderSearchQuery) qs.set('search', orderSearchQuery);
+                const data = await apiCall(`/orders?${qs.toString()}`);
                 orders = data.orders || [];
                 ordersTotal = typeof data.total === 'number' ? data.total : orders.length;
                 if (orders.length === 0 && ordersTotal > 0 && ordersPage > 1) {
@@ -677,7 +712,10 @@
                 const ordersList = document.getElementById('ordersList');
                 
                 if (orders.length === 0) {
-                    ordersList.innerHTML = '<p>No works orders found</p>' + renderOrdersPager();
+                    const emptyMsg = orderSearchQuery
+                        ? `No works orders match "${escapeHtml(orderSearchQuery)}"`
+                        : 'No works orders found';
+                    ordersList.innerHTML = `<p>${emptyMsg}</p>` + renderOrdersPager();
                     updateOrdersCheckboxes();
                     return;
                 }
@@ -2305,6 +2343,8 @@
             window.location.href = `installations.html?order_id=${orderId}`;
         }
         
+        document.getElementById('orderSearchInput').addEventListener('input', onOrderSearchInput);
+
         init();
     </script>
     

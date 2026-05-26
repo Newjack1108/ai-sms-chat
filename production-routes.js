@@ -2318,12 +2318,14 @@ router.get('/orders', requireProductionAuth, async (req, res) => {
                 .map(s => s.trim())
                 .filter(Boolean);
         }
+        const search = req.query.search ? String(req.query.search).trim() : null;
         const { orders, total, page: p, page_size } = await ProductionDatabase.getProductOrdersPaged({
             page,
             pageSize,
             quoteOnly: false,
             includeProducts,
-            statusIn
+            statusIn,
+            search: search || null
         });
         res.json({ success: true, orders, total, page: p, page_size });
     } catch (error) {
