@@ -453,6 +453,19 @@
         </div>
     </div>
     
+    <!-- Production setup (LeadLock bespoke / order lines) -->
+    <div id="productionSetupModal" class="modal">
+        <div class="modal-content" style="max-width: 960px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3 id="productionSetupModalTitle">Production setup</h3>
+                <button class="modal-close" onclick="hideModal('productionSetupModal')">&times;</button>
+            </div>
+            <div id="productionSetupContent" style="padding: 16px;">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Update Status Modal -->
     <div id="updateStatusModal" class="modal">
         <div class="modal-content">
@@ -643,6 +656,7 @@
                         <button type="button" onclick="viewWorkOrderDetails(${order.id})" class="btn btn-info btn-sm">Details</button>
                         <button type="button" onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
                         <button type="button" onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
+                        ${order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '' ? `<button type="button" onclick="showProductionSetup(${order.id})" class="btn btn-primary btn-sm">Production setup</button>` : ''}
                         <button type="button" onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
                         <button type="button" onclick="showUpdateStatusModal(${order.id}, '${(order.status || '').replace(/'/g, "\\'")}')" class="btn btn-secondary btn-sm">Status</button>
                     </div>
@@ -689,6 +703,325 @@
             });
         }
         
+        let productionSetupOrderId = null;
+        let productionSetupBespokeProductId = null;
+
+        async function showProductionSetup(orderId) {
+            productionSetupOrderId = orderId;
+            productionSetupBespokeProductId = null;
+            document.getElementById('productionSetupModalTitle').textContent =
+                `Production setup — Work order #${orderId}`;
+            document.getElementById('productionSetupContent').innerHTML =
+                '<div class="loading">Loading…</div>';
+            showModal('productionSetupModal');
+            await refreshProductionSetupContent();
+        }
+
+        async function refreshProductionSetupContent() {
+            const orderId = productionSetupOrderId;
+            const container = document.getElementById('productionSetupContent');
+            if (!orderId || !container) return;
+            try {
+                const data = await apiCall(`/orders/${orderId}/production-setup`);
+                await renderProductionSetupPanel(container, data);
+            } catch (error) {
+                container.innerHTML = `<p class="text-danger">${escapeHtml(error.message || 'Failed to load production setup')}</p>`;
+            }
+        }
+
+        async function renderProductionSetupPanel(container, data) {
+            const canBom = canEditProductBom(currentUser);
+            const canLines = canManageOrderProducts(currentUser);
+            const order = data.order || {};
+            const leadlockItems = data.leadlock_items || [];
+            window.__prodSetupLeadlockItems = leadlockItems;
+            const orderProducts = data.order_products || [];
+            const salesOnlyCount = data.sales_only_count || 0;
+
+            let html = '';
+            if (data.is_leadlock) {
+                html += `<p class="text-muted" style="margin: 0 0 16px 0;">Link LeadLock sales lines to production products and build BOMs so load sheets and stock deduction are correct.${
+                    salesOnlyCount > 0
+                        ? ` <strong>${salesOnlyCount}</strong> line(s) still need production setup.`
+                        : ''
+                }</p>`;
+            }
+
+            if (leadlockItems.length > 0) {
+                html += `<h4>LeadLock sales lines</h4>
+                <table class="table" style="margin-bottom: 20px;">
+                    <thead><tr>
+                        <th>Item</th><th>Qty</th><th>Description</th><th>Status</th><th>Actions</th>
+                    </tr></thead><tbody>`;
+                for (const item of leadlockItems) {
+                    const statusBadge = item.is_sales_only
+                        ? '<span class="badge badge-warning">Sales only</span>'
+                        : item.on_order_products
+                          ? '<span class="badge badge-success">In production</span>'
+                          : '<span class="badge badge-info">Linked</span>';
+                    let actions = '';
+                    if (item.is_sales_only && canBom) {
+                        actions += `<button type="button" class="btn btn-primary btn-sm" onclick="startBespokeProduct(${item.id})">Create bespoke &amp; BOM</button> `;
+                        actions += `<button type="button" class="btn btn-secondary btn-sm" onclick="showLinkLeadlockItem(${item.id})">Link existing</button>`;
+                    } else if (!item.is_sales_only && item.matched_product_id && canBom) {
+                        actions += `<button type="button" class="btn btn-info btn-sm" onclick="editBespokeBom(${item.matched_product_id})">Edit BOM</button>`;
+                    }
+                    if (!actions) actions = '—';
+                    html += `<tr>
+                        <td><strong>${escapeHtml(item.product_name || 'Unknown')}</strong></td>
+                        <td>${escapeHtml(String(item.quantity ?? 1))}</td>
+                        <td>${item.description ? escapeHtml(item.description) : '—'}</td>
+                        <td>${statusBadge}</td>
+                        <td>${actions}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table>';
+            }
+
+            html += `<h4>Production lines</h4>`;
+            if (orderProducts.length === 0) {
+                html += '<p class="text-muted">No production products on this order yet.</p>';
+            } else {
+                html += `<table class="table" style="margin-bottom: 12px;">
+                    <thead><tr>
+                        <th>Product</th><th>Qty</th><th>BOM</th>${canLines ? '<th>Actions</th>' : ''}
+                    </tr></thead><tbody>`;
+                for (const line of orderProducts) {
+                    const bomBadge = line.has_bom
+                        ? '<span class="badge badge-success">Yes</span>'
+                        : '<span class="badge badge-warning">None</span>';
+                    const qtyCell = canLines
+                        ? `<input type="number" min="1" class="form-input" style="width:80px;" value="${line.quantity}" id="prodSetupQty_${line.id}">`
+                        : escapeHtml(String(line.quantity));
+                    const actions = canLines
+                        ? `<button type="button" class="btn btn-primary btn-sm" onclick="saveProductionLineQty(${line.id})">Save</button>
+                           <button type="button" class="btn btn-danger btn-sm" onclick="removeProductionLine(${line.id})">Remove</button>
+                           ${canBom ? `<button type="button" class="btn btn-info btn-sm" onclick="editBespokeBom(${line.product_id})">BOM</button>` : ''}`
+                        : canBom
+                          ? `<button type="button" class="btn btn-info btn-sm" onclick="editBespokeBom(${line.product_id})">BOM</button>`
+                          : '—';
+                    html += `<tr>
+                        <td>${escapeHtml(line.product_name || 'Unknown')}</td>
+                        <td>${qtyCell}</td>
+                        <td>${bomBadge}</td>
+                        ${canLines || canBom ? `<td>${actions}</td>` : ''}
+                    </tr>`;
+                }
+                html += '</tbody></table>';
+            }
+
+            if (canLines) {
+                html += `<div class="form-group" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+                    <div style="flex:1; min-width:200px;">
+                        <label class="form-label">Add catalog product</label>
+                        <select id="prodSetupAddProduct" class="form-select">
+                            <option value="">Select product</option>
+                            ${products.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Qty</label>
+                        <input type="number" id="prodSetupAddQty" class="form-input" min="1" value="1" style="width:80px;">
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-primary" onclick="addProductionLineFromSetup()">Add to order</button>
+                    </div>
+                </div>`;
+            } else if (!canBom) {
+                html += '<p class="text-muted">Manager or office access required to change production lines.</p>';
+            }
+
+            html += `<div id="productionSetupBomSection" style="margin-top: 20px; display: none;">
+                <h4 id="productionSetupBomTitle">Product BOM</h4>
+                <div id="productionSetupBomHost"></div>
+            </div>`;
+
+            html += `<div style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-success" onclick="viewLoadSheet(${productionSetupOrderId}); hideModal('productionSetupModal');">View load sheet</button>
+                <button type="button" class="btn btn-secondary" onclick="hideModal('productionSetupModal')">Close</button>
+            </div>`;
+
+            container.innerHTML = html;
+
+            if (productionSetupBespokeProductId) {
+                await editBespokeBom(productionSetupBespokeProductId);
+            }
+        }
+
+        function startBespokeProduct(leadlockItemId) {
+            const item = (window.__prodSetupLeadlockItems || []).find((i) => i.id === leadlockItemId);
+            const container = document.getElementById('productionSetupContent');
+            const section = document.getElementById('productionSetupBomSection');
+            if (!container) return;
+            const existing = document.getElementById('bespokeCreateForm');
+            if (existing) existing.remove();
+            const wrap = document.createElement('div');
+            wrap.id = 'bespokeCreateForm';
+            wrap.style.cssText = 'margin:16px 0; padding:14px; border:1px solid #dee2e6; border-radius:8px; background:#f8f9fa;';
+            wrap.innerHTML = `
+                <h4 style="margin-top:0;">Create bespoke product</h4>
+                <div class="form-group">
+                    <label class="form-label">Name *</label>
+                    <input type="text" id="bespokeName" class="form-input" value="${escapeHtml((item && item.product_name) || '')}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea id="bespokeDescription" class="form-input" rows="2">${escapeHtml((item && item.description) || '')}</textarea>
+                </div>
+                <div class="text-right">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('bespokeCreateForm').remove()">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="submitBespokeProduct(${leadlockItemId})">Create &amp; build BOM</button>
+                </div>`;
+            container.insertBefore(wrap, section || null);
+        }
+
+        async function submitBespokeProduct(leadlockItemId) {
+            const name = document.getElementById('bespokeName')?.value?.trim();
+            if (!name) {
+                showAlert('Product name is required', 'error');
+                return;
+            }
+            try {
+                const result = await apiCall(`/orders/${productionSetupOrderId}/bespoke-products`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        leadlock_item_id: leadlockItemId,
+                        name,
+                        description: document.getElementById('bespokeDescription')?.value || ''
+                    })
+                });
+                productionSetupBespokeProductId = result.product?.id || null;
+                showAlert('Bespoke product created — add BOM lines below');
+                document.getElementById('bespokeCreateForm')?.remove();
+                await refreshProductionSetupContent();
+            } catch (error) {
+                showAlert(error.message || 'Failed to create product', 'error');
+            }
+        }
+
+        function showLinkLeadlockItem(leadlockItemId) {
+            const container = document.getElementById('productionSetupContent');
+            const section = document.getElementById('productionSetupBomSection');
+            const existing = document.getElementById('linkLeadlockForm');
+            if (existing) existing.remove();
+            const wrap = document.createElement('div');
+            wrap.id = 'linkLeadlockForm';
+            wrap.style.cssText = 'margin:16px 0; padding:14px; border:1px solid #dee2e6; border-radius:8px;';
+            wrap.innerHTML = `
+                <h4 style="margin-top:0;">Link to existing product</h4>
+                <div class="form-group">
+                    <label class="form-label">Product *</label>
+                    <select id="linkLeadlockProduct" class="form-select">
+                        <option value="">Select product</option>
+                        ${products.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="text-right">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('linkLeadlockForm').remove()">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="submitLinkLeadlockItem(${leadlockItemId})">Link</button>
+                </div>`;
+            container.insertBefore(wrap, section || null);
+        }
+
+        async function submitLinkLeadlockItem(leadlockItemId) {
+            const productId = document.getElementById('linkLeadlockProduct')?.value;
+            if (!productId) {
+                showAlert('Select a product', 'error');
+                return;
+            }
+            try {
+                await apiCall(
+                    `/orders/${productionSetupOrderId}/leadlock-items/${leadlockItemId}/link`,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({ product_id: parseInt(productId, 10) })
+                    }
+                );
+                showAlert('Sales line linked to product');
+                document.getElementById('linkLeadlockForm')?.remove();
+                await refreshProductionSetupContent();
+            } catch (error) {
+                showAlert(error.message || 'Failed to link', 'error');
+            }
+        }
+
+        async function editBespokeBom(productId) {
+            const section = document.getElementById('productionSetupBomSection');
+            const host = document.getElementById('productionSetupBomHost');
+            const title = document.getElementById('productionSetupBomTitle');
+            if (!section || !host) return;
+            let productName = `Product #${productId}`;
+            const fromList = products.find((p) => p.id === productId);
+            if (fromList) productName = fromList.name;
+            else {
+                try {
+                    const pd = await apiCall(`/products/${productId}`);
+                    if (pd.product) productName = pd.product.name;
+                } catch (e) {
+                    /* use default */
+                }
+            }
+            section.style.display = 'block';
+            if (title) title.textContent = `BOM — ${productName}`;
+            productionSetupBespokeProductId = productId;
+            host.innerHTML = '<div class="loading">Loading BOM…</div>';
+            await renderProductBomPanel(productId, host, {
+                user: currentUser,
+                productName,
+                onChange: () => refreshProductionSetupContent()
+            });
+        }
+
+        async function addProductionLineFromSetup() {
+            const productId = document.getElementById('prodSetupAddProduct')?.value;
+            const qty = document.getElementById('prodSetupAddQty')?.value;
+            if (!productId || !qty) {
+                showAlert('Select a product and quantity', 'error');
+                return;
+            }
+            try {
+                await apiCall(`/orders/${productionSetupOrderId}/products`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        product_id: parseInt(productId, 10),
+                        quantity: parseInt(qty, 10)
+                    })
+                });
+                showAlert('Product added to order');
+                await refreshProductionSetupContent();
+            } catch (error) {
+                showAlert(error.message || 'Failed to add product', 'error');
+            }
+        }
+
+        async function saveProductionLineQty(orderProductId) {
+            const qty = document.getElementById(`prodSetupQty_${orderProductId}`)?.value;
+            if (!qty) return;
+            try {
+                await apiCall(`/orders/${productionSetupOrderId}/products/${orderProductId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ quantity: parseInt(qty, 10) })
+                });
+                showAlert('Quantity updated');
+                await refreshProductionSetupContent();
+            } catch (error) {
+                showAlert(error.message || 'Failed to update quantity', 'error');
+            }
+        }
+
+        async function removeProductionLine(orderProductId) {
+            if (!confirm('Remove this product from the works order?')) return;
+            try {
+                await apiCall(`/orders/${productionSetupOrderId}/products/${orderProductId}`, {
+                    method: 'DELETE'
+                });
+                showAlert('Product removed');
+                await refreshProductionSetupContent();
+            } catch (error) {
+                showAlert(error.message || 'Failed to remove product', 'error');
+            }
+        }
+
         async function init() {
             // Redirect staff users
             if (await restrictStaffAccess()) return;
@@ -893,6 +1226,7 @@
                                         <button onclick="viewWorkOrderDetails(${order.id})" class="btn btn-info btn-sm">Details</button>
                                         <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
                                         <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
+                                        ${isLeadlock ? `<button onclick="showProductionSetup(${order.id})" class="btn btn-primary btn-sm">Production setup</button>` : ''}
                                         <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Spares</button>
                                         <button onclick="bookInstallation(${order.id})" class="btn btn-info btn-sm">Book Installation</button>
                                         <button onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
@@ -1142,6 +1476,23 @@
                 const order = result.order;
                 if (!order) throw new Error('Order not found');
                 const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+                let productionLinesHtml = '';
+                if (order.products && order.products.length > 0) {
+                    productionLinesHtml = `<div style="margin-top: 12px;"><strong>Production lines:</strong><ul style="margin: 6px 0 0 18px;">${order.products
+                        .map((p) => `<li>${escapeHtml(p.product_name || 'Unknown')} × ${escapeHtml(String(p.quantity))}</li>`)
+                        .join('')}</ul></div>`;
+                }
+                let setupHint = '';
+                if (isLeadlock) {
+                    try {
+                        const setup = await apiCall(`/orders/${orderId}/production-setup`);
+                        if (setup.sales_only_count > 0) {
+                            setupHint = `<p style="margin-top: 12px; padding: 10px; background: #fff8e6; border-left: 3px solid #f0ad4e;"><strong>${setup.sales_only_count}</strong> LeadLock line(s) need production setup. <button type="button" class="btn btn-primary btn-sm" onclick="this.closest('.modal').remove(); showProductionSetup(${orderId});">Open production setup</button></p>`;
+                        }
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
                 const addressFallback = !isLeadlock ? `
                     <p style="margin: 0 0 6px 0;"><strong>Address:</strong> ${order.customer_address ? escapeHtml(order.customer_address) : '—'}</p>
                     <p style="margin: 0;"><strong>Postcode:</strong> ${order.customer_postcode ? escapeHtml(order.customer_postcode) : '—'}</p>
@@ -1158,6 +1509,8 @@
                             ${renderLoadSheetCustomerHeader(order)}
                             ${renderLeadLockWorkOrderDetailsHtml(order)}
                             ${addressFallback}
+                            ${productionLinesHtml}
+                            ${setupHint}
                             ${order.notes ? `<div style="margin-top: 12px;"><strong>Notes:</strong><div class="notes-block" style="margin-top: 6px;">${escapeHtml(order.notes)}</div></div>` : ''}
                         </div>
                     </div>`;

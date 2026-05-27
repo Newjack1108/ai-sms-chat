@@ -910,7 +910,7 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id);
         CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id);
-        CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id);
+        CREATE INDEX IF NOT EXISTS idx_planner_items_item ON planner_items(item_id);
         CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date);
         CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id);
         CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id);
@@ -2454,7 +2454,7 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_panel_movements_panel ON panel_movements(panel_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_planner ON planner_items(planner_id)`);
-        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_panel ON planner_items(panel_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_planner_items_item ON planner_items(item_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_weekly_planner_date ON weekly_planner(week_start_date)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_user ON timesheet_entries(user_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_timesheet_entries_job ON timesheet_entries(job_id)`);
@@ -3549,8 +3549,7 @@ class ProductionDatabase {
                  VALUES (?, ?, ?, ?, ?, ?)`
             );
             stmt.run(data.stock_item_id, data.movement_type, data.quantity, data.reference, data.user_id, data.cost_gbp || 0);
-            // Update stock quantity
-            const stockItem = this.getStockItemById(data.stock_item_id);
+            const stockItem = await this.getStockItemById(data.stock_item_id);
             let newQuantity = parseFloat(stockItem.current_quantity) || 0;
             if (data.movement_type === 'in') {
                 newQuantity += parseFloat(data.quantity);
@@ -3559,7 +3558,7 @@ class ProductionDatabase {
             } else if (data.movement_type === 'adjustment') {
                 newQuantity = parseFloat(data.quantity);
             }
-            this.updateStockQuantity(data.stock_item_id, newQuantity);
+            await this.updateStockQuantity(data.stock_item_id, newQuantity);
             return db.prepare(`SELECT * FROM stock_movements WHERE id = (SELECT MAX(id) FROM stock_movements)`).get();
         }
     }
@@ -7336,19 +7335,193 @@ class ProductionDatabase {
     }
     
     static async addProductToOrder(orderId, productId, quantity) {
-        if (isPostgreSQL) {
+        return this.upsertProductToOrder(orderId, productId, quantity);
+    }
+
+    /** Insert or update quantity for a product on an order (one row per product_id). */
+    static async upsertProductToOrder(orderId, productId, quantity) {
+        const qty = Math.max(1, parseInt(quantity, 10) || 1);
+        const pid = parseInt(productId, 10);
+        if (!pid) {
+            throw new Error('Invalid product ID');
+        }
+        const existing = await this.getOrderProducts(orderId);
+        const match = existing.find((row) => parseInt(row.product_id, 10) === pid);
+        if (match) {
+            if (isPostgreSQL) {
+                await pool.query(
+                    `UPDATE order_products SET quantity = $1 WHERE id = $2`,
+                    [qty, match.id]
+                );
+            } else {
+                db.prepare(`UPDATE order_products SET quantity = ? WHERE id = ?`).run(qty, match.id);
+            }
+        } else if (isPostgreSQL) {
             await pool.query(
-                `INSERT INTO order_products (order_id, product_id, quantity)
-                 VALUES ($1, $2, $3)`,
-                [orderId, productId, quantity]
+                `INSERT INTO order_products (order_id, product_id, quantity) VALUES ($1, $2, $3)`,
+                [orderId, pid, qty]
             );
         } else {
             db.prepare(
-                `INSERT INTO order_products (order_id, product_id, quantity)
-                 VALUES (?, ?, ?)`
-            ).run(orderId, productId, quantity);
+                `INSERT INTO order_products (order_id, product_id, quantity) VALUES (?, ?, ?)`
+            ).run(orderId, pid, qty);
         }
         return this.getOrderProducts(orderId);
+    }
+
+    static async updateOrderProductQuantity(orderId, orderProductId, quantity) {
+        const qty = Math.max(1, parseInt(quantity, 10) || 1);
+        const opId = parseInt(orderProductId, 10);
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE order_products SET quantity = $1 WHERE order_id = $2 AND id = $3`,
+                [qty, orderId, opId]
+            );
+            if (result.rowCount === 0) {
+                throw new Error('Product not found in order');
+            }
+        } else {
+            const result = db.prepare(
+                `UPDATE order_products SET quantity = ? WHERE order_id = ? AND id = ?`
+            ).run(qty, orderId, opId);
+            if (result.changes === 0) {
+                throw new Error('Product not found in order');
+            }
+        }
+        return this.getOrderProducts(orderId);
+    }
+
+    static async getLeadlockWorkOrderItemById(itemId, orderId) {
+        const id = parseInt(itemId, 10);
+        const oid = parseInt(orderId, 10);
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM leadlock_work_order_items WHERE id = $1 AND order_id = $2`,
+                [id, oid]
+            );
+            return result.rows[0] || null;
+        }
+        return (
+            db.prepare(
+                `SELECT * FROM leadlock_work_order_items WHERE id = ? AND order_id = ?`
+            ).get(id, oid) || null
+        );
+    }
+
+    static async linkLeadlockItemToProduct(orderId, leadlockItemId, productId) {
+        const item = await this.getLeadlockWorkOrderItemById(leadlockItemId, orderId);
+        if (!item) {
+            throw new Error('LeadLock line not found on this order');
+        }
+        const product = await this.getProductById(productId);
+        if (!product) {
+            throw new Error('Product not found');
+        }
+        if (this.isLeadlockPlaceholderProduct(product)) {
+            throw new Error('Cannot link to the LeadLock placeholder product');
+        }
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE leadlock_work_order_items SET product_id = $1 WHERE id = $2 AND order_id = $3`,
+                [productId, leadlockItemId, orderId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE leadlock_work_order_items SET product_id = ? WHERE id = ? AND order_id = ?`
+            ).run(productId, leadlockItemId, orderId);
+        }
+        await this.syncLeadlockItemsToOrderProducts(orderId);
+        return this.getOrderProductionSetup(orderId);
+    }
+
+    static async createBespokeProductFromLeadlockItem(orderId, leadlockItemId, data = {}) {
+        const item = await this.getLeadlockWorkOrderItemById(leadlockItemId, orderId);
+        if (!item) {
+            throw new Error('LeadLock line not found on this order');
+        }
+        const name = (data.name && String(data.name).trim()) || item.product_name || 'Bespoke product';
+        const description =
+            data.description != null ? String(data.description) : (item.description || '');
+        const product = await this.createProduct({
+            name,
+            description,
+            product_type: data.product_type || 'sheds',
+            leadlock_category: data.leadlock_category || 'sheds',
+            category: data.category || 'Other',
+            status: data.status || 'active',
+            estimated_load_time: data.estimated_load_time ?? item.install_hours ?? 0,
+            estimated_install_time: data.estimated_install_time ?? item.install_hours ?? 0,
+            estimated_travel_time: data.estimated_travel_time ?? 0,
+            number_of_boxes: data.number_of_boxes ?? item.number_of_boxes ?? 1,
+            is_optional_extra: !!data.is_optional_extra
+        });
+        const setup = await this.linkLeadlockItemToProduct(orderId, leadlockItemId, product.id);
+        return { product, setup };
+    }
+
+    static async getOrderProductionSetup(orderId) {
+        const order = await this.getProductOrderById(orderId);
+        if (!order) {
+            throw new Error('Order not found');
+        }
+        const leadlockItems = await this.getLeadlockWorkOrderItems(orderId);
+        const orderProductsRaw = await this.getOrderProducts(orderId);
+        const productionLines = [];
+        for (const op of orderProductsRaw) {
+            if (!op.product_id) continue;
+            const fp = await this.getProductById(op.product_id);
+            if (this.isLeadlockPlaceholderProduct(fp)) continue;
+            const comps = await this.getProductComponents(op.product_id);
+            productionLines.push({
+                ...op,
+                has_bom: comps.length > 0,
+                is_optional_extra: !!(fp && (fp.is_optional_extra === true || fp.is_optional_extra === 1))
+            });
+        }
+        const productionProductIds = new Set(
+            productionLines.map((p) => parseInt(p.product_id, 10)).filter((id) => !isNaN(id))
+        );
+        const enrichedLeadlock = [];
+        let salesOnlyCount = 0;
+        for (const item of leadlockItems) {
+            const resolved = await this.resolveProductFromLeadlockItem(item);
+            const matchedProductId =
+                item.product_id != null && parseInt(item.product_id, 10) > 0
+                    ? parseInt(item.product_id, 10)
+                    : resolved
+                      ? resolved.id
+                      : null;
+            const isSalesOnly = !resolved;
+            if (isSalesOnly) salesOnlyCount += 1;
+            enrichedLeadlock.push({
+                ...item,
+                matched_product_id: matchedProductId,
+                matched_product_name: resolved ? resolved.name : null,
+                is_sales_only: isSalesOnly,
+                on_order_products:
+                    matchedProductId != null && productionProductIds.has(matchedProductId)
+            });
+        }
+        return {
+            order,
+            leadlock_items: enrichedLeadlock,
+            order_products: productionLines,
+            sales_only_count: salesOnlyCount,
+            is_leadlock:
+                order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== ''
+        };
+    }
+
+    static async deductStockForCompletedOrder(orderId, userId) {
+        const { orderProducts } = await this.getOrderLineItemsForProduction(orderId);
+        for (const op of orderProducts) {
+            if (!op.product_id) continue;
+            const fp = await this.getProductById(op.product_id);
+            if (this.isLeadlockPlaceholderProduct(fp)) continue;
+            const qty = parseFloat(op.quantity || 1);
+            if (qty <= 0) continue;
+            await this.deductProductComponents(op.product_id, qty, userId, `Order #${orderId}`);
+        }
     }
     
     static async removeProductFromOrder(orderId, orderProductId) {
@@ -7603,18 +7776,10 @@ class ProductionDatabase {
             );
             const updatedOrder = result.rows[0];
             
-            // If status changed to complete, depreciate product components
             if (statusChangingToComplete) {
-                const orderQuantity = data.quantity !== undefined ? data.quantity : updatedOrder.quantity;
-                const orderProductId = data.product_id !== undefined ? data.product_id : updatedOrder.product_id;
                 const userId = updatedOrder.created_by || null;
-                await this.deductProductComponents(
-                    orderProductId, 
-                    orderQuantity, 
-                    userId, 
-                    `Order #${id}`
-                );
-                console.log(`✅ Depreciated stock for product order #${id} (quantity: ${orderQuantity})`);
+                await this.deductStockForCompletedOrder(id, userId);
+                console.log(`✅ Depreciated stock for all production lines on order #${id}`);
             }
             
             return await this.getProductOrderById(id);
@@ -7626,18 +7791,10 @@ class ProductionDatabase {
             db.prepare(`UPDATE product_orders SET ${setClause} WHERE id = ?`).run(...values);
             const updatedOrder = await this.getProductOrderById(id);
             
-            // If status changed to complete, depreciate product components
             if (statusChangingToComplete) {
-                const orderQuantity = data.quantity !== undefined ? data.quantity : updatedOrder.quantity;
-                const orderProductId = data.product_id !== undefined ? data.product_id : updatedOrder.product_id;
                 const userId = updatedOrder.created_by || null;
-                await this.deductProductComponents(
-                    orderProductId, 
-                    orderQuantity, 
-                    userId, 
-                    `Order #${id}`
-                );
-                console.log(`✅ Depreciated stock for product order #${id} (quantity: ${orderQuantity})`);
+                await this.deductStockForCompletedOrder(id, userId);
+                console.log(`✅ Depreciated stock for all production lines on order #${id}`);
             }
             
             return updatedOrder;

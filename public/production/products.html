@@ -438,25 +438,11 @@
         async function viewComponents(productId) {
             currentProductId = productId;
             try {
-                const [componentsData, costData] = await Promise.all([
-                    apiCall(`/products/${productId}/components`),
-                    apiCall(`/products/${productId}/cost`)
-                ]);
-                const totalCost = (costData && typeof costData.cost === 'number') ? costData.cost : 0;
-                // Keep main list in sync so Cost (Auto) is correct when modal is open or after close
-                const productIndex = allProducts.findIndex(p => p.id === productId);
-                if (productIndex >= 0) {
-                    allProducts[productIndex].calculated_cost = totalCost;
-                    displayProducts();
-                }
-
-                // Get product name from allProducts array or fetch from API
                 let productName = null;
-                const product = allProducts.find(p => p.id === productId);
+                const product = allProducts.find((p) => p.id === productId);
                 if (product) {
                     productName = product.name;
                 } else {
-                    // Fallback: fetch product from API if not in array
                     try {
                         const productData = await apiCall(`/products/${productId}`);
                         productName = productData.product ? productData.product.name : `Product #${productId}`;
@@ -466,249 +452,28 @@
                 }
 
                 document.getElementById('componentsModalTitle').textContent = 'Product Components';
-                document.getElementById('componentsContent').innerHTML = `
-                    <div style="margin-bottom: 20px;">
-                        <h4 style="margin-bottom: 15px; color: #333;">${productName || 'Product Components'}</h4>
-                        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
-                            <div>
-                                <strong>Total product cost:</strong>
-                                <span id="componentsModalTotalCost" style="font-size: 1.1em; margin-left: 8px;">${formatCurrency(totalCost)}</span>
-                            </div>
-                            <button type="button" onclick="refreshComponentsModalTotal()" class="btn btn-secondary btn-sm">Refresh total</button>
-                        </div>
-                        ${currentUser.role === 'admin' ? `
-                            <button onclick="showAddComponent()" class="btn btn-primary">Add Component</button>
-                        ` : ''}
-                    </div>
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Type</th>
-                                <th>Component</th>
-                                <th>Quantity</th>
-                                <th>Unit</th>
-                                ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${componentsData.components.length === 0 ? '<tr><td colspan="5">No components</td></tr>' : componentsData.components.map(comp => `
-                                <tr id="comp-row-${comp.id}">
-                                    <td><span class="badge badge-info">${comp.component_type === 'raw_material' ? 'Raw Material' : comp.component_type === 'component' ? 'Component' : 'Built Item'}</span></td>
-                                    <td>${comp.component_name || 'Unknown'}</td>
-                                    <td>
-                                        ${currentUser.role === 'admin' ? `
-                                            <input type="number" step="0.01" 
-                                                id="qty-${comp.id}" 
-                                                class="form-input" 
-                                                value="${comp.quantity_required}" 
-                                                style="width: 100px; display: inline-block;"
-                                                data-comp-id="${comp.id}"
-                                                data-component-type="${comp.component_type}"
-                                                data-component-id="${comp.component_id}"
-                                                data-unit="${comp.unit}"
-                                                data-original-value="${comp.quantity_required}"
-                                                onchange="showSaveButton(${comp.id})"
-                                                oninput="showSaveButton(${comp.id})">
-                                        ` : comp.quantity_required}
-                                    </td>
-                                    <td>${comp.unit}</td>
-                                    ${currentUser.role === 'admin' ? `
-                                        <td>
-                                            <span id="save-buttons-${comp.id}" style="display: none;">
-                                                <button onclick="saveComponentQuantity(${comp.id})" class="btn btn-primary btn-sm" style="margin-right: 5px;">Save</button>
-                                                <button onclick="cancelQuantityEdit(${comp.id})" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Cancel</button>
-                                            </span>
-                                            <button onclick="deleteComponent(${comp.id})" class="btn btn-danger btn-sm">Delete</button>
-                                        </td>
-                                    ` : ''}
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
+                const container = document.getElementById('componentsContent');
                 showModal('componentsModal');
+                await renderProductBomPanel(productId, container, {
+                    user: currentUser,
+                    productName,
+                    onChange: async () => {
+                        try {
+                            const costData = await apiCall(`/products/${productId}/cost`);
+                            const totalCost =
+                                costData && typeof costData.cost === 'number' ? costData.cost : 0;
+                            const productIndex = allProducts.findIndex((p) => p.id === productId);
+                            if (productIndex >= 0) {
+                                allProducts[productIndex].calculated_cost = totalCost;
+                                displayProducts();
+                            }
+                        } catch (e) {
+                            console.error('Cost refresh after BOM change', e);
+                        }
+                    }
+                });
             } catch (error) {
                 showAlert('Error loading components', 'error');
-            }
-        }
-        
-        function showAddComponent() {
-            const componentsContent = document.getElementById('componentsContent');
-            componentsContent.innerHTML = `
-                <h4>Add Component</h4>
-                <form id="componentForm">
-                    <div class="form-group">
-                        <label class="form-label">Component Type *</label>
-                        <select id="compType" class="form-select" required onchange="updateComponentOptions()">
-                            <option value="">Select type</option>
-                            <option value="raw_material">Raw Material</option>
-                            <option value="component">Component</option>
-                            <option value="built_item">Built Item</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Component *</label>
-                        <select id="compId" class="form-select" required>
-                            <option value="">Select component</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Quantity Required *</label>
-                        <input type="number" step="0.01" id="compQty" class="form-input" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Unit *</label>
-                        <input type="text" id="compUnit" class="form-input" required>
-                    </div>
-                    <div class="text-right">
-                        <button type="button" onclick="viewComponents(${currentProductId})" class="btn btn-secondary">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Add</button>
-                    </div>
-                </form>
-            `;
-            
-            document.getElementById('componentForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                try {
-                    await apiCall(`/products/${currentProductId}/components`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            component_type: document.getElementById('compType').value,
-                            component_id: document.getElementById('compId').value,
-                            quantity_required: document.getElementById('compQty').value,
-                            unit: document.getElementById('compUnit').value
-                        })
-                    });
-                    showAlert('Component added');
-                    viewComponents(currentProductId);
-                } catch (error) {
-                    showAlert(error.message, 'error');
-                }
-            });
-        }
-        
-        function updateComponentOptions() {
-            const type = document.getElementById('compType').value;
-            const select = document.getElementById('compId');
-            select.innerHTML = '<option value="">Select component</option>';
-            
-            if (type === 'raw_material') {
-                stockItems.forEach(item => {
-                    select.innerHTML += `<option value="${item.id}">${item.name} (${item.unit})</option>`;
-                });
-            } else if (type === 'component') {
-                components.forEach(comp => {
-                    select.innerHTML += `<option value="${comp.id}">${comp.name}</option>`;
-                });
-            } else if (type === 'built_item') {
-                panels.forEach(panel => {
-                    select.innerHTML += `<option value="${panel.id}">${panel.name}</option>`;
-                });
-            }
-        }
-        
-        async function refreshComponentsModalTotal() {
-            if (!currentProductId) return;
-            const el = document.getElementById('componentsModalTotalCost');
-            if (!el) return;
-            try {
-                el.textContent = '…';
-                const costData = await apiCall(`/products/${currentProductId}/cost`);
-                const cost = (costData && typeof costData.cost === 'number') ? costData.cost : 0;
-                el.textContent = formatCurrency(cost);
-            } catch (error) {
-                el.textContent = '—';
-                showAlert(error.message || 'Failed to refresh total', 'error');
-            }
-        }
-
-        function showSaveButton(compId) {
-            const qtyInput = document.getElementById(`qty-${compId}`);
-            const saveButtons = document.getElementById(`save-buttons-${compId}`);
-            
-            if (!qtyInput || !saveButtons) return;
-            
-            const originalValue = parseFloat(qtyInput.dataset.originalValue);
-            const currentValue = parseFloat(qtyInput.value);
-            
-            // Show save buttons if value has changed
-            if (!isNaN(currentValue) && currentValue !== originalValue) {
-                saveButtons.style.display = 'inline';
-            } else {
-                saveButtons.style.display = 'none';
-            }
-        }
-        
-        async function saveComponentQuantity(compId) {
-            const qtyInput = document.getElementById(`qty-${compId}`);
-            if (!qtyInput) return;
-            
-            const componentType = qtyInput.dataset.componentType;
-            const componentId = qtyInput.dataset.componentId;
-            const unit = qtyInput.dataset.unit;
-            
-            if (!compId || !componentType || !componentId || !unit) {
-                showAlert('Missing component data', 'error');
-                return;
-            }
-            
-            const newQuantity = parseFloat(qtyInput.value);
-            if (isNaN(newQuantity) || newQuantity < 0) {
-                showAlert('Invalid quantity', 'error');
-                cancelQuantityEdit(compId); // Reset to original value
-                return;
-            }
-            
-            // Show loading state
-            const saveButtons = document.getElementById(`save-buttons-${compId}`);
-            if (saveButtons) {
-                saveButtons.style.display = 'none';
-            }
-            qtyInput.disabled = true;
-            
-            try {
-                await apiCall(`/products/${currentProductId}/components/${compId}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        component_type: componentType,
-                        component_id: parseInt(componentId),
-                        quantity_required: newQuantity,
-                        unit: unit
-                    })
-                });
-                showAlert('Quantity updated');
-                viewComponents(currentProductId);
-            } catch (error) {
-                showAlert(error.message || 'Failed to update quantity', 'error');
-                qtyInput.disabled = false;
-                showSaveButton(compId); // Show buttons again on error
-            }
-        }
-        
-        function cancelQuantityEdit(compId) {
-            const qtyInput = document.getElementById(`qty-${compId}`);
-            const saveButtons = document.getElementById(`save-buttons-${compId}`);
-            
-            if (!qtyInput) return;
-            
-            // Reset to original value
-            const originalValue = qtyInput.dataset.originalValue;
-            qtyInput.value = originalValue;
-            
-            // Hide save buttons
-            if (saveButtons) {
-                saveButtons.style.display = 'none';
-            }
-        }
-        
-        async function deleteComponent(compId) {
-            if (!confirm('Delete this component?')) return;
-            try {
-                await apiCall(`/products/${currentProductId}/components/${compId}`, { method: 'DELETE' });
-                showAlert('Component deleted');
-                viewComponents(currentProductId);
-            } catch (error) {
-                showAlert(error.message, 'error');
             }
         }
         

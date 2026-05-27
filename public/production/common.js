@@ -298,13 +298,300 @@ function renderLoadSheetSalesOnlyLinesHtml(loadSheet) {
 </tr>`;
         })
         .join('');
-    return `<h4>Sales extras (no BOM)</h4>
+    return `<h4>Sales lines pending production setup</h4>
+<p class="text-muted" style="font-size: 0.9rem; margin: 0 0 10px 0;">These LeadLock items are not linked to a production product with a BOM. Use <strong>Production setup</strong> on the works order to create or link a product.</p>
 <table class="table">
 <thead><tr>
 <th>Item</th><th>Qty</th><th>Description</th><th>Install hrs</th><th>Boxes</th>
 </tr></thead>
 <tbody>${rows}</tbody>
 </table>`;
+}
+
+/** Whether the user may edit product BOM lines (matches API requireAdminOrOffice). */
+function canEditProductBom(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'office';
+}
+
+/** Whether the user may add/remove/edit quantities on order production lines (matches API requireManager). */
+function canManageOrderProducts(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'office' || user.role === 'manager';
+}
+
+const ProductBomCatalog = {
+    stockItems: [],
+    components: [],
+    panels: [],
+    loaded: false,
+    async ensureLoaded() {
+        if (this.loaded) return;
+        const [stockData, compData, panelData] = await Promise.all([
+            apiCall('/stock?all=1'),
+            apiCall('/components?all=1'),
+            apiCall('/panels?all=1')
+        ]);
+        this.stockItems = stockData.items || stockData.stock || [];
+        this.components = compData.components || [];
+        this.panels = panelData.panels || [];
+        this.loaded = true;
+    }
+};
+
+/**
+ * Render editable product BOM into a container element.
+ * @param {number} productId
+ * @param {HTMLElement} container
+ * @param {{ user?: object, productName?: string, onChange?: () => void }} options
+ */
+async function renderProductBomPanel(productId, container, options = {}) {
+    const user = options.user || null;
+    const canEdit = canEditProductBom(user);
+    const onChange = typeof options.onChange === 'function' ? options.onChange : null;
+    const productName = options.productName || `Product #${productId}`;
+
+    container.innerHTML = '<div class="loading">Loading BOM…</div>';
+    await ProductBomCatalog.ensureLoaded();
+
+    const state = { productId, canEdit, onChange, productName };
+
+    async function reload() {
+        const [componentsData, costData] = await Promise.all([
+            apiCall(`/products/${productId}/components`),
+            apiCall(`/products/${productId}/cost`)
+        ]);
+        const totalCost = costData && typeof costData.cost === 'number' ? costData.cost : 0;
+        const comps = componentsData.components || [];
+        const totalCostId = `productBomTotalCost_${productId}`;
+
+        container.innerHTML = `
+            <div class="product-bom-panel" data-product-id="${productId}">
+                <div style="margin-bottom: 16px;">
+                    <h4 style="margin-bottom: 10px; color: #333;">${escapeHtml(productName)}</h4>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                        <div>
+                            <strong>Total product cost:</strong>
+                            <span id="${totalCostId}" style="font-size: 1.1em; margin-left: 8px;">${formatCurrency(totalCost)}</span>
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm product-bom-refresh-cost">Refresh total</button>
+                        ${canEdit ? '<button type="button" class="btn btn-primary btn-sm product-bom-add">Add line</button>' : ''}
+                    </div>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Item</th>
+                            <th>Quantity</th>
+                            <th>Unit</th>
+                            ${canEdit ? '<th>Actions</th>' : ''}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${
+                            comps.length === 0
+                                ? `<tr><td colspan="${canEdit ? 5 : 4}">No BOM lines yet</td></tr>`
+                                : comps
+                                      .map((comp) => {
+                                          const typeLabel =
+                                              comp.component_type === 'raw_material'
+                                                  ? 'Raw Material'
+                                                  : comp.component_type === 'component'
+                                                    ? 'Component'
+                                                    : 'Built Item';
+                                          return `<tr id="product-bom-row-${comp.id}">
+<td><span class="badge badge-info">${escapeHtml(typeLabel)}</span></td>
+<td>${escapeHtml(comp.component_name || 'Unknown')}</td>
+<td>${
+                                              canEdit
+                                                  ? `<input type="number" step="0.01" class="form-input product-bom-qty" data-comp-id="${comp.id}" value="${comp.quantity_required}" style="width: 100px;" data-original="${comp.quantity_required}" data-type="${escapeHtml(comp.component_type)}" data-cid="${comp.component_id}" data-unit="${escapeHtml(comp.unit)}">`
+                                                  : escapeHtml(String(comp.quantity_required))
+                                          }</td>
+<td>${escapeHtml(comp.unit)}</td>
+${
+    canEdit
+        ? `<td>
+<button type="button" class="btn btn-primary btn-sm product-bom-save-qty" data-comp-id="${comp.id}" style="display:none; margin-right:4px;">Save</button>
+<button type="button" class="btn btn-danger btn-sm product-bom-delete" data-comp-id="${comp.id}">Delete</button>
+</td>`
+        : ''
+}
+</tr>`;
+                                      })
+                                      .join('')
+                        }
+                    </tbody>
+                </table>
+            </div>`;
+
+        container.querySelector('.product-bom-refresh-cost')?.addEventListener('click', async () => {
+            const el = document.getElementById(totalCostId);
+            if (!el) return;
+            try {
+                el.textContent = '…';
+                const cd = await apiCall(`/products/${productId}/cost`);
+                el.textContent = formatCurrency(cd && typeof cd.cost === 'number' ? cd.cost : 0);
+            } catch (err) {
+                el.textContent = '—';
+                showAlert(err.message || 'Failed to refresh total', 'error');
+            }
+        });
+
+        container.querySelector('.product-bom-add')?.addEventListener('click', () => {
+            showProductBomAddForm(container, state, reload);
+        });
+
+        container.querySelectorAll('.product-bom-qty').forEach((input) => {
+            input.addEventListener('input', () => {
+                const compId = input.dataset.compId;
+                const saveBtn = container.querySelector(`.product-bom-save-qty[data-comp-id="${compId}"]`);
+                if (!saveBtn) return;
+                const orig = parseFloat(input.dataset.original);
+                const cur = parseFloat(input.value);
+                saveBtn.style.display = !isNaN(cur) && cur !== orig ? 'inline-block' : 'none';
+            });
+        });
+
+        container.querySelectorAll('.product-bom-save-qty').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const compId = btn.dataset.compId;
+                const input = container.querySelector(`.product-bom-qty[data-comp-id="${compId}"]`);
+                if (!input) return;
+                const newQty = parseFloat(input.value);
+                if (isNaN(newQty) || newQty < 0) {
+                    showAlert('Invalid quantity', 'error');
+                    return;
+                }
+                try {
+                    await apiCall(`/products/${productId}/components/${compId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            component_type: input.dataset.type,
+                            component_id: parseInt(input.dataset.cid, 10),
+                            quantity_required: newQty,
+                            unit: input.dataset.unit
+                        })
+                    });
+                    showAlert('Quantity updated');
+                    await reload();
+                    if (onChange) onChange();
+                } catch (err) {
+                    showAlert(err.message || 'Failed to update', 'error');
+                }
+            });
+        });
+
+        container.querySelectorAll('.product-bom-delete').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Delete this BOM line?')) return;
+                try {
+                    await apiCall(`/products/${productId}/components/${btn.dataset.compId}`, { method: 'DELETE' });
+                    showAlert('BOM line deleted');
+                    await reload();
+                    if (onChange) onChange();
+                } catch (err) {
+                    showAlert(err.message || 'Failed to delete', 'error');
+                }
+            });
+        });
+    }
+
+    await reload();
+}
+
+function showProductBomAddForm(container, state, reloadCallback) {
+    const { productId, canEdit } = state;
+    if (!canEdit) return;
+    const panel = container.querySelector('.product-bom-panel');
+    if (!panel) return;
+
+    const formWrap = document.createElement('div');
+    formWrap.className = 'product-bom-add-form';
+    formWrap.style.marginTop = '16px';
+    formWrap.style.padding = '12px';
+    formWrap.style.border = '1px solid #dee2e6';
+    formWrap.style.borderRadius = '6px';
+    formWrap.innerHTML = `
+        <h4 style="margin-top:0;">Add BOM line</h4>
+        <div class="form-group">
+            <label class="form-label">Type *</label>
+            <select class="form-select product-bom-new-type">
+                <option value="">Select type</option>
+                <option value="raw_material">Raw Material</option>
+                <option value="component">Component</option>
+                <option value="built_item">Built Item</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Item *</label>
+            <select class="form-select product-bom-new-item"><option value="">Select item</option></select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Quantity *</label>
+            <input type="number" step="0.01" class="form-input product-bom-new-qty" required>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Unit *</label>
+            <input type="text" class="form-input product-bom-new-unit" required>
+        </div>
+        <div class="text-right">
+            <button type="button" class="btn btn-secondary btn-sm product-bom-add-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm product-bom-add-submit">Add</button>
+        </div>`;
+
+    panel.appendChild(formWrap);
+
+    const typeSelect = formWrap.querySelector('.product-bom-new-type');
+    const itemSelect = formWrap.querySelector('.product-bom-new-item');
+
+    typeSelect.addEventListener('change', () => {
+        const type = typeSelect.value;
+        itemSelect.innerHTML = '<option value="">Select item</option>';
+        if (type === 'raw_material') {
+            ProductBomCatalog.stockItems.forEach((item) => {
+                itemSelect.innerHTML += `<option value="${item.id}">${escapeHtml(item.name)} (${escapeHtml(item.unit || '')})</option>`;
+            });
+        } else if (type === 'component') {
+            ProductBomCatalog.components.forEach((c) => {
+                itemSelect.innerHTML += `<option value="${c.id}">${escapeHtml(c.name)}</option>`;
+            });
+        } else if (type === 'built_item') {
+            ProductBomCatalog.panels.forEach((p) => {
+                itemSelect.innerHTML += `<option value="${p.id}">${escapeHtml(p.name)}</option>`;
+            });
+        }
+    });
+
+    formWrap.querySelector('.product-bom-add-cancel').addEventListener('click', () => formWrap.remove());
+
+    formWrap.querySelector('.product-bom-add-submit').addEventListener('click', async () => {
+        const component_type = typeSelect.value;
+        const component_id = itemSelect.value;
+        const quantity_required = formWrap.querySelector('.product-bom-new-qty').value;
+        const unit = formWrap.querySelector('.product-bom-new-unit').value;
+        if (!component_type || !component_id || !quantity_required || !unit) {
+            showAlert('All fields are required', 'error');
+            return;
+        }
+        try {
+            await apiCall(`/products/${productId}/components`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    component_type,
+                    component_id: parseInt(component_id, 10),
+                    quantity_required: parseFloat(quantity_required),
+                    unit
+                })
+            });
+            showAlert('BOM line added');
+            formWrap.remove();
+            await reloadCallback();
+            if (state.onChange) state.onChange();
+        } catch (err) {
+            showAlert(err.message || 'Failed to add BOM line', 'error');
+        }
+    });
 }
 
 /**

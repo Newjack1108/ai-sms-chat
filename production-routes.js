@@ -2133,6 +2133,103 @@ router.delete('/orders/:id/products/:productId', requireProductionAuth, requireM
     }
 });
 
+router.put('/orders/:id/products/:orderProductId', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const orderProductId = parseInt(req.params.orderProductId, 10);
+        const { quantity } = req.body;
+        if (!quantity) {
+            return res.status(400).json({ success: false, error: 'Quantity is required' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        const products = await ProductionDatabase.updateOrderProductQuantity(
+            orderId,
+            orderProductId,
+            parseInt(quantity, 10)
+        );
+        res.json({ success: true, products });
+    } catch (error) {
+        console.error('Update order product error:', error);
+        const status = error.message === 'Product not found in order' ? 404 : 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to update order product' });
+    }
+});
+
+router.get('/orders/:id/production-setup', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const setup = await ProductionDatabase.getOrderProductionSetup(orderId);
+        res.json({ success: true, ...setup });
+    } catch (error) {
+        console.error('Get production setup error:', error);
+        const status = error.message === 'Order not found' ? 404 : 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to load production setup' });
+    }
+});
+
+router.post(
+    '/orders/:id/leadlock-items/:itemId/link',
+    requireProductionAuth,
+    requireAdminOrOffice,
+    async (req, res) => {
+        try {
+            const orderId = parseInt(req.params.id, 10);
+            const itemId = parseInt(req.params.itemId, 10);
+            const { product_id } = req.body;
+            if (!product_id) {
+                return res.status(400).json({ success: false, error: 'product_id is required' });
+            }
+            const setup = await ProductionDatabase.linkLeadlockItemToProduct(
+                orderId,
+                itemId,
+                parseInt(product_id, 10)
+            );
+            res.json({ success: true, setup });
+        } catch (error) {
+            console.error('Link LeadLock item error:', error);
+            const status =
+                error.message === 'LeadLock line not found on this order' ||
+                error.message === 'Product not found'
+                    ? 404
+                    : 400;
+            res.status(status).json({ success: false, error: error.message || 'Failed to link product' });
+        }
+    }
+);
+
+router.post('/orders/:id/bespoke-products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const { leadlock_item_id, name, description, leadlock_category, product_type, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        if (!leadlock_item_id) {
+            return res.status(400).json({ success: false, error: 'leadlock_item_id is required' });
+        }
+        const result = await ProductionDatabase.createBespokeProductFromLeadlockItem(
+            orderId,
+            parseInt(leadlock_item_id, 10),
+            {
+                name,
+                description,
+                leadlock_category,
+                product_type,
+                estimated_load_time,
+                estimated_install_time,
+                estimated_travel_time,
+                number_of_boxes,
+                is_optional_extra
+            }
+        );
+        res.json({ success: true, product: result.product, setup: result.setup });
+    } catch (error) {
+        console.error('Create bespoke product error:', error);
+        const status = error.message === 'LeadLock line not found on this order' ? 404 : 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to create bespoke product' });
+    }
+});
+
 // ============ ORDER SPARES ROUTES ============
 
 router.get('/orders/:id/spares', requireProductionAuth, async (req, res) => {
