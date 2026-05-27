@@ -162,6 +162,11 @@ app.use(express.static('public'));
 // Production system routes and authentication
 const productionRoutes = require('./production-routes');
 const { initializeProductionDatabase, ProductionDatabase } = require('./production-database');
+const {
+    validateLeadLockWebhookBody,
+    normalizeLeadLockWebhookPayload,
+    handleLeadLockWorkOrderWebhook
+} = require('./leadlock-work-order');
 const { createDefaultAdmin } = require('./production-auth');
 
 // Production authentication middleware
@@ -2485,35 +2490,18 @@ app.post('/api/webhooks/work-orders', async (req, res) => {
         if (!body || typeof body !== 'object') {
             return res.status(400).json({ success: false, error: 'Invalid or empty JSON body' });
         }
-        if (!Array.isArray(body.items) || body.items.length === 0) {
-            return res.status(400).json({ success: false, error: 'items array is required and must not be empty' });
+        const validation = validateLeadLockWebhookBody(body);
+        if (!validation.ok) {
+            return res.status(400).json({ success: false, error: validation.error });
         }
-        const payload = {
-            order_number: body.order_number,
-            order_id: body.order_id,
-            customer_name: body.customer_name,
-            customer_postcode: body.customer_postcode,
-            customer_address: body.customer_address,
-            customer_email: body.customer_email,
-            customer_phone: body.customer_phone,
-            items: body.items,
-            total_amount: body.total_amount,
-            currency: body.currency,
-            installation_booked: body.installation_booked,
-            created_at: body.created_at,
-            notes: body.notes == null ? '' : String(body.notes),
-            travel_time_hours_round_trip: body.travel_time_hours_round_trip
-        };
-        const existingBefore = payload.order_id != null && String(payload.order_id).trim() !== ''
-            ? await ProductionDatabase.getProductOrderByLeadlockOrderId(payload.order_id)
-            : null;
-        const order = await ProductionDatabase.createLeadLockWorkOrder(payload);
-        if (existingBefore) {
+        const payload = normalizeLeadLockWebhookPayload(body);
+        const { order, updated } = await handleLeadLockWorkOrderWebhook(payload, ProductionDatabase);
+        if (updated) {
             console.log(`LeadLock webhook: updated existing work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
         } else {
             console.log(`LeadLock webhook: created work order #${order.id} for ${body.order_number || body.order_id || 'unknown'}`);
         }
-        res.status(200).json({ success: true, work_order_id: String(order.id), updated: !!existingBefore });
+        res.status(200).json({ success: true, work_order_id: String(order.id), updated });
     } catch (error) {
         console.error('LeadLock work order webhook error:', error);
         res.status(500).json({ success: false, error: error.message || 'Failed to create work order' });

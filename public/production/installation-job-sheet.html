@@ -258,11 +258,10 @@
                     <h2>Customer &amp; contact</h2>
                     <table>
                         ${row('Customer', order.customer_name ? esc(order.customer_name) : '—')}
-                        ${row('Address', order.customer_address ? esc(order.customer_address) : '—')}
-                        ${row('Postcode', order.customer_postcode ? esc(order.customer_postcode) : '—')}
                         ${row('Phone', order.customer_phone ? esc(order.customer_phone) : '—')}
                         ${row('Email', order.customer_email ? esc(order.customer_email) : '—')}
                     </table>
+                    ${renderLeadLockWorkOrderDetailsHtml(order)}
                     <h2>Products</h2>
                     ${productsTable}
                     ${salesOnlyBlock}

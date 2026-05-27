@@ -640,6 +640,7 @@
                     ${notesTrim ? `<p class="wo-order-card__meta" title="${escapeHtml(notesTrim)}">${escapeHtml(notesShort)}</p>` : ''}
                     <div class="wo-order-card__flags">${flagsHtml || '<span class="text-muted" style="font-size: 11px;">No flags</span>'}</div>
                     <div class="wo-order-card__actions">
+                        <button type="button" onclick="viewWorkOrderDetails(${order.id})" class="btn btn-info btn-sm">Details</button>
                         <button type="button" onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
                         <button type="button" onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
                         <button type="button" onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
@@ -889,6 +890,7 @@
                                     <td>${formatDate(order.order_date)}</td>
                                     <td>${order.created_by_name || '-'}</td>
                                     <td>
+                                        <button onclick="viewWorkOrderDetails(${order.id})" class="btn btn-info btn-sm">Details</button>
                                         <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
                                         <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
                                         <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Spares</button>
@@ -1134,6 +1136,37 @@
             }
         }
         
+        async function viewWorkOrderDetails(orderId) {
+            try {
+                const result = await apiCall(`/orders/${orderId}`);
+                const order = result.order;
+                if (!order) throw new Error('Order not found');
+                const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+                const addressFallback = !isLeadlock ? `
+                    <p style="margin: 0 0 6px 0;"><strong>Address:</strong> ${order.customer_address ? escapeHtml(order.customer_address) : '—'}</p>
+                    <p style="margin: 0;"><strong>Postcode:</strong> ${order.customer_postcode ? escapeHtml(order.customer_postcode) : '—'}</p>
+                ` : '';
+                const modal = document.createElement('div');
+                modal.className = 'modal show';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width: 640px;">
+                        <div class="modal-header">
+                            <h3>Work order #${order.id}${isLeadlock ? ' · LeadLock' : ''}</h3>
+                            <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
+                        </div>
+                        <div class="requirements-section" style="padding: 16px;">
+                            ${renderLoadSheetCustomerHeader(order)}
+                            ${renderLeadLockWorkOrderDetailsHtml(order)}
+                            ${addressFallback}
+                            ${order.notes ? `<div style="margin-top: 12px;"><strong>Notes:</strong><div class="notes-block" style="margin-top: 6px;">${escapeHtml(order.notes)}</div></div>` : ''}
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showAlert(error.message || 'Failed to load work order', 'error');
+            }
+        }
+
         async function viewLoadSheet(orderId) {
             try {
                 const result = await apiCall(`/orders/${orderId}/load-sheet`);
@@ -1166,6 +1199,7 @@
                         </div>
                         <div class="requirements-section" id="loadSheetContent">
                             ${renderLoadSheetCustomerHeader(loadSheet)}
+                            ${renderLeadLockWorkOrderDetailsHtml(loadSheet)}
                             ${renderLoadSheetSalesOnlyLinesHtml(loadSheet)}
                             ${loadSheet.components.length > 0 ? `
                             <h4>Components Required</h4>
@@ -1482,6 +1516,7 @@
                             <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
                             <p style="margin: 0; font-size: 14px; color: #666;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
                             ${renderLoadSheetCustomerHeader(loadSheet).replace(/margin-bottom: 16px/g, 'margin: 12px auto 0; max-width: 480px; text-align: left')}
+                            ${renderLeadLockWorkOrderDetailsHtml(loadSheet)}
                         </div>
                         ${renderLoadSheetSalesOnlyLinesHtml(loadSheet)}
                         

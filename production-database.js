@@ -21,6 +21,7 @@ const {
     londonLocalTimeToUtc,
     ymdFromDbOrInstant
 } = require('./uk-datetime');
+const { parseBool: leadlockParseBool, parseAmount: leadlockParseAmount } = require('./leadlock-work-order');
 
 // Get database connection (SQLite or PostgreSQL)
 let db;
@@ -501,6 +502,25 @@ function initializeSQLite() {
         if (!tableInfo.some(c => c.name === 'workflow_flags')) {
             db.exec(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
             console.log('✅ Added workflow_flags column to product_orders table');
+        }
+        const leadlockExtendedCols = [
+            { name: 'fulfillment_method', type: 'TEXT' },
+            { name: 'deposit_paid', type: 'INTEGER', def: ' DEFAULT 0' },
+            { name: 'balance_paid', type: 'INTEGER', def: ' DEFAULT 0' },
+            { name: 'paid_in_full', type: 'INTEGER', def: ' DEFAULT 0' },
+            { name: 'deposit_amount', type: 'REAL', def: ' DEFAULT 0' },
+            { name: 'balance_amount', type: 'REAL', def: ' DEFAULT 0' },
+            { name: 'invoice_number', type: 'TEXT' },
+            { name: 'address_is_delivery_location', type: 'INTEGER', def: ' DEFAULT 0' },
+            { name: 'delivery_location_notes', type: 'TEXT' },
+            { name: 'crm_customer_address', type: 'TEXT' }
+        ];
+        const tableInfoExtended = db.prepare(`PRAGMA table_info(product_orders)`).all();
+        for (const col of leadlockExtendedCols) {
+            if (!tableInfoExtended.some(c => c.name === col.name)) {
+                db.exec(`ALTER TABLE product_orders ADD COLUMN ${col.name} ${col.type}${col.def || ''}`);
+                console.log(`✅ Added ${col.name} column to product_orders table`);
+            }
         }
     } catch (error) {
         console.log('⚠️ Product orders migration check skipped:', error.message);
@@ -1949,6 +1969,28 @@ async function initializePostgreSQL() {
             if (workflowFlagsCheck.rows.length === 0) {
                 await pool.query(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
                 console.log('✅ Added workflow_flags column to product_orders table');
+            }
+            const leadlockExtendedCols = [
+                { name: 'fulfillment_method', type: 'VARCHAR(20)' },
+                { name: 'deposit_paid', type: 'BOOLEAN DEFAULT FALSE' },
+                { name: 'balance_paid', type: 'BOOLEAN DEFAULT FALSE' },
+                { name: 'paid_in_full', type: 'BOOLEAN DEFAULT FALSE' },
+                { name: 'deposit_amount', type: 'DECIMAL(10,2) DEFAULT 0' },
+                { name: 'balance_amount', type: 'DECIMAL(10,2) DEFAULT 0' },
+                { name: 'invoice_number', type: 'VARCHAR(100)' },
+                { name: 'address_is_delivery_location', type: 'BOOLEAN DEFAULT FALSE' },
+                { name: 'delivery_location_notes', type: 'TEXT' },
+                { name: 'crm_customer_address', type: 'TEXT' }
+            ];
+            for (const col of leadlockExtendedCols) {
+                const colCheck = await pool.query(`
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'product_orders' AND column_name = $1
+                `, [col.name]);
+                if (colCheck.rows.length === 0) {
+                    await pool.query(`ALTER TABLE product_orders ADD COLUMN ${col.name} ${col.type}`);
+                    console.log(`✅ Added ${col.name} column to product_orders table`);
+                }
             }
         } catch (error) {
             console.log('⚠️ Product orders migration check skipped:', error.message);
@@ -6823,6 +6865,22 @@ class ProductionDatabase {
             order_id: orderId,
             customer_name: order.customer_name || null,
             customer_phone: order.customer_phone || null,
+            customer_postcode: order.customer_postcode || null,
+            customer_address: order.customer_address || null,
+            customer_email: order.customer_email || null,
+            fulfillment_method: order.fulfillment_method || null,
+            leadlock_order_id: order.leadlock_order_id || null,
+            notes: order.notes || null,
+            currency: order.currency || 'GBP',
+            deposit_paid: order.deposit_paid,
+            balance_paid: order.balance_paid,
+            paid_in_full: order.paid_in_full,
+            deposit_amount: order.deposit_amount,
+            balance_amount: order.balance_amount,
+            invoice_number: order.invoice_number || null,
+            address_is_delivery_location: order.address_is_delivery_location,
+            delivery_location_notes: order.delivery_location_notes || null,
+            crm_customer_address: order.crm_customer_address || null,
             products: productsList,
             components,
             built_items: builtItems,
@@ -7005,6 +7063,30 @@ class ProductionDatabase {
         await this.syncLeadlockItemsToOrderProducts(orderId);
     }
 
+    /** LeadLock payment + delivery fields for INSERT/UPDATE from webhook payload. */
+    static _leadLockExtendedOrderValues(payload, { sqlite = false } = {}) {
+        const depositPaid = leadlockParseBool(payload.deposit_paid, false);
+        const balancePaid = leadlockParseBool(payload.balance_paid, false);
+        const paidInFull = leadlockParseBool(payload.paid_in_full, false);
+        const addressIsDelivery = leadlockParseBool(payload.address_is_delivery_location, false);
+        const boolOut = (v) => (sqlite ? (v ? 1 : 0) : v);
+        const invoice = payload.invoice_number != null && String(payload.invoice_number).trim() !== ''
+            ? String(payload.invoice_number).trim()
+            : null;
+        return {
+            fulfillment_method: payload.fulfillment_method || null,
+            deposit_paid: boolOut(depositPaid),
+            balance_paid: boolOut(balancePaid),
+            paid_in_full: boolOut(paidInFull),
+            deposit_amount: leadlockParseAmount(payload.deposit_amount, 0),
+            balance_amount: leadlockParseAmount(payload.balance_amount, 0),
+            invoice_number: invoice,
+            address_is_delivery_location: boolOut(addressIsDelivery),
+            delivery_location_notes: payload.delivery_location_notes != null ? String(payload.delivery_location_notes) : null,
+            crm_customer_address: payload.crm_customer_address || null
+        };
+    }
+
     static async refreshLeadLockWorkOrderFromPayload(orderId, payload) {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
@@ -7021,6 +7103,7 @@ class ProductionDatabase {
         const salesOrderRef = payload.order_number ? `LeadLock-${payload.order_number}` : `LeadLock-${payload.order_id || Date.now()}`;
         const installationBooked = payload.installation_booked === true || payload.installation_booked === 'true';
         const salesNotes = payload.notes == null ? '' : String(payload.notes);
+        const ext = this._leadLockExtendedOrderValues(payload, { sqlite: !isPostgreSQL });
 
         if (isPostgreSQL) {
             await pool.query(
@@ -7029,15 +7112,22 @@ class ProductionDatabase {
                     customer_postcode = $4, customer_address = $5, customer_email = $6, customer_phone = $7,
                     currency = $8, total_amount = $9, installation_booked = $10,
                     labour_estimate_hours = $11, shipping_boxes_count = $12,
-                    travel_time_hours_round_trip = $13, notes = $14
-                 WHERE id = $15`,
+                    travel_time_hours_round_trip = $13, notes = $14,
+                    fulfillment_method = $15, deposit_paid = $16, balance_paid = $17, paid_in_full = $18,
+                    deposit_amount = $19, balance_amount = $20, invoice_number = $21,
+                    address_is_delivery_location = $22, delivery_location_notes = $23, crm_customer_address = $24
+                 WHERE id = $25`,
                 [
                     orderDate, payload.customer_name || null, salesOrderRef,
                     payload.customer_postcode || null, payload.customer_address || null,
                     payload.customer_email || null, payload.customer_phone || null,
                     payload.currency || null, parseFloat(payload.total_amount) || null, installationBooked,
                     labourEstimateHours || null, shippingBoxesCount || null,
-                    travelTimeHoursRoundTrip, salesNotes, orderId
+                    travelTimeHoursRoundTrip, salesNotes,
+                    ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
+                    ext.deposit_amount, ext.balance_amount, ext.invoice_number,
+                    ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
+                    orderId
                 ]
             );
         } else {
@@ -7047,7 +7137,10 @@ class ProductionDatabase {
                     customer_postcode = ?, customer_address = ?, customer_email = ?, customer_phone = ?,
                     currency = ?, total_amount = ?, installation_booked = ?,
                     labour_estimate_hours = ?, shipping_boxes_count = ?,
-                    travel_time_hours_round_trip = ?, notes = ?
+                    travel_time_hours_round_trip = ?, notes = ?,
+                    fulfillment_method = ?, deposit_paid = ?, balance_paid = ?, paid_in_full = ?,
+                    deposit_amount = ?, balance_amount = ?, invoice_number = ?,
+                    address_is_delivery_location = ?, delivery_location_notes = ?, crm_customer_address = ?
                  WHERE id = ?`
             ).run(
                 orderDate, payload.customer_name || null, salesOrderRef,
@@ -7055,7 +7148,11 @@ class ProductionDatabase {
                 payload.customer_email || null, payload.customer_phone || null,
                 payload.currency || null, parseFloat(payload.total_amount) || null, installationBooked ? 1 : 0,
                 labourEstimateHours || null, shippingBoxesCount || null,
-                travelTimeHoursRoundTrip, salesNotes, orderId
+                travelTimeHoursRoundTrip, salesNotes,
+                ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
+                ext.deposit_amount, ext.balance_amount, ext.invoice_number,
+                ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
+                orderId
             );
         }
         await this.replaceLeadlockWorkOrderItems(orderId, items);
@@ -7089,13 +7186,17 @@ class ProductionDatabase {
         const salesOrderRef = payload.order_number ? `LeadLock-${payload.order_number}` : `LeadLock-${payload.order_id || Date.now()}`;
         const installationBooked = payload.installation_booked === true || payload.installation_booked === 'true';
         const salesNotes = payload.notes == null ? '' : String(payload.notes);
+        const ext = this._leadLockExtendedOrderValues(payload, { sqlite: !isPostgreSQL });
         
         let orderId;
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id`,
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
+                 fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -7105,15 +7206,20 @@ class ProductionDatabase {
                     payload.order_id != null ? String(payload.order_id) : null,
                     labourEstimateHours || null, shippingBoxesCount || null,
                     travelTimeHoursRoundTrip,
-                    salesNotes
+                    salesNotes,
+                    ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
+                    ext.deposit_amount, ext.balance_amount, ext.invoice_number,
+                    ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address
                 ]
             );
             orderId = result.rows[0].id;
         } else {
             const stmt = db.prepare(
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
-                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
+                 fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -7124,7 +7230,10 @@ class ProductionDatabase {
                 payload.order_id != null ? String(payload.order_id) : null,
                 labourEstimateHours || null, shippingBoxesCount || null,
                 travelTimeHoursRoundTrip,
-                salesNotes
+                salesNotes,
+                ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
+                ext.deposit_amount, ext.balance_amount, ext.invoice_number,
+                ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address
             );
             orderId = info.lastInsertRowid;
         }

@@ -785,3 +785,85 @@ function getDefaultWorkTimes(date) {
     const isFriday = d.getDay() === 5;
     return { start: '08:00', end: isFriday ? '15:00' : '17:00' };
 }
+
+function leadlockTruthy(value) {
+    return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+/** Human-readable LeadLock payment status (browser). */
+function deriveLeadLockPaymentStatusLabel(data) {
+    const paidInFull = leadlockTruthy(data && data.paid_in_full);
+    const depositPaid = leadlockTruthy(data && data.deposit_paid);
+    const balancePaid = leadlockTruthy(data && data.balance_paid);
+    if (paidInFull) return 'Paid in full';
+    if (depositPaid && balancePaid) return 'Deposit and balance paid';
+    if (depositPaid) return 'Deposit paid — balance outstanding';
+    return 'Payment pending';
+}
+
+function formatLeadLockPaidLabel(paid) {
+    return leadlockTruthy(paid) ? 'Paid' : 'Not paid';
+}
+
+/**
+ * Address + delivery notes block for LeadLock work orders (load sheet, job sheet, detail).
+ * @param {object} order or loadSheet row with customer_* and delivery fields
+ */
+function renderLeadLockWorkOrderAddressHtml(order) {
+    if (!order) return '';
+    const isDelivery = leadlockTruthy(order.address_is_delivery_location);
+    const fulfillment = (order.fulfillment_method || '').toLowerCase();
+    const isCollection = fulfillment === 'collection';
+    const addrLabel = isDelivery ? 'Delivery location' : 'Customer address';
+    const postcodeLabel = isDelivery ? 'Delivery postcode' : 'Postcode';
+    const address = (order.customer_address || '').trim();
+    const postcode = (order.customer_postcode || '').trim();
+    const deliveryNotes = (order.delivery_location_notes || '').trim();
+    const crmAddress = (order.crm_customer_address || '').trim();
+
+    let html = '<div style="margin-bottom: 12px;">';
+    if (fulfillment) {
+        html += `<p style="margin: 0 0 8px 0;"><strong>Fulfilment:</strong> ${escapeHtml(fulfillment)}</p>`;
+    }
+    if (!isCollection || address || postcode) {
+        html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(addrLabel)}:</strong> ${address ? escapeHtml(address) : '—'}</p>`;
+        html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(postcodeLabel)}:</strong> ${postcode ? escapeHtml(postcode) : '—'}</p>`;
+    }
+    if (isDelivery && deliveryNotes) {
+        html += `<p style="margin: 0 0 6px 0; padding: 8px 10px; background: #fff8e6; border-left: 3px solid #f0ad4e;"><strong>Delivery access notes:</strong> ${escapeHtml(deliveryNotes)}</p>`;
+    }
+    if (isDelivery && crmAddress) {
+        html += `<p style="margin: 0; font-size: 14px; color: #555;"><strong>Bill to / CRM address:</strong> ${escapeHtml(crmAddress)}</p>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+/**
+ * Payment summary for LeadLock work orders.
+ */
+function renderLeadLockPaymentSummaryHtml(order) {
+    if (!order || order.leadlock_order_id == null || String(order.leadlock_order_id).trim() === '') {
+        return '';
+    }
+    const depositAmt = parseFloat(order.deposit_amount);
+    const balanceAmt = parseFloat(order.balance_amount);
+    const statusLabel = deriveLeadLockPaymentStatusLabel(order);
+    const invoice = (order.invoice_number || '').trim();
+    return `<div style="margin-bottom: 16px; padding: 12px 16px; background: #eef6ff; border: 1px solid #b8d4f0; border-radius: 8px;">
+<h4 style="margin: 0 0 10px 0; font-size: 15px;">Payment</h4>
+<p style="margin: 0 0 6px 0;"><strong>Status:</strong> ${escapeHtml(statusLabel)}</p>
+<p style="margin: 0 0 6px 0;"><strong>Deposit:</strong> ${escapeHtml(formatLeadLockPaidLabel(order.deposit_paid))} — ${formatCurrency(Number.isFinite(depositAmt) ? depositAmt : 0)}</p>
+<p style="margin: 0 0 6px 0;"><strong>Balance:</strong> ${escapeHtml(formatLeadLockPaidLabel(order.balance_paid))} — ${formatCurrency(Number.isFinite(balanceAmt) ? balanceAmt : 0)}</p>
+<p style="margin: 0 0 6px 0;"><strong>Paid in full:</strong> ${leadlockTruthy(order.paid_in_full) ? 'Yes' : 'No'}</p>
+<p style="margin: 0;"><strong>Invoice:</strong> ${invoice ? escapeHtml(invoice) : '—'}</p>
+</div>`;
+}
+
+/** Combined LeadLock customer, address, and payment block. */
+function renderLeadLockWorkOrderDetailsHtml(order) {
+    if (!order) return '';
+    const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+    if (!isLeadlock) return '';
+    return renderLeadLockWorkOrderAddressHtml(order) + renderLeadLockPaymentSummaryHtml(order);
+}
