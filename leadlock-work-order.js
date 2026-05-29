@@ -169,11 +169,27 @@ function normalizeLeadLockWebhookPayload(body) {
         created_at: body.created_at,
         notes: body.notes == null ? '' : String(body.notes),
         travel_time_hours_round_trip: body.travel_time_hours_round_trip,
-        deposit_paid: parseBool(body.deposit_paid, false),
-        balance_paid: parseBool(body.balance_paid, false),
-        paid_in_full: parseBool(body.paid_in_full, false),
         deposit_amount: parseAmount(body.deposit_amount, 0),
         balance_amount: parseAmount(body.balance_amount, 0),
+        ...reconcileLeadLockPaymentFlags({
+            deposit_paid: firstPresentBool(
+                body.deposit_paid,
+                body.deposit_payment_paid,
+                body.is_deposit_paid
+            ),
+            balance_paid: firstPresentBool(
+                body.balance_paid,
+                body.balance_payment_paid,
+                body.is_balance_paid
+            ),
+            paid_in_full: firstPresentBool(
+                body.paid_in_full,
+                body.paid_in_full_payment,
+                body.is_paid_in_full
+            ),
+            deposit_amount: body.deposit_amount,
+            balance_amount: body.balance_amount
+        }),
         invoice_number: optionalString(body.invoice_number),
         address_is_delivery_location: addressIsDeliveryLocation,
         delivery_location_notes: deliveryLocationNotes,
@@ -182,16 +198,50 @@ function normalizeLeadLockWebhookPayload(body) {
 }
 
 /**
+ * First defined boolean from webhook aliases (or null if all omitted).
+ */
+function firstPresentBool(...values) {
+    for (const value of values) {
+        if (value !== undefined && value !== null) {
+            return parseBool(value, false);
+        }
+    }
+    return null;
+}
+
+/**
+ * Align deposit / balance / paid-in-full flags (LeadLock may only set paid_in_full).
+ * @param {object} data Raw or normalized payment fields
+ * @returns {{ deposit_paid: boolean, balance_paid: boolean, paid_in_full: boolean }}
+ */
+function reconcileLeadLockPaymentFlags(data) {
+    const depositAmount = parseAmount(data.deposit_amount, 0);
+    let depositPaid = parseBool(data.deposit_paid, false);
+    let balancePaid = parseBool(data.balance_paid, false);
+    let paidInFull = parseBool(data.paid_in_full, false);
+
+    if (paidInFull) {
+        depositPaid = true;
+        balancePaid = true;
+    } else if (depositPaid && balancePaid) {
+        paidInFull = true;
+    } else if (balancePaid && (depositPaid || depositAmount <= 0)) {
+        paidInFull = true;
+        depositPaid = true;
+    }
+
+    return { deposit_paid: depositPaid, balance_paid: balancePaid, paid_in_full: paidInFull };
+}
+
+/**
  * Human-readable payment status from normalized payload or order row.
  * @param {{ deposit_paid?: boolean, balance_paid?: boolean, paid_in_full?: boolean }} data
  */
 function deriveLeadLockPaymentStatusLabel(data) {
-    const paidInFull = parseBool(data.paid_in_full, false);
-    const depositPaid = parseBool(data.deposit_paid, false);
-    const balancePaid = parseBool(data.balance_paid, false);
-    if (paidInFull) return 'Paid in full';
-    if (depositPaid && balancePaid) return 'Deposit and balance paid';
-    if (depositPaid) return 'Deposit paid — balance outstanding';
+    const flags = reconcileLeadLockPaymentFlags(data || {});
+    if (flags.paid_in_full) return 'Paid in full';
+    if (flags.deposit_paid && flags.balance_paid) return 'Deposit and balance paid';
+    if (flags.deposit_paid) return 'Deposit paid — balance outstanding';
     return 'Payment pending';
 }
 
@@ -215,6 +265,7 @@ module.exports = {
     parseAmount,
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
+    reconcileLeadLockPaymentFlags,
     deriveLeadLockPaymentStatusLabel,
     resolveTravelTimeHoursRoundTrip,
     handleLeadLockWorkOrderWebhook

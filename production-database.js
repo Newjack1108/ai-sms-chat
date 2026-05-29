@@ -507,6 +507,13 @@ function initializeSQLite() {
             db.exec(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
             console.log('✅ Added workflow_flags column to product_orders table');
         }
+        if (!tableInfo.some(c => c.name === 'production_acknowledged_at')) {
+            db.exec(`ALTER TABLE product_orders ADD COLUMN production_acknowledged_at TEXT`);
+            db.exec(
+                `UPDATE product_orders SET production_acknowledged_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE production_acknowledged_at IS NULL`
+            );
+            console.log('✅ Added production_acknowledged_at column to product_orders table');
+        }
         const leadlockExtendedCols = [
             { name: 'fulfillment_method', type: 'TEXT' },
             { name: 'deposit_paid', type: 'INTEGER', def: ' DEFAULT 0' },
@@ -1974,6 +1981,19 @@ async function initializePostgreSQL() {
                 await pool.query(`ALTER TABLE product_orders ADD COLUMN workflow_flags TEXT DEFAULT '[]'`);
                 console.log('✅ Added workflow_flags column to product_orders table');
             }
+            const ackAtCheck = await pool.query(`
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'product_orders' AND column_name = 'production_acknowledged_at'
+            `);
+            if (ackAtCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE product_orders ADD COLUMN production_acknowledged_at TIMESTAMP`);
+                await pool.query(`
+                    UPDATE product_orders
+                    SET production_acknowledged_at = COALESCE(created_at, CURRENT_TIMESTAMP)
+                    WHERE production_acknowledged_at IS NULL
+                `);
+                console.log('✅ Added production_acknowledged_at column to product_orders table');
+            }
             const leadlockExtendedCols = [
                 { name: 'fulfillment_method', type: 'VARCHAR(20)' },
                 { name: 'deposit_paid', type: 'BOOLEAN DEFAULT FALSE' },
@@ -3149,7 +3169,29 @@ class ProductionDatabase {
     static attachWorkflowFlagsToOrder(order) {
         if (!order) return order;
         order.workflow_flags = ProductionDatabase.parseWorkflowFlagsFromDb(order.workflow_flags);
+        order.is_new = !order.production_acknowledged_at;
         return order;
+    }
+
+    static async acknowledgeProductOrder(orderId) {
+        const id = parseInt(orderId, 10);
+        if (!id) return false;
+        const now = new Date().toISOString();
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE product_orders
+                 SET production_acknowledged_at = COALESCE(production_acknowledged_at, $1::timestamptz)
+                 WHERE id = $2`,
+                [now, id]
+            );
+            return result.rowCount > 0;
+        }
+        const info = db.prepare(
+            `UPDATE product_orders
+             SET production_acknowledged_at = COALESCE(production_acknowledged_at, ?)
+             WHERE id = ?`
+        ).run(now, id);
+        return info.changes > 0;
     }
 
     static _buildProductOrdersWhere(opts = {}, { postgres = false } = {}) {
@@ -7068,9 +7110,11 @@ class ProductionDatabase {
 
     /** LeadLock payment + delivery fields for INSERT/UPDATE from webhook payload. */
     static _leadLockExtendedOrderValues(payload, { sqlite = false } = {}) {
-        const depositPaid = leadlockParseBool(payload.deposit_paid, false);
-        const balancePaid = leadlockParseBool(payload.balance_paid, false);
-        const paidInFull = leadlockParseBool(payload.paid_in_full, false);
+        const { reconcileLeadLockPaymentFlags } = require('./leadlock-work-order');
+        const payment = reconcileLeadLockPaymentFlags(payload);
+        const depositPaid = payment.deposit_paid;
+        const balancePaid = payment.balance_paid;
+        const paidInFull = payment.paid_in_full;
         const addressIsDelivery = leadlockParseBool(payload.address_is_delivery_location, false);
         const boolOut = (v) => (sqlite ? (v ? 1 : 0) : v);
         const invoice = payload.invoice_number != null && String(payload.invoice_number).trim() !== ''
@@ -7771,7 +7815,8 @@ class ProductionDatabase {
                 await this.deductStockForCompletedOrder(id, userId);
                 console.log(`✅ Depreciated stock for all production lines on order #${id}`);
             }
-            
+
+            await this.acknowledgeProductOrder(id);
             return await this.getProductOrderById(id);
         } else {
             const setClause = updates.map((update, idx) => {
@@ -7786,7 +7831,8 @@ class ProductionDatabase {
                 await this.deductStockForCompletedOrder(id, userId);
                 console.log(`✅ Depreciated stock for all production lines on order #${id}`);
             }
-            
+
+            await this.acknowledgeProductOrder(id);
             return updatedOrder;
         }
     }

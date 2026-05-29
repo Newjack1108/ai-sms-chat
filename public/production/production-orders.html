@@ -206,6 +206,24 @@
         .wo-order-card.status-complete {
             border-left-color: #28a745;
         }
+        .wo-order-card--new {
+            background: #f0f4ff;
+            border-color: #b8c9e8;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.12);
+        }
+        .wo-order-card__new-badge {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #3d4f8c;
+            background: #dce6ff;
+            border-radius: 10px;
+            vertical-align: middle;
+        }
         .wo-board-toolbar__scope {
             display: inline-flex;
             gap: 6px;
@@ -687,6 +705,21 @@
             renderWoBoardFilters();
             renderOrdersBoard();
         }
+
+        async function acknowledgeWorkOrder(orderId) {
+            const id = parseInt(orderId, 10);
+            if (!id) return;
+            const order = boardOrders.find(o => o.id === id);
+            if (!order || !order.is_new) return;
+            order.is_new = false;
+            order.production_acknowledged_at = order.production_acknowledged_at || new Date().toISOString();
+            renderOrdersBoard();
+            try {
+                await apiCall(`/orders/${id}/acknowledge`, { method: 'POST' });
+            } catch (e) {
+                console.error('Failed to acknowledge work order:', e);
+            }
+        }
         
         function orderMatchesBoardFlagFilter(order) {
             if (boardFlagFilter === 'all') return true;
@@ -731,10 +764,13 @@
                 if (order.sales_order_ref) refParts.push(escapeHtml(String(order.sales_order_ref)));
                 if (order.leadlock_order_id) refParts.push('LeadLock ' + escapeHtml(String(order.leadlock_order_id)));
                 const refLine = refParts.length ? refParts.join(' · ') : '';
+                const isNew = order.is_new === true;
+                const newCardClass = isNew ? ' wo-order-card--new' : '';
+                const newBadge = isNew ? '<span class="wo-order-card__new-badge">New</span>' : '';
                 return `
-                <article class="wo-order-card status-${status.replace(/[^a-z0-9_]/g, '_')}" data-order-id="${order.id}">
+                <article class="wo-order-card status-${status.replace(/[^a-z0-9_]/g, '_')}${newCardClass}" data-order-id="${order.id}">
                     <div class="wo-order-card__header">
-                        <h3 class="wo-order-card__title">#${order.id} ${escapeHtml(order.customer_name || 'No customer')}</h3>
+                        <h3 class="wo-order-card__title">#${order.id} ${escapeHtml(order.customer_name || 'No customer')}${newBadge}</h3>
                         <span class="badge ${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
                     </div>
                     <p class="wo-order-card__meta"><strong>${formatOrderProductsDisplay(order)}</strong></p>
@@ -779,6 +815,7 @@
         }
         
         function showManageFlagsModal(orderId) {
+            acknowledgeWorkOrder(orderId);
             const order = boardOrders.find(o => o.id === orderId) || orders.find(o => o.id === orderId);
             const flags = order ? parseWorkflowFlags(order) : [];
             document.getElementById('manageFlagsOrderId').value = orderId;
@@ -797,6 +834,7 @@
         let productionSetupBespokeProductId = null;
 
         async function showProductionSetup(orderId) {
+            acknowledgeWorkOrder(orderId);
             productionSetupOrderId = orderId;
             productionSetupBespokeProductId = null;
             document.getElementById('productionSetupModalTitle').textContent =
@@ -1558,6 +1596,7 @@
         }
         
         async function viewWorkOrderDetails(orderId) {
+            acknowledgeWorkOrder(orderId);
             try {
                 const result = await apiCall(`/orders/${orderId}`);
                 const order = result.order;
@@ -1608,6 +1647,7 @@
         }
 
         async function viewLoadSheet(orderId) {
+            acknowledgeWorkOrder(orderId);
             try {
                 const result = await apiCall(`/orders/${orderId}/load-sheet`);
                 const loadSheet = result.load_sheet;
@@ -2572,6 +2612,7 @@
         }
         
         async function viewOrderRequirements(orderId) {
+            acknowledgeWorkOrder(orderId);
             try {
                 const result = await apiCall(`/orders/${orderId}/requirements`, {
                     method: 'POST'
@@ -2695,6 +2736,7 @@
         }
         
         function showUpdateStatusModal(orderId, currentStatus) {
+            acknowledgeWorkOrder(orderId);
             document.getElementById('updateStatusOrderId').value = orderId;
             document.getElementById('updateStatusSelect').value = currentStatus;
             showModal('updateStatusModal');

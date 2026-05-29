@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
+    reconcileLeadLockPaymentFlags,
     deriveLeadLockPaymentStatusLabel,
     resolveTravelTimeHoursRoundTrip
 } = require('../leadlock-work-order');
@@ -159,12 +160,48 @@ describe('resolveTravelTimeHoursRoundTrip', () => {
     });
 });
 
+describe('reconcileLeadLockPaymentFlags', () => {
+    it('sets balance and deposit paid when paid_in_full is true', () => {
+        const flags = reconcileLeadLockPaymentFlags({
+            paid_in_full: true,
+            deposit_paid: true,
+            balance_paid: false
+        });
+        assert.equal(flags.paid_in_full, true);
+        assert.equal(flags.balance_paid, true);
+        assert.equal(flags.deposit_paid, true);
+    });
+
+    it('sets paid_in_full when balance paid after deposit', () => {
+        const flags = reconcileLeadLockPaymentFlags({
+            deposit_paid: true,
+            balance_paid: true,
+            paid_in_full: false,
+            deposit_amount: 5000,
+            balance_amount: 5000
+        });
+        assert.equal(flags.paid_in_full, true);
+    });
+
+    it('normalizes paid_in_full-only webhook payload', () => {
+        const p = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            items: [],
+            paid_in_full: true,
+            deposit_paid: true,
+            balance_paid: false
+        });
+        assert.equal(p.paid_in_full, true);
+        assert.equal(p.balance_paid, true);
+    });
+});
+
 describe('deriveLeadLockPaymentStatusLabel', () => {
     it('returns expected labels', () => {
         assert.equal(deriveLeadLockPaymentStatusLabel({ paid_in_full: true }), 'Paid in full');
         assert.equal(
             deriveLeadLockPaymentStatusLabel({ deposit_paid: true, balance_paid: true }),
-            'Deposit and balance paid'
+            'Paid in full'
         );
         assert.equal(
             deriveLeadLockPaymentStatusLabel({ deposit_paid: true, balance_paid: false }),

@@ -1077,14 +1077,30 @@ function leadlockTruthy(value) {
     return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+/** Align LeadLock payment flags for display (matches server reconcileLeadLockPaymentFlags). */
+function reconcileLeadLockPaymentFlagsForDisplay(order) {
+    const depositAmt = parseFloat(order && order.deposit_amount);
+    let depositPaid = leadlockTruthy(order && order.deposit_paid);
+    let balancePaid = leadlockTruthy(order && order.balance_paid);
+    let paidInFull = leadlockTruthy(order && order.paid_in_full);
+    if (paidInFull) {
+        depositPaid = true;
+        balancePaid = true;
+    } else if (depositPaid && balancePaid) {
+        paidInFull = true;
+    } else if (balancePaid && (depositPaid || !Number.isFinite(depositAmt) || depositAmt <= 0)) {
+        paidInFull = true;
+        depositPaid = true;
+    }
+    return { deposit_paid: depositPaid, balance_paid: balancePaid, paid_in_full: paidInFull };
+}
+
 /** Human-readable LeadLock payment status (browser). */
 function deriveLeadLockPaymentStatusLabel(data) {
-    const paidInFull = leadlockTruthy(data && data.paid_in_full);
-    const depositPaid = leadlockTruthy(data && data.deposit_paid);
-    const balancePaid = leadlockTruthy(data && data.balance_paid);
-    if (paidInFull) return 'Paid in full';
-    if (depositPaid && balancePaid) return 'Deposit and balance paid';
-    if (depositPaid) return 'Deposit paid — balance outstanding';
+    const flags = reconcileLeadLockPaymentFlagsForDisplay(data || {});
+    if (flags.paid_in_full) return 'Paid in full';
+    if (flags.deposit_paid && flags.balance_paid) return 'Deposit and balance paid';
+    if (flags.deposit_paid) return 'Deposit paid — balance outstanding';
     return 'Payment pending';
 }
 
@@ -1139,14 +1155,15 @@ function renderLeadLockPaymentSummaryHtml(order) {
     }
     const depositAmt = parseFloat(order.deposit_amount);
     const balanceAmt = parseFloat(order.balance_amount);
-    const statusLabel = deriveLeadLockPaymentStatusLabel(order);
+    const pay = reconcileLeadLockPaymentFlagsForDisplay(order);
+    const statusLabel = deriveLeadLockPaymentStatusLabel(pay);
     const invoice = (order.invoice_number || '').trim();
     return `<div style="margin-bottom: 16px; padding: 12px 16px; background: #eef6ff; border: 1px solid #b8d4f0; border-radius: 8px;">
 <h4 style="margin: 0 0 10px 0; font-size: 15px;">Payment</h4>
 <p style="margin: 0 0 6px 0;"><strong>Status:</strong> ${escapeHtml(statusLabel)}</p>
-<p style="margin: 0 0 6px 0;"><strong>Deposit:</strong> ${escapeHtml(formatLeadLockPaidLabel(order.deposit_paid))} — ${formatCurrency(Number.isFinite(depositAmt) ? depositAmt : 0)}</p>
-<p style="margin: 0 0 6px 0;"><strong>Balance:</strong> ${escapeHtml(formatLeadLockPaidLabel(order.balance_paid))} — ${formatCurrency(Number.isFinite(balanceAmt) ? balanceAmt : 0)}</p>
-<p style="margin: 0 0 6px 0;"><strong>Paid in full:</strong> ${leadlockTruthy(order.paid_in_full) ? 'Yes' : 'No'}</p>
+<p style="margin: 0 0 6px 0;"><strong>Deposit:</strong> ${escapeHtml(formatLeadLockPaidLabel(pay.deposit_paid))} — ${formatCurrency(Number.isFinite(depositAmt) ? depositAmt : 0)}</p>
+<p style="margin: 0 0 6px 0;"><strong>Balance:</strong> ${escapeHtml(formatLeadLockPaidLabel(pay.balance_paid))} — ${formatCurrency(Number.isFinite(balanceAmt) ? balanceAmt : 0)}</p>
+<p style="margin: 0 0 6px 0;"><strong>Paid in full:</strong> ${pay.paid_in_full ? 'Yes' : 'No'}</p>
 <p style="margin: 0;"><strong>Invoice:</strong> ${invoice ? escapeHtml(invoice) : '—'}</p>
 </div>`;
 }

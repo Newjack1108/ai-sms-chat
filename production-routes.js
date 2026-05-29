@@ -2483,6 +2483,25 @@ router.get('/orders/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.post('/orders/:id/acknowledge', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (!orderId) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        await ProductionDatabase.acknowledgeProductOrder(orderId);
+        const updated = await ProductionDatabase.getProductOrderById(orderId);
+        res.json({ success: true, order: updated });
+    } catch (error) {
+        console.error('Acknowledge order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to acknowledge order' });
+    }
+});
+
 router.patch('/orders/:id/flags', requireProductionAuth, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
