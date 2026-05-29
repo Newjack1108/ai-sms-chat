@@ -21,7 +21,11 @@ const {
     londonLocalTimeToUtc,
     ymdFromDbOrInstant
 } = require('./uk-datetime');
-const { parseBool: leadlockParseBool, parseAmount: leadlockParseAmount } = require('./leadlock-work-order');
+const {
+    parseBool: leadlockParseBool,
+    parseAmount: leadlockParseAmount,
+    resolveTravelTimeHoursRoundTrip: leadlockResolveTravelTimeHoursRoundTrip
+} = require('./leadlock-work-order');
 
 // Get database connection (SQLite or PostgreSQL)
 let db;
@@ -7090,13 +7094,7 @@ class ProductionDatabase {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
         const shippingBoxesCount = items.reduce((sum, i) => sum + (parseInt(i.number_of_boxes, 10) || 0), 0);
-        let travelTimeHoursRoundTrip = null;
-        if (payload.travel_time_hours_round_trip !== undefined && payload.travel_time_hours_round_trip !== null && payload.travel_time_hours_round_trip !== '') {
-            const t = typeof payload.travel_time_hours_round_trip === 'number'
-                ? payload.travel_time_hours_round_trip
-                : parseFloat(payload.travel_time_hours_round_trip);
-            if (Number.isFinite(t)) travelTimeHoursRoundTrip = t;
-        }
+        const travelTimeHoursRoundTrip = leadlockResolveTravelTimeHoursRoundTrip(payload);
         let orderDate = (payload.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) orderDate = new Date().toISOString().slice(0, 10);
         const salesOrderRef = payload.order_number ? `LeadLock-${payload.order_number}` : `LeadLock-${payload.order_id || Date.now()}`;
@@ -7168,16 +7166,8 @@ class ProductionDatabase {
         const items = Array.isArray(payload.items) ? payload.items : [];
         const labourEstimateHours = items.reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
         const shippingBoxesCount = items.reduce((sum, i) => sum + (parseInt(i.number_of_boxes, 10) || 0), 0);
-        let travelTimeHoursRoundTrip = null;
-        if (payload.travel_time_hours_round_trip !== undefined && payload.travel_time_hours_round_trip !== null && payload.travel_time_hours_round_trip !== '') {
-            const t = typeof payload.travel_time_hours_round_trip === 'number'
-                ? payload.travel_time_hours_round_trip
-                : parseFloat(payload.travel_time_hours_round_trip);
-            if (Number.isFinite(t)) {
-                travelTimeHoursRoundTrip = t;
-            }
-        }
-        
+        const travelTimeHoursRoundTrip = leadlockResolveTravelTimeHoursRoundTrip(payload);
+
         let orderDate = (payload.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate)) orderDate = new Date().toISOString().slice(0, 10);
         

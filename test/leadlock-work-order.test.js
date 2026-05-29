@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const {
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
-    deriveLeadLockPaymentStatusLabel
+    deriveLeadLockPaymentStatusLabel,
+    resolveTravelTimeHoursRoundTrip
 } = require('../leadlock-work-order');
 
 const basePayload = {
@@ -97,6 +98,26 @@ describe('normalizeLeadLockWebhookPayload', () => {
         });
         assert.equal(p.fulfillment_method, 'collection');
         assert.deepEqual(p.items, []);
+    });
+});
+
+describe('resolveTravelTimeHoursRoundTrip', () => {
+    it('returns round trip for delivery when set', () => {
+        assert.equal(
+            resolveTravelTimeHoursRoundTrip({ fulfillment_method: 'delivery', travel_time_hours_round_trip: 2.5 }),
+            2.5
+        );
+    });
+
+    it('returns null for collection even when travel is present', () => {
+        assert.equal(
+            resolveTravelTimeHoursRoundTrip({ fulfillment_method: 'collection', travel_time_hours_round_trip: 2.5 }),
+            null
+        );
+    });
+
+    it('returns null when travel omitted', () => {
+        assert.equal(resolveTravelTimeHoursRoundTrip({ fulfillment_method: 'delivery' }), null);
     });
 });
 

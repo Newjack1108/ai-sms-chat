@@ -23,6 +23,27 @@ function optionalString(value) {
 }
 
 /**
+ * Round-trip drive hours from LeadLock payload, or null when not applicable.
+ * Collection orders never store travel time (LeadLock omits the field).
+ * @param {object} payload Normalized or raw webhook payload
+ * @returns {number|null}
+ */
+function resolveTravelTimeHoursRoundTrip(payload) {
+    const fulfillment = payload.fulfillment_method != null
+        ? String(payload.fulfillment_method).trim().toLowerCase()
+        : '';
+    if (fulfillment === 'collection') {
+        return null;
+    }
+    const raw = payload.travel_time_hours_round_trip;
+    if (raw === undefined || raw === null || raw === '') {
+        return null;
+    }
+    const t = typeof raw === 'number' ? raw : parseFloat(raw);
+    return Number.isFinite(t) ? t : null;
+}
+
+/**
  * @param {object} body Raw JSON body
  * @returns {{ ok: true } | { ok: false, error: string }}
  */
@@ -109,5 +130,6 @@ module.exports = {
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
     deriveLeadLockPaymentStatusLabel,
+    resolveTravelTimeHoursRoundTrip,
     handleLeadLockWorkOrderWebhook
 };

@@ -10,7 +10,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "setup": "node setup.js",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
