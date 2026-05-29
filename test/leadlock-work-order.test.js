@@ -99,6 +99,44 @@ describe('normalizeLeadLockWebhookPayload', () => {
         assert.equal(p.fulfillment_method, 'collection');
         assert.deepEqual(p.items, []);
     });
+
+    it('infers alternate delivery from delivery_address and billing_address without explicit flag', () => {
+        const p = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-2026-101',
+            order_id: 101,
+            items: [],
+            customer_address: '1 CRM Street, Chester',
+            customer_postcode: 'CH1 1AA',
+            billing_address: '1 CRM Street, Chester',
+            delivery_address: 'Farm Lane, Shrewsbury',
+            delivery_postcode: 'SY1 2BB',
+            delivery_notes: 'Use rear gate'
+        });
+        assert.equal(p.address_is_delivery_location, true);
+        assert.equal(p.customer_address, 'Farm Lane, Shrewsbury');
+        assert.equal(p.customer_postcode, 'SY1 2BB');
+        assert.equal(p.crm_customer_address, '1 CRM Street, Chester');
+        assert.equal(p.delivery_location_notes, 'Use rear gate');
+    });
+
+    it('reads alternate delivery from nested delivery object', () => {
+        const p = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-NEST',
+            order_id: 102,
+            items: [],
+            crm_customer_address: 'Bill here',
+            delivery: {
+                is_alternate: true,
+                address: 'Site B',
+                postcode: 'AB1 2CD',
+                notes: 'Ring bell'
+            }
+        });
+        assert.equal(p.address_is_delivery_location, true);
+        assert.equal(p.customer_address, 'Site B');
+        assert.equal(p.customer_postcode, 'AB1 2CD');
+        assert.equal(p.delivery_location_notes, 'Ring bell');
+    });
 });
 
 describe('resolveTravelTimeHoursRoundTrip', () => {

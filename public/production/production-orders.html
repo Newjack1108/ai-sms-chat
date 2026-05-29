@@ -85,15 +85,62 @@
             color: black;
             margin-bottom: 10px;
         }
-        .table td:last-child {
+        .wo-orders-table {
+            table-layout: fixed;
+            font-size: 13px;
+        }
+        .wo-orders-table th,
+        .wo-orders-table td {
+            padding: 6px 8px;
+            vertical-align: top;
+        }
+        .wo-orders-table .wo-cell-products {
+            font-size: 12px;
+            line-height: 1.35;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+        }
+        .wo-orders-table .wo-cell-notes,
+        .wo-orders-table .wo-cell-customer {
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
+            font-size: 12px;
         }
-        .table td:last-child .btn {
-            margin-right: 4px;
-            margin-bottom: 2px;
+        .wo-orders-table .wo-cell-travel,
+        .wo-orders-table .wo-cell-date,
+        .wo-orders-table .wo-cell-qty {
+            white-space: nowrap;
+            font-size: 12px;
         }
-        .table td:last-child .btn:last-child {
-            margin-right: 0;
+        .wo-orders-table .wo-status-flags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            align-items: center;
+        }
+        .wo-orders-table .wo-cell-actions {
+            white-space: nowrap;
+            width: 1%;
+        }
+        .wo-orders-table .wo-row-actions.navbar-dropdown {
+            display: inline-block;
+        }
+        .wo-orders-table .wo-row-actions .dropdown-toggle {
+            padding: 4px 10px;
+            font-size: 12px;
+        }
+        .wo-orders-table .wo-row-actions .dropdown-menu {
+            min-width: 160px;
+            right: 0;
+            left: auto;
+        }
+        .wo-orders-table .wo-row-actions .dropdown-item {
+            padding: 8px 12px;
+            font-size: 13px;
         }
         .orders-view-toggle {
             display: inline-flex;
@@ -545,6 +592,49 @@
                 ).join(', ');
             }
             return `${escapeHtml(order.product_name || 'Unknown')} (x${order.quantity || 1})`;
+        }
+
+        function formatOrderProductsPlain(order) {
+            if (order.products && order.products.length > 0) {
+                return order.products.map(p =>
+                    `${p.product_name || 'Unknown'} ×${p.quantity}`
+                ).join(' · ');
+            }
+            return `${order.product_name || 'Unknown'} ×${order.quantity || 1}`;
+        }
+
+        function formatOrderProductsCompactHtml(order) {
+            const plain = formatOrderProductsPlain(order);
+            const titleEsc = plain
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            return `<div class="wo-cell-products" title="${titleEsc}">${escapeHtml(plain)}</div>`;
+        }
+
+        function renderWorkOrderRowActions(order) {
+            const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+            const statusJs = String(order.status || 'pending').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            let menu = `
+                <button type="button" class="dropdown-item" onclick="viewWorkOrderDetails(${order.id})">Details</button>
+                <button type="button" class="dropdown-item" onclick="viewOrderRequirements(${order.id})">Requirements</button>
+                <button type="button" class="dropdown-item" onclick="viewLoadSheet(${order.id})">Load sheet</button>`;
+            if (isLeadlock) {
+                menu += `<button type="button" class="dropdown-item" onclick="showProductionSetup(${order.id})">Production setup</button>`;
+            }
+            menu += `
+                <button type="button" class="dropdown-item" onclick="manageSpares(${order.id})">Spares</button>
+                <button type="button" class="dropdown-item" onclick="bookInstallation(${order.id})">Book installation</button>
+                <button type="button" class="dropdown-item" onclick="showManageFlagsModal(${order.id})">Flags</button>
+                <button type="button" class="dropdown-item" onclick="showUpdateStatusModal(${order.id}, '${statusJs}')">Status</button>
+                <button type="button" class="dropdown-item" onclick="showEditOrderModal(${order.id})">Edit</button>
+                <div class="dropdown-divider"></div>
+                <button type="button" class="dropdown-item" style="color: #c82333;" onclick="deleteOrder(${order.id})">Delete</button>`;
+            return `<div class="wo-row-actions navbar-dropdown">
+                <button type="button" class="btn btn-secondary btn-sm dropdown-toggle" onclick="toggleDropdown(event, this)">Actions</button>
+                <div class="dropdown-menu">${menu}</div>
+            </div>`;
         }
         
         function getBoardStatusApiParam() {
@@ -1166,33 +1256,32 @@
                 
                 ordersList.innerHTML = `
                     ${renderOrdersListSummary()}
-                    <table class="table">
+                    <div class="table-wrapper">
+                    <table class="table wo-orders-table">
+                        <colgroup>
+                            <col style="width: 26%;">
+                            <col style="width: 16%;">
+                            <col style="width: 18%;">
+                            <col style="width: 7%;">
+                            <col style="width: 5%;">
+                            <col style="width: 14%;">
+                            <col style="width: 9%;">
+                            <col style="width: 5%;">
+                        </colgroup>
                         <thead>
                             <tr>
-                                <th>Product</th>
+                                <th>Lines</th>
                                 <th>Customer</th>
-                                <th>Sales notes</th>
-                                <th>Travel (rt h)</th>
-                                <th>Quantity</th>
+                                <th>Notes</th>
+                                <th>Travel</th>
+                                <th>Qty</th>
                                 <th>Status</th>
-                                <th>Order Date</th>
-                                <th>Created By</th>
-                                <th>Actions</th>
+                                <th>Date</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
                             ${orders.map(order => {
-                                // Display all products if available, otherwise fallback to old format
-                                let productsDisplay = '';
-                                if (order.products && order.products.length > 0) {
-                                    productsDisplay = order.products.map(p => 
-                                        `${escapeHtml(p.product_name || 'Unknown')} (x${p.quantity})`
-                                    ).join(', ');
-                                } else {
-                                    // Fallback to old format
-                                    productsDisplay = `${order.product_name || 'Unknown'} (x${order.quantity || 1})`;
-                                }
-                                
                                 const totalQuantity = order.products && order.products.length > 0
                                     ? order.products.reduce((sum, p) => sum + (parseInt(p.quantity) || 0), 0)
                                     : (order.quantity || 1);
@@ -1202,43 +1291,41 @@
                                 const notesTitleEsc = notesTrim
                                     ? notesTrim.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
                                     : '';
-                                const notesShort = notesTrim.length > 40 ? notesTrim.slice(0, 40) + '…' : notesTrim;
                                 const travelRt = order.travel_time_hours_round_trip;
                                 const travelCell = travelRt != null && travelRt !== '' && !Number.isNaN(parseFloat(travelRt))
-                                    ? parseFloat(travelRt).toFixed(2)
+                                    ? parseFloat(travelRt).toFixed(1)
                                     : '—';
                                 const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
                                 const leadlockBadge = isLeadlock
-                                    ? `<span class="badge badge-secondary" style="margin-right: 6px;" title="LeadLock ${escapeHtml(String(order.leadlock_order_id))}">LeadLock</span>`
+                                    ? `<span class="badge badge-secondary" title="LeadLock ${escapeHtml(String(order.leadlock_order_id))}">LL</span> `
                                     : '';
+                                const createdBy = order.created_by_name ? String(order.created_by_name).trim() : '';
+                                const customerTitle = [
+                                    order.customer_name || '',
+                                    createdBy ? `Created by ${createdBy}` : ''
+                                ].filter(Boolean).join(' · ');
+                                const customerTitleEsc = customerTitle
+                                    .replace(/&/g, '&amp;')
+                                    .replace(/"/g, '&quot;')
+                                    .replace(/</g, '&lt;')
+                                    .replace(/>/g, '&gt;');
                                 
                                 return `
                                 <tr>
-                                    <td><strong>${productsDisplay}</strong></td>
-                                    <td>${leadlockBadge}${escapeHtml(order.customer_name || '-')}</td>
-                                    <td style="max-width: 200px;" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesShort) : '—'}</td>
-                                    <td>${travelCell}</td>
-                                    <td>${totalQuantity}</td>
+                                    <td>${formatOrderProductsCompactHtml(order)}</td>
+                                    <td class="wo-cell-customer" title="${customerTitleEsc}">${leadlockBadge}${escapeHtml(order.customer_name || '—')}</td>
+                                    <td class="wo-cell-notes" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesTrim) : '—'}</td>
+                                    <td class="wo-cell-travel">${travelCell}</td>
+                                    <td class="wo-cell-qty">${totalQuantity}</td>
                                     <td><div class="wo-status-flags"><span class="badge badge-info">${escapeHtml(order.status || '')}</span>${renderWorkOrderFlagBadges(parseWorkflowFlags(order), { compact: true })}</div></td>
-                                    <td>${formatDate(order.order_date)}</td>
-                                    <td>${order.created_by_name || '-'}</td>
-                                    <td>
-                                        <button onclick="viewWorkOrderDetails(${order.id})" class="btn btn-info btn-sm">Details</button>
-                                        <button onclick="viewOrderRequirements(${order.id})" class="btn btn-primary btn-sm">View</button>
-                                        <button onclick="viewLoadSheet(${order.id})" class="btn btn-success btn-sm">Load Sheet</button>
-                                        ${isLeadlock ? `<button onclick="showProductionSetup(${order.id})" class="btn btn-primary btn-sm">Production setup</button>` : ''}
-                                        <button onclick="manageSpares(${order.id})" class="btn btn-warning btn-sm">Spares</button>
-                                        <button onclick="bookInstallation(${order.id})" class="btn btn-info btn-sm">Book Installation</button>
-                                        <button onclick="showManageFlagsModal(${order.id})" class="btn btn-warning btn-sm">Flags</button>
-                                        <button onclick="showUpdateStatusModal(${order.id}, '${order.status}')" class="btn btn-secondary btn-sm">Status</button>
-                                        <button onclick="showEditOrderModal(${order.id})" class="btn btn-info btn-sm">Edit</button>
-                                        <button onclick="deleteOrder(${order.id})" class="btn btn-danger btn-sm">Delete</button>
-                                    </td>
+                                    <td class="wo-cell-date">${formatDate(order.order_date)}</td>
+                                    <td class="wo-cell-actions">${renderWorkOrderRowActions(order)}</td>
                                 </tr>
                             `;
                             }).join('')}
                         </tbody>
                     </table>
+                    </div>
                     ${renderOrdersPager()}
                 `;
                 updateOrdersCheckboxes();

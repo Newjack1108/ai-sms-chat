@@ -22,6 +22,45 @@ function optionalString(value) {
     return s === '' ? null : s;
 }
 
+/** First non-empty scalar from a list (for webhook field aliases). */
+function firstPresentString(...values) {
+    for (const value of values) {
+        const s = optionalString(value);
+        if (s) return s;
+    }
+    return null;
+}
+
+/**
+ * Explicit alternate-delivery flag from webhook, or null if not sent.
+ * @param {object} body
+ * @returns {boolean|null}
+ */
+function resolveAddressIsDeliveryLocationFlag(body) {
+    const explicitKeys = [
+        'address_is_delivery_location',
+        'address_is_delivery',
+        'use_alternate_delivery_address',
+        'alternate_delivery_address_set',
+        'has_alternate_delivery'
+    ];
+    for (const key of explicitKeys) {
+        if (body[key] !== undefined && body[key] !== null) {
+            return parseBool(body[key], false);
+        }
+    }
+    const delivery = body.delivery;
+    if (delivery && typeof delivery === 'object') {
+        if (delivery.address_is_delivery_location !== undefined && delivery.address_is_delivery_location !== null) {
+            return parseBool(delivery.address_is_delivery_location, false);
+        }
+        if (delivery.is_alternate !== undefined && delivery.is_alternate !== null) {
+            return parseBool(delivery.is_alternate, false);
+        }
+    }
+    return null;
+}
+
 /**
  * Round-trip drive hours from LeadLock payload, or null when not applicable.
  * Collection orders never store travel time (LeadLock omits the field).
@@ -67,13 +106,60 @@ function normalizeLeadLockWebhookPayload(body) {
         ? String(body.fulfillment_method).trim().toLowerCase()
         : null;
 
+    const deliveryBlock = body.delivery && typeof body.delivery === 'object' ? body.delivery : null;
+    const crmCustomerAddress = firstPresentString(
+        body.crm_customer_address,
+        body.billing_address,
+        body.customer_billing_address,
+        body.bill_to_address,
+        deliveryBlock && deliveryBlock.crm_address
+    );
+    const deliveryLocationNotes = firstPresentString(
+        body.delivery_location_notes,
+        body.delivery_notes,
+        body.delivery_access_notes,
+        deliveryBlock && deliveryBlock.notes
+    );
+    const deliverySiteAddress = firstPresentString(
+        body.delivery_address,
+        body.delivery_location_address,
+        body.alternate_delivery_address,
+        deliveryBlock && deliveryBlock.address
+    );
+    const deliverySitePostcode = firstPresentString(
+        body.delivery_postcode,
+        body.delivery_location_postcode,
+        deliveryBlock && deliveryBlock.postcode
+    );
+
+    let addressIsDeliveryLocation = resolveAddressIsDeliveryLocationFlag(body);
+    if (addressIsDeliveryLocation === null) {
+        addressIsDeliveryLocation = !!(
+            crmCustomerAddress ||
+            deliverySiteAddress ||
+            deliverySitePostcode ||
+            deliveryLocationNotes
+        );
+    }
+
+    let customerAddress = body.customer_address;
+    let customerPostcode = body.customer_postcode;
+    if (addressIsDeliveryLocation) {
+        if (deliverySiteAddress) {
+            customerAddress = deliverySiteAddress;
+        }
+        if (deliverySitePostcode) {
+            customerPostcode = deliverySitePostcode;
+        }
+    }
+
     return {
         order_number: body.order_number,
         order_id: body.order_id,
         fulfillment_method: fulfillment || null,
         customer_name: body.customer_name,
-        customer_postcode: body.customer_postcode,
-        customer_address: body.customer_address,
+        customer_postcode: customerPostcode,
+        customer_address: customerAddress,
         customer_email: body.customer_email,
         customer_phone: body.customer_phone,
         items: Array.isArray(body.items) ? body.items : [],
@@ -89,9 +175,9 @@ function normalizeLeadLockWebhookPayload(body) {
         deposit_amount: parseAmount(body.deposit_amount, 0),
         balance_amount: parseAmount(body.balance_amount, 0),
         invoice_number: optionalString(body.invoice_number),
-        address_is_delivery_location: parseBool(body.address_is_delivery_location, false),
-        delivery_location_notes: body.delivery_location_notes != null ? String(body.delivery_location_notes) : null,
-        crm_customer_address: optionalString(body.crm_customer_address)
+        address_is_delivery_location: addressIsDeliveryLocation,
+        delivery_location_notes: deliveryLocationNotes,
+        crm_customer_address: crmCustomerAddress
     };
 }
 

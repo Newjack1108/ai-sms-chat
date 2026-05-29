@@ -1101,25 +1101,29 @@ function renderLeadLockWorkOrderAddressHtml(order) {
     const isDelivery = leadlockTruthy(order.address_is_delivery_location);
     const fulfillment = (order.fulfillment_method || '').toLowerCase();
     const isCollection = fulfillment === 'collection';
-    const addrLabel = isDelivery ? 'Delivery location' : 'Customer address';
-    const postcodeLabel = isDelivery ? 'Delivery postcode' : 'Postcode';
-    const address = (order.customer_address || '').trim();
-    const postcode = (order.customer_postcode || '').trim();
     const deliveryNotes = (order.delivery_location_notes || '').trim();
     const crmAddress = (order.crm_customer_address || '').trim();
+    const hasAlternateDelivery = isDelivery || !!crmAddress || !!deliveryNotes;
+    const addrLabel = hasAlternateDelivery ? 'Delivery location' : 'Customer address';
+    const postcodeLabel = hasAlternateDelivery ? 'Delivery postcode' : 'Postcode';
+    const address = (order.customer_address || '').trim();
+    const postcode = (order.customer_postcode || '').trim();
 
     let html = '<div style="margin-bottom: 12px;">';
     if (fulfillment) {
         html += `<p style="margin: 0 0 8px 0;"><strong>Fulfilment:</strong> ${escapeHtml(fulfillment)}</p>`;
     }
+    if (hasAlternateDelivery && (crmAddress || deliveryNotes)) {
+        html += '<p style="margin: 0 0 8px 0; font-size: 14px; color: #555;"><strong>Alternate delivery</strong> (delivery site differs from CRM / bill-to)</p>';
+    }
     if (!isCollection || address || postcode) {
         html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(addrLabel)}:</strong> ${address ? escapeHtml(address) : '—'}</p>`;
         html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(postcodeLabel)}:</strong> ${postcode ? escapeHtml(postcode) : '—'}</p>`;
     }
-    if (isDelivery && deliveryNotes) {
+    if (deliveryNotes) {
         html += `<p style="margin: 0 0 6px 0; padding: 8px 10px; background: #fff8e6; border-left: 3px solid #f0ad4e;"><strong>Delivery access notes:</strong> ${escapeHtml(deliveryNotes)}</p>`;
     }
-    if (isDelivery && crmAddress) {
+    if (crmAddress) {
         html += `<p style="margin: 0; font-size: 14px; color: #555;"><strong>Bill to / CRM address:</strong> ${escapeHtml(crmAddress)}</p>`;
     }
     html += '</div>';
