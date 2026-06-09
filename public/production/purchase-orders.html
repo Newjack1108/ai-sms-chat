@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="apple-touch-icon" href="logo.png">
     <link rel="stylesheet" href="common.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -240,6 +241,7 @@
                                     <td>${formatCurrency(o.subtotal_gbp || 0)}</td>
                                     <td>
                                         <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
+                                        <button class="btn btn-primary btn-sm" onclick="downloadPoPdf(${o.id})">Download PDF</button>
                                         <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
                                         <button class="btn btn-danger btn-sm admin-or-office" onclick="deletePo(${o.id}, '${escapeHtml(o.po_number)}')">Delete</button>
                                     </td>
@@ -287,6 +289,7 @@
                         </tbody>
                     </table>
                     <div class="text-right">
+                        <button type="button" class="btn btn-primary" onclick="downloadPoPdf(${o.id})">Download PDF</button>
                         <button type="button" class="btn btn-secondary" onclick="hideModal('viewModal')">Close</button>
                     </div>
                 `;
@@ -381,6 +384,163 @@
                 await loadOrders();
             } catch (error) {
                 showAlert(error.message || 'Failed to receive purchase order', 'error');
+            }
+        }
+
+        function buildPoPdfHtml(order) {
+            const supplierLines = [];
+            const supplierName = order.supplier_name || '';
+            if (supplierName) {
+                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 14px;"><strong>${escapeHtml(supplierName)}</strong>${order.supplier_code ? ` (${escapeHtml(order.supplier_code)})` : ''}</p>`);
+            }
+            if (order.supplier_contact_name) {
+                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Contact: ${escapeHtml(order.supplier_contact_name)}</p>`);
+            }
+            if (order.supplier_email) {
+                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Email: ${escapeHtml(order.supplier_email)}</p>`);
+            }
+            if (order.supplier_phone) {
+                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Phone: ${escapeHtml(order.supplier_phone)}</p>`);
+            }
+            if (order.supplier_address) {
+                supplierLines.push(`<p style="margin: 0; font-size: 12px; white-space: pre-wrap;">${escapeHtml(order.supplier_address)}</p>`);
+            }
+            const items = order.items || [];
+            const itemsRows = items.length === 0
+                ? '<tr><td colspan="5" style="padding: 8px; border: 1px solid #ccc;">No line items</td></tr>'
+                : items.map((it) => `
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_name || '-')}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_unit || '-')}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${it.quantity}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${formatCurrency(it.unit_cost_gbp || 0)}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${formatCurrency(it.line_total_gbp || 0)}</td>
+                    </tr>
+                `).join('');
+            const notesBlock = order.notes
+                ? `<div style="margin-top: 16px;">
+                        <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: bold;">Notes</p>
+                        <p style="margin: 0; font-size: 12px; white-space: pre-wrap;">${escapeHtml(order.notes)}</p>
+                   </div>`
+                : '';
+            return `
+                <div style="font-family: Arial, sans-serif; color: #000;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 12px;">
+                        <img src="logo.png" alt="Company Logo" style="max-height: 50px; max-width: 180px;" onerror="this.style.display='none';">
+                        <div style="text-align: right;">
+                            <h1 style="margin: 0; font-size: 22px;">Purchase Order</h1>
+                            <p style="margin: 4px 0 0 0; font-size: 16px; font-weight: bold;">${escapeHtml(order.po_number || '')}</p>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 24px; margin-bottom: 20px;">
+                        <div style="flex: 1;">
+                            <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #555;">Supplier</p>
+                            ${supplierLines.join('') || '<p style="margin: 0; font-size: 12px;">-</p>'}
+                        </div>
+                        <div style="flex: 1;">
+                            <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #555;">Order Details</p>
+                            <p style="margin: 0 0 4px 0; font-size: 12px;"><strong>Order Date:</strong> ${formatDate(order.order_date)}</p>
+                            <p style="margin: 0 0 4px 0; font-size: 12px;"><strong>Expected Delivery:</strong> ${formatDate(order.expected_date)}</p>
+                            <p style="margin: 0; font-size: 12px;"><strong>Status:</strong> ${escapeHtml(order.status || '')}</p>
+                        </div>
+                    </div>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px;">
+                        <thead>
+                            <tr style="background: #f0f0f0;">
+                                <th style="padding: 8px; border: 1px solid #ccc; text-align: left;">Item</th>
+                                <th style="padding: 8px; border: 1px solid #ccc; text-align: left;">Unit</th>
+                                <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Qty</th>
+                                <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Unit Cost</th>
+                                <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>${itemsRows}</tbody>
+                    </table>
+                    <div style="text-align: right; font-size: 14px; font-weight: bold;">
+                        Subtotal: ${formatCurrency(order.subtotal_gbp || 0)}
+                    </div>
+                    ${notesBlock}
+                </div>
+            `;
+        }
+
+        async function downloadPoPdf(id) {
+            try {
+                if (typeof html2pdf === 'undefined') {
+                    throw new Error('PDF library not loaded. Please refresh the page.');
+                }
+                const data = await apiCall(`/purchase-orders/${id}`);
+                const order = data.order;
+                if (!order) {
+                    throw new Error('Purchase order not found');
+                }
+                const printHTML = buildPoPdfHtml(order);
+                const printDiv = document.createElement('div');
+                printDiv.innerHTML = printHTML;
+                printDiv.className = 'po-print-area';
+                printDiv.style.width = '190mm';
+                printDiv.style.maxWidth = '190mm';
+                printDiv.style.padding = '10px';
+                printDiv.style.backgroundColor = 'white';
+                printDiv.style.color = 'black';
+                printDiv.style.fontFamily = 'Arial, sans-serif';
+                printDiv.style.fontSize = '11px';
+                printDiv.style.lineHeight = '1.4';
+                printDiv.style.boxSizing = 'border-box';
+                printDiv.style.margin = '0';
+                const container = document.createElement('div');
+                container.style.position = 'fixed';
+                container.style.top = '0';
+                container.style.left = '0';
+                container.style.width = '210mm';
+                container.style.maxWidth = '100vw';
+                container.style.height = 'auto';
+                container.style.overflow = 'auto';
+                container.style.backgroundColor = 'white';
+                container.style.zIndex = '99999';
+                container.style.padding = '0';
+                container.style.margin = '0';
+                container.appendChild(printDiv);
+                document.body.appendChild(container);
+                window.scrollTo(0, 0);
+                container.scrollTop = 0;
+                await new Promise((resolve) => setTimeout(resolve, 800));
+                void printDiv.offsetHeight;
+                if (!printDiv.innerHTML || printDiv.innerHTML.trim().length < 100) {
+                    document.body.removeChild(container);
+                    throw new Error('Purchase order content is empty or too short');
+                }
+                const safePoNumber = (order.po_number || `PO_${id}`).replace(/[^a-z0-9._-]/gi, '_');
+                const opt = {
+                    margin: [5, 5, 5, 5],
+                    filename: `PurchaseOrder_${safePoNumber}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: {
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        letterRendering: true,
+                        allowTaint: false,
+                        backgroundColor: '#ffffff',
+                        width: printDiv.scrollWidth,
+                        height: printDiv.scrollHeight
+                    },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                    pagebreak: { mode: ['css', 'legacy'] }
+                };
+                try {
+                    await html2pdf().set(opt).from(printDiv).save();
+                } finally {
+                    setTimeout(() => {
+                        if (container.parentNode) {
+                            document.body.removeChild(container);
+                        }
+                    }, 1000);
+                }
+                showAlert('PDF downloaded successfully', 'success');
+            } catch (error) {
+                console.error('PO PDF generation error:', error);
+                showAlert('Error generating PDF: ' + error.message, 'error');
             }
         }
 

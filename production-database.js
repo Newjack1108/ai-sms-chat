@@ -6251,7 +6251,13 @@ class ProductionDatabase {
         let po;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+                `SELECT po.*,
+                        s.name AS supplier_name,
+                        s.code AS supplier_code,
+                        s.contact_name AS supplier_contact_name,
+                        s.email AS supplier_email,
+                        s.phone AS supplier_phone,
+                        s.address AS supplier_address
                  FROM purchase_orders po
                  INNER JOIN suppliers s ON s.id = po.supplier_id
                  WHERE po.id = $1`,
@@ -6274,7 +6280,13 @@ class ProductionDatabase {
             return po;
         }
         po = db.prepare(
-            `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
+            `SELECT po.*,
+                    s.name AS supplier_name,
+                    s.code AS supplier_code,
+                    s.contact_name AS supplier_contact_name,
+                    s.email AS supplier_email,
+                    s.phone AS supplier_phone,
+                    s.address AS supplier_address
              FROM purchase_orders po
              INNER JOIN suppliers s ON s.id = po.supplier_id
              WHERE po.id = ?`
