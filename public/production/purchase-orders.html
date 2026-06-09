@@ -407,14 +407,12 @@
             }
             const items = order.items || [];
             const itemsRows = items.length === 0
-                ? '<tr><td colspan="5" style="padding: 8px; border: 1px solid #ccc;">No line items</td></tr>'
+                ? '<tr><td colspan="3" style="padding: 8px; border: 1px solid #ccc;">No line items</td></tr>'
                 : items.map((it) => `
                     <tr>
                         <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_name || '-')}</td>
                         <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_unit || '-')}</td>
                         <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${it.quantity}</td>
-                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${formatCurrency(it.unit_cost_gbp || 0)}</td>
-                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${formatCurrency(it.line_total_gbp || 0)}</td>
                     </tr>
                 `).join('');
             const notesBlock = order.notes
@@ -434,6 +432,10 @@
                     </div>
                     <div style="display: flex; gap: 24px; margin-bottom: 20px;">
                         <div style="flex: 1;">
+                            <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #555;">From</p>
+                            ${renderCompanyDetailsHtml()}
+                        </div>
+                        <div style="flex: 1;">
                             <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #555;">Supplier</p>
                             ${supplierLines.join('') || '<p style="margin: 0; font-size: 12px;">-</p>'}
                         </div>
@@ -450,15 +452,10 @@
                                 <th style="padding: 8px; border: 1px solid #ccc; text-align: left;">Item</th>
                                 <th style="padding: 8px; border: 1px solid #ccc; text-align: left;">Unit</th>
                                 <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Qty</th>
-                                <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Unit Cost</th>
-                                <th style="padding: 8px; border: 1px solid #ccc; text-align: right;">Total</th>
                             </tr>
                         </thead>
                         <tbody>${itemsRows}</tbody>
                     </table>
-                    <div style="text-align: right; font-size: 14px; font-weight: bold;">
-                        Subtotal: ${formatCurrency(order.subtotal_gbp || 0)}
-                    </div>
                     ${notesBlock}
                 </div>
             `;

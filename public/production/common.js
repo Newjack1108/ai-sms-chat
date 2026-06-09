@@ -209,6 +209,26 @@ function formatDate(dateString) {
     });
 }
 
+/** Company details for PDFs and supplier-facing documents. */
+const COMPANY_DETAILS = {
+    name: 'Cheshire Sheds and Garden Buildings Ltd (CSGB)',
+    tradingAs: 'T/A Cheshire Stables',
+    addressLines: ['Ibex House', 'Off Nat Lane', 'Winsford, Cheshire', 'CW7 3BS'],
+    phone: '01606 653653',
+    email: 'sales@csgbgroup.co.uk'
+};
+
+function renderCompanyDetailsHtml() {
+    const lines = [
+        `<p style="margin: 0 0 4px 0; font-size: 14px;"><strong>${escapeHtml(COMPANY_DETAILS.name)}</strong></p>`,
+        `<p style="margin: 0 0 4px 0; font-size: 12px;">${escapeHtml(COMPANY_DETAILS.tradingAs)}</p>`,
+        ...COMPANY_DETAILS.addressLines.map((line) => `<p style="margin: 0 0 4px 0; font-size: 12px;">${escapeHtml(line)}</p>`),
+        `<p style="margin: 0 0 4px 0; font-size: 12px;">Tel: ${escapeHtml(COMPANY_DETAILS.phone)}</p>`,
+        `<p style="margin: 0; font-size: 12px;">${escapeHtml(COMPANY_DETAILS.email)}</p>`
+    ];
+    return lines.join('');
+}
+
 // Format datetime
 function formatDateTime(dateString) {
     if (!dateString) return '-';
@@ -1204,7 +1224,8 @@ function renderLeadLockPaymentSummaryHtml(order) {
 }
 
 /** Combined LeadLock address and payment block (ref banner is on load sheet customer header). */
-function renderLeadLockWorkOrderDetailsHtml(order) {
+function renderLeadLockWorkOrderDetailsHtml(order, options = {}) {
     if (!isLeadLockOrder(order)) return '';
-    return renderLeadLockWorkOrderAddressHtml(order) + renderLeadLockPaymentSummaryHtml(order);
+    const includePayment = options.includePayment !== false;
+    return renderLeadLockWorkOrderAddressHtml(order) + (includePayment ? renderLeadLockPaymentSummaryHtml(order) : '');
 }

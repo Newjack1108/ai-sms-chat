@@ -2009,12 +2009,20 @@
                 // Create print-friendly HTML
                 const printHTML = `
                     <div class="load-sheet-print-area">
-                        <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px;">
-                            <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold;">Load Sheet</h1>
-                            <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
-                            <p style="margin: 0; font-size: 14px; color: #666;">${formatLoadSheetOrderIdsLine(loadSheet, orderId)}</p>
+                        <div style="margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px;">
+                            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 16px;">
+                                <div style="flex: 1;">
+                                    <img src="logo.png" alt="Company Logo" style="max-height: 50px; max-width: 180px; margin-bottom: 10px;" onerror="this.style.display='none';">
+                                    ${renderCompanyDetailsHtml()}
+                                </div>
+                                <div style="flex: 1; text-align: right;">
+                                    <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold;">Load Sheet</h1>
+                                    <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
+                                    <p style="margin: 0; font-size: 14px; color: #666;">${formatLoadSheetOrderIdsLine(loadSheet, orderId)}</p>
+                                </div>
+                            </div>
                             ${renderLoadSheetCustomerHeader(loadSheet).replace(/margin-bottom: 16px/g, 'margin: 12px auto 0; max-width: 480px; text-align: left')}
-                            ${renderLeadLockWorkOrderDetailsHtml(loadSheet)}
+                            ${renderLeadLockWorkOrderDetailsHtml(loadSheet, { includePayment: false })}
                         </div>
                         ${renderLoadSheetSalesOnlyLinesHtml(loadSheet)}
                         

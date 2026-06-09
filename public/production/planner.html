@@ -801,8 +801,8 @@
                                                         ` : ''}
                                                         <div class="planner-item-actions">
                                                             <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                                            ${qtyBuilt > 0 && item.item_type !== 'job' ? `
-                                                                <button onclick="addToStock('${item.item_type || 'built_item'}', ${item.item_id_for_movement || item.item_id || item.panel_id}, ${qtyBuilt}, ${item.id}, ${item.hours_used || 0})" class="btn btn-success btn-sm" title="Add to stock">Stock</button>
+                                                            ${item.status !== 'completed' ? `
+                                                                <button onclick="completePlannerItem(${item.id})" class="btn btn-success btn-sm" title="Mark complete and add to stock">Complete</button>
                                                             ` : ''}
                                                             <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                         </div>
@@ -827,6 +827,9 @@
                                                 <div class="planner-item-details">Qty: ${qtyPlanned.toFixed(1)} | Hours: ${hoursPerUnit.toFixed(1)}</div>
                                                 <div class="planner-item-actions">
                                                     <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Assign Days</button>
+                                                    ${item.status !== 'completed' ? `
+                                                        <button onclick="completePlannerItem(${item.id})" class="btn btn-success btn-sm">Complete</button>
+                                                    ` : ''}
                                                     <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                 </div>
                                             </div>
@@ -1822,78 +1825,131 @@
             return div.innerHTML;
         }
         
-        async function addToStock(itemType, itemId, quantity, plannerItemId, hoursUsed) {
-            const itemTypeName = itemType === 'component' ? 'component' : 'built item';
-            if (!confirm(`Add ${quantity.toFixed(2)} units to ${itemTypeName} stock, mark as completed, and remove from planner?\n\nHours used (${hoursUsed.toFixed(2)}) will be deducted from available hours.`)) {
+        function getPlannerItemCompletionDefaults(item) {
+            const qtyPlanned = parseFloat(item.quantity_to_build || 0);
+            const labourHours = parseFloat(item.labour_hours || 0);
+            const itemType = item.item_type || (item.panel_id ? 'built_item' : 'built_item');
+
+            if (itemType === 'job') {
+                return {
+                    itemType: 'job',
+                    quantityBuilt: 0,
+                    hoursUsed: qtyPlanned,
+                    skipsStock: true
+                };
+            }
+
+            return {
+                itemType: itemType === 'component' ? 'component' : 'built_item',
+                quantityBuilt: qtyPlanned,
+                hoursUsed: labourHours * qtyPlanned,
+                skipsStock: false
+            };
+        }
+
+        function buildCompletePlannerConfirmMessage(item, defaults) {
+            const name = item.item_name || item.panel_name || item.job_name || 'Unknown';
+            const lines = [`Mark "${name}" complete?`, ''];
+
+            if (defaults.skipsStock) {
+                lines.push(`Hours: ${defaults.hoursUsed.toFixed(1)}`);
+                lines.push('Removes from this week\'s planner and deducts hours.');
+            } else {
+                lines.push(`Built: ${defaults.quantityBuilt.toFixed(1)} · Hours: ${defaults.hoursUsed.toFixed(1)}`);
+                lines.push('Adds to stock and removes from this week\'s planner.');
+            }
+
+            return lines.join('\n');
+        }
+
+        async function deductPlannerHours(hoursToDeduct) {
+            const plannerData = await apiCall(`/planner/${currentPlannerId}`);
+            const planner = plannerData.planner;
+            const currentHoursAvailable = parseFloat(planner.hours_available || 0);
+            const newHoursAvailable = Math.max(0, currentHoursAvailable - parseFloat(hoursToDeduct || 0));
+
+            await apiCall(`/planner/${currentPlannerId}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    staff_available: parseInt(planner.staff_available || 1),
+                    hours_available: newHoursAvailable,
+                    notes: planner.notes || ''
+                })
+            });
+        }
+
+        async function completePlannerItem(plannerItemId) {
+            if (!currentPlannerId) {
+                showAlert('Please select a week first', 'error');
                 return;
             }
-            
+
             try {
-                // First, get the planner item to get planner_id
                 const plannerData = await apiCall(`/planner/${currentPlannerId}`);
-                const item = plannerData.items.find(i => i.id === plannerItemId);
+                const item = plannerData.items.find((i) => i.id === plannerItemId);
                 if (!item) {
                     throw new Error('Planner item not found');
                 }
-                
-                // Mark the planner item as completed
-                await apiCall(`/planner/items/${plannerItemId}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        quantity_to_build: parseFloat(item.quantity_to_build || 0),
-                        quantity_built: parseFloat(item.quantity_built || 0),
-                        hours_used: parseFloat(hoursUsed || 0),
-                        priority: item.priority,
-                        status: 'completed'
-                    })
-                });
-                
-                // Get current planner to calculate new hours_available
-                const planner = plannerData.planner;
-                const currentHoursAvailable = parseFloat(planner.hours_available || 0);
-                const hoursToDeduct = parseFloat(hoursUsed || 0);
-                const newHoursAvailable = Math.max(0, currentHoursAvailable - hoursToDeduct);
-                
-                // Update planner hours_available
-                await apiCall(`/planner/${currentPlannerId}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({
-                        staff_available: parseInt(planner.staff_available || 1),
-                        hours_available: newHoursAvailable,
-                        notes: planner.notes || ''
-                    })
-                });
-                
-                // Record movement to add to stock (component or built item)
-                if (itemType === 'component') {
-                    await apiCall(`/components/${itemId}/movement`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            movement_type: 'build',
-                            quantity: quantity,
-                            reference: `Planner Item #${plannerItemId}`
-                        })
-                    });
-                } else {
-                    await apiCall(`/panels/${itemId}/movement`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            movement_type: 'build',
-                            quantity: quantity,
-                            reference: `Planner Item #${plannerItemId}`
-                        })
-                    });
+
+                if (item.status === 'completed') {
+                    showAlert('This item is already completed', 'error');
+                    return;
                 }
-                
-                // Remove the planner item after successfully adding to stock
+
+                const defaults = getPlannerItemCompletionDefaults(item);
+                if (!defaults.skipsStock && defaults.quantityBuilt <= 0) {
+                    showAlert('Quantity to build must be greater than zero', 'error');
+                    return;
+                }
+
+                if (!confirm(buildCompletePlannerConfirmMessage(item, defaults))) {
+                    return;
+                }
+
+                if (!defaults.skipsStock) {
+                    const itemId = item.item_id_for_movement || item.item_id || item.panel_id;
+                    if (!itemId) {
+                        throw new Error('Item ID not found for stock movement');
+                    }
+
+                    const movementBody = {
+                        movement_type: 'build',
+                        quantity: defaults.quantityBuilt,
+                        reference: `Planner Item #${plannerItemId}`
+                    };
+
+                    if (defaults.itemType === 'component') {
+                        await apiCall(`/components/${itemId}/movement`, {
+                            method: 'POST',
+                            body: JSON.stringify(movementBody)
+                        });
+                    } else {
+                        await apiCall(`/panels/${itemId}/movement`, {
+                            method: 'POST',
+                            body: JSON.stringify(movementBody)
+                        });
+                    }
+                }
+
+                await deductPlannerHours(defaults.hoursUsed);
                 await apiCall(`/planner/items/${plannerItemId}`, { method: 'DELETE' });
-                
-                showAlert(`Added ${quantity.toFixed(2)} units to ${itemTypeName} stock, marked as completed, and deducted ${hoursToDeduct.toFixed(2)} hours from available hours`, 'success');
-                // Reload planner to refresh data
+
+                const itemTypeName = defaults.itemType === 'component'
+                    ? 'component'
+                    : defaults.itemType === 'job'
+                        ? 'job'
+                        : 'built item';
+
+                if (defaults.skipsStock) {
+                    showAlert(`Completed ${itemTypeName} and deducted ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
+                } else {
+                    showAlert(`Added ${defaults.quantityBuilt.toFixed(1)} units to ${itemTypeName} stock and deducted ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
+                }
+
                 loadPlanner();
             } catch (error) {
-                console.error('Error adding to stock:', error);
-                showAlert('Error adding to stock: ' + (error.message || 'Unknown error'), 'error');
+                console.error('Error completing planner item:', error);
+                showAlert('Error completing item: ' + (error.message || 'Unknown error'), 'error');
             }
         }
         
