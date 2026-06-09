@@ -241,16 +241,43 @@ function formatInstallationBlockLabel(inst) {
     return { primary: product, secondary: '', title: product };
 }
 
+function isLeadLockOrder(order) {
+    return order && order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
+}
+
+/** Prominent LeadLock sales order reference for load sheets and detail views. */
+function renderLeadLockOrderRefHtml(order) {
+    if (!isLeadLockOrder(order)) {
+        return '';
+    }
+    const ref = escapeHtml(String(order.leadlock_order_id).trim());
+    return `<div style="margin-bottom: 12px; padding: 12px 16px; background: #e8f4e8; border: 1px solid #a8d4a8; border-radius: 8px;">
+<p style="margin: 0; font-size: 18px;"><strong>LeadLock order:</strong> ${ref}</p>
+</div>`;
+}
+
+/** Order ID line for load sheet modal subtitle and print header. */
+function formatLoadSheetOrderIdsLine(loadSheet, worksOrderId) {
+    const parts = [];
+    if (isLeadLockOrder(loadSheet)) {
+        parts.push(`<strong>LeadLock order:</strong> ${escapeHtml(String(loadSheet.leadlock_order_id).trim())}`);
+    }
+    parts.push(`<strong>Works order:</strong> ${escapeHtml(String(worksOrderId))}`);
+    parts.push(`<strong>Date:</strong> ${escapeHtml(new Date().toLocaleDateString())}`);
+    return parts.join(' · ');
+}
+
 /** Customer + phone header for load sheets (modal, print, embed). */
 function renderLoadSheetCustomerHeader(loadSheet) {
     if (!loadSheet) {
         return '';
     }
+    const leadlockRef = renderLeadLockOrderRefHtml(loadSheet);
     const nameRaw = (loadSheet.customer_name || '').trim();
     const nameDisplay = nameRaw ? escapeHtml(nameRaw) : '—';
     const phoneRaw = (loadSheet.customer_phone || '').trim();
     const phoneDisplay = phoneRaw ? escapeHtml(phoneRaw) : '—';
-    return `<div style="margin-bottom: 16px; padding: 12px 16px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px;">
+    return `${leadlockRef}<div style="margin-bottom: 16px; padding: 12px 16px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px;">
 <p style="margin: 0 0 6px 0; font-size: 16px;"><strong>Customer:</strong> ${nameDisplay}</p>
 <p style="margin: 0; font-size: 16px;"><strong>Phone:</strong> ${phoneDisplay}</p>
 </div>`;
@@ -603,6 +630,7 @@ function renderLoadSheetReadOnlyHtml(loadSheet) {
         return '';
     }
     let html = renderLoadSheetCustomerHeader(loadSheet);
+    html += renderLeadLockWorkOrderDetailsHtml(loadSheet);
     html += renderLoadSheetSalesOnlyLinesHtml(loadSheet);
     const components = loadSheet.components || [];
     const builtItems = loadSheet.built_items || [];
@@ -1168,10 +1196,8 @@ function renderLeadLockPaymentSummaryHtml(order) {
 </div>`;
 }
 
-/** Combined LeadLock customer, address, and payment block. */
+/** Combined LeadLock address and payment block (ref banner is on load sheet customer header). */
 function renderLeadLockWorkOrderDetailsHtml(order) {
-    if (!order) return '';
-    const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
-    if (!isLeadlock) return '';
+    if (!isLeadLockOrder(order)) return '';
     return renderLeadLockWorkOrderAddressHtml(order) + renderLeadLockPaymentSummaryHtml(order);
 }

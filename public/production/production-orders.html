@@ -103,12 +103,26 @@
             overflow: hidden;
             word-break: break-word;
         }
-        .wo-orders-table .wo-cell-notes,
-        .wo-orders-table .wo-cell-customer {
+        .wo-orders-table .wo-cell-notes {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             font-size: 12px;
+        }
+        .wo-orders-table .wo-cell-customer {
+            font-size: 12px;
+            white-space: normal;
+        }
+        .wo-orders-table .wo-cell-customer .wo-customer-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .wo-leadlock-ref {
+            font-weight: 600;
+            font-size: 12px;
+            color: #2d6a2d;
+            margin-bottom: 2px;
         }
         .wo-orders-table .wo-cell-travel,
         .wo-orders-table .wo-cell-date,
@@ -1333,9 +1347,9 @@
                                 const travelCell = travelRt != null && travelRt !== '' && !Number.isNaN(parseFloat(travelRt))
                                     ? parseFloat(travelRt).toFixed(1)
                                     : '—';
-                                const isLeadlock = order.leadlock_order_id != null && String(order.leadlock_order_id).trim() !== '';
-                                const leadlockBadge = isLeadlock
-                                    ? `<span class="badge badge-secondary" title="LeadLock ${escapeHtml(String(order.leadlock_order_id))}">LL</span> `
+                                const isLeadlock = isLeadLockOrder(order);
+                                const leadlockRefLine = isLeadlock
+                                    ? `<div class="wo-leadlock-ref">LeadLock #${escapeHtml(String(order.leadlock_order_id).trim())}</div>`
                                     : '';
                                 const createdBy = order.created_by_name ? String(order.created_by_name).trim() : '';
                                 const customerTitle = [
@@ -1351,7 +1365,7 @@
                                 return `
                                 <tr>
                                     <td>${formatOrderProductsCompactHtml(order)}</td>
-                                    <td class="wo-cell-customer" title="${customerTitleEsc}">${leadlockBadge}${escapeHtml(order.customer_name || '—')}</td>
+                                    <td class="wo-cell-customer" title="${customerTitleEsc}">${leadlockRefLine}<div class="wo-customer-name">${escapeHtml(order.customer_name || '—')}</div></td>
                                     <td class="wo-cell-notes" title="${notesTitleEsc}">${notesTrim ? escapeHtml(notesTrim) : '—'}</td>
                                     <td class="wo-cell-travel">${travelCell}</td>
                                     <td class="wo-cell-qty">${totalQuantity}</td>
@@ -1664,6 +1678,7 @@
                 }
                 
                 const productsDisplay = escapeHtml(getLoadSheetProductsDisplay(loadSheet));
+                const loadSheetIdsSubtitle = formatLoadSheetOrderIdsLine(loadSheet, orderId);
                 
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
@@ -1671,7 +1686,10 @@
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 900px;">
                         <div class="modal-header">
-                            <h3>Load Sheet - ${productsDisplay}</h3>
+                            <div>
+                                <h3 style="margin: 0;">Load Sheet - ${productsDisplay}</h3>
+                                <p style="margin: 6px 0 0 0; font-size: 14px; color: #555;">${loadSheetIdsSubtitle}</p>
+                            </div>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div style="padding: 15px; border-bottom: 1px solid #dee2e6;">
@@ -1994,7 +2012,7 @@
                         <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px;">
                             <h1 style="margin: 0 0 10px 0; font-size: 32px; font-weight: bold;">Load Sheet</h1>
                             <p style="margin: 0 0 5px 0; font-size: 18px;"><strong>${printProductsDisplay}</strong></p>
-                            <p style="margin: 0; font-size: 14px; color: #666;"><strong>Order ID:</strong> ${orderId} | <strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+                            <p style="margin: 0; font-size: 14px; color: #666;">${formatLoadSheetOrderIdsLine(loadSheet, orderId)}</p>
                             ${renderLoadSheetCustomerHeader(loadSheet).replace(/margin-bottom: 16px/g, 'margin: 12px auto 0; max-width: 480px; text-align: left')}
                             ${renderLeadLockWorkOrderDetailsHtml(loadSheet)}
                         </div>

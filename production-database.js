@@ -4956,7 +4956,17 @@ class ProductionDatabase {
     }
     
     // ============ PLANNER OPERATIONS ============
-    
+
+    static normalizeWeeklyPlannerRow(row) {
+        if (!row) {
+            return null;
+        }
+        return {
+            ...row,
+            week_start_date: ymdFromDbOrInstant(row.week_start_date)
+        };
+    }
+
     static async createWeeklyPlanner(data) {
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -4964,7 +4974,7 @@ class ProductionDatabase {
                  VALUES ($1, $2, $3, $4) RETURNING *`,
                 [data.week_start_date, data.staff_available || 1, data.hours_available || 40, data.notes]
             );
-            return result.rows[0];
+            return this.normalizeWeeklyPlannerRow(result.rows[0]);
         } else {
             const stmt = db.prepare(
                 `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
@@ -4976,54 +4986,141 @@ class ProductionDatabase {
     }
     
     static async getWeeklyPlannerById(id) {
+        let row;
         if (isPostgreSQL) {
             const result = await pool.query(`SELECT * FROM weekly_planner WHERE id = $1`, [id]);
-            return result.rows[0] || null;
+            row = result.rows[0] || null;
         } else {
-            return db.prepare(`SELECT * FROM weekly_planner WHERE id = ?`).get(id) || null;
+            row = db.prepare(`SELECT * FROM weekly_planner WHERE id = ?`).get(id) || null;
         }
+        return this.normalizeWeeklyPlannerRow(row);
     }
     
     static async getWeeklyPlannerByDate(weekStartDate) {
+        let row;
         if (isPostgreSQL) {
             const result = await pool.query(`SELECT * FROM weekly_planner WHERE week_start_date = $1`, [weekStartDate]);
-            return result.rows[0] || null;
+            row = result.rows[0] || null;
         } else {
-            return db.prepare(`SELECT * FROM weekly_planner WHERE week_start_date = ?`).get(weekStartDate) || null;
+            row = db.prepare(`SELECT * FROM weekly_planner WHERE week_start_date = ?`).get(weekStartDate) || null;
         }
+        return this.normalizeWeeklyPlannerRow(row);
     }
     
     static async getAllWeeklyPlanners(startDate, endDate) {
+        let rows;
         if (isPostgreSQL) {
             if (startDate && endDate) {
                 const result = await pool.query(
                     `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN $1 AND $2 ORDER BY week_start_date`,
                     [startDate, endDate]
                 );
-                return result.rows;
+                rows = result.rows;
             } else {
                 const result = await pool.query(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`);
-                return result.rows;
+                rows = result.rows;
             }
         } else {
             if (startDate && endDate) {
-                return db.prepare(
+                rows = db.prepare(
                     `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN ? AND ? ORDER BY week_start_date`
                 ).all(startDate, endDate);
             } else {
-                return db.prepare(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`).all();
+                rows = db.prepare(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`).all();
             }
         }
+        return rows.map((row) => this.normalizeWeeklyPlannerRow(row));
+    }
+
+    static async getPlannerWeekSummaries(limit = 12) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT wp.id, wp.week_start_date, wp.staff_available, wp.hours_available,
+                        COUNT(pi.id)::int AS item_count
+                 FROM weekly_planner wp
+                 LEFT JOIN planner_items pi ON pi.planner_id = wp.id
+                 GROUP BY wp.id
+                 ORDER BY wp.week_start_date DESC
+                 LIMIT $1`,
+                [limit]
+            );
+            return result.rows.map((row) => ({
+                id: row.id,
+                week_start_date: ymdFromDbOrInstant(row.week_start_date),
+                item_count: parseInt(row.item_count, 10) || 0,
+                staff_available: row.staff_available,
+                hours_available: row.hours_available
+            }));
+        }
+        const rows = db.prepare(
+            `SELECT wp.id, wp.week_start_date, wp.staff_available, wp.hours_available,
+                    COUNT(pi.id) AS item_count
+             FROM weekly_planner wp
+             LEFT JOIN planner_items pi ON pi.planner_id = wp.id
+             GROUP BY wp.id
+             ORDER BY wp.week_start_date DESC
+             LIMIT ?`
+        ).all(limit);
+        return rows.map((row) => ({
+            id: row.id,
+            week_start_date: ymdFromDbOrInstant(row.week_start_date),
+            item_count: parseInt(row.item_count, 10) || 0,
+            staff_available: row.staff_available,
+            hours_available: row.hours_available
+        }));
+    }
+
+    static async copyPlannerItems(targetPlannerId, sourcePlannerId, options = {}) {
+        const includeCompleted = !!options.includeCompleted;
+        const sourceItems = await this.getPlannerItems(sourcePlannerId);
+        let copied = 0;
+
+        for (const item of sourceItems) {
+            if (!includeCompleted && item.status === 'completed') {
+                continue;
+            }
+
+            const qtyBuilt = parseFloat(item.quantity_built || 0);
+            const qtyToBuild = parseFloat(item.quantity_to_build || 0);
+            let remainingQty = item.item_type === 'job'
+                ? qtyToBuild
+                : Math.max(0, qtyToBuild - qtyBuilt);
+
+            if (!includeCompleted && remainingQty <= 0) {
+                continue;
+            }
+            if (includeCompleted) {
+                remainingQty = qtyToBuild;
+            }
+
+            const itemType = item.item_type || 'built_item';
+            const itemId = item.item_id != null ? item.item_id : item.panel_id;
+
+            await this.addPlannerItem(
+                targetPlannerId,
+                itemType,
+                itemId,
+                remainingQty,
+                item.priority || 'medium',
+                'planned',
+                item.job_name || null,
+                null,
+                null
+            );
+            copied += 1;
+        }
+
+        return { copied };
     }
     
     static async updateWeeklyPlanner(id, data) {
         if (isPostgreSQL) {
-            const result = await pool.query(
+            await pool.query(
                 `UPDATE weekly_planner SET staff_available = $1, hours_available = $2, notes = $3
-                 WHERE id = $4 RETURNING *`,
+                 WHERE id = $4`,
                 [data.staff_available, data.hours_available, data.notes, id]
             );
-            return result.rows[0];
+            return this.getWeeklyPlannerById(id);
         } else {
             db.prepare(
                 `UPDATE weekly_planner SET staff_available = ?, hours_available = ?, notes = ?

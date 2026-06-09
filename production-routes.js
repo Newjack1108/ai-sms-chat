@@ -5849,6 +5849,17 @@ router.get('/planner/low-stock-components', requireProductionAuth, async (req, r
     }
 });
 
+router.get('/planner/summary', requireProductionAuth, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 12, 52);
+        const summaries = await ProductionDatabase.getPlannerWeekSummaries(limit);
+        res.json({ success: true, summaries });
+    } catch (error) {
+        console.error('Get planner summary error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get planner summary' });
+    }
+});
+
 router.post('/planner', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const { week_start_date, staff_available, hours_available, notes } = req.body;
@@ -5935,6 +5946,39 @@ router.delete('/planner/:id', requireProductionAuth, requireAdminOrOffice, async
     } catch (error) {
         console.error('Delete planner error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete planner' });
+    }
+});
+
+router.post('/planner/:id/copy-from-week', requireProductionAuth, requireManager, async (req, res) => {
+    try {
+        const targetPlannerId = parseInt(req.params.id, 10);
+        const { source_week_start_date, include_completed } = req.body || {};
+
+        if (!source_week_start_date) {
+            return res.status(400).json({ success: false, error: 'source_week_start_date is required' });
+        }
+
+        const targetPlanner = await ProductionDatabase.getWeeklyPlannerById(targetPlannerId);
+        if (!targetPlanner) {
+            return res.status(404).json({ success: false, error: 'Target planner not found' });
+        }
+
+        const sourcePlanner = await ProductionDatabase.getWeeklyPlannerByDate(source_week_start_date);
+        if (!sourcePlanner) {
+            return res.status(404).json({ success: false, error: 'Source planner not found for that week' });
+        }
+
+        if (sourcePlanner.id === targetPlannerId) {
+            return res.status(400).json({ success: false, error: 'Source and target planner must be different weeks' });
+        }
+
+        const result = await ProductionDatabase.copyPlannerItems(targetPlannerId, sourcePlanner.id, {
+            includeCompleted: !!include_completed
+        });
+        res.json({ success: true, copied: result.copied });
+    } catch (error) {
+        console.error('Copy planner items error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to copy planner items' });
     }
 });
 
