@@ -269,37 +269,58 @@
         </div>
     </div>
     
-    <!-- Add Item Modal -->
-    <div id="addPanelModal" class="modal">
+    <!-- Add / Edit Planner Item Modal -->
+    <div id="plannerItemModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Add Item to Planner</h3>
-                <button class="modal-close" onclick="hideModal('addPanelModal')">&times;</button>
+                <h3 id="plannerItemModalTitle">Add Item to Planner</h3>
+                <button class="modal-close" onclick="hideModal('plannerItemModal')">&times;</button>
             </div>
-            <form id="addPanelForm" novalidate>
-                <div class="form-group">
-                    <label class="form-label">Item Type *</label>
-                    <select id="itemTypeSelect" class="form-select" required onchange="updateItemSelect()">
-                        <option value="">Select item type...</option>
-                        <option value="component">Component</option>
-                        <option value="built_item">Built Item</option>
-                        <option value="job">Job</option>
-                    </select>
-                </div>
-                <div class="form-group" id="itemSelectGroup">
-                    <label class="form-label" id="itemSelectLabel">Item *</label>
-                    <select id="panelSelect" class="form-select" required>
-                        <option value="">Select item type first...</option>
-                    </select>
-                </div>
-                <div class="form-group" id="jobNameGroup" style="display: none;">
-                    <label class="form-label">Job Name *</label>
-                    <input type="text" id="jobNameInput" class="form-input" placeholder="e.g., Workshop Tidy, Showsite Clean">
+            <form id="plannerItemForm" novalidate>
+                <input type="hidden" id="plannerItemId" value="">
+                <div id="plannerItemAddFields">
+                    <div class="form-group">
+                        <label class="form-label">Item Type *</label>
+                        <select id="itemTypeSelect" class="form-select" onchange="updateItemSelect()">
+                            <option value="">Select item type...</option>
+                            <option value="component">Component</option>
+                            <option value="built_item">Built Item</option>
+                            <option value="job">Job</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="itemSelectGroup">
+                        <label class="form-label" id="itemSelectLabel">Item *</label>
+                        <select id="panelSelect" class="form-select">
+                            <option value="">Select item type first...</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="jobNameGroup" style="display: none;">
+                        <label class="form-label">Job Name *</label>
+                        <input type="text" id="jobNameInput" class="form-input" placeholder="e.g., Workshop Tidy, Showsite Clean">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" id="quantityLabel">Quantity to Build *</label>
                     <input type="number" step="0.01" id="panelQuantity" class="form-input" required min="0.01">
                     <small style="color: #6c757d;" id="quantityHelp">Quantity of items to build</small>
+                </div>
+                <div id="plannerItemEditFields" style="display: none;">
+                    <div class="form-group">
+                        <label class="form-label">Quantity Built</label>
+                        <input type="number" step="0.01" id="plannerItemQtyBuilt" class="form-input" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Hours Used</label>
+                        <input type="number" step="0.01" id="plannerItemHoursUsed" class="form-input" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Status</label>
+                        <select id="plannerItemStatus" class="form-select">
+                            <option value="planned">Planned</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Priority</label>
@@ -309,9 +330,34 @@
                         <option value="low">Low</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label class="form-label">Start Day</label>
+                    <select id="plannerItemStartDay" class="form-select">
+                        <option value="">Not assigned</option>
+                        <option value="0">Monday</option>
+                        <option value="1">Tuesday</option>
+                        <option value="2">Wednesday</option>
+                        <option value="3">Thursday</option>
+                        <option value="4">Friday</option>
+                        <option value="5">Saturday</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">End Day</label>
+                    <select id="plannerItemEndDay" class="form-select">
+                        <option value="">Not assigned</option>
+                        <option value="0">Monday</option>
+                        <option value="1">Tuesday</option>
+                        <option value="2">Wednesday</option>
+                        <option value="3">Thursday</option>
+                        <option value="4">Friday</option>
+                        <option value="5">Saturday</option>
+                    </select>
+                    <small style="color: #6c757d;">Leave empty or same as start day for single day. Set end day to span multiple days.</small>
+                </div>
                 <div class="text-right">
-                    <button type="button" onclick="hideModal('addPanelModal')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add</button>
+                    <button type="button" onclick="hideModal('plannerItemModal')" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" id="plannerItemSubmitBtn" class="btn btn-primary">Add</button>
                 </div>
             </form>
         </div>
@@ -913,8 +959,58 @@
             }
         }
         
-        async function showAddPanelModal() {
-            document.getElementById('addPanelForm').reset();
+        function parsePlannerItemDayAssignment() {
+            const startDay = document.getElementById('plannerItemStartDay').value;
+            const endDay = document.getElementById('plannerItemEndDay').value;
+            const finalStartDay = startDay !== '' ? parseInt(startDay, 10) : null;
+            const finalEndDay = endDay !== '' ? parseInt(endDay, 10) : (finalStartDay !== null ? finalStartDay : null);
+            return { start_day: finalStartDay, end_day: finalEndDay };
+        }
+
+        function setPlannerItemDaySelects(startDay, endDay) {
+            const startEl = document.getElementById('plannerItemStartDay');
+            const endEl = document.getElementById('plannerItemEndDay');
+            startEl.value = startDay !== null && startDay !== undefined ? String(startDay) : '';
+            endEl.value = endDay !== null && endDay !== undefined ? String(endDay) : '';
+        }
+
+        function setPlannerItemModalMode(mode, item) {
+            const isEdit = mode === 'edit';
+            document.getElementById('plannerItemAddFields').style.display = isEdit ? 'none' : 'block';
+            document.getElementById('plannerItemEditFields').style.display = isEdit ? 'block' : 'none';
+            document.getElementById('plannerItemSubmitBtn').textContent = isEdit ? 'Save' : 'Add';
+            document.getElementById('itemTypeSelect').required = !isEdit;
+            document.getElementById('panelSelect').required = !isEdit;
+
+            if (isEdit && item) {
+                const name = item.item_name || item.panel_name || item.job_name || 'Unknown';
+                document.getElementById('plannerItemModalTitle').textContent = `Edit: ${name}`;
+                document.getElementById('plannerItemId').value = String(item.id);
+                document.getElementById('panelQuantity').value = item.quantity_to_build;
+                document.getElementById('plannerItemQtyBuilt').value = item.quantity_built || 0;
+                document.getElementById('plannerItemHoursUsed').value = item.hours_used || 0;
+                document.getElementById('panelPriority').value = item.priority || 'medium';
+                document.getElementById('plannerItemStatus').value = item.status || 'planned';
+                setPlannerItemDaySelects(item.start_day, item.end_day);
+                if (item.item_type === 'job') {
+                    document.getElementById('quantityLabel').textContent = 'Hours Required *';
+                    document.getElementById('quantityHelp').textContent = 'Number of hours this job will take';
+                } else {
+                    document.getElementById('quantityLabel').textContent = 'Quantity to Build *';
+                    document.getElementById('quantityHelp').textContent = 'Quantity of items to build';
+                }
+            } else {
+                document.getElementById('plannerItemModalTitle').textContent = 'Add Item to Planner';
+                document.getElementById('plannerItemId').value = '';
+                document.getElementById('plannerItemQtyBuilt').value = '0';
+                document.getElementById('plannerItemHoursUsed').value = '0';
+                document.getElementById('plannerItemStatus').value = 'planned';
+                setPlannerItemDaySelects(null, null);
+            }
+        }
+
+        async function openPlannerItemModalAdd() {
+            document.getElementById('plannerItemForm').reset();
             document.getElementById('itemTypeSelect').value = '';
             document.getElementById('panelSelect').innerHTML = '<option value="">Select item type first...</option>';
             document.getElementById('itemSelectLabel').textContent = 'Item *';
@@ -924,16 +1020,35 @@
             document.getElementById('quantityHelp').textContent = 'Quantity of items to build';
             document.getElementById('panelSelect').required = true;
             document.getElementById('jobNameInput').required = false;
-            
-            // Reload data if empty
+            setPlannerItemModalMode('add');
+
             if (allComponents.length === 0) {
                 await loadAllComponents();
             }
             if (allPanels.length === 0) {
                 await loadAllPanels();
             }
-            
-            showModal('addPanelModal');
+
+            showModal('plannerItemModal');
+        }
+
+        async function openPlannerItemModalEdit(id) {
+            if (!currentPlannerId) {
+                showAlert('Please select a week first', 'error');
+                return;
+            }
+            const data = await apiCall(`/planner/${currentPlannerId}`);
+            const item = data.items.find((i) => i.id === id);
+            if (!item) {
+                showAlert('Planner item not found', 'error');
+                return;
+            }
+            setPlannerItemModalMode('edit', item);
+            showModal('plannerItemModal');
+        }
+
+        async function showAddPanelModal() {
+            await openPlannerItemModalAdd();
         }
         
         async function showLowStockModal() {
@@ -1043,110 +1158,7 @@
         }
         
         async function editPlannerItem(id) {
-            const data = await apiCall(`/planner/${currentPlannerId}`);
-            const item = data.items.find(i => i.id === id);
-            if (!item) return;
-            
-            const modal = document.createElement('div');
-            modal.className = 'modal show';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h3>Edit Planner Item: ${item.item_name || item.panel_name || 'Unknown'}</h3>
-                        <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
-                    </div>
-                    <form id="editItemForm">
-                        <div class="form-group">
-                            <label class="form-label">Quantity to Build</label>
-                            <input type="number" step="0.01" id="editQtyBuild" class="form-input" value="${item.quantity_to_build}" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Quantity Built</label>
-                            <input type="number" step="0.01" id="editQtyBuilt" class="form-input" value="${item.quantity_built || 0}">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Hours Used</label>
-                            <input type="number" step="0.01" id="editHoursUsed" class="form-input" value="${item.hours_used || 0}">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Priority</label>
-                            <select id="editPriority" class="form-select">
-                                <option value="high" ${item.priority === 'high' ? 'selected' : ''}>High</option>
-                                <option value="medium" ${item.priority === 'medium' ? 'selected' : ''}>Medium</option>
-                                <option value="low" ${item.priority === 'low' ? 'selected' : ''}>Low</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Status</label>
-                            <select id="editStatus" class="form-select">
-                                <option value="planned" ${item.status === 'planned' ? 'selected' : ''}>Planned</option>
-                                <option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
-                                <option value="completed" ${item.status === 'completed' ? 'selected' : ''}>Completed</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Start Day</label>
-                            <select id="editStartDay" class="form-select">
-                                <option value="">Not assigned</option>
-                                <option value="0" ${item.start_day === 0 ? 'selected' : ''}>Monday</option>
-                                <option value="1" ${item.start_day === 1 ? 'selected' : ''}>Tuesday</option>
-                                <option value="2" ${item.start_day === 2 ? 'selected' : ''}>Wednesday</option>
-                                <option value="3" ${item.start_day === 3 ? 'selected' : ''}>Thursday</option>
-                                <option value="4" ${item.start_day === 4 ? 'selected' : ''}>Friday</option>
-                                <option value="5" ${item.start_day === 5 ? 'selected' : ''}>Saturday</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">End Day</label>
-                            <select id="editEndDay" class="form-select">
-                                <option value="">Not assigned</option>
-                                <option value="0" ${item.end_day === 0 ? 'selected' : ''}>Monday</option>
-                                <option value="1" ${item.end_day === 1 ? 'selected' : ''}>Tuesday</option>
-                                <option value="2" ${item.end_day === 2 ? 'selected' : ''}>Wednesday</option>
-                                <option value="3" ${item.end_day === 3 ? 'selected' : ''}>Thursday</option>
-                                <option value="4" ${item.end_day === 4 ? 'selected' : ''}>Friday</option>
-                                <option value="5" ${item.end_day === 5 ? 'selected' : ''}>Saturday</option>
-                            </select>
-                            <small style="color: #6c757d;">Leave empty or same as start day for single day. Set end day to span multiple days.</small>
-                        </div>
-                        <div class="text-right">
-                            <button type="button" onclick="this.closest('.modal').remove()" class="btn btn-secondary">Cancel</button>
-                            <button type="submit" class="btn btn-primary">Save</button>
-                        </div>
-                    </form>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            
-            document.getElementById('editItemForm').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                try {
-                    const startDay = document.getElementById('editStartDay').value;
-                    const endDay = document.getElementById('editEndDay').value;
-                    
-                    // If start day is set but end day is not, set end day to start day (single day)
-                    const finalStartDay = startDay !== '' ? parseInt(startDay) : null;
-                    const finalEndDay = endDay !== '' ? parseInt(endDay) : (finalStartDay !== null ? finalStartDay : null);
-                    
-                    await apiCall(`/planner/items/${id}`, {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                            quantity_to_build: parseFloat(document.getElementById('editQtyBuild').value),
-                            quantity_built: parseFloat(document.getElementById('editQtyBuilt').value),
-                            hours_used: parseFloat(document.getElementById('editHoursUsed').value),
-                            priority: document.getElementById('editPriority').value,
-                            status: document.getElementById('editStatus').value,
-                            start_day: finalStartDay,
-                            end_day: finalEndDay
-                        })
-                    });
-                    showAlert('Item updated');
-                    modal.remove();
-                    loadPlanner();
-                } catch (error) {
-                    showAlert('Error updating item: ' + (error.message || 'Unknown error'), 'error');
-                }
-            });
+            await openPlannerItemModalEdit(id);
         }
         
         async function showEfficiencyReport(plannerId) {
@@ -1719,80 +1731,96 @@
             }
         });
         
-        document.getElementById('addPanelForm').addEventListener('submit', async (e) => {
+        document.getElementById('plannerItemForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!currentPlannerId) {
                 showAlert('Please select a week first', 'error');
                 return;
             }
-            
+
+            const itemId = document.getElementById('plannerItemId').value;
+            const isEdit = !!itemId;
+            const quantity = parseFloat(document.getElementById('panelQuantity').value);
+            if (!quantity || quantity <= 0) {
+                showAlert('Please enter a valid quantity greater than 0', 'error');
+                return;
+            }
+
+            const dayAssignment = parsePlannerItemDayAssignment();
+
             try {
-                const itemType = document.getElementById('itemTypeSelect').value;
-                
-                if (!itemType) {
-                    showAlert('Please select item type', 'error');
-                    return;
-                }
-                
-                const quantityInput = document.getElementById('panelQuantity');
-                const quantity = parseFloat(quantityInput.value);
-                if (!quantity || quantity <= 0) {
-                    showAlert('Please enter a valid quantity greater than 0', 'error');
-                    return;
-                }
-                
-                let requestBody = {
-                    item_type: itemType,
-                    quantity_to_build: quantity,
-                    priority: document.getElementById('panelPriority').value
-                };
-                
-                if (itemType === 'job') {
-                    const jobName = document.getElementById('jobNameInput').value.trim();
-                    if (!jobName) {
-                        showAlert('Please enter a job name', 'error');
-                        return;
-                    }
-                    requestBody.job_name = jobName;
+                if (isEdit) {
+                    await apiCall(`/planner/items/${itemId}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            quantity_to_build: quantity,
+                            quantity_built: parseFloat(document.getElementById('plannerItemQtyBuilt').value),
+                            hours_used: parseFloat(document.getElementById('plannerItemHoursUsed').value),
+                            priority: document.getElementById('panelPriority').value,
+                            status: document.getElementById('plannerItemStatus').value,
+                            start_day: dayAssignment.start_day,
+                            end_day: dayAssignment.end_day
+                        })
+                    });
+                    showAlert('Item updated');
                 } else {
-                    const panelSelect = document.getElementById('panelSelect');
-                    const itemId = parseInt(panelSelect.value);
-                    if (!itemId || isNaN(itemId)) {
-                        const itemTypeName = itemType === 'component' ? 'component' : 'built item';
-                        showAlert(`Please select a ${itemTypeName}`, 'error');
+                    const itemType = document.getElementById('itemTypeSelect').value;
+                    if (!itemType) {
+                        showAlert('Please select item type', 'error');
                         return;
                     }
-                    requestBody.item_id = itemId;
-                    
-                    // Verify the selected item exists in our loaded data
-                    if (itemType === 'component') {
-                        const component = allComponents.find(c => c.id === itemId);
-                        if (!component) {
-                            showAlert('Selected component not found. Please refresh and try again.', 'error');
+
+                    const requestBody = {
+                        item_type: itemType,
+                        quantity_to_build: quantity,
+                        priority: document.getElementById('panelPriority').value,
+                        start_day: dayAssignment.start_day,
+                        end_day: dayAssignment.end_day
+                    };
+
+                    if (itemType === 'job') {
+                        const jobName = document.getElementById('jobNameInput').value.trim();
+                        if (!jobName) {
+                            showAlert('Please enter a job name', 'error');
                             return;
                         }
-                    } else if (itemType === 'built_item') {
-                        const panel = allPanels.find(p => p.id === itemId);
-                        if (!panel) {
-                            showAlert('Selected built item not found. Please refresh and try again.', 'error');
+                        requestBody.job_name = jobName;
+                    } else {
+                        const selectedItemId = parseInt(document.getElementById('panelSelect').value, 10);
+                        if (!selectedItemId || Number.isNaN(selectedItemId)) {
+                            const itemTypeName = itemType === 'component' ? 'component' : 'built item';
+                            showAlert(`Please select a ${itemTypeName}`, 'error');
                             return;
+                        }
+                        requestBody.item_id = selectedItemId;
+
+                        if (itemType === 'component') {
+                            const component = allComponents.find((c) => c.id === selectedItemId);
+                            if (!component) {
+                                showAlert('Selected component not found. Please refresh and try again.', 'error');
+                                return;
+                            }
+                        } else if (itemType === 'built_item') {
+                            const panel = allPanels.find((p) => p.id === selectedItemId);
+                            if (!panel) {
+                                showAlert('Selected built item not found. Please refresh and try again.', 'error');
+                                return;
+                            }
                         }
                     }
+
+                    await apiCall(`/planner/${currentPlannerId}/items`, {
+                        method: 'POST',
+                        body: JSON.stringify(requestBody)
+                    });
+                    showAlert('Item added to planner');
                 }
-                
-                console.log('Submitting planner item:', requestBody);
-                const result = await apiCall(`/planner/${currentPlannerId}/items`, {
-                    method: 'POST',
-                    body: JSON.stringify(requestBody)
-                });
-                console.log('Planner item added successfully:', result);
-                showAlert('Item added to planner');
-                hideModal('addPanelModal');
+
+                hideModal('plannerItemModal');
                 loadPlanner();
             } catch (error) {
-                console.error('Error adding planner item:', error);
-                const errorMessage = error.message || 'Failed to add item to planner. Please check the console for details.';
-                showAlert(errorMessage, 'error');
+                console.error('Error saving planner item:', error);
+                showAlert('Error saving item: ' + (error.message || 'Unknown error'), 'error');
             }
         });
         
