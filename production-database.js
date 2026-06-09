@@ -4967,12 +4967,129 @@ class ProductionDatabase {
         };
     }
 
+    static normalizePlannerWeekStartDate(weekStartDate) {
+        if (!weekStartDate) {
+            return null;
+        }
+        const ymd = ymdFromDbOrInstant(weekStartDate);
+        return londonMondayYmdFromYmd(ymd);
+    }
+
+    static isPlannerMonday(weekStartDate) {
+        const ymd = ymdFromDbOrInstant(weekStartDate);
+        return ymd && this.normalizePlannerWeekStartDate(ymd) === ymd;
+    }
+
+    /**
+     * Merge planner rows that share the same London Monday week (fixes UTC/off-by-one duplicates).
+     * Moves items onto the canonical Monday row and removes empty duplicates.
+     */
+    static async consolidateMisalignedPlannerWeeks() {
+        let rows;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT wp.id, wp.week_start_date,
+                        COUNT(pi.id)::int AS item_count
+                 FROM weekly_planner wp
+                 LEFT JOIN planner_items pi ON pi.planner_id = wp.id
+                 GROUP BY wp.id
+                 ORDER BY wp.week_start_date, wp.id`
+            );
+            rows = result.rows;
+        } else {
+            rows = db.prepare(
+                `SELECT wp.id, wp.week_start_date,
+                        COUNT(pi.id) AS item_count
+                 FROM weekly_planner wp
+                 LEFT JOIN planner_items pi ON pi.planner_id = wp.id
+                 GROUP BY wp.id
+                 ORDER BY wp.week_start_date, wp.id`
+            ).all();
+        }
+
+        const groups = new Map();
+        for (const row of rows) {
+            const weekYmd = ymdFromDbOrInstant(row.week_start_date);
+            const monday = this.normalizePlannerWeekStartDate(weekYmd);
+            if (!groups.has(monday)) {
+                groups.set(monday, []);
+            }
+            groups.get(monday).push({
+                id: row.id,
+                week_start_date: weekYmd,
+                item_count: parseInt(row.item_count, 10) || 0
+            });
+        }
+
+        let merged = 0;
+        let deleted = 0;
+        let realigned = 0;
+
+        for (const [monday, planners] of groups) {
+            if (planners.length === 0) {
+                continue;
+            }
+
+            planners.sort((a, b) => {
+                const aOnMonday = a.week_start_date === monday ? 1 : 0;
+                const bOnMonday = b.week_start_date === monday ? 1 : 0;
+                if (bOnMonday !== aOnMonday) {
+                    return bOnMonday - aOnMonday;
+                }
+                if (b.item_count !== a.item_count) {
+                    return b.item_count - a.item_count;
+                }
+                return a.id - b.id;
+            });
+
+            const primary = planners[0];
+            const duplicates = planners.slice(1);
+
+            if (primary.week_start_date !== monday) {
+                if (isPostgreSQL) {
+                    await pool.query(
+                        `UPDATE weekly_planner SET week_start_date = $1 WHERE id = $2`,
+                        [monday, primary.id]
+                    );
+                } else {
+                    db.prepare(`UPDATE weekly_planner SET week_start_date = ? WHERE id = ?`).run(monday, primary.id);
+                }
+                realigned += 1;
+            }
+
+            for (const dup of duplicates) {
+                if (isPostgreSQL) {
+                    await pool.query(
+                        `UPDATE planner_items SET planner_id = $1 WHERE planner_id = $2`,
+                        [primary.id, dup.id]
+                    );
+                    await pool.query(`DELETE FROM weekly_planner WHERE id = $1`, [dup.id]);
+                } else {
+                    db.prepare(`UPDATE planner_items SET planner_id = ? WHERE planner_id = ?`).run(primary.id, dup.id);
+                    db.prepare(`DELETE FROM weekly_planner WHERE id = ?`).run(dup.id);
+                }
+                merged += dup.item_count;
+                deleted += 1;
+            }
+        }
+
+        return { merged, deleted, realigned };
+    }
+
     static async createWeeklyPlanner(data) {
+        const weekStartMonday = this.normalizePlannerWeekStartDate(data.week_start_date);
+        const existing = await this.getWeeklyPlannerByDate(weekStartMonday);
+        if (existing) {
+            const err = new Error('A planner already exists for this week. Please edit the existing planner instead.');
+            err.code = 'PLANNER_WEEK_EXISTS';
+            throw err;
+        }
+
         if (isPostgreSQL) {
             const result = await pool.query(
                 `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
                  VALUES ($1, $2, $3, $4) RETURNING *`,
-                [data.week_start_date, data.staff_available || 1, data.hours_available || 40, data.notes]
+                [weekStartMonday, data.staff_available || 1, data.hours_available || 40, data.notes]
             );
             return this.normalizeWeeklyPlannerRow(result.rows[0]);
         } else {
@@ -4980,7 +5097,7 @@ class ProductionDatabase {
                 `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
                  VALUES (?, ?, ?, ?)`
             );
-            const info = stmt.run(data.week_start_date, data.staff_available || 1, data.hours_available || 40, data.notes);
+            const info = stmt.run(weekStartMonday, data.staff_available || 1, data.hours_available || 40, data.notes);
             return this.getWeeklyPlannerById(info.lastInsertRowid);
         }
     }
@@ -4997,23 +5114,26 @@ class ProductionDatabase {
     }
     
     static async getWeeklyPlannerByDate(weekStartDate) {
+        const monday = this.normalizePlannerWeekStartDate(weekStartDate);
         let row;
         if (isPostgreSQL) {
-            const result = await pool.query(`SELECT * FROM weekly_planner WHERE week_start_date = $1`, [weekStartDate]);
+            const result = await pool.query(`SELECT * FROM weekly_planner WHERE week_start_date = $1`, [monday]);
             row = result.rows[0] || null;
         } else {
-            row = db.prepare(`SELECT * FROM weekly_planner WHERE week_start_date = ?`).get(weekStartDate) || null;
+            row = db.prepare(`SELECT * FROM weekly_planner WHERE week_start_date = ?`).get(monday) || null;
         }
         return this.normalizeWeeklyPlannerRow(row);
     }
     
     static async getAllWeeklyPlanners(startDate, endDate) {
+        const rangeStart = startDate ? this.normalizePlannerWeekStartDate(startDate) : null;
+        const rangeEnd = endDate ? this.normalizePlannerWeekStartDate(endDate) : null;
         let rows;
         if (isPostgreSQL) {
-            if (startDate && endDate) {
+            if (rangeStart && rangeEnd) {
                 const result = await pool.query(
                     `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN $1 AND $2 ORDER BY week_start_date`,
-                    [startDate, endDate]
+                    [rangeStart, rangeEnd]
                 );
                 rows = result.rows;
             } else {
@@ -5021,10 +5141,10 @@ class ProductionDatabase {
                 rows = result.rows;
             }
         } else {
-            if (startDate && endDate) {
+            if (rangeStart && rangeEnd) {
                 rows = db.prepare(
                     `SELECT * FROM weekly_planner WHERE week_start_date BETWEEN ? AND ? ORDER BY week_start_date`
-                ).all(startDate, endDate);
+                ).all(rangeStart, rangeEnd);
             } else {
                 rows = db.prepare(`SELECT * FROM weekly_planner ORDER BY week_start_date DESC LIMIT 12`).all();
             }
@@ -5033,6 +5153,8 @@ class ProductionDatabase {
     }
 
     static async getPlannerWeekSummaries(limit = 12) {
+        await this.consolidateMisalignedPlannerWeeks();
+
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT wp.id, wp.week_start_date, wp.staff_available, wp.hours_available,
@@ -5044,13 +5166,17 @@ class ProductionDatabase {
                  LIMIT $1`,
                 [limit]
             );
-            return result.rows.map((row) => ({
-                id: row.id,
-                week_start_date: ymdFromDbOrInstant(row.week_start_date),
-                item_count: parseInt(row.item_count, 10) || 0,
-                staff_available: row.staff_available,
-                hours_available: row.hours_available
-            }));
+            return result.rows.map((row) => {
+                const weekStart = ymdFromDbOrInstant(row.week_start_date);
+                return {
+                    id: row.id,
+                    week_start_date: weekStart,
+                    week_end_date: londonYmdAddDays(weekStart, 5),
+                    item_count: parseInt(row.item_count, 10) || 0,
+                    staff_available: row.staff_available,
+                    hours_available: row.hours_available
+                };
+            });
         }
         const rows = db.prepare(
             `SELECT wp.id, wp.week_start_date, wp.staff_available, wp.hours_available,
@@ -5061,13 +5187,17 @@ class ProductionDatabase {
              ORDER BY wp.week_start_date DESC
              LIMIT ?`
         ).all(limit);
-        return rows.map((row) => ({
-            id: row.id,
-            week_start_date: ymdFromDbOrInstant(row.week_start_date),
-            item_count: parseInt(row.item_count, 10) || 0,
-            staff_available: row.staff_available,
-            hours_available: row.hours_available
-        }));
+        return rows.map((row) => {
+            const weekStart = ymdFromDbOrInstant(row.week_start_date);
+            return {
+                id: row.id,
+                week_start_date: weekStart,
+                week_end_date: londonYmdAddDays(weekStart, 5),
+                item_count: parseInt(row.item_count, 10) || 0,
+                staff_available: row.staff_available,
+                hours_available: row.hours_available
+            };
+        });
     }
 
     static async copyPlannerItems(targetPlannerId, sourcePlannerId, options = {}) {

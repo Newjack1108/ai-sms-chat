@@ -37,6 +37,13 @@ function londonMondayYmd(date = new Date()) {
     return `${yy}-${mm}-${dd}`;
 }
 
+/** Monday week start YYYY-MM-DD for any London calendar date string. */
+function londonMondayYmdFromYmd(ymd) {
+    if (!ymd) return '';
+    const normalized = String(ymd).split('T')[0];
+    return londonMondayYmd(new Date(`${normalized}T12:00:00`));
+}
+
 function londonYmdAddDays(ymd, delta) {
     const [y, m, d] = ymd.split('-').map(Number);
     const t = new Date(Date.UTC(y, m - 1, d));

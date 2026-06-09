@@ -5866,19 +5866,21 @@ router.post('/planner', requireProductionAuth, requireManager, async (req, res) 
         if (!week_start_date) {
             return res.status(400).json({ success: false, error: 'Week start date is required' });
         }
+
+        const weekStartMonday = ProductionDatabase.normalizePlannerWeekStartDate(week_start_date);
         
         const planner = await ProductionDatabase.createWeeklyPlanner({
-            week_start_date,
+            week_start_date: weekStartMonday,
             staff_available: parseInt(staff_available) || 1,
             hours_available: parseFloat(hours_available) || 40,
             notes
         });
-        res.json({ success: true, planner });
+        res.json({ success: true, planner, week_start_date: weekStartMonday });
     } catch (error) {
         console.error('Create planner error:', error);
         
         // Check for duplicate week_start_date error
-        if (error.message && (error.message.includes('UNIQUE') || error.message.includes('duplicate') || error.message.includes('unique constraint'))) {
+        if (error.code === 'PLANNER_WEEK_EXISTS' || (error.message && (error.message.includes('UNIQUE') || error.message.includes('duplicate') || error.message.includes('unique constraint')))) {
             return res.status(409).json({ success: false, error: 'A planner already exists for this week. Please edit the existing planner instead.' });
         }
         

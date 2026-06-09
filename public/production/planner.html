@@ -245,8 +245,9 @@
             <form id="plannerForm">
                 <input type="hidden" id="plannerId">
                 <div class="form-group">
-                    <label class="form-label">Week Start Date *</label>
+                    <label class="form-label">Week Start Date (Monday) *</label>
                     <input type="date" id="plannerWeekStart" class="form-input" required>
+                    <small class="text-muted">Any date is adjusted to the Monday of that week.</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Staff Available</label>
@@ -352,13 +353,19 @@
             return String(value).split('T')[0];
         }
 
+        function plannerWeekMonday(value) {
+            return londonMondayYmdFromYmd(normalizePlannerWeekDate(value));
+        }
+
         function findPlannerForWeek(planners, weekStart) {
-            return (planners || []).find((p) => normalizePlannerWeekDate(p.week_start_date) === weekStart) || null;
+            const monday = plannerWeekMonday(weekStart);
+            return (planners || []).find((p) => plannerWeekMonday(p.week_start_date) === monday) || null;
         }
 
         function setPlannerWeekStart(weekStart) {
-            document.getElementById('weekStartDate').value = weekStart;
-            localStorage.setItem(PLANNER_LAST_WEEK_KEY, weekStart);
+            const monday = plannerWeekMonday(weekStart);
+            document.getElementById('weekStartDate').value = monday;
+            localStorage.setItem(PLANNER_LAST_WEEK_KEY, monday);
         }
 
         function shiftPlannerWeek(dayDelta) {
@@ -379,14 +386,29 @@
         }
 
         function formatPlannerWeekLabel(weekStartYmd) {
-            const d = new Date(`${weekStartYmd}T12:00:00`);
+            const d = new Date(`${plannerWeekMonday(weekStartYmd)}T12:00:00`);
             return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        }
+
+        function formatPlannerWeekRangeLabel(weekStartYmd, weekEndYmd) {
+            const start = plannerWeekMonday(weekStartYmd);
+            const end = weekEndYmd || londonYmdAddDays(start, 5);
+            const startDate = new Date(`${start}T12:00:00`);
+            const endDate = new Date(`${end}T12:00:00`);
+            const startLabel = startDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            const endLabel = endDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            return `${startLabel} – ${endLabel}`;
         }
 
         function renderRecentWeeksStrip(currentWeekStart) {
             const container = document.getElementById('plannerRecentWeeks');
             if (!container) return;
-            if (!plannerWeekSummaries.length) {
+            const currentMonday = plannerWeekMonday(currentWeekStart);
+            const mondaySummaries = plannerWeekSummaries.filter((summary) => {
+                const weekStart = plannerWeekMonday(summary.week_start_date);
+                return weekStart === normalizePlannerWeekDate(summary.week_start_date);
+            });
+            if (!mondaySummaries.length) {
                 container.style.display = 'none';
                 container.innerHTML = '';
                 return;
@@ -394,18 +416,19 @@
             container.style.display = 'flex';
             container.innerHTML = `
                 <span class="planner-recent-weeks__label">Recent weeks:</span>
-                ${plannerWeekSummaries.map((summary) => {
-                    const weekStart = normalizePlannerWeekDate(summary.week_start_date);
-                    const isActive = weekStart === currentWeekStart;
+                ${mondaySummaries.map((summary) => {
+                    const weekStart = plannerWeekMonday(summary.week_start_date);
+                    const isActive = weekStart === currentMonday;
                     const countLabel = summary.item_count === 1 ? '1 item' : `${summary.item_count} items`;
-                    return `<button type="button" class="planner-week-chip${isActive ? ' active' : ''}" onclick="selectPlannerWeek('${weekStart}')">${formatPlannerWeekLabel(weekStart)} — ${countLabel}</button>`;
+                    const rangeLabel = formatPlannerWeekRangeLabel(weekStart, summary.week_end_date);
+                    return `<button type="button" class="planner-week-chip${isActive ? ' active' : ''}" onclick="selectPlannerWeek('${weekStart}')">${rangeLabel} — ${countLabel}</button>`;
                 }).join('')}
             `;
         }
 
         function getPreviousWeekSummary(currentWeekStart) {
-            const prevWeekStart = londonYmdAddDays(currentWeekStart, -7);
-            return plannerWeekSummaries.find((s) => normalizePlannerWeekDate(s.week_start_date) === prevWeekStart) || null;
+            const prevWeekStart = londonYmdAddDays(plannerWeekMonday(currentWeekStart), -7);
+            return plannerWeekSummaries.find((s) => plannerWeekMonday(s.week_start_date) === prevWeekStart) || null;
         }
 
         function renderPreviousWeekBanner(currentWeekStart, itemCount, options = {}) {
@@ -413,8 +436,8 @@
             if (!prevSummary || prevSummary.item_count <= 0) {
                 return '';
             }
-            const prevWeekStart = normalizePlannerWeekDate(prevSummary.week_start_date);
-            const weekLabel = formatPlannerWeekLabel(prevWeekStart);
+            const prevWeekStart = plannerWeekMonday(prevSummary.week_start_date);
+            const weekLabel = formatPlannerWeekRangeLabel(prevWeekStart, prevSummary.week_end_date);
             const count = prevSummary.item_count;
             const itemWord = count === 1 ? 'item' : 'items';
             const copyBtn = options.showCopy
@@ -422,7 +445,7 @@
                 : '';
             return `
                 <div class="planner-week-banner">
-                    <span><strong>Week starting ${weekLabel}</strong> still has ${count} scheduled ${itemWord}.</span>
+                    <span><strong>Week ${weekLabel}</strong> still has ${count} scheduled ${itemWord}.</span>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                         <button type="button" class="btn btn-secondary btn-sm" onclick="selectPlannerWeek('${prevWeekStart}')">View that week</button>
                         ${copyBtn}
@@ -432,12 +455,12 @@
         }
 
         function renderEmptyPlannerState(weekStart) {
-            const weekLabel = formatPlannerWeekLabel(weekStart);
+            const weekLabel = formatPlannerWeekRangeLabel(weekStart);
             const banner = renderPreviousWeekBanner(weekStart, 0, { showCopy: true });
             document.getElementById('plannerContent').innerHTML = `
                 ${banner}
                 <div class="planner-empty-state card">
-                    <h3 style="margin-top: 0;">No planner for week starting ${weekLabel}</h3>
+                    <h3 style="margin-top: 0;">No planner for week ${weekLabel}</h3>
                     <p class="text-muted">Each week has its own planner. Create one for this week, or open a recent week above that still has items.</p>
                     <button type="button" onclick="createNewWeek()" class="btn btn-primary">Create planner for this week</button>
                 </div>
@@ -464,9 +487,9 @@
 
         async function copyFromPreviousWeek(sourceWeekStart, itemCount) {
             const count = itemCount || 0;
-            const weekLabel = formatPlannerWeekLabel(sourceWeekStart);
+            const weekLabel = formatPlannerWeekRangeLabel(sourceWeekStart);
             const itemWord = count === 1 ? 'item' : 'items';
-            if (!confirm(`Copy ${count} ${itemWord} from week starting ${weekLabel} into this week?\n\nItems will be unassigned to days. The source week is not changed.`)) {
+            if (!confirm(`Copy ${count} ${itemWord} from week ${weekLabel} into this week?\n\nItems will be unassigned to days. The source week is not changed.`)) {
                 return;
             }
             try {
@@ -493,8 +516,8 @@
                 return;
             }
             sessionStorage.setItem(promptKey, '1');
-            const prevWeekStart = normalizePlannerWeekDate(prevSummary.week_start_date);
-            const weekLabel = formatPlannerWeekLabel(prevWeekStart);
+            const prevWeekStart = plannerWeekMonday(prevSummary.week_start_date);
+            const weekLabel = formatPlannerWeekRangeLabel(prevWeekStart, prevSummary.week_end_date);
             const count = prevSummary.item_count;
             const itemWord = count === 1 ? 'item' : 'items';
             if (confirm(`This week has no scheduled items.\n\nCopy ${count} ${itemWord} from week starting ${weekLabel}?`)) {
@@ -511,7 +534,7 @@
             initNavbar();
             
             const savedWeek = localStorage.getItem(PLANNER_LAST_WEEK_KEY);
-            setPlannerWeekStart(savedWeek || londonMondayYmd());
+            setPlannerWeekStart(savedWeek ? plannerWeekMonday(savedWeek) : londonMondayYmd());
             
             await Promise.all([loadAllPanels(), loadAllComponents()]);
             loadPlanner();
@@ -584,13 +607,14 @@
         }
         
         async function loadPlanner() {
-            const weekStart = document.getElementById('weekStartDate').value;
+            let weekStart = document.getElementById('weekStartDate').value;
             if (!weekStart) {
                 document.getElementById('plannerContent').innerHTML = '<p>Please select a week</p>';
                 return;
             }
 
-            localStorage.setItem(PLANNER_LAST_WEEK_KEY, weekStart);
+            weekStart = plannerWeekMonday(weekStart);
+            setPlannerWeekStart(weekStart);
             document.getElementById('plannerContent').innerHTML = '<div class="loading">Loading planner...</div>';
             
             try {
@@ -1623,7 +1647,8 @@
         document.getElementById('plannerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const id = document.getElementById('plannerId').value;
-            const weekStart = document.getElementById('plannerWeekStart').value;
+            const weekStart = plannerWeekMonday(document.getElementById('plannerWeekStart').value);
+            document.getElementById('plannerWeekStart').value = weekStart;
             
             if (!weekStart) {
                 showAlert('Week start date is required', 'error');
