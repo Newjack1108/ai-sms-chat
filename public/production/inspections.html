@@ -46,9 +46,10 @@
             <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; padding: 12px;">
                 <div class="form-group" style="margin: 0;">
                     <label class="form-label">Asset type</label>
-                    <select id="filterType" class="form-select" onchange="renderAssetSections()">
+                    <select id="filterType" class="form-select" onchange="onFilterTypeChange()">
                         <option value="">All types</option>
                         <option value="ladder">Ladder</option>
+                        <option value="first_aid_box">First Aid Box</option>
                         <option value="emergency_lighting">Emergency Lighting</option>
                         <option value="lev">LEV</option>
                     </select>
@@ -68,13 +69,14 @@
                     </label>
                 </div>
                 <button type="button" class="btn btn-primary" onclick="showAssetModal(null)">Add asset</button>
+                <div id="batchActions" style="display: none; gap: 8px; flex-wrap: wrap;"></div>
             </div>
         </div>
 
         <div id="sectionsHost"></div>
     </div>
 
-    <!-- Inspect modal -->
+    <!-- Inspect modal (individual types only) -->
     <div id="inspectModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -111,6 +113,57 @@
         </div>
     </div>
 
+    <!-- Batch inspect modal -->
+    <div id="batchModal" class="modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h3 id="batchModalTitle">Batch inspection</h3>
+                <button class="modal-close" onclick="hideModal('batchModal')">&times;</button>
+            </div>
+            <form id="batchForm">
+                <input type="hidden" id="batchAssetType">
+                <div class="form-group">
+                    <label class="form-label">Inspection date</label>
+                    <input type="date" id="batchDate" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Session notes</label>
+                    <textarea id="batchNotes" class="form-input" rows="2" placeholder="Optional notes for this inspection session"></textarea>
+                </div>
+                <div id="batchEmptyMsg" style="display: none; color: #6c757d; margin-bottom: 12px;">
+                    No active assets of this type. Add assets before running a batch inspection.
+                </div>
+                <div id="batchItemsHost" style="max-height: 420px; overflow: auto;"></div>
+                <div class="text-right" style="margin-top: 16px;">
+                    <button type="button" class="btn btn-secondary" onclick="hideModal('batchModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="batchSubmitBtn">Submit batch</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Batch history modal -->
+    <div id="batchHistoryModal" class="modal">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h3 id="batchHistoryTitle">Batch inspection history</h3>
+                <button class="modal-close" onclick="hideModal('batchHistoryModal')">&times;</button>
+            </div>
+            <div id="batchHistoryBody" style="max-height: 400px; overflow: auto;"></div>
+        </div>
+    </div>
+
+    <!-- Batch session detail modal -->
+    <div id="batchDetailModal" class="modal">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <h3 id="batchDetailTitle">Session detail</h3>
+                <button class="modal-close" onclick="hideModal('batchDetailModal')">&times;</button>
+            </div>
+            <div id="batchDetailBody" style="max-height: 400px; overflow: auto;"></div>
+        </div>
+    </div>
+
     <!-- History modal -->
     <div id="historyModal" class="modal">
         <div class="modal-content" style="max-width: 720px;">
@@ -135,6 +188,7 @@
                     <label class="form-label">Type *</label>
                     <select id="assetType" class="form-select" required>
                         <option value="ladder">Ladder</option>
+                        <option value="first_aid_box">First Aid Box</option>
                         <option value="emergency_lighting">Emergency Lighting</option>
                         <option value="lev">LEV</option>
                     </select>
@@ -177,8 +231,16 @@
 
         const TYPE_LABEL = {
             ladder: 'Ladder',
+            first_aid_box: 'First Aid Box',
             emergency_lighting: 'Emergency Lighting',
             lev: 'LEV'
+        };
+
+        const BATCH_TYPES = ['ladder', 'first_aid_box'];
+
+        const BATCH_LABEL_PLURAL = {
+            ladder: 'ladders',
+            first_aid_box: 'first aid boxes'
         };
 
         function escapeHtml(s) {
@@ -207,6 +269,16 @@
             return 'ok';
         }
 
+        function isBatchType(type) {
+            return BATCH_TYPES.includes(type);
+        }
+
+        function activeAssetsOfType(type) {
+            return allAssets.filter(a =>
+                a.asset_type === type && (a.is_active === true || a.is_active === 1)
+            );
+        }
+
         async function init() {
             if (await restrictStaffAccess()) return;
             currentUser = await checkAuth();
@@ -219,12 +291,18 @@
             await loadAssets();
 
             const params = new URLSearchParams(window.location.search);
+            const batchType = params.get('batch');
             const assetId = params.get('asset');
-            if (assetId) {
+            if (batchType && isBatchType(batchType)) {
+                document.getElementById('filterType').value = batchType;
+                onFilterTypeChange();
+                await showBatchModal(batchType);
+            } else if (assetId) {
                 await showInspectModal(parseInt(assetId, 10));
             }
 
             document.getElementById('inspectForm').addEventListener('submit', submitInspect);
+            document.getElementById('batchForm').addEventListener('submit', submitBatch);
             document.getElementById('assetForm').addEventListener('submit', submitAsset);
         }
 
@@ -235,10 +313,32 @@
             try {
                 const data = await apiCall(url);
                 allAssets = data.assets || [];
-                renderAssetSections();
+                onFilterTypeChange();
             } catch (e) {
                 document.getElementById('sectionsHost').innerHTML = '<div class="card"><p>Error loading assets</p></div>';
             }
+        }
+
+        function onFilterTypeChange() {
+            updateBatchActions();
+            renderAssetSections();
+        }
+
+        function updateBatchActions() {
+            const host = document.getElementById('batchActions');
+            const typeFilter = document.getElementById('filterType').value;
+            if (!typeFilter || !isBatchType(typeFilter)) {
+                host.style.display = 'none';
+                host.innerHTML = '';
+                return;
+            }
+            const label = TYPE_LABEL[typeFilter] || typeFilter;
+            const plural = BATCH_LABEL_PLURAL[typeFilter] || label.toLowerCase();
+            host.style.display = 'flex';
+            host.innerHTML = `
+                <button type="button" class="btn btn-primary" onclick="showBatchModal('${typeFilter}')">Inspect all ${escapeHtml(plural)}</button>
+                <button type="button" class="btn btn-secondary" onclick="showBatchHistoryModal('${typeFilter}')">Batch history</button>
+            `;
         }
 
         function renderAssetSections() {
@@ -285,9 +385,13 @@
         function renderAssetCard(a) {
             const active = a.is_active === true || a.is_active === 1;
             const badge = TYPE_LABEL[a.asset_type] || a.asset_type;
+            const batch = isBatchType(a.asset_type);
             const adminDel = currentUser.role === 'admin'
                 ? `<button type="button" class="btn btn-danger btn-sm" onclick="deactivateAsset(${a.id})">Deactivate</button>`
                 : '';
+            const inspectBtn = batch
+                ? ''
+                : `<button type="button" class="btn btn-primary btn-sm" onclick="showInspectModal(${a.id})" ${!active ? 'disabled' : ''}>Inspect now</button>`;
             return `
                 <div style="padding: 12px; margin-bottom: 10px; border: 1px solid #e9ecef; border-radius: 6px; background: #fafafa;">
                     <div style="display:flex; flex-wrap:wrap; justify-content: space-between; gap: 8px; align-items: flex-start;">
@@ -306,7 +410,7 @@
                             </div>
                         </div>
                         <div style="display:flex; flex-wrap:wrap; gap: 6px;">
-                            <button type="button" class="btn btn-primary btn-sm" onclick="showInspectModal(${a.id})" ${!active ? 'disabled' : ''}>Inspect now</button>
+                            ${inspectBtn}
                             <button type="button" class="btn btn-secondary btn-sm" onclick="showHistoryModal(${a.id})">History</button>
                             <button type="button" class="btn btn-secondary btn-sm" onclick="showAssetModal(${a.id})">Edit</button>
                             ${adminDel}
@@ -326,6 +430,10 @@
                     alert('Asset not found or you do not have access.');
                     return;
                 }
+            }
+            if (isBatchType(a.asset_type)) {
+                await showBatchModal(a.asset_type);
+                return;
             }
             const assetActive = a.is_active === true || a.is_active === 1;
             if (!assetActive) {
@@ -373,6 +481,189 @@
                 await loadAssets();
             } catch (err) {
                 alert(err.message || 'Failed to save');
+            }
+        }
+
+        function showBatchModal(assetType) {
+            const assets = activeAssetsOfType(assetType);
+            const label = TYPE_LABEL[assetType] || assetType;
+            const plural = BATCH_LABEL_PLURAL[assetType] || label.toLowerCase();
+            document.getElementById('batchAssetType').value = assetType;
+            document.getElementById('batchModalTitle').textContent = 'Inspect all ' + plural;
+            document.getElementById('batchDate').value = todayStr();
+            document.getElementById('batchNotes').value = '';
+            const emptyMsg = document.getElementById('batchEmptyMsg');
+            const host = document.getElementById('batchItemsHost');
+            const submitBtn = document.getElementById('batchSubmitBtn');
+            if (assets.length === 0) {
+                emptyMsg.style.display = 'block';
+                host.innerHTML = '';
+                submitBtn.disabled = true;
+            } else {
+                emptyMsg.style.display = 'none';
+                submitBtn.disabled = false;
+                host.innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Asset</th>
+                                <th>Location</th>
+                                <th>Result</th>
+                                <th>Defects</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${assets.map(a => `
+                                <tr data-asset-id="${a.id}">
+                                    <td>
+                                        <strong>${escapeHtml(a.asset_name)}</strong>
+                                        ${a.identifier ? '<br><small>ID: ' + escapeHtml(a.identifier) + '</small>' : ''}
+                                    </td>
+                                    <td>${escapeHtml(a.location || '—')}</td>
+                                    <td>
+                                        <label><input type="radio" name="batchStatus_${a.id}" value="pass" checked onchange="toggleBatchDefects(${a.id})"> Pass</label>
+                                        <label style="margin-left: 8px;"><input type="radio" name="batchStatus_${a.id}" value="fail" onchange="toggleBatchDefects(${a.id})"> Fail</label>
+                                    </td>
+                                    <td>
+                                        <textarea id="batchDefects_${a.id}" class="form-input" rows="2" placeholder="Required if fail" style="display: none;"></textarea>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+            document.getElementById('batchModal').classList.add('show');
+        }
+
+        function toggleBatchDefects(assetId) {
+            const fail = document.querySelector(`input[name="batchStatus_${assetId}"]:checked`).value === 'fail';
+            const el = document.getElementById('batchDefects_' + assetId);
+            el.style.display = fail ? 'block' : 'none';
+            el.required = fail;
+            if (!fail) el.value = '';
+        }
+
+        async function submitBatch(e) {
+            e.preventDefault();
+            const assetType = document.getElementById('batchAssetType').value;
+            const assets = activeAssetsOfType(assetType);
+            if (assets.length === 0) return;
+            const items = assets.map(a => {
+                const status = document.querySelector(`input[name="batchStatus_${a.id}"]:checked`).value;
+                const defectsEl = document.getElementById('batchDefects_' + a.id);
+                return {
+                    asset_id: a.id,
+                    status,
+                    defects: status === 'fail' ? (defectsEl.value || '') : null
+                };
+            });
+            for (const item of items) {
+                if (item.status === 'fail' && !item.defects.trim()) {
+                    alert('Defects are required for failed items.');
+                    return;
+                }
+            }
+            const body = {
+                asset_type: assetType,
+                inspection_date: document.getElementById('batchDate').value,
+                notes: document.getElementById('batchNotes').value || null,
+                items
+            };
+            try {
+                await apiCall('/inspections/batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                hideModal('batchModal');
+                await loadAssets();
+            } catch (err) {
+                alert(err.message || 'Failed to save batch');
+            }
+        }
+
+        async function showBatchHistoryModal(assetType) {
+            const label = TYPE_LABEL[assetType] || assetType;
+            document.getElementById('batchHistoryTitle').textContent = 'Batch history — ' + label;
+            document.getElementById('batchHistoryBody').innerHTML = '<div class="loading">Loading...</div>';
+            document.getElementById('batchHistoryModal').classList.add('show');
+            try {
+                const data = await apiCall('/inspections/batch/sessions?asset_type=' + encodeURIComponent(assetType) + '&limit=50');
+                const sessions = data.sessions || [];
+                if (sessions.length === 0) {
+                    document.getElementById('batchHistoryBody').innerHTML = '<p>No batch sessions yet.</p>';
+                    return;
+                }
+                document.getElementById('batchHistoryBody').innerHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Inspector</th>
+                                <th>Items</th>
+                                <th>Failed</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sessions.map(s => `
+                                <tr>
+                                    <td>${formatDate(s.inspection_date)}</td>
+                                    <td>${escapeHtml(s.inspector_name || '')}</td>
+                                    <td>${s.item_count || 0}</td>
+                                    <td>${parseInt(s.fail_count, 10) > 0
+                                        ? '<span class="badge badge-danger">' + s.fail_count + '</span>'
+                                        : '<span class="badge badge-success">0</span>'}</td>
+                                    <td><button type="button" class="btn btn-secondary btn-sm" onclick="showBatchDetailModal(${s.id})">View</button></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (e) {
+                document.getElementById('batchHistoryBody').innerHTML = '<p>Error loading history</p>';
+            }
+        }
+
+        async function showBatchDetailModal(sessionId) {
+            document.getElementById('batchDetailTitle').textContent = 'Session detail';
+            document.getElementById('batchDetailBody').innerHTML = '<div class="loading">Loading...</div>';
+            document.getElementById('batchDetailModal').classList.add('show');
+            try {
+                const data = await apiCall('/inspections/batch/sessions/' + sessionId);
+                const s = data.session;
+                const items = data.items || [];
+                document.getElementById('batchDetailTitle').textContent =
+                    'Session — ' + (TYPE_LABEL[s.asset_type] || s.asset_type) + ' — ' + formatDate(s.inspection_date);
+                document.getElementById('batchDetailBody').innerHTML = `
+                    <p style="margin-bottom: 12px;">
+                        Inspector: <strong>${escapeHtml(s.inspector_name || '')}</strong>
+                        ${s.notes ? '<br>Notes: ' + escapeHtml(s.notes) : ''}
+                    </p>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Asset</th>
+                                <th>Location</th>
+                                <th>Result</th>
+                                <th>Defects</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${items.map(r => `
+                                <tr>
+                                    <td>${escapeHtml(r.asset_name)}</td>
+                                    <td>${escapeHtml(r.location || '')}</td>
+                                    <td><span class="badge ${r.status === 'pass' ? 'badge-success' : 'badge-danger'}">${r.status}</span></td>
+                                    <td>${escapeHtml(r.defects || '')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (e) {
+                document.getElementById('batchDetailBody').innerHTML = '<p>Error loading session</p>';
             }
         }
 

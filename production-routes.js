@@ -5816,6 +5816,59 @@ router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdm
     }
 });
 
+router.post('/inspections/batch', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const u = req.session.production_user;
+        const body = req.body || {};
+        const result = await ProductionDatabase.createBatchInspectionSession({
+            asset_type: body.asset_type,
+            inspection_date: body.inspection_date,
+            notes: body.notes,
+            items: body.items,
+            inspector_user_id: u.id,
+            inspector_name: u.username
+        });
+        res.json({ success: true, session: result.session, records: result.records });
+    } catch (error) {
+        console.error('Create batch inspection error:', error);
+        const status = error.message && (
+            error.message.includes('required') ||
+            error.message.includes('Invalid') ||
+            error.message.includes('must be included')
+        ) ? 400 : 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to save batch inspection' });
+    }
+});
+
+router.get('/inspections/batch/sessions', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const asset_type = req.query.asset_type || null;
+        const limit = req.query.limit;
+        const sessions = await ProductionDatabase.getInspectionSessions({ asset_type, limit });
+        res.json({ success: true, sessions });
+    } catch (error) {
+        console.error('Get inspection sessions error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to list sessions' });
+    }
+});
+
+router.get('/inspections/batch/sessions/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const sessionId = parseInt(req.params.id, 10);
+        if (Number.isNaN(sessionId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const result = await ProductionDatabase.getInspectionSessionById(sessionId);
+        if (!result) {
+            return res.status(404).json({ success: false, error: 'Session not found' });
+        }
+        res.json({ success: true, session: result.session, items: result.items });
+    } catch (error) {
+        console.error('Get inspection session error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to get session' });
+    }
+});
+
 // ============ PLANNER ROUTES ============
 
 router.get('/planner', requireProductionAuth, async (req, res) => {

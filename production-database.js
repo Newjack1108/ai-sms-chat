@@ -688,7 +688,7 @@ function initializeSQLite() {
     db.exec(`
         CREATE TABLE IF NOT EXISTS inspection_assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev')),
+            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
             asset_name TEXT NOT NULL,
             location TEXT,
             identifier TEXT,
@@ -703,9 +703,22 @@ function initializeSQLite() {
         )
     `);
     db.exec(`
+        CREATE TABLE IF NOT EXISTS inspection_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'first_aid_box')),
+            inspection_date TEXT NOT NULL,
+            inspector_user_id INTEGER,
+            inspector_name TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (inspector_user_id) REFERENCES production_users(id)
+        )
+    `);
+    db.exec(`
         CREATE TABLE IF NOT EXISTS inspection_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             asset_id INTEGER NOT NULL,
+            session_id INTEGER,
             inspector_user_id INTEGER,
             inspector_name TEXT,
             inspection_date TEXT NOT NULL,
@@ -714,9 +727,54 @@ function initializeSQLite() {
             notes TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (asset_id) REFERENCES inspection_assets(id) ON DELETE CASCADE,
+            FOREIGN KEY (session_id) REFERENCES inspection_sessions(id) ON DELETE SET NULL,
             FOREIGN KEY (inspector_user_id) REFERENCES production_users(id)
         )
     `);
+    try {
+        const inspRecCols = db.prepare("PRAGMA table_info(inspection_records)").all();
+        if (!inspRecCols.some(c => c.name === 'session_id')) {
+            db.exec('ALTER TABLE inspection_records ADD COLUMN session_id INTEGER REFERENCES inspection_sessions(id) ON DELETE SET NULL');
+            console.log('✅ Added session_id column to inspection_records');
+        }
+    } catch (e) {
+        console.log('⚠️ inspection_records session_id migration skipped:', e.message);
+    }
+    try {
+        const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='inspection_assets'").get();
+        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'first_aid_box'")) {
+            console.log('🔄 Migrating inspection_assets to support first_aid_box type...');
+            db.exec(`
+                CREATE TABLE inspection_assets_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
+                    asset_name TEXT NOT NULL,
+                    location TEXT,
+                    identifier TEXT,
+                    frequency_days INTEGER NOT NULL DEFAULT 30,
+                    last_inspection_date TEXT,
+                    next_inspection_date TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    created_by_user_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
+                )
+            `);
+            db.exec(`
+                INSERT INTO inspection_assets_new
+                SELECT id, asset_type, asset_name, location, identifier, frequency_days,
+                       last_inspection_date, next_inspection_date, is_active, created_by_user_id,
+                       created_at, updated_at
+                FROM inspection_assets
+            `);
+            db.exec('DROP TABLE inspection_assets');
+            db.exec('ALTER TABLE inspection_assets_new RENAME TO inspection_assets');
+            console.log('✅ Migrated inspection_assets table to support first_aid_box type');
+        }
+    } catch (e) {
+        console.log('⚠️ inspection_assets first_aid_box migration skipped:', e.message);
+    }
     try {
         const seedCount = db.prepare('SELECT COUNT(*) AS c FROM inspection_assets').get();
         if (seedCount && seedCount.c === 0) {
@@ -734,6 +792,10 @@ function initializeSQLite() {
                 `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
                  VALUES (?, ?, ?, ?, ?, NULL, ?, 1, NULL)`
             ).run('lev', 'Example LEV — Welding Bay', 'Welding Bay', 'LEV-WB1', 30, today);
+            db.prepare(
+                `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, NULL, ?, 1, NULL)`
+            ).run('first_aid_box', 'Example First Aid Box — Office', 'Office', 'FA-O01', 30, yesterday);
             console.log('✅ Seeded example compliance inspection assets');
         }
     } catch (e) {
@@ -2196,7 +2258,7 @@ async function initializePostgreSQL() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS inspection_assets (
                 id SERIAL PRIMARY KEY,
-                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev')),
+                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
                 asset_name VARCHAR(255) NOT NULL,
                 location TEXT,
                 identifier TEXT,
@@ -2210,9 +2272,21 @@ async function initializePostgreSQL() {
             )
         `);
         await pool.query(`
+            CREATE TABLE IF NOT EXISTS inspection_sessions (
+                id SERIAL PRIMARY KEY,
+                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'first_aid_box')),
+                inspection_date DATE NOT NULL,
+                inspector_user_id INTEGER REFERENCES production_users(id),
+                inspector_name TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS inspection_records (
                 id SERIAL PRIMARY KEY,
                 asset_id INTEGER NOT NULL REFERENCES inspection_assets(id) ON DELETE CASCADE,
+                session_id INTEGER REFERENCES inspection_sessions(id) ON DELETE SET NULL,
                 inspector_user_id INTEGER REFERENCES production_users(id),
                 inspector_name TEXT,
                 inspection_date DATE NOT NULL,
@@ -2222,6 +2296,44 @@ async function initializePostgreSQL() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        try {
+            await pool.query(`
+                DO $$ BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'inspection_records' AND column_name = 'session_id'
+                    ) THEN
+                        ALTER TABLE inspection_records ADD COLUMN session_id INTEGER REFERENCES inspection_sessions(id) ON DELETE SET NULL;
+                    END IF;
+                END $$
+            `);
+            console.log('✅ Checked/added session_id column to inspection_records');
+        } catch (migErr) {
+            console.log('⚠️ inspection_records session_id migration skipped:', migErr.message);
+        }
+        try {
+            await pool.query(`
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'inspection_assets_asset_type_check'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM pg_constraint c
+                        JOIN pg_class t ON c.conrelid = t.oid
+                        WHERE t.relname = 'inspection_assets'
+                          AND c.conname = 'inspection_assets_asset_type_check'
+                          AND pg_get_constraintdef(c.oid) LIKE '%first_aid_box%'
+                    ) THEN
+                        ALTER TABLE inspection_assets DROP CONSTRAINT inspection_assets_asset_type_check;
+                        ALTER TABLE inspection_assets ADD CONSTRAINT inspection_assets_asset_type_check
+                            CHECK (asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box'));
+                    END IF;
+                END $$
+            `);
+            console.log('✅ Checked inspection_assets asset_type constraint for first_aid_box');
+        } catch (migErr) {
+            console.log('⚠️ inspection_assets first_aid_box migration skipped:', migErr.message);
+        }
         try {
             const seedRes = await pool.query('SELECT COUNT(*)::int AS c FROM inspection_assets');
             if (seedRes.rows[0].c === 0) {
@@ -2241,6 +2353,11 @@ async function initializePostgreSQL() {
                     `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
                      VALUES ('lev', $1, $2, $3, 30, NULL, $4, TRUE, NULL)`,
                     ['Example LEV — Welding Bay', 'Welding Bay', 'LEV-WB1', today]
+                );
+                await pool.query(
+                    `INSERT INTO inspection_assets (asset_type, asset_name, location, identifier, frequency_days, last_inspection_date, next_inspection_date, is_active, created_by_user_id)
+                     VALUES ('first_aid_box', $1, $2, $3, 30, NULL, $4, TRUE, NULL)`,
+                    ['Example First Aid Box — Office', 'Office', 'FA-O01', yesterday]
                 );
                 console.log('✅ Seeded example compliance inspection assets (PostgreSQL)');
             }
@@ -13637,7 +13754,8 @@ class ProductionDatabase {
     
     // ============ COMPLIANCE INSPECTIONS ============
     
-    static INSPECTION_ASSET_TYPES = ['ladder', 'emergency_lighting', 'lev'];
+    static INSPECTION_ASSET_TYPES = ['ladder', 'emergency_lighting', 'lev', 'first_aid_box'];
+    static BATCH_INSPECTION_ASSET_TYPES = ['ladder', 'first_aid_box'];
     
     static async createInspectionAsset(data) {
         const assetType = data.asset_type;
@@ -13898,6 +14016,7 @@ class ProductionDatabase {
         let inspectionDate = data.inspection_date || new Date().toISOString().split('T')[0];
         const inspectorUserId = data.inspector_user_id != null ? parseInt(data.inspector_user_id, 10) : null;
         const inspectorName = data.inspector_name || null;
+        const sessionId = data.session_id != null ? parseInt(data.session_id, 10) : null;
         const freq = Math.max(1, parseInt(String(asset.frequency_days || 30), 10) || 30);
         
         const nextD = new Date(inspectionDate + 'T12:00:00');
@@ -13908,10 +14027,10 @@ class ProductionDatabase {
             await pool.query('BEGIN');
             try {
                 const ins = await pool.query(
-                    `INSERT INTO inspection_records (asset_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
-                     VALUES ($1, $2, $3, $4::date, $5, $6, $7)
+                    `INSERT INTO inspection_records (asset_id, session_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                     VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8)
                      RETURNING *`,
-                    [parseInt(assetId, 10), inspectorUserId, inspectorName, inspectionDate, status, defects || null, notes]
+                    [parseInt(assetId, 10), sessionId, inspectorUserId, inspectorName, inspectionDate, status, defects || null, notes]
                 );
                 await pool.query(
                     `UPDATE inspection_assets
@@ -13931,11 +14050,12 @@ class ProductionDatabase {
         const rid = db.transaction(() => {
             const rec = db
                 .prepare(
-                    `INSERT INTO inspection_records (asset_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)`
+                    `INSERT INTO inspection_records (asset_id, session_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
                 )
                 .run(
                     parseInt(assetId, 10),
+                    sessionId,
                     inspectorUserId,
                     inspectorName,
                     inspectionDate,
@@ -13952,6 +14072,195 @@ class ProductionDatabase {
         })();
         const row = db.prepare(`SELECT * FROM inspection_records WHERE id = ?`).get(rid);
         return row;
+    }
+
+    static async createBatchInspectionSession(data) {
+        const assetType = data.asset_type;
+        if (!this.BATCH_INSPECTION_ASSET_TYPES.includes(assetType)) {
+            throw new Error('Invalid batch asset_type');
+        }
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (items.length === 0) {
+            throw new Error('At least one item is required');
+        }
+        const inspectionDate = data.inspection_date || new Date().toISOString().split('T')[0];
+        const notes = data.notes != null ? String(data.notes).trim() || null : null;
+        const inspectorUserId = data.inspector_user_id != null ? parseInt(data.inspector_user_id, 10) : null;
+        const inspectorName = data.inspector_name || null;
+
+        const activeAssets = await this.getInspectionAssets({ asset_type: assetType, only_active: true });
+        const activeIds = new Set(activeAssets.map(a => a.id));
+        const submittedIds = new Set();
+        for (const item of items) {
+            const aid = parseInt(item.asset_id, 10);
+            if (Number.isNaN(aid) || !activeIds.has(aid)) {
+                throw new Error(`Invalid or inactive asset_id: ${item.asset_id}`);
+            }
+            if (submittedIds.has(aid)) {
+                throw new Error(`Duplicate asset_id: ${item.asset_id}`);
+            }
+            submittedIds.add(aid);
+            const status = item.status === 'fail' ? 'fail' : 'pass';
+            const defects = item.defects != null ? String(item.defects).trim() : '';
+            if (status === 'fail' && !defects) {
+                throw new Error(`defects are required when status is fail (asset_id ${aid})`);
+            }
+        }
+        if (submittedIds.size !== activeIds.size) {
+            throw new Error('All active assets of this type must be included in the batch');
+        }
+
+        if (isPostgreSQL) {
+            await pool.query('BEGIN');
+            try {
+                const sess = await pool.query(
+                    `INSERT INTO inspection_sessions (asset_type, inspection_date, inspector_user_id, inspector_name, notes)
+                     VALUES ($1, $2::date, $3, $4, $5)
+                     RETURNING *`,
+                    [assetType, inspectionDate, inspectorUserId, inspectorName, notes]
+                );
+                const session = sess.rows[0];
+                const records = [];
+                for (const item of items) {
+                    const aid = parseInt(item.asset_id, 10);
+                    const asset = activeAssets.find(a => a.id === aid);
+                    const status = item.status === 'fail' ? 'fail' : 'pass';
+                    let defects = item.defects != null ? String(item.defects).trim() : '';
+                    if (status === 'fail' && !defects) {
+                        throw new Error(`defects are required when status is fail (asset_id ${aid})`);
+                    }
+                    if (status === 'pass') defects = defects || null;
+                    const freq = Math.max(1, parseInt(String(asset.frequency_days || 30), 10) || 30);
+                    const nextD = new Date(inspectionDate + 'T12:00:00');
+                    nextD.setDate(nextD.getDate() + freq);
+                    const nextInspectionDate = nextD.toISOString().split('T')[0];
+                    const ins = await pool.query(
+                        `INSERT INTO inspection_records (asset_id, session_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                         VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8)
+                         RETURNING *`,
+                        [aid, session.id, inspectorUserId, inspectorName, inspectionDate, status, defects || null, null]
+                    );
+                    await pool.query(
+                        `UPDATE inspection_assets
+                         SET last_inspection_date = $1::date,
+                             next_inspection_date = $2::date,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $3`,
+                        [inspectionDate, nextInspectionDate, aid]
+                    );
+                    records.push(ins.rows[0]);
+                }
+                await pool.query('COMMIT');
+                return { session, records };
+            } catch (e) {
+                await pool.query('ROLLBACK');
+                throw e;
+            }
+        }
+
+        const result = db.transaction(() => {
+            const sessInfo = db
+                .prepare(
+                    `INSERT INTO inspection_sessions (asset_type, inspection_date, inspector_user_id, inspector_name, notes)
+                     VALUES (?, ?, ?, ?, ?)`
+                )
+                .run(assetType, inspectionDate, inspectorUserId, inspectorName, notes);
+            const sessionId = sessInfo.lastInsertRowid;
+            const session = db.prepare('SELECT * FROM inspection_sessions WHERE id = ?').get(sessionId);
+            const records = [];
+            for (const item of items) {
+                const asset = db.prepare('SELECT * FROM inspection_assets WHERE id = ?').get(parseInt(item.asset_id, 10));
+                const status = item.status === 'fail' ? 'fail' : 'pass';
+                let defects = item.defects != null ? String(item.defects).trim() : '';
+                if (status === 'pass') defects = defects || null;
+                const freq = Math.max(1, parseInt(String(asset.frequency_days || 30), 10) || 30);
+                const nextD = new Date(inspectionDate + 'T12:00:00');
+                nextD.setDate(nextD.getDate() + freq);
+                const nextInspectionDate = nextD.toISOString().split('T')[0];
+                const recInfo = db
+                    .prepare(
+                        `INSERT INTO inspection_records (asset_id, session_id, inspector_user_id, inspector_name, inspection_date, status, defects, notes)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                    )
+                    .run(
+                        parseInt(item.asset_id, 10),
+                        sessionId,
+                        inspectorUserId,
+                        inspectorName,
+                        inspectionDate,
+                        status,
+                        defects || null,
+                        null
+                    );
+                db.prepare(
+                    `UPDATE inspection_assets
+                     SET last_inspection_date = ?, next_inspection_date = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?`
+                ).run(inspectionDate, nextInspectionDate, parseInt(item.asset_id, 10));
+                records.push(db.prepare('SELECT * FROM inspection_records WHERE id = ?').get(recInfo.lastInsertRowid));
+            }
+            return { session, records };
+        })();
+        return result;
+    }
+
+    static async getInspectionSessions(filters = {}) {
+        const assetType = filters.asset_type || null;
+        const limit = Math.min(200, Math.max(1, parseInt(String(filters.limit || 50), 10) || 50));
+        let where = [];
+        const params = [];
+        let idx = 1;
+        if (assetType) {
+            where.push(isPostgreSQL ? `s.asset_type = $${idx}` : 's.asset_type = ?');
+            params.push(assetType);
+            idx++;
+        }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        const q = `
+            SELECT s.*,
+                   (SELECT COUNT(*) FROM inspection_records r WHERE r.session_id = s.id) AS item_count,
+                   (SELECT COUNT(*) FROM inspection_records r WHERE r.session_id = s.id AND r.status = 'fail') AS fail_count
+            FROM inspection_sessions s
+            ${whereSql}
+            ORDER BY s.inspection_date DESC, s.created_at DESC
+            LIMIT ${isPostgreSQL ? `$${idx}` : '?'}
+        `;
+        params.push(limit);
+        if (isPostgreSQL) {
+            const r = await pool.query(q, params);
+            return r.rows;
+        }
+        return db.prepare(q).all(...params);
+    }
+
+    static async getInspectionSessionById(id) {
+        const sid = parseInt(id, 10);
+        if (Number.isNaN(sid)) return null;
+        if (isPostgreSQL) {
+            const sess = await pool.query('SELECT * FROM inspection_sessions WHERE id = $1', [sid]);
+            if (!sess.rows[0]) return null;
+            const items = await pool.query(
+                `SELECT r.*, a.asset_name, a.location, a.identifier
+                 FROM inspection_records r
+                 JOIN inspection_assets a ON a.id = r.asset_id
+                 WHERE r.session_id = $1
+                 ORDER BY a.asset_name ASC`,
+                [sid]
+            );
+            return { session: sess.rows[0], items: items.rows };
+        }
+        const session = db.prepare('SELECT * FROM inspection_sessions WHERE id = ?').get(sid);
+        if (!session) return null;
+        const items = db
+            .prepare(
+                `SELECT r.*, a.asset_name, a.location, a.identifier
+                 FROM inspection_records r
+                 JOIN inspection_assets a ON a.id = r.asset_id
+                 WHERE r.session_id = ?
+                 ORDER BY a.asset_name ASC`
+            )
+            .all(sid);
+        return { session, items };
     }
     
     // ============ HOLIDAY OPERATIONS ============

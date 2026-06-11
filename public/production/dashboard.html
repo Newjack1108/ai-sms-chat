@@ -383,19 +383,67 @@
                 try {
                     const inspData = await apiCall('/inspections/overdue');
                     const inspDiv = document.getElementById('overdueInspections');
-                    const list = (inspData.inspections || []).slice(0, 8);
+                    const list = inspData.inspections || [];
                     const typeLabel = (t) => ({
                         ladder: 'Ladder',
+                        first_aid_box: 'First Aid Box',
                         emergency_lighting: 'Emergency Lighting',
                         lev: 'LEV'
                     }[t] || t);
-                    if (list.length === 0) {
+                    const batchTypes = ['ladder', 'first_aid_box'];
+                    const batchLabelPlural = {
+                        ladder: 'Ladders',
+                        first_aid_box: 'First aid boxes'
+                    };
+                    const today = new Date().toISOString().split('T')[0];
+
+                    const displayRows = [];
+                    for (const bt of batchTypes) {
+                        const batchItems = list.filter(r => r.asset_type === bt);
+                        if (batchItems.length === 0) continue;
+                        const hasOverdue = batchItems.some(r =>
+                            (r.urgency || (r.next_inspection_date <= today ? 'overdue' : 'due_soon')) === 'overdue'
+                        );
+                        const earliestDue = batchItems.reduce((min, r) =>
+                            !min || r.next_inspection_date < min ? r.next_inspection_date : min, null);
+                        displayRows.push({
+                            kind: 'batch',
+                            asset_type: bt,
+                            label: batchLabelPlural[bt] || typeLabel(bt),
+                            count: batchItems.length,
+                            urgency: hasOverdue ? 'overdue' : 'due_soon',
+                            next_inspection_date: earliestDue
+                        });
+                    }
+                    for (const row of list) {
+                        if (!batchTypes.includes(row.asset_type)) {
+                            displayRows.push({ kind: 'individual', ...row });
+                        }
+                    }
+                    displayRows.sort((a, b) => {
+                        const da = a.next_inspection_date || '';
+                        const db = b.next_inspection_date || '';
+                        return da.localeCompare(db);
+                    });
+
+                    const shown = displayRows.slice(0, 8);
+                    if (shown.length === 0) {
                         inspDiv.innerHTML = '<p>No inspections due in the next 7 days</p>';
                     } else {
-                        inspDiv.innerHTML = list.map((row) => {
-                            const urg = row.urgency || (row.next_inspection_date <= new Date().toISOString().split('T')[0] ? 'overdue' : 'due_soon');
+                        inspDiv.innerHTML = shown.map((row) => {
+                            const urg = row.urgency || (row.next_inspection_date <= today ? 'overdue' : 'due_soon');
                             const bg = urg === 'overdue' ? '#f8d7da' : '#fff3cd';
                             const fg = urg === 'overdue' ? '#721c24' : '#856404';
+                            if (row.kind === 'batch') {
+                                return `
+                                    <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: ${bg};">
+                                        <strong style="color: ${fg};">${escapeHtml(row.label)} — ${row.count} due</strong><br>
+                                        <small style="color: ${fg};">Earliest due: ${formatDate(row.next_inspection_date)}</small>
+                                        <br>
+                                        <a href="inspections.html?batch=${encodeURIComponent(row.asset_type)}" style="font-size: 11px; color: ${fg}; text-decoration: underline; margin-top: 4px; display: inline-block;">Inspect all →</a>
+                                    </div>
+                                `;
+                            }
                             return `
                                 <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: ${bg};">
                                     <strong style="color: ${fg};">${typeLabel(row.asset_type)} — ${escapeHtml(row.asset_name)}</strong><br>
