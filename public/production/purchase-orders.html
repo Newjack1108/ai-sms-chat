@@ -35,10 +35,13 @@
     <div id="poModal" class="modal">
         <div class="modal-content" style="max-width: 980px;">
             <div class="modal-header">
-                <h3>Create Purchase Order</h3>
+                <h3 id="poModalTitle">Create Purchase Order</h3>
                 <button class="modal-close" onclick="hideModal('poModal')">&times;</button>
             </div>
             <form id="poForm">
+                <div id="poEditReceivedNotice" class="alert alert-warning" style="display: none; margin-bottom: 16px;">
+                    This purchase order has already been received. Saving changes updates the PO record only and does not adjust stock levels.
+                </div>
                 <div class="grid grid-2">
                     <div class="form-group"><label class="form-label">PO Number</label><input id="poNumberPreview" class="form-input" readonly></div>
                     <div class="form-group"><label class="form-label">Order Date</label><input id="poOrderDate" type="date" class="form-input" required></div>
@@ -64,7 +67,7 @@
                 <div style="font-weight: 600; margin-bottom: 12px;">Subtotal: <span id="subtotalLabel">£0.00</span></div>
                 <div class="text-right">
                     <button type="button" class="btn btn-secondary" onclick="hideModal('poModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Create PO</button>
+                    <button type="submit" class="btn btn-primary" id="poSubmitBtn">Create PO</button>
                 </div>
             </form>
         </div>
@@ -96,6 +99,37 @@
         let stockItems = [];
         let lineItems = [];
         let currentReceiveOrder = null;
+        let editingPoId = null;
+
+        function setPoModalMode(mode, poNumber) {
+            const isEdit = mode === 'edit';
+            document.getElementById('poModalTitle').textContent = isEdit
+                ? `Edit Purchase Order ${poNumber || ''}`.trim()
+                : 'Create Purchase Order';
+            document.getElementById('poSubmitBtn').textContent = isEdit ? 'Save Changes' : 'Create PO';
+        }
+
+        function populateSupplierSelect(selectedSupplierId) {
+            const select = document.getElementById('poSupplier');
+            let options = suppliers.filter((s) => s.is_active);
+            if (selectedSupplierId && !options.some((s) => String(s.id) === String(selectedSupplierId))) {
+                const allData = suppliers;
+                const inactive = allData.find((s) => String(s.id) === String(selectedSupplierId));
+                if (inactive) {
+                    options = [inactive, ...options];
+                }
+            }
+            select.innerHTML = '<option value="">Select supplier</option>' + options.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}${s.code ? ` (${escapeHtml(s.code)})` : ''}</option>`).join('');
+            if (selectedSupplierId) {
+                select.value = String(selectedSupplierId);
+            }
+        }
+
+        async function loadSuppliers() {
+            const data = await apiCall('/suppliers');
+            suppliers = data.suppliers || [];
+            populateSupplierSelect();
+        }
 
         async function init() {
             if (await restrictStaffAccess()) return;
@@ -103,13 +137,6 @@
             if (!user) return;
             await initNavbar();
             await Promise.all([loadSuppliers(), loadStockItems(), loadOrders()]);
-        }
-
-        async function loadSuppliers() {
-            const data = await apiCall('/suppliers');
-            suppliers = (data.suppliers || []).filter((s) => s.is_active);
-            const select = document.getElementById('poSupplier');
-            select.innerHTML = '<option value="">Select supplier</option>' + suppliers.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}${s.code ? ` (${escapeHtml(s.code)})` : ''}</option>`).join('');
         }
 
         async function loadStockItems() {
@@ -207,14 +234,57 @@
         }
 
         async function showCreatePoModal() {
+            editingPoId = null;
+            setPoModalMode('create');
+            document.getElementById('poEditReceivedNotice').style.display = 'none';
             document.getElementById('poForm').reset();
             document.getElementById('poOrderDate').value = londonYmd(new Date());
             lineItems = [];
             addLineItem('raw_material');
+            populateSupplierSelect();
             const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(document.getElementById('poOrderDate').value)}`);
             document.getElementById('poNumberPreview').value = numberData.po_number || '';
             renderLineItems();
             showModal('poModal');
+        }
+
+        async function showEditPoModal(id) {
+            try {
+                const data = await apiCall(`/purchase-orders/${id}`);
+                const order = data.order;
+                if (!order) {
+                    throw new Error('Purchase order not found');
+                }
+                editingPoId = id;
+                setPoModalMode('edit', order.po_number);
+                document.getElementById('poEditReceivedNotice').style.display =
+                    order.status === 'received' ? '' : 'none';
+                document.getElementById('poNumberPreview').value = order.po_number || '';
+                document.getElementById('poOrderDate').value = order.order_date ? String(order.order_date).split('T')[0] : '';
+                document.getElementById('poExpectedDate').value = order.expected_date ? String(order.expected_date).split('T')[0] : '';
+                document.getElementById('poNotes').value = order.notes || '';
+                document.getElementById('poOneOffPurchase').checked = !!(order.is_one_off_purchase);
+                populateSupplierSelect(order.supplier_id);
+                lineItems = (order.items || []).map((it) => {
+                    const isCustom = !!(it.is_custom_item);
+                    return {
+                        line_type: isCustom ? 'custom' : 'raw_material',
+                        stock_item_id: isCustom ? '' : (it.stock_item_id || ''),
+                        custom_item_name: isCustom ? (it.stock_item_name || it.custom_item_name || '') : '',
+                        custom_unit: isCustom ? (it.stock_item_unit || it.custom_unit || 'item') : '',
+                        quantity: it.quantity,
+                        unit_cost_gbp: it.unit_cost_gbp
+                    };
+                });
+                if (lineItems.length === 0) {
+                    addLineItem('raw_material');
+                } else {
+                    renderLineItems();
+                }
+                showModal('poModal');
+            } catch (error) {
+                showAlert(error.message || 'Failed to load purchase order', 'error');
+            }
         }
 
         async function loadOrders() {
@@ -241,6 +311,7 @@
                                     <td>${formatCurrency(o.subtotal_gbp || 0)}</td>
                                     <td>
                                         <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
+                                        <button class="btn btn-secondary btn-sm admin-or-office" onclick="showEditPoModal(${o.id})">Edit</button>
                                         <button class="btn btn-primary btn-sm" onclick="downloadPoPdf(${o.id})">Download PDF</button>
                                         <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
                                         <button class="btn btn-danger btn-sm admin-or-office" onclick="deletePo(${o.id}, '${escapeHtml(o.po_number)}')">Delete</button>
@@ -289,6 +360,7 @@
                         </tbody>
                     </table>
                     <div class="text-right">
+                        <button type="button" class="btn btn-secondary admin-or-office" onclick="hideModal('viewModal'); showEditPoModal(${o.id})">Edit</button>
                         <button type="button" class="btn btn-primary" onclick="downloadPoPdf(${o.id})">Download PDF</button>
                         <button type="button" class="btn btn-secondary" onclick="hideModal('viewModal')">Close</button>
                     </div>
@@ -553,6 +625,7 @@
         }
 
         document.getElementById('poOrderDate').addEventListener('change', async (e) => {
+            if (editingPoId) return;
             const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(e.target.value)}`);
             document.getElementById('poNumberPreview').value = numberData.po_number || '';
         });
@@ -610,12 +683,19 @@
                 items: payloadItems
             };
             try {
-                await apiCall('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
-                hideModal('poModal');
-                showAlert('Purchase order created', 'success');
+                if (editingPoId) {
+                    await apiCall(`/purchase-orders/${editingPoId}`, { method: 'PUT', body: JSON.stringify(payload) });
+                    hideModal('poModal');
+                    editingPoId = null;
+                    showAlert('Purchase order updated', 'success');
+                } else {
+                    await apiCall('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
+                    hideModal('poModal');
+                    showAlert('Purchase order created', 'success');
+                }
                 await loadOrders();
             } catch (error) {
-                showAlert(error.message || 'Failed to create purchase order', 'error');
+                showAlert(error.message || (editingPoId ? 'Failed to update purchase order' : 'Failed to create purchase order'), 'error');
             }
         });
 

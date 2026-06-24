@@ -6726,6 +6726,85 @@ class ProductionDatabase {
         return this.getPurchaseOrderById(id);
     }
 
+    static async updatePurchaseOrder(id, data) {
+        const items = Array.isArray(data.items) ? data.items : [];
+        const isOneOffPurchase = !!data.is_one_off_purchase;
+        if (items.length === 0 && !isOneOffPurchase) {
+            throw new Error('At least one purchase order item is required');
+        }
+        const orderDate = data.order_date || new Date().toISOString().slice(0, 10);
+        const existing = await this.getPurchaseOrderById(id);
+        if (!existing) {
+            return null;
+        }
+        if (isPostgreSQL) {
+            await pool.query('BEGIN');
+            try {
+                await pool.query(
+                    `UPDATE purchase_orders
+                     SET supplier_id = $1, order_date = $2, expected_date = $3, notes = $4,
+                         is_one_off_purchase = $5, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = $6`,
+                    [data.supplier_id, orderDate, data.expected_date || null, data.notes || null, isOneOffPurchase, id]
+                );
+                await pool.query(`DELETE FROM purchase_order_items WHERE purchase_order_id = $1`, [id]);
+                let subtotal = 0;
+                for (const item of items) {
+                    const qty = parseFloat(item.quantity || 0);
+                    const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                    const lineTotal = parseFloat((qty * unitCost).toFixed(2));
+                    subtotal += lineTotal;
+                    await pool.query(
+                        `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                        [id, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null]
+                    );
+                }
+                await pool.query(
+                    `UPDATE purchase_orders SET subtotal_gbp = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                    [parseFloat(subtotal.toFixed(2)), id]
+                );
+                await pool.query('COMMIT');
+                return this.getPurchaseOrderById(id);
+            } catch (error) {
+                await pool.query('ROLLBACK');
+                throw error;
+            }
+        }
+        const tx = db.transaction((payload) => {
+            db.prepare(
+                `UPDATE purchase_orders
+                 SET supplier_id = ?, order_date = ?, expected_date = ?, notes = ?,
+                     is_one_off_purchase = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?`
+            ).run(
+                payload.supplier_id,
+                payload.order_date,
+                payload.expected_date || null,
+                payload.notes || null,
+                payload.is_one_off_purchase ? 1 : 0,
+                id
+            );
+            db.prepare(`DELETE FROM purchase_order_items WHERE purchase_order_id = ?`).run(id);
+            let subtotal = 0;
+            const insertItem = db.prepare(
+                `INSERT INTO purchase_order_items (purchase_order_id, stock_item_id, custom_item_name, custom_unit, quantity, unit_cost_gbp, line_total_gbp, notes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            );
+            for (const item of payload.items) {
+                const qty = parseFloat(item.quantity || 0);
+                const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                const lineTotal = parseFloat((qty * unitCost).toFixed(2));
+                subtotal += lineTotal;
+                insertItem.run(id, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
+            }
+            db.prepare(`UPDATE purchase_orders SET subtotal_gbp = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+                .run(parseFloat(subtotal.toFixed(2)), id);
+        });
+        tx({ ...data, order_date: orderDate, items, is_one_off_purchase: isOneOffPurchase });
+        return this.getPurchaseOrderById(id);
+    }
+
     static async addPurchaseOrderItem(purchaseOrderId, item) {
         const qty = parseFloat(item.quantity || 0);
         const unitCost = parseFloat(item.unit_cost_gbp || 0);

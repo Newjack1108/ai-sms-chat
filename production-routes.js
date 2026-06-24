@@ -744,6 +744,57 @@ router.delete('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, asy
     }
 });
 
+function normalizePurchaseOrderPayload(body) {
+    const supplierId = parseInt(body.supplier_id, 10);
+    const isOneOffPurchase = !!body.is_one_off_purchase;
+    if (Number.isNaN(supplierId)) {
+        return { error: 'Valid supplier_id is required' };
+    }
+    const incomingItems = Array.isArray(body.items) ? body.items : [];
+    const normalizedItems = incomingItems.map((item) => {
+        const stockItemId = parseInt(item.stock_item_id, 10);
+        const quantity = parseFloat(item.quantity || 0);
+        const customItemName = item.custom_item_name ? String(item.custom_item_name).trim() : '';
+        const customUnit = item.custom_unit ? String(item.custom_unit).trim() : '';
+        if (!(quantity > 0)) return null;
+        if (!Number.isNaN(stockItemId) && stockItemId > 0) {
+            return {
+                stock_item_id: stockItemId,
+                custom_item_name: null,
+                custom_unit: null,
+                quantity,
+                unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
+                notes: item.notes || null
+            };
+        }
+        if (customItemName) {
+            return {
+                stock_item_id: null,
+                custom_item_name: customItemName,
+                custom_unit: customUnit || 'item',
+                quantity,
+                unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
+                notes: item.notes || null
+            };
+        }
+        return null;
+    }).filter(Boolean);
+    if (!isOneOffPurchase && normalizedItems.some((item) => item.custom_item_name)) {
+        return { error: 'Custom line items are only allowed on one-off purchases' };
+    }
+    if (normalizedItems.length === 0 && !isOneOffPurchase) {
+        return { error: 'At least one valid line item is required unless this is marked as a one-off purchase' };
+    }
+    return {
+        supplier_id: supplierId,
+        order_date: body.order_date || new Date().toISOString().slice(0, 10),
+        expected_date: body.expected_date || null,
+        notes: body.notes || null,
+        is_one_off_purchase: isOneOffPurchase,
+        items: normalizedItems
+    };
+}
+
 router.get('/purchase-orders/next-number', requireProductionAuth, async (req, res) => {
     try {
         const orderDate = req.query.order_date ? String(req.query.order_date) : undefined;
@@ -786,56 +837,14 @@ router.get('/purchase-orders/:id', requireProductionAuth, async (req, res) => {
 
 router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { supplier_id, order_date, expected_date, status, notes, items, is_one_off_purchase } = req.body;
-        const supplierId = parseInt(supplier_id, 10);
-        const isOneOffPurchase = !!is_one_off_purchase;
-        if (Number.isNaN(supplierId)) {
-            return res.status(400).json({ success: false, error: 'Valid supplier_id is required' });
-        }
-        const incomingItems = Array.isArray(items) ? items : [];
-        const normalizedItems = incomingItems.map((item) => {
-            const stockItemId = parseInt(item.stock_item_id, 10);
-            const quantity = parseFloat(item.quantity || 0);
-            const customItemName = item.custom_item_name ? String(item.custom_item_name).trim() : '';
-            const customUnit = item.custom_unit ? String(item.custom_unit).trim() : '';
-            if (!(quantity > 0)) return null;
-            if (!Number.isNaN(stockItemId) && stockItemId > 0) {
-                return {
-                    stock_item_id: stockItemId,
-                    custom_item_name: null,
-                    custom_unit: null,
-                    quantity,
-                    unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
-                    notes: item.notes || null
-                };
-            }
-            if (customItemName) {
-                return {
-                    stock_item_id: null,
-                    custom_item_name: customItemName,
-                    custom_unit: customUnit || 'item',
-                    quantity,
-                    unit_cost_gbp: parseFloat(item.unit_cost_gbp || 0),
-                    notes: item.notes || null
-                };
-            }
-            return null;
-        }).filter(Boolean);
-        if (!isOneOffPurchase && normalizedItems.some((item) => item.custom_item_name)) {
-            return res.status(400).json({ success: false, error: 'Custom line items are only allowed on one-off purchases' });
-        }
-        if (normalizedItems.length === 0 && !isOneOffPurchase) {
-            return res.status(400).json({ success: false, error: 'At least one valid line item is required unless this is marked as a one-off purchase' });
+        const normalized = normalizePurchaseOrderPayload(req.body);
+        if (normalized.error) {
+            return res.status(400).json({ success: false, error: normalized.error });
         }
         const order = await ProductionDatabase.createPurchaseOrder({
-            supplier_id: supplierId,
-            order_date: order_date || new Date().toISOString().slice(0, 10),
-            expected_date: expected_date || null,
-            status: status || 'draft',
-            notes: notes || null,
-            is_one_off_purchase: isOneOffPurchase,
-            created_by: req.session.production_user ? req.session.production_user.id : null,
-            items: normalizedItems
+            ...normalized,
+            status: req.body.status || 'draft',
+            created_by: req.session.production_user ? req.session.production_user.id : null
         });
         res.json({ success: true, order });
     } catch (error) {
@@ -843,6 +852,27 @@ router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, asy
         const msg = (error.message || '').toLowerCase();
         const isDuplicate = msg.includes('unique') || msg.includes('duplicate');
         res.status(isDuplicate ? 409 : 500).json({ success: false, error: isDuplicate ? 'Purchase order number already exists, try again' : 'Failed to create purchase order' });
+    }
+});
+
+router.put('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const poId = parseInt(req.params.id, 10);
+        if (Number.isNaN(poId)) {
+            return res.status(400).json({ success: false, error: 'Invalid purchase order id' });
+        }
+        const normalized = normalizePurchaseOrderPayload(req.body);
+        if (normalized.error) {
+            return res.status(400).json({ success: false, error: normalized.error });
+        }
+        const order = await ProductionDatabase.updatePurchaseOrder(poId, normalized);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Purchase order not found' });
+        }
+        res.json({ success: true, order });
+    } catch (error) {
+        console.error('Update purchase order error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update purchase order' });
     }
 });
 
