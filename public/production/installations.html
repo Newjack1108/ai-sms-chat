@@ -1586,9 +1586,15 @@
                             <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
                             <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
                             <tr><th>Status:</th><td><span class="badge badge-info">${inst.status}</span></td></tr>
-                            <tr><th>Notes:</th><td>${inst.notes || '-'}</td></tr>
                             <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>
                         </table>
+                        <h5>Notes</h5>
+                        ${(canManageInstallations || isAssignedInstaller) ? `
+                        <div id="installationDetailsNotesSection">
+                            <textarea id="installationDetailsNotes" class="form-input" rows="4" placeholder="Add notes for installers..."></textarea>
+                            <button type="button" onclick="saveInstallationNotes(${inst.id})" class="btn btn-primary" style="margin-top: 8px;">Save notes</button>
+                        </div>` : `
+                        <div class="notes-block">${inst.notes ? escapeHtml(inst.notes) : '—'}</div>`}
                         <h5>Assigned Users:</h5>
                         <ul>
                             ${inst.assigned_users && inst.assigned_users.length > 0 ? 
@@ -1613,9 +1619,29 @@
                 `;
                 
                 document.getElementById('installationDetailsContent').innerHTML = html;
+                const notesTextarea = document.getElementById('installationDetailsNotes');
+                if (notesTextarea) {
+                    notesTextarea.value = inst.notes || '';
+                }
                 showModal('installationDetailsModal');
             } catch (error) {
                 showAlert('Error loading installation details: ' + error.message, 'error');
+            }
+        }
+
+        async function saveInstallationNotes(installationId) {
+            try {
+                const notesEl = document.getElementById('installationDetailsNotes');
+                const notes = notesEl ? notesEl.value.trim() || null : null;
+                await apiCall(`/installations/${installationId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ notes })
+                });
+                showAlert('Notes saved successfully');
+                await loadData();
+                renderCalendar();
+            } catch (error) {
+                showAlert('Error saving notes: ' + error.message, 'error');
             }
         }
         
