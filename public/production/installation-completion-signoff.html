@@ -17,12 +17,16 @@
         .emojiItem.selected { border-color: #0d6efd; background: #eef5ff; }
         #signatureCanvas { width: 100%; height: 220px; border: 1px dashed #6c757d; border-radius: 4px; touch-action: none; }
         .actions { display: flex; gap: 10px; margin-top: 12px; }
-        .btn { border: 0; border-radius: 4px; padding: 10px 14px; cursor: pointer; }
+        .btn { border: 0; border-radius: 4px; padding: 10px 14px; cursor: pointer; text-decoration: none; text-align: center; display: inline-block; }
         .btn-primary { background: #0d6efd; color: #fff; }
         .btn-secondary { background: #6c757d; color: #fff; }
         .muted { color: #6c757d; font-size: 13px; }
         .error { color: #dc3545; margin-top: 8px; }
         .success { color: #198754; margin-top: 8px; }
+        .review-links { margin-top: 20px; padding-top: 16px; border-top: 1px solid #dee2e6; }
+        .review-links h3 { margin: 0 0 8px 0; font-size: 1.1rem; }
+        .review-links-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+        .review-link-btn { width: 100%; }
         @media (max-width: 768px) {
             .wrap {
                 margin: 0;
@@ -48,40 +52,47 @@
     <div class="wrap">
         <h2>Installation Completion Sign-Off</h2>
         <p class="muted" id="jobMeta">Loading installation details...</p>
-        <div class="row">
-            <label for="signerName">Your name</label>
-            <input id="signerName" type="text" placeholder="Customer name">
-        </div>
-        <div class="row">
-            <label for="signerPhone">Your phone (optional)</label>
-            <input id="signerPhone" type="tel" placeholder="Phone number">
-        </div>
-        <div class="row">
-            <label>May we use installation photos on social media?</label>
-            <label><input type="radio" name="socialConsent" value="yes"> Yes</label>
-            <label><input type="radio" name="socialConsent" value="no"> No</label>
-        </div>
-        <div class="row">
-            <label>How happy are you with the install service?</label>
-            <div class="emojiRow" id="emojiRow">
-                <div class="emojiItem" data-value="very_happy">😀 Very happy</div>
-                <div class="emojiItem" data-value="happy">🙂 Happy</div>
-                <div class="emojiItem" data-value="neutral">😐 Neutral</div>
-                <div class="emojiItem" data-value="unhappy">🙁 Unhappy</div>
-                <div class="emojiItem" data-value="very_unhappy">😞 Very unhappy</div>
+        <div id="signoffFormSection">
+            <div class="row">
+                <label for="signerName">Your name</label>
+                <input id="signerName" type="text" placeholder="Customer name" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false">
             </div>
-        </div>
-        <div class="row">
-            <label>Customer completion signature</label>
-            <canvas id="signatureCanvas"></canvas>
+            <div class="row">
+                <label for="signerPhone">Your phone (optional)</label>
+                <input id="signerPhone" type="tel" placeholder="Phone number" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="tel">
+            </div>
+            <div class="row">
+                <label>May we use installation photos on social media?</label>
+                <label><input type="radio" name="socialConsent" value="yes"> Yes</label>
+                <label><input type="radio" name="socialConsent" value="no"> No</label>
+            </div>
+            <div class="row">
+                <label>How happy are you with the install service?</label>
+                <div class="emojiRow" id="emojiRow">
+                    <div class="emojiItem" data-value="very_happy">😀 Very happy</div>
+                    <div class="emojiItem" data-value="happy">🙂 Happy</div>
+                    <div class="emojiItem" data-value="neutral">😐 Neutral</div>
+                    <div class="emojiItem" data-value="unhappy">🙁 Unhappy</div>
+                    <div class="emojiItem" data-value="very_unhappy">😞 Very unhappy</div>
+                </div>
+            </div>
+            <div class="row">
+                <label>Customer completion signature</label>
+                <canvas id="signatureCanvas"></canvas>
+                <div class="actions">
+                    <button type="button" class="btn btn-secondary" id="clearSigBtn">Clear signature</button>
+                </div>
+            </div>
             <div class="actions">
-                <button type="button" class="btn btn-secondary" id="clearSigBtn">Clear signature</button>
+                <button type="button" class="btn btn-primary" id="submitBtn">Submit Sign-Off</button>
             </div>
-        </div>
-        <div class="actions">
-            <button type="button" class="btn btn-primary" id="submitBtn">Submit Sign-Off</button>
         </div>
         <div id="statusMessage"></div>
+        <div id="reviewLinksSection" class="review-links" hidden>
+            <h3>Thank you — we'd love your feedback online</h3>
+            <p class="muted">If you have a moment, please leave us a review:</p>
+            <div id="reviewLinksList" class="review-links-list"></div>
+        </div>
     </div>
     <script>
         const API_BASE = '/production/api';
@@ -91,10 +102,39 @@
         let isDrawing = false;
         let selectedEmoji = null;
 
+        function escapeHtml(s) {
+            if (s == null) return '';
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function escapeAttr(s) {
+            return escapeHtml(s).replace(/'/g, '&#39;');
+        }
+
         function setStatus(message, type) {
             const el = document.getElementById('statusMessage');
             el.className = type || '';
             el.textContent = message || '';
+        }
+
+        function showSubmittedState(reviewLinks) {
+            const formSection = document.getElementById('signoffFormSection');
+            if (formSection) formSection.style.display = 'none';
+            setStatus('Thank you. Your sign-off has been submitted successfully.', 'success');
+            showReviewLinks(reviewLinks);
+        }
+
+        function showReviewLinks(links) {
+            if (!links || !links.length) return;
+            const list = document.getElementById('reviewLinksList');
+            list.innerHTML = links.map((link) =>
+                `<a class="btn btn-primary review-link-btn" href="${escapeAttr(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`
+            ).join('');
+            document.getElementById('reviewLinksSection').hidden = false;
         }
 
         function resizeCanvas() {
@@ -141,6 +181,11 @@
             }
             try {
                 const data = await fetchJson(`/installations/public/signoff/${encodeURIComponent(token)}`);
+                if (data.already_submitted) {
+                    document.getElementById('jobMeta').textContent = 'Your sign-off has already been submitted.';
+                    showSubmittedState(data.review_links || []);
+                    return;
+                }
                 const inst = data.installation;
                 document.getElementById('jobMeta').textContent =
                     `Installation #${inst.id} · ${inst.location || 'Location not set'} · ${inst.start_date || ''}`;
@@ -204,12 +249,11 @@
                         satisfaction_emoji: selectedEmoji,
                         signature_data_url: canvas.toDataURL('image/png')
                     };
-                    await fetchJson(`/installations/public/signoff/${encodeURIComponent(token)}`, {
+                    const data = await fetchJson(`/installations/public/signoff/${encodeURIComponent(token)}`, {
                         method: 'POST',
                         body: JSON.stringify(payload)
                     });
-                    setStatus('Thank you. Your sign-off has been submitted successfully.', 'success');
-                    document.getElementById('submitBtn').disabled = true;
+                    showSubmittedState(data.review_links || []);
                 } catch (error) {
                     setStatus(error.message, 'error');
                 }

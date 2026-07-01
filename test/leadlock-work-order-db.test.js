@@ -59,6 +59,35 @@ describe('LeadLock work order database ingest', () => {
         assert.equal(row.crm_customer_address, '1 CRM Street');
     });
 
+    it('persists what3words on create and update', async () => {
+        const body = {
+            order_number: 'ORD-DB-W3W',
+            order_id: 9003,
+            fulfillment_method: 'delivery',
+            customer_name: 'W3W Test',
+            customer_postcode: 'CH3 3CC',
+            customer_address: 'Field Lane',
+            items: [],
+            total_amount: 1500,
+            currency: 'GBP',
+            what3words: '///index.home.raft'
+        };
+        const payload = normalizeLeadLockWebhookPayload(body);
+        const { order, updated } = await handleLeadLockWorkOrderWebhook(payload, ProductionDatabase);
+        assert.equal(updated, false);
+        let row = await ProductionDatabase.getProductOrderById(order.id);
+        assert.equal(row.what3words, 'index.home.raft');
+
+        const updatePayload = normalizeLeadLockWebhookPayload({
+            ...body,
+            what3words: 'filled.count.soap'
+        });
+        const { updated: updatedAgain } = await handleLeadLockWorkOrderWebhook(updatePayload, ProductionDatabase);
+        assert.equal(updatedAgain, true);
+        row = await ProductionDatabase.getProductOrderByLeadlockOrderId(9003);
+        assert.equal(row.what3words, 'filled.count.soap');
+    });
+
     it('clears travel time when upserted as collection', async () => {
         const deliveryBody = {
             order_number: 'ORD-DB-002',

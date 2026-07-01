@@ -94,6 +94,12 @@
         .sheet td {
             word-break: break-word;
         }
+        .maps-link,
+        .w3w-link {
+            display: inline-block;
+            margin-top: 4px;
+            color: #0d6efd;
+        }
         @media (max-width: 768px) {
             body {
                 padding: 12px;
@@ -186,6 +192,30 @@
         function row(label, value) {
             const v = value == null || value === '' ? '—' : value;
             return `<tr><th>${esc(label)}</th><td>${v}</td></tr>`;
+        }
+
+        function rowHtml(label, htmlContent) {
+            const cell = htmlContent == null || htmlContent === '' ? '—' : htmlContent;
+            return `<tr><th>${esc(label)}</th><td>${cell}</td></tr>`;
+        }
+
+        function renderSiteDirectionsRows(inst, order) {
+            let html = '';
+            const mapsQuery = resolveInstallationSiteMapsQuery(inst, order);
+            const mapsUrl = buildGoogleMapsSearchUrl(mapsQuery);
+            if (mapsUrl) {
+                html += rowHtml('Directions', `<a class="maps-link" href="${esc(mapsUrl)}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>`);
+            }
+            const w3w = resolveInstallationWhat3Words(order);
+            const w3wUrl = buildWhat3WordsUrl(w3w);
+            if (w3w) {
+                const label = esc(formatWhat3WordsDisplay(w3w));
+                const link = w3wUrl
+                    ? ` <a class="w3w-link" href="${esc(w3wUrl)}" target="_blank" rel="noopener noreferrer">Open in what3words</a>`
+                    : '';
+                html += rowHtml('what3words', `${label}${link}`);
+            }
+            return html;
         }
 
         function renderJobSheetSalesOnlyLines(lines) {
@@ -330,6 +360,7 @@
                     <table>
                         ${row('Location', inst.location ? esc(inst.location) : '—')}
                         ${row('Site address', inst.address ? esc(inst.address) : '—')}
+                        ${renderSiteDirectionsRows(inst, order)}
                         ${row('Date range', multiDay ? `${formatDate(startD)} – ${formatDate(endD)}` : formatDate(startD))}
                         ${row('Default start', formatTime(inst.start_time))}
                         ${row('Default end', formatTime(inst.end_time))}

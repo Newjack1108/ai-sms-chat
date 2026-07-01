@@ -69,6 +69,28 @@ const COMPLETION_QUESTION_KEYS = [
     'snagging_resolved'
 ];
 const ALLOWED_SATISFACTION_EMOJIS = ['very_happy', 'happy', 'neutral', 'unhappy', 'very_unhappy'];
+const POSITIVE_SATISFACTION_EMOJIS = ['very_happy', 'happy'];
+
+/** Customer review URLs — set CUSTOMER_REVIEW_*_URL env vars on deployment. */
+function getCustomerReviewLinks() {
+    const links = [];
+    if (process.env.CUSTOMER_REVIEW_GOOGLE_URL) {
+        links.push({ id: 'google', label: 'Leave a Google review', url: process.env.CUSTOMER_REVIEW_GOOGLE_URL });
+    }
+    if (process.env.CUSTOMER_REVIEW_TRUSTPILOT_URL) {
+        links.push({ id: 'trustpilot', label: 'Leave a Trustpilot review', url: process.env.CUSTOMER_REVIEW_TRUSTPILOT_URL });
+    }
+    if (process.env.CUSTOMER_REVIEW_FACEBOOK_URL) {
+        links.push({ id: 'facebook', label: 'Leave a Facebook review', url: process.env.CUSTOMER_REVIEW_FACEBOOK_URL });
+    }
+    return links;
+}
+
+function reviewLinksForSatisfaction(satisfactionEmoji) {
+    if (!POSITIVE_SATISFACTION_EMOJIS.includes(satisfactionEmoji)) return [];
+    return getCustomerReviewLinks();
+}
+
 const INSTALLATION_PHOTO_STAGE_KEYS = ['arrival', 'before', 'in_progress_1', 'in_progress_2', 'after', 'customer_handover'];
 const DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS = [
     { key: 'lights_working', critical: true },
@@ -2980,7 +3002,14 @@ router.get('/installations/public/signoff/:token', async (req, res) => {
             return res.status(404).json({ success: false, error: 'Invalid signoff link' });
         }
         if (tokenRow.used_at) {
-            return res.status(400).json({ success: false, error: 'This signoff link has already been used' });
+            const signoff = await ProductionDatabase.getInstallationSignoff(tokenRow.installation_id);
+            const satisfactionEmoji = signoff?.satisfaction_emoji || null;
+            return res.json({
+                success: true,
+                already_submitted: true,
+                signoff: { satisfaction_emoji: satisfactionEmoji },
+                review_links: reviewLinksForSatisfaction(satisfactionEmoji)
+            });
         }
         if (tokenRow.expires_at && new Date(tokenRow.expires_at).getTime() < Date.now()) {
             return res.status(400).json({ success: false, error: 'This signoff link has expired' });
@@ -3045,7 +3074,13 @@ router.post('/installations/public/signoff/:token', async (req, res) => {
         await ProductionDatabase.markInstallationSignoffTokenUsed(token);
         const installation = await ProductionDatabase.getInstallationById(tokenRow.installation_id);
         const gate = getCompletionGateResult(installation);
-        res.json({ success: true, signoff_complete: true, completion_requirements_met: gate.ok, blockers: gate.blockers });
+        res.json({
+            success: true,
+            signoff_complete: true,
+            completion_requirements_met: gate.ok,
+            blockers: gate.blockers,
+            review_links: reviewLinksForSatisfaction(satisfaction_emoji)
+        });
     } catch (error) {
         console.error('Submit public signoff error:', error);
         res.status(500).json({ success: false, error: 'Failed to submit signoff' });

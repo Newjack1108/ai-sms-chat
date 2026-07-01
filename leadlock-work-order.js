@@ -22,6 +22,13 @@ function optionalString(value) {
     return s === '' ? null : s;
 }
 
+/** Normalize what3words to word.word.word (no /// prefix). */
+function normalizeWhat3Words(value) {
+    const s = optionalString(value);
+    if (!s) return null;
+    return s.replace(/^\/\/\//, '').toLowerCase();
+}
+
 /** First non-empty scalar from a list (for webhook field aliases). */
 function firstPresentString(...values) {
     for (const value of values) {
@@ -131,6 +138,15 @@ function normalizeLeadLockWebhookPayload(body) {
         body.delivery_location_postcode,
         deliveryBlock && deliveryBlock.postcode
     );
+    const what3words = normalizeWhat3Words(
+        firstPresentString(
+            body.what3words,
+            body.what_three_words,
+            body.w3w,
+            deliveryBlock && deliveryBlock.what3words,
+            deliveryBlock && deliveryBlock.what_three_words
+        )
+    );
 
     let addressIsDeliveryLocation = resolveAddressIsDeliveryLocationFlag(body);
     if (addressIsDeliveryLocation === null) {
@@ -193,7 +209,8 @@ function normalizeLeadLockWebhookPayload(body) {
         invoice_number: optionalString(body.invoice_number),
         address_is_delivery_location: addressIsDeliveryLocation,
         delivery_location_notes: deliveryLocationNotes,
-        crm_customer_address: crmCustomerAddress
+        crm_customer_address: crmCustomerAddress,
+        what3words
     };
 }
 
@@ -263,6 +280,7 @@ async function handleLeadLockWorkOrderWebhook(payload, ProductionDatabase) {
 module.exports = {
     parseBool,
     parseAmount,
+    normalizeWhat3Words,
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
     reconcileLeadLockPaymentFlags,

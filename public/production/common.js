@@ -924,6 +924,38 @@ function hideModal(modalId) {
     }
 }
 
+/** Reduce mobile keyboard predictions and browser autofill on free-text fields. */
+const SUGGESTION_SKIP_AUTOCOMPLETE = new Set(['username', 'current-password']);
+
+function disableInputSuggestions(root) {
+    const container = root || document;
+    const nodes = [];
+    if (container.matches && (container.matches('input') || container.matches('textarea'))) {
+        nodes.push(container);
+    }
+    if (container.querySelectorAll) {
+        nodes.push(...container.querySelectorAll('input, textarea'));
+    }
+    nodes.forEach((el) => {
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        if (['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'date', 'number'].includes(type)) {
+            return;
+        }
+        const ac = el.getAttribute('autocomplete');
+        if (ac && SUGGESTION_SKIP_AUTOCOMPLETE.has(ac)) {
+            return;
+        }
+        el.setAttribute('autocomplete', 'off');
+        el.setAttribute('autocorrect', 'off');
+        el.setAttribute('autocapitalize', 'off');
+        el.setAttribute('spellcheck', 'false');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    disableInputSuggestions(document);
+});
+
 // Close modal on outside click
 document.addEventListener('click', (e) => {
     if (e.target.classList.contains('modal')) {
@@ -1163,6 +1195,47 @@ function formatLeadLockPaidLabel(paid) {
     return leadlockTruthy(paid) ? 'Paid' : 'Not paid';
 }
 
+function buildGoogleMapsSearchUrl(query) {
+    const q = (query || '').trim();
+    if (!q) return null;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+function buildWhat3WordsUrl(words) {
+    const w = (words || '').trim().replace(/^\/\/\//, '');
+    if (!w) return null;
+    return `https://what3words.com/${encodeURIComponent(w)}`;
+}
+
+function resolveInstallationSiteMapsQuery(installation, order) {
+    const instAddr = (installation && installation.address || '').trim();
+    const instLoc = (installation && installation.location || '').trim();
+    if (instAddr) {
+        const parts = [instAddr];
+        if (instLoc && !instAddr.toLowerCase().includes(instLoc.toLowerCase())) {
+            parts.push(instLoc);
+        }
+        return parts.join(', ');
+    }
+    if (order) {
+        const combined = [(order.customer_address || '').trim(), (order.customer_postcode || '').trim()]
+            .filter(Boolean).join(', ');
+        if (combined) return combined;
+    }
+    return instLoc || '';
+}
+
+function resolveInstallationWhat3Words(order) {
+    const w = (order && order.what3words || '').trim();
+    return w || null;
+}
+
+function formatWhat3WordsDisplay(words) {
+    const w = (words || '').trim().replace(/^\/\/\//, '');
+    if (!w) return '';
+    return `///${w}`;
+}
+
 /**
  * Address + delivery notes block for LeadLock work orders (load sheet, job sheet, detail).
  * @param {object} order or loadSheet row with customer_* and delivery fields
@@ -1196,6 +1269,15 @@ function renderLeadLockWorkOrderAddressHtml(order) {
     }
     if (crmAddress) {
         html += `<p style="margin: 0; font-size: 14px; color: #555;"><strong>Bill to / CRM address:</strong> ${escapeHtml(crmAddress)}</p>`;
+    }
+    const w3w = resolveInstallationWhat3Words(order);
+    if (w3w) {
+        const w3wUrl = buildWhat3WordsUrl(w3w);
+        const w3wLabel = escapeHtml(formatWhat3WordsDisplay(w3w));
+        const w3wLink = w3wUrl
+            ? ` <a href="${escapeHtml(w3wUrl)}" target="_blank" rel="noopener noreferrer" class="w3w-link">Open in what3words</a>`
+            : '';
+        html += `<p style="margin: 8px 0 0 0;"><strong>what3words:</strong> ${w3wLabel}${w3wLink}</p>`;
     }
     html += '</div>';
     return html;

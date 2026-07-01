@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
     validateLeadLockWebhookBody,
     normalizeLeadLockWebhookPayload,
+    normalizeWhat3Words,
     reconcileLeadLockPaymentFlags,
     deriveLeadLockPaymentStatusLabel,
     resolveTravelTimeHoursRoundTrip
@@ -137,6 +138,30 @@ describe('normalizeLeadLockWebhookPayload', () => {
         assert.equal(p.customer_address, 'Site B');
         assert.equal(p.customer_postcode, 'AB1 2CD');
         assert.equal(p.delivery_location_notes, 'Ring bell');
+    });
+
+    it('normalizes what3words from top-level and nested delivery fields', () => {
+        assert.equal(normalizeWhat3Words('///Filled.Count.Soap'), 'filled.count.soap');
+        const top = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            items: [],
+            what3words: '///index.home.raft'
+        });
+        assert.equal(top.what3words, 'index.home.raft');
+        const nested = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-W3W',
+            order_id: 103,
+            items: [],
+            delivery: { what3words: 'filled.count.soap' }
+        });
+        assert.equal(nested.what3words, 'filled.count.soap');
+        const alias = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-W3W2',
+            order_id: 104,
+            items: [],
+            what_three_words: 'clocks.evening.garden'
+        });
+        assert.equal(alias.what3words, 'clocks.evening.garden');
     });
 });
 

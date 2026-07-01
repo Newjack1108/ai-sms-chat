@@ -333,7 +333,7 @@
                 <h3 id="installationModalTitle">Add Installation</h3>
                 <button class="modal-close" onclick="hideModal('installationModal')">&times;</button>
             </div>
-            <form id="installationForm">
+            <form id="installationForm" autocomplete="off">
                 <input type="hidden" id="installationId">
                 
                 <div class="form-group">
@@ -1227,7 +1227,9 @@
                 const result = await apiCall(`/installations/${id}`);
                 const inst = result.installation;
                 
-                document.getElementById('installationModalTitle').textContent = 'Edit Installation';
+                const isInstallerOnlySession = canInstallerActions && !canManageInstallations;
+                document.getElementById('installationModalTitle').textContent =
+                    isInstallerOnlySession ? 'Complete Checklist' : 'Edit Installation';
                 document.getElementById('installationId').value = inst.id;
                 document.getElementById('installationWorksOrder').value = inst.works_order_id || '';
                 const startDate = inst.start_date || inst.installation_date;
@@ -1279,7 +1281,7 @@
                 refreshWorksOrderTravelHint(inst.travel_time_hours_round_trip);
                 await loadInstallationChecklistData(inst.id);
 
-                if (canInstallerActions && !canManageInstallations) {
+                if (isInstallerOnlySession) {
                     document.getElementById('installationWorksOrder').disabled = true;
                     document.getElementById('installationStartDate').disabled = true;
                     document.getElementById('installationEndDate').disabled = true;
@@ -1290,6 +1292,7 @@
                     document.getElementById('addUserSelect').disabled = true;
                     document.getElementById('addUserRole').disabled = true;
                 }
+                hideModal('installationDetailsModal');
                 showModal('installationModal');
             } catch (error) {
                 showAlert('Error loading installation: ' + error.message, 'error');
@@ -1494,6 +1497,7 @@
             
             html += '</tbody></table>';
             document.getElementById('perDayTable').innerHTML = html;
+            disableInputSuggestions(document.getElementById('perDayTable'));
         }
         
         function addDayOverride() {
@@ -1737,6 +1741,7 @@
                 if (notesTextarea) {
                     notesTextarea.value = inst.notes || '';
                 }
+                disableInputSuggestions(document.getElementById('installationDetailsContent'));
                 showModal('installationDetailsModal');
             } catch (error) {
                 showAlert('Error loading installation details: ' + error.message, 'error');

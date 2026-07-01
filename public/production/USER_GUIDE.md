@@ -215,4 +215,16 @@ If any critical item is marked **Fail**, your check is still saved but a warning
 
 ---
 
+## Customer sign-off review links (admin setup)
+
+After a customer signs off with **Happy** or **Very happy**, the sign-off page can show buttons to leave a Google, Trustpilot, or Facebook review. Set these environment variables on your server (e.g. Railway):
+
+- `CUSTOMER_REVIEW_GOOGLE_URL` — Google Business review link
+- `CUSTOMER_REVIEW_TRUSTPILOT_URL` — Trustpilot review page
+- `CUSTOMER_REVIEW_FACEBOOK_URL` — Facebook reviews link
+
+If a variable is not set, that button is hidden. Review links are not shown before sign-off or for neutral/unhappy responses.
+
+---
+
 *Simple guide - 2024*
