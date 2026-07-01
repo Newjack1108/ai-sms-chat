@@ -192,6 +192,79 @@
         .conflict-warning strong {
             color: #856404;
         }
+
+        .calendar-scroll {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .installation-list-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 12px;
+            background: #fff;
+        }
+        .installation-list-card h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        .installation-list-card p {
+            margin: 4px 0;
+            font-size: 14px;
+            color: #495057;
+        }
+        .installation-load-sheet-copy {
+            overflow-x: auto;
+        }
+        .installation-load-sheet-copy .table,
+        .installation-load-sheet-copy table {
+            min-width: 0;
+        }
+        .installation-details-body {
+            padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .calendar-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .view-switcher {
+                justify-content: center;
+            }
+            .calendar-nav {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+            .calendar-nav .current-date {
+                min-width: 0;
+                width: 100%;
+                order: -1;
+            }
+            .weekly-view {
+                min-width: 700px;
+            }
+            .monthly-view {
+                min-width: 560px;
+            }
+            .daily-view {
+                grid-template-columns: 56px 1fr;
+            }
+            .daily-installation {
+                white-space: normal;
+            }
+            .installation-block {
+                white-space: normal;
+            }
+            .installation-details-body {
+                padding: 12px;
+            }
+            #installationModal .modal-content,
+            #installationDetailsModal .modal-content {
+                width: 100%;
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
@@ -435,6 +508,13 @@
                 currentUser.role === 'office' ||
                 currentUser.role === 'manager';
             canInstallerActions = currentUser.role === 'installer';
+
+            if (window.innerWidth <= 768 && currentView === 'weekly') {
+                currentView = 'daily';
+                document.querySelectorAll('.view-switcher button').forEach(btn => btn.classList.remove('active'));
+                const dailyBtn = document.getElementById('viewDaily');
+                if (dailyBtn) dailyBtn.classList.add('active');
+            }
             
             const home = document.getElementById('productionHomeNav');
             if (home && (currentUser.role === 'installer' || currentUser.role === 'staff')) {
@@ -638,7 +718,39 @@
                 return s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
             };
             const instStatusLabel = (s) => (s == null || s === '') ? '-' : String(s).replace(/_/g, ' ');
-            let html = '<table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Customer</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            const useInstallerCards = canInstallerActions && !canManageInstallations && window.innerWidth <= 768;
+
+            if (useInstallerCards) {
+                let cardsHtml = '';
+                list.forEach(inst => {
+                    const isAssignedInstaller = !!(
+                        canInstallerActions &&
+                        currentUser &&
+                        Array.isArray(inst.assigned_users) &&
+                        inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+                    );
+                    const canOpen = canManageInstallations || isAssignedInstaller;
+                    const startD = inst.start_date || inst.installation_date || '—';
+                    const endD = inst.end_date || startD || '—';
+                    const customerCell = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
+                    const loc = inst.location || '—';
+                    const woStatus = orderStatusLabel(inst.order_status);
+                    const status = instStatusLabel(inst.status);
+                    const dateLine = startD === endD ? formatDate(startD) : `${formatDate(startD)} – ${formatDate(endD)}`;
+                    cardsHtml += `<div class="installation-list-card">
+                        <h4>${customerCell}</h4>
+                        <p><strong>Dates:</strong> ${dateLine}</p>
+                        <p><strong>Location:</strong> ${escapeHtml(loc)}</p>
+                        <p><strong>Status:</strong> <span class="badge installation-block ${inst.status || 'scheduled'}">${status}</span></p>
+                        <p><strong>Works order:</strong> ${woStatus}</p>
+                        ${canOpen ? `<button onclick="showInstallationDetails(${inst.id})" class="btn btn-primary btn-sm" style="margin-top: 8px; width: 100%;">Open</button>` : '<p class="text-muted" style="margin-top: 8px;">Not allocated</p>'}
+                    </div>`;
+                });
+                container.innerHTML = cardsHtml;
+                return;
+            }
+
+            let html = '<div class="table-wrapper"><table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Customer</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
             list.forEach(inst => {
                 const isAssignedInstaller = !!(
                     canInstallerActions &&
@@ -674,7 +786,7 @@
                     </td>
                 </tr>`;
             });
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             container.innerHTML = html;
         }
         
@@ -773,7 +885,7 @@
             });
             
             html += '</div>';
-            container.innerHTML = html;
+            container.innerHTML = '<div class="calendar-scroll">' + html + '</div>';
         }
         
         function renderMonthlyView(container) {
@@ -854,7 +966,7 @@
             }
             
             html += '</div>';
-            container.innerHTML = html;
+            container.innerHTML = '<div class="calendar-scroll">' + html + '</div>';
         }
         
         function renderDailyView(container) {
@@ -1575,8 +1687,9 @@
                         : `Order #${inst.works_order_id} - ${escapeHtml(inst.product_name || 'Unknown')}`)
                     : 'None';
                 let html = `
-                    <div style="padding: 20px;">
+                    <div class="installation-details-body">
                         <h4>Installation #${inst.id}</h4>
+                        <div class="table-wrapper">
                         <table class="table">
                             <tr><th>Customer:</th><td>${customerDisplay}</td></tr>
                             <tr><th>Works Order:</th><td>${worksOrderCell}</td></tr>
@@ -1588,6 +1701,7 @@
                             <tr><th>Status:</th><td><span class="badge badge-info">${inst.status}</span></td></tr>
                             <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>
                         </table>
+                        </div>
                         <h5>Notes</h5>
                         ${(canManageInstallations || isAssignedInstaller) ? `
                         <div id="installationDetailsNotesSection">

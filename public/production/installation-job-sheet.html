@@ -82,6 +82,49 @@
             border-radius: 8px;
             color: #742a2a;
         }
+        .table-scroll {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 8px;
+        }
+        .sheet .data-table {
+            min-width: 480px;
+        }
+        .sheet .notes-block,
+        .sheet td {
+            word-break: break-word;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            .sheet {
+                padding: 16px;
+                border-radius: 6px;
+            }
+            .sheet h1 {
+                font-size: 1.25rem;
+            }
+            .sheet h2 {
+                font-size: 1rem;
+                margin-top: 18px;
+            }
+            .sheet table:not(.data-table) th,
+            .sheet table:not(.data-table) td {
+                display: block;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .sheet table:not(.data-table) th {
+                border-bottom: none;
+                padding-bottom: 4px;
+            }
+            .sheet table:not(.data-table) td {
+                border-top: none;
+                padding-top: 0;
+                padding-bottom: 12px;
+            }
+        }
         @media print {
             body {
                 background: #fff;
@@ -156,6 +199,7 @@
                     </tr>`).join('');
             return `
                     <h3 style="margin-top: 16px; font-size: 1rem;">Sales extras (no BOM)</h3>
+                    <div class="table-scroll">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -167,7 +211,8 @@
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
-                    </table>`;
+                    </table>
+                    </div>`;
         }
 
         function renderJobSheet(data) {
@@ -195,6 +240,7 @@
                 }).join('');
                 daysHtml = `
                     <h2>Schedule by day</h2>
+                    <div class="table-scroll">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -206,7 +252,8 @@
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
-                    </table>`;
+                    </table>
+                    </div>`;
             }
 
             const assigned = (inst.assigned_users || []).map(u =>
@@ -235,10 +282,12 @@
                         </tr>`;
                     }).join('');
                     productsTable = `
+                        <div class="table-scroll">
                         <table class="data-table">
                             <thead><tr><th>Product</th><th>Qty</th><th>Details</th></tr></thead>
                             <tbody>${prow}</tbody>
-                        </table>`;
+                        </table>
+                        </div>`;
                 }
 
                 const salesOnlyBlock = renderJobSheetSalesOnlyLines(salesOnly);

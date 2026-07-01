@@ -367,6 +367,20 @@ body.dashboard-page {
     overflow-y: auto;
 }
 
+@media (max-width: 768px) {
+    .modal {
+        align-items: flex-end;
+    }
+
+    .modal-content {
+        width: 100%;
+        max-width: none;
+        max-height: 92vh;
+        border-radius: 12px 12px 0 0;
+        padding: 16px;
+    }
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;
