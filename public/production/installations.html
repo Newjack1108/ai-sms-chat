@@ -471,6 +471,90 @@
         let currentUser = null;
         let canManageInstallations = false;
         let canInstallerActions = false;
+        let loadDataGeneration = 0;
+
+        function getCurrentLondonYmd() {
+            return londonYmd(currentDate);
+        }
+
+        function setCurrentLondonYmd(ymd) {
+            const [y, m, d] = ymd.split('-').map(Number);
+            currentDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+        }
+
+        function getLondonMonthStartYmd(date = currentDate) {
+            const ymd = londonYmd(date);
+            return ymd.slice(0, 8) + '01';
+        }
+
+        function getLondonMonthEndYmd(date = currentDate) {
+            const ymd = londonYmd(date);
+            const [y, m] = ymd.split('-').map(Number);
+            const nextMonthFirst = m === 12
+                ? `${y + 1}-01-01`
+                : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+            return londonYmdAddDays(nextMonthFirst, -1);
+        }
+
+        function londonSundayStartYmd(ymd) {
+            const d = new Date(`${ymd}T12:00:00`);
+            const daysSinceSunday = (londonWeekdayOffsetFromMonday(d) + 1) % 7;
+            return londonYmdAddDays(ymd, -daysSinceSunday);
+        }
+
+        function formatLondonWeekdayShort(ymd) {
+            const d = new Date(`${ymd}T12:00:00`);
+            return new Intl.DateTimeFormat('en-GB', {
+                timeZone: UK_TIMEZONE,
+                weekday: 'short',
+                day: 'numeric'
+            }).format(d);
+        }
+
+        function isInstallerMobileView() {
+            return canInstallerActions && !canManageInstallations && window.innerWidth <= 768;
+        }
+
+        function isAssignedToCurrentUser(inst) {
+            return !!(
+                currentUser &&
+                Array.isArray(inst.assigned_users) &&
+                inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
+            );
+        }
+
+        function getVisibleInstallations() {
+            let list = installations || [];
+            if (canInstallerActions && !canManageInstallations) {
+                list = list.filter(isAssignedToCurrentUser);
+            }
+            return list;
+        }
+
+        function getPeriodDisplayLabel() {
+            if (currentView === 'weekly') {
+                return `${formatDate(getStartOfPeriod())} – ${formatDate(getEndOfPeriod())}`;
+            }
+            if (currentView === 'monthly') {
+                const ymd = getCurrentLondonYmd();
+                const [y, m] = ymd.split('-').map(Number);
+                const d = new Date(Date.UTC(y, m - 1, 1, 12, 0, 0));
+                return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: UK_TIMEZONE });
+            }
+            return formatDate(getCurrentLondonYmd());
+        }
+
+        function applyInstallerMobileUi() {
+            if (!isInstallerMobileView()) return;
+            const switcher = document.querySelector('.view-switcher');
+            if (switcher) switcher.style.display = 'none';
+            const filterEl = document.getElementById('installationsOrderStatusFilter');
+            if (filterEl) {
+                const filterBlock = filterEl.closest('div');
+                if (filterBlock) filterBlock.style.display = 'none';
+            }
+        }
+
         const PRE_FITTING_QUESTIONS = [
             { key: 'site_access_confirmed', label: 'Site access is confirmed' },
             { key: 'area_clear_for_install', label: 'Install area is clear and ready' },
@@ -515,7 +599,8 @@
                 const dailyBtn = document.getElementById('viewDaily');
                 if (dailyBtn) dailyBtn.classList.add('active');
             }
-            
+            applyInstallerMobileUi();
+
             const home = document.getElementById('productionHomeNav');
             if (home && (currentUser.role === 'installer' || currentUser.role === 'staff')) {
                 home.href = 'timesheet.html';
@@ -560,6 +645,17 @@
             }
             const signoffBtn = document.getElementById('generateSignoffLinkBtn');
             if (signoffBtn) signoffBtn.addEventListener('click', generateSignoffLink);
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    loadData().then(() => renderCalendar());
+                }
+            });
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted) {
+                    loadData().then(() => renderCalendar());
+                }
+            });
         });
         
         function formatWorksOrderOptionLabel(order) {
@@ -572,18 +668,23 @@
         }
         
         async function loadData() {
+            const generation = ++loadDataGeneration;
             try {
                 const startDate = getStartOfPeriod();
                 const endDate = getEndOfPeriod();
                 const instResult = await apiCall(`/installations?start_date=${startDate}&end_date=${endDate}`);
+                if (generation !== loadDataGeneration || !instResult) return;
                 installations = instResult.installations || [];
                 const holidayResult = await apiCall(`/holidays/calendar?start_date=${startDate}&end_date=${endDate}`);
+                if (generation !== loadDataGeneration || !holidayResult) return;
                 holidayAllocations = holidayResult.requests || [];
                 
                 if (canManageInstallations) {
                     const ordersResult = await apiCall('/orders/for-select');
+                    if (generation !== loadDataGeneration || !ordersResult) return;
                     worksOrders = ordersResult.orders || [];
                     const usersResult = await apiCall('/users');
+                    if (generation !== loadDataGeneration || !usersResult) return;
                     users = (usersResult.users || []).filter(u => u.status !== 'left_company');
                     
                     const worksOrderSelect = document.getElementById('installationWorksOrder');
@@ -614,59 +715,50 @@
         }
         
         function getStartOfPeriod() {
-            const date = new Date(currentDate);
             if (currentView === 'weekly') {
-                const day = date.getDay();
-                const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-                date.setDate(diff);
-            } else if (currentView === 'monthly') {
-                date.setDate(1);
-            } else {
-                // daily
+                return londonMondayYmd(currentDate);
             }
-            return date.toISOString().split('T')[0];
+            if (currentView === 'monthly') {
+                return getLondonMonthStartYmd();
+            }
+            return getCurrentLondonYmd();
         }
         
         function getEndOfPeriod() {
-            const date = new Date(currentDate);
             if (currentView === 'weekly') {
-                const day = date.getDay();
-                const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-                date.setDate(diff + 6);
-            } else if (currentView === 'monthly') {
-                date.setMonth(date.getMonth() + 1);
-                date.setDate(0);
-            } else {
-                // daily
+                return londonYmdAddDays(londonMondayYmd(currentDate), 6);
             }
-            return date.toISOString().split('T')[0];
+            if (currentView === 'monthly') {
+                return getLondonMonthEndYmd();
+            }
+            return getCurrentLondonYmd();
         }
         
         function switchView(view) {
             currentView = view;
             document.querySelectorAll('.view-switcher button').forEach(btn => btn.classList.remove('active'));
             document.getElementById(`view${view.charAt(0).toUpperCase() + view.slice(1)}`).classList.add('active');
-            renderCalendar();
+            loadData().then(() => renderCalendar());
         }
         
         function previousPeriod() {
             if (currentView === 'weekly') {
-                currentDate.setDate(currentDate.getDate() - 7);
+                setCurrentLondonYmd(londonYmdAddDays(londonMondayYmd(currentDate), -7));
             } else if (currentView === 'monthly') {
-                currentDate.setMonth(currentDate.getMonth() - 1);
+                setCurrentLondonYmd(londonYmdAddDays(getLondonMonthStartYmd(), -1));
             } else {
-                currentDate.setDate(currentDate.getDate() - 1);
+                setCurrentLondonYmd(londonYmdAddDays(getCurrentLondonYmd(), -1));
             }
             loadData().then(() => renderCalendar());
         }
         
         function nextPeriod() {
             if (currentView === 'weekly') {
-                currentDate.setDate(currentDate.getDate() + 7);
+                setCurrentLondonYmd(londonYmdAddDays(londonMondayYmd(currentDate), 7));
             } else if (currentView === 'monthly') {
-                currentDate.setMonth(currentDate.getMonth() + 1);
+                setCurrentLondonYmd(londonYmdAddDays(getLondonMonthEndYmd(), 1));
             } else {
-                currentDate.setDate(currentDate.getDate() + 1);
+                setCurrentLondonYmd(londonYmdAddDays(getCurrentLondonYmd(), 1));
             }
             loadData().then(() => renderCalendar());
         }
@@ -684,15 +776,13 @@
                 renderWeeklyView(content);
                 const start = getStartOfPeriod();
                 const end = getEndOfPeriod();
-                const startDate = new Date(start);
-                const endDate = new Date(end);
                 dateDisplay.textContent = `${formatDate(start)} - ${formatDate(end)}`;
             } else if (currentView === 'monthly') {
                 renderMonthlyView(content);
-                dateDisplay.textContent = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                dateDisplay.textContent = getPeriodDisplayLabel();
             } else {
                 renderDailyView(content);
-                dateDisplay.textContent = formatDate(currentDate.toISOString().split('T')[0]);
+                dateDisplay.textContent = formatDate(getCurrentLondonYmd());
             }
             renderInstallationsList();
         }
@@ -702,14 +792,17 @@
             if (!container) return;
             const filterEl = document.getElementById('installationsOrderStatusFilter');
             const filterValue = filterEl ? filterEl.value : 'all';
-            let list = installations || [];
+            let list = getVisibleInstallations();
             if (filterValue === 'no_order') {
                 list = list.filter(inst => inst.works_order_id == null && !inst.order_id);
             } else if (filterValue !== 'all') {
                 list = list.filter(inst => (inst.order_status || '').toLowerCase() === filterValue);
             }
             if (list.length === 0) {
-                container.innerHTML = '<p class="text-muted">No installations in this period' + (filterValue !== 'all' ? ' for the selected works order status.' : '.') + '</p>';
+                const periodLabel = getPeriodDisplayLabel();
+                const filterSuffix = filterValue !== 'all' ? ' for the selected works order status' : '';
+                container.innerHTML = `<p class="text-muted">No installations for ${periodLabel}${filterSuffix}.</p>
+                    <button type="button" onclick="goToToday()" class="btn btn-primary" style="margin-top: 12px;">Go to Today</button>`;
                 return;
             }
             const orderStatusLabel = (os) => {
@@ -791,41 +884,34 @@
         }
         
         function renderWeeklyView(container) {
-            const start = getStartOfPeriod();
-            const startDate = new Date(start);
-            const days = [];
+            const startYmd = getStartOfPeriod();
+            const dayYmds = [];
             for (let i = 0; i < 7; i++) {
-                const date = new Date(startDate);
-                date.setDate(date.getDate() + i);
-                days.push(date);
+                dayYmds.push(londonYmdAddDays(startYmd, i));
             }
-            
-            // Normalize date to YYYY-MM-DD (API may return ISO string)
+
             const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
+            const visibleInstallations = getVisibleInstallations();
             const dayHolidays = {};
-            // Group installations by day - handle multi-day installations
             const dayInstallations = {};
-            days.forEach(day => {
-                const dayStr = day.toISOString().split('T')[0];
+            dayYmds.forEach(dayStr => {
                 dayInstallations[dayStr] = [];
                 dayHolidays[dayStr] = (holidayAllocations || []).filter(h => {
                     const hStart = toDateStr(h.start_date);
                     const hEnd = toDateStr(h.end_date) || hStart;
                     return hStart && hEnd && dayStr >= hStart && dayStr <= hEnd;
                 });
-                
-                installations.forEach(inst => {
+
+                visibleInstallations.forEach(inst => {
                     const instStartDate = toDateStr(inst.start_date || inst.installation_date);
                     const instEndDate = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStartDate;
-                    
-                    // Check if this day falls within the installation date range
+
                     if (instStartDate && instEndDate && dayStr >= instStartDate && dayStr <= instEndDate) {
-                        // Get day-specific times or use defaults
                         const dayOverride = inst.installation_days?.find(d => d.day_date === dayStr);
                         const dayStartTime = dayOverride?.start_time || inst.start_time || null;
                         const dayDuration = dayOverride?.duration_hours || inst.duration_hours;
                         const dayEndTime = dayOverride?.end_time || inst.end_time || null;
-                        
+
                         dayInstallations[dayStr].push({
                             ...inst,
                             dayStartTime,
@@ -838,21 +924,18 @@
                     }
                 });
             });
-            
+
             let html = '<div class="weekly-view">';
-            
-            // Header row
+
             html += '<div class="weekly-header">Time</div>';
-            days.forEach(day => {
-                html += `<div class="weekly-day-header">${day.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric' })}</div>`;
+            dayYmds.forEach(dayStr => {
+                html += `<div class="weekly-day-header">${formatLondonWeekdayShort(dayStr)}</div>`;
             });
-            
-            // Show all-day installations (no time slots since times are removed)
+
             html += '<div class="weekly-time-slot">All Day</div>';
-            days.forEach(day => {
-                const dayStr = day.toISOString().split('T')[0];
+            dayYmds.forEach(dayStr => {
                 const dayInsts = dayInstallations[dayStr] || [];
-                
+
                 html += '<div class="weekly-day-cell">';
                 dayInsts.forEach(inst => {
                     const isAssignedInstaller = !!(
@@ -889,32 +972,29 @@
         }
         
         function renderMonthlyView(container) {
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth();
-            const firstDay = new Date(year, month, 1);
-            const lastDay = new Date(year, month + 1, 0);
-            const startDate = new Date(firstDay);
-            startDate.setDate(startDate.getDate() - startDate.getDay());
-            
+            const monthStartYmd = getLondonMonthStartYmd();
+            const gridStartYmd = londonSundayStartYmd(monthStartYmd);
+            const currentMonthYmd = getCurrentLondonYmd();
+            const currentMonth = currentMonthYmd.slice(0, 7);
+            const todayYmd = londonYmd(new Date());
+
             let html = '<div class="monthly-view">';
-            
-            // Day headers
+
             const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             dayNames.forEach(day => {
                 html += `<div class="weekly-day-header">${day}</div>`;
             });
-            
+
             const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
-            // Calendar days
-            const today = new Date();
+            const visibleInstallations = getVisibleInstallations();
+
             for (let i = 0; i < 42; i++) {
-                const date = new Date(startDate);
-                date.setDate(startDate.getDate() + i);
-                const dateStr = date.toISOString().split('T')[0];
-                const isOtherMonth = date.getMonth() !== month;
-                const isToday = dateStr === today.toISOString().split('T')[0];
-                
-                const dayInsts = installations.filter(inst => {
+                const dateStr = londonYmdAddDays(gridStartYmd, i);
+                const isOtherMonth = dateStr.slice(0, 7) !== currentMonth;
+                const isToday = dateStr === todayYmd;
+                const dayNumber = parseInt(dateStr.split('-')[2], 10);
+
+                const dayInsts = visibleInstallations.filter(inst => {
                     const instStart = toDateStr(inst.start_date || inst.installation_date);
                     const instEnd = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStart;
                     return instStart && instEnd && dateStr >= instStart && dateStr <= instEnd;
@@ -924,9 +1004,9 @@
                     const hEnd = toDateStr(h.end_date) || hStart;
                     return hStart && hEnd && dateStr >= hStart && dateStr <= hEnd;
                 });
-                
+
                 html += `<div class="monthly-day ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}">`;
-                html += `<div class="monthly-day-number">${date.getDate()}</div>`;
+                html += `<div class="monthly-day-number">${dayNumber}</div>`;
                 
                 if (dayInsts.length > 0) {
                     html += `<div class="monthly-installation-count">${dayInsts.length} installation(s)</div>`;
@@ -970,12 +1050,11 @@
         }
         
         function renderDailyView(container) {
-            const dateStr = currentDate.toISOString().split('T')[0];
-            
+            const dateStr = getCurrentLondonYmd();
+
             const toDateStr = (d) => (d == null || d === '') ? '' : String(d).split('T')[0];
-            // Find installations that include this day
             const dayInsts = [];
-            installations.forEach(inst => {
+            getVisibleInstallations().forEach(inst => {
                 const instStartDate = toDateStr(inst.start_date || inst.installation_date);
                 const instEndDate = toDateStr(inst.end_date || inst.start_date || inst.installation_date) || instStartDate;
                 
@@ -1207,7 +1286,7 @@
             document.getElementById('installationModalTitle').textContent = 'Add Installation';
             document.getElementById('installationForm').reset();
             document.getElementById('installationId').value = '';
-            const today = currentDate.toISOString().split('T')[0];
+            const today = getCurrentLondonYmd();
             document.getElementById('installationStartDate').value = today;
             document.getElementById('installationEndDate').value = today;
             document.getElementById('assignedUsersList').innerHTML = '';

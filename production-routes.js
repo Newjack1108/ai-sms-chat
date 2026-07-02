@@ -2822,7 +2822,11 @@ router.get('/installations', requireProductionAuth, async (req, res) => {
     try {
         const startDate = req.query.start_date || null;
         const endDate = req.query.end_date || null;
-        const installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        let installations = await ProductionDatabase.getAllInstallations(startDate, endDate);
+        const user = req.session.production_user;
+        if (user?.role === 'installer') {
+            installations = installations.filter(inst => isInstallerAssignedToInstallation(inst, user.id));
+        }
         res.json({ success: true, installations });
     } catch (error) {
         console.error('Get installations error:', error);
