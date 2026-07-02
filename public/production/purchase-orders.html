@@ -36,7 +36,7 @@
         <div class="modal-content" style="max-width: 980px;">
             <div class="modal-header">
                 <h3 id="poModalTitle">Create Purchase Order</h3>
-                <button class="modal-close" onclick="hideModal('poModal')">&times;</button>
+                <button class="modal-close" onclick="closePoModal()">&times;</button>
             </div>
             <form id="poForm">
                 <div id="poEditReceivedNotice" class="alert alert-warning" style="display: none; margin-bottom: 16px;">
@@ -66,7 +66,7 @@
                 </div>
                 <div style="font-weight: 600; margin-bottom: 12px;">Subtotal: <span id="subtotalLabel">£0.00</span></div>
                 <div class="text-right">
-                    <button type="button" class="btn btn-secondary" onclick="hideModal('poModal')">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="closePoModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary" id="poSubmitBtn">Create PO</button>
                 </div>
             </form>
@@ -107,6 +107,11 @@
                 ? `Edit Purchase Order ${poNumber || ''}`.trim()
                 : 'Create Purchase Order';
             document.getElementById('poSubmitBtn').textContent = isEdit ? 'Save Changes' : 'Create PO';
+        }
+
+        function closePoModal() {
+            editingPoId = null;
+            hideModal('poModal');
         }
 
         function populateSupplierSelect(selectedSupplierId) {
@@ -231,6 +236,42 @@
             }
             lineItems[index][key] = value;
             renderLineItems();
+        }
+
+        function syncLineItemsFromDom() {
+            const rows = document.querySelectorAll('#lineItemsBody tr');
+            rows.forEach((row, i) => {
+                const cells = row.cells;
+                if (!cells || cells.length < 5 || !lineItems[i]) return;
+
+                const lineTypeSelect = cells[0].querySelector('select');
+                const lineType = lineTypeSelect ? lineTypeSelect.value : 'raw_material';
+                const itemInput = cells[1].querySelector('input');
+                const itemSelect = cells[1].querySelector('select');
+                const unitInput = cells[2].querySelector('input');
+                const qtyInput = cells[3].querySelector('input');
+                const costInput = cells[4].querySelector('input');
+
+                if (lineType === 'custom') {
+                    lineItems[i] = {
+                        line_type: 'custom',
+                        stock_item_id: '',
+                        custom_item_name: itemInput ? itemInput.value : '',
+                        custom_unit: unitInput ? unitInput.value : 'item',
+                        quantity: qtyInput ? qtyInput.value : '',
+                        unit_cost_gbp: costInput ? costInput.value : ''
+                    };
+                } else {
+                    lineItems[i] = {
+                        line_type: 'raw_material',
+                        stock_item_id: itemSelect ? itemSelect.value : '',
+                        custom_item_name: '',
+                        custom_unit: '',
+                        quantity: qtyInput ? qtyInput.value : '',
+                        unit_cost_gbp: costInput ? costInput.value : ''
+                    };
+                }
+            });
         }
 
         async function showCreatePoModal() {
@@ -643,6 +684,7 @@
 
         document.getElementById('poForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            syncLineItemsFromDom();
             const payloadItems = lineItems.map((i) => {
                 const quantity = parseFloat(i.quantity || 0);
                 const unitCost = parseFloat(i.unit_cost_gbp || 0);
@@ -684,12 +726,14 @@
             };
             try {
                 if (editingPoId) {
-                    await apiCall(`/purchase-orders/${editingPoId}`, { method: 'PUT', body: JSON.stringify(payload) });
+                    const result = await apiCall(`/purchase-orders/${editingPoId}`, { method: 'PUT', body: JSON.stringify(payload) });
+                    if (!result) return;
                     hideModal('poModal');
                     editingPoId = null;
                     showAlert('Purchase order updated', 'success');
                 } else {
-                    await apiCall('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
+                    const result = await apiCall('/purchase-orders', { method: 'POST', body: JSON.stringify(payload) });
+                    if (!result) return;
                     hideModal('poModal');
                     showAlert('Purchase order created', 'success');
                 }
