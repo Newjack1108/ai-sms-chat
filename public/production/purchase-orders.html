@@ -38,7 +38,7 @@
                 <h3 id="poModalTitle">Create Purchase Order</h3>
                 <button class="modal-close" onclick="closePoModal()">&times;</button>
             </div>
-            <form id="poForm">
+            <form id="poForm" novalidate>
                 <div id="poEditReceivedNotice" class="alert alert-warning" style="display: none; margin-bottom: 16px;">
                     This purchase order has already been received. Saving changes updates the PO record only and does not adjust stock levels.
                 </div>
@@ -192,13 +192,19 @@
                                 : `<span>${escapeHtml(selectedStock?.unit || '-')}</span>`
                             }
                         </td>
-                        <td><input type="number" min="0.01" step="0.01" class="form-input" value="${item.quantity || ''}" onchange="updateLineItem(${i}, 'quantity', this.value)"></td>
-                        <td><input type="number" min="0" step="0.01" class="form-input" value="${item.unit_cost_gbp || ''}" onchange="updateLineItem(${i}, 'unit_cost_gbp', this.value)"></td>
+                        <td><input type="text" inputmode="decimal" class="form-input" value="${item.quantity || ''}" oninput="updateLineItem(${i}, 'quantity', this.value)"></td>
+                        <td><input type="text" inputmode="decimal" class="form-input" value="${item.unit_cost_gbp || ''}" oninput="updateLineItem(${i}, 'unit_cost_gbp', this.value)"></td>
                         <td>${formatCurrency(total)}</td>
                         <td><button type="button" class="btn btn-danger btn-sm" onclick="removeLineItem(${i})">Remove</button></td>
                     </tr>
                 `;
             }).join('');
+            const subtotal = lineItems.reduce((sum, item) => sum + ((parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0), 0);
+            document.getElementById('subtotalLabel').textContent = formatCurrency(subtotal);
+        }
+
+        function updateSubtotalLabel() {
+            syncLineItemsFromDom();
             const subtotal = lineItems.reduce((sum, item) => sum + ((parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0), 0);
             document.getElementById('subtotalLabel').textContent = formatCurrency(subtotal);
         }
@@ -235,6 +241,10 @@
                 return;
             }
             lineItems[index][key] = value;
+            if (key === 'quantity' || key === 'unit_cost_gbp') {
+                updateSubtotalLabel();
+                return;
+            }
             renderLineItems();
         }
 
@@ -274,6 +284,48 @@
             });
         }
 
+        function buildPayloadItemsFromDom() {
+            const rows = document.querySelectorAll('#lineItemsBody tr');
+            const items = [];
+            rows.forEach((row) => {
+                const cells = row.cells;
+                if (!cells || cells.length < 5) return;
+
+                const lineTypeSelect = cells[0].querySelector('select');
+                const lineType = lineTypeSelect ? lineTypeSelect.value : 'raw_material';
+                const itemInput = cells[1].querySelector('input');
+                const itemSelect = cells[1].querySelector('select');
+                const unitInput = cells[2].querySelector('input');
+                const qtyInput = cells[3].querySelector('input');
+                const costInput = cells[4].querySelector('input');
+
+                const quantity = parseFloat(qtyInput ? qtyInput.value : 0);
+                const unitCost = parseFloat(costInput ? costInput.value : 0);
+                if (!(quantity > 0)) return;
+
+                if (lineType === 'custom') {
+                    const customName = (itemInput ? itemInput.value : '').trim();
+                    if (!customName) return;
+                    items.push({
+                        custom_item_name: customName,
+                        custom_unit: ((unitInput ? unitInput.value : '') || 'item').trim() || 'item',
+                        quantity,
+                        unit_cost_gbp: unitCost
+                    });
+                    return;
+                }
+
+                const stockItemId = parseInt(itemSelect ? itemSelect.value : '', 10);
+                if (Number.isNaN(stockItemId)) return;
+                items.push({
+                    stock_item_id: stockItemId,
+                    quantity,
+                    unit_cost_gbp: unitCost
+                });
+            });
+            return items;
+        }
+
         async function showCreatePoModal() {
             editingPoId = null;
             setPoModalMode('create');
@@ -291,7 +343,7 @@
 
         async function showEditPoModal(id) {
             try {
-                const data = await apiCall(`/purchase-orders/${id}`);
+                const data = await apiCall(`/purchase-orders/${id}?_=${Date.now()}`);
                 const order = data.order;
                 if (!order) {
                     throw new Error('Purchase order not found');
@@ -369,7 +421,7 @@
 
         async function viewPo(id) {
             try {
-                const data = await apiCall(`/purchase-orders/${id}`);
+                const data = await apiCall(`/purchase-orders/${id}?_=${Date.now()}`);
                 const o = data.order;
                 document.getElementById('viewModalTitle').textContent = `Purchase Order ${o.po_number}`;
                 document.getElementById('viewModalContent').innerHTML = `
@@ -684,29 +736,22 @@
 
         document.getElementById('poForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            const submitBtn = document.getElementById('poSubmitBtn');
+            if (submitBtn.disabled) return;
+
+            const supplierId = parseInt(document.getElementById('poSupplier').value, 10);
+            if (Number.isNaN(supplierId)) {
+                showAlert('Please select a supplier', 'error');
+                return;
+            }
+            const orderDate = document.getElementById('poOrderDate').value;
+            if (!orderDate) {
+                showAlert('Please enter an order date', 'error');
+                return;
+            }
+
             syncLineItemsFromDom();
-            const payloadItems = lineItems.map((i) => {
-                const quantity = parseFloat(i.quantity || 0);
-                const unitCost = parseFloat(i.unit_cost_gbp || 0);
-                const lineType = i.line_type || (i.custom_item_name ? 'custom' : 'raw_material');
-                if (lineType === 'custom') {
-                    return {
-                        custom_item_name: (i.custom_item_name || '').trim(),
-                        custom_unit: (i.custom_unit || 'item').trim() || 'item',
-                        quantity,
-                        unit_cost_gbp: unitCost
-                    };
-                }
-                return {
-                    stock_item_id: parseInt(i.stock_item_id, 10),
-                    quantity,
-                    unit_cost_gbp: unitCost
-                };
-            }).filter((i) => {
-                if (!(i.quantity > 0)) return false;
-                if (i.custom_item_name !== undefined) return !!i.custom_item_name;
-                return !Number.isNaN(i.stock_item_id);
-            });
+            const payloadItems = buildPayloadItemsFromDom();
             const isOneOffPurchase = document.getElementById('poOneOffPurchase').checked;
             if (!isOneOffPurchase && payloadItems.some((item) => item.custom_item_name)) {
                 showAlert('Custom line items are only allowed on one-off purchases', 'error');
@@ -717,13 +762,18 @@
                 return;
             }
             const payload = {
-                supplier_id: parseInt(document.getElementById('poSupplier').value, 10),
-                order_date: document.getElementById('poOrderDate').value,
+                supplier_id: supplierId,
+                order_date: orderDate,
                 expected_date: document.getElementById('poExpectedDate').value || null,
                 notes: document.getElementById('poNotes').value.trim() || null,
                 is_one_off_purchase: isOneOffPurchase,
                 items: payloadItems
             };
+            const isEdit = !!editingPoId;
+            const savingLabel = isEdit ? 'Saving...' : 'Creating...';
+            const defaultLabel = isEdit ? 'Save Changes' : 'Create PO';
+            submitBtn.disabled = true;
+            submitBtn.textContent = savingLabel;
             try {
                 if (editingPoId) {
                     const result = await apiCall(`/purchase-orders/${editingPoId}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -740,6 +790,9 @@
                 await loadOrders();
             } catch (error) {
                 showAlert(error.message || (editingPoId ? 'Failed to update purchase order' : 'Failed to create purchase order'), 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = defaultLabel;
             }
         });
 
