@@ -165,6 +165,11 @@
             if (addCustomBtn) {
                 addCustomBtn.style.display = allowCustom ? '' : 'none';
             }
+            if (!lineItems.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No line items yet. Click Add Raw Material to add one.</td></tr>';
+                document.getElementById('subtotalLabel').textContent = formatCurrency(0);
+                return;
+            }
             tbody.innerHTML = lineItems.map((item, i) => {
                 const lineType = item.line_type || (item.custom_item_name ? 'custom' : 'raw_material');
                 const total = (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_gbp || 0)) || 0;
@@ -333,7 +338,6 @@
             document.getElementById('poForm').reset();
             document.getElementById('poOrderDate').value = londonYmd(new Date());
             lineItems = [];
-            addLineItem('raw_material');
             populateSupplierSelect();
             const numberData = await apiCall(`/purchase-orders/next-number?order_date=${encodeURIComponent(document.getElementById('poOrderDate').value)}`);
             document.getElementById('poNumberPreview').value = numberData.po_number || '';
@@ -369,11 +373,7 @@
                         unit_cost_gbp: it.unit_cost_gbp
                     };
                 });
-                if (lineItems.length === 0) {
-                    addLineItem('raw_material');
-                } else {
-                    renderLineItems();
-                }
+                renderLineItems();
                 showModal('poModal');
             } catch (error) {
                 showAlert(error.message || 'Failed to load purchase order', 'error');
@@ -726,10 +726,6 @@
         document.getElementById('poOneOffPurchase').addEventListener('change', (e) => {
             if (!e.target.checked && lineItems.some((item) => (item.line_type || 'raw_material') === 'custom')) {
                 lineItems = lineItems.filter((item) => (item.line_type || 'raw_material') !== 'custom');
-                if (lineItems.length === 0) {
-                    addLineItem('raw_material');
-                    return;
-                }
             }
             renderLineItems();
         });
