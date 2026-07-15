@@ -1962,7 +1962,10 @@
                                     <td style="text-align: center;" onclick="event.stopPropagation();">
                                         <span class="expand-icon" id="icon-${row.user_id}">▶</span>
                                     </td>
-                                    <td><strong>${escapeHtml(row.username || 'Unknown')}</strong></td>
+                                    <td>
+                                        <strong>${escapeHtml(row.username || 'Unknown')}</strong>
+                                        ${row.has_sick ? '<span style="background: #007bff; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: normal; margin-left: 6px;">Sick</span>' : ''}
+                                    </td>
                                     <td>${formatHours(regular)}</td>
                                     <td>${formatHours(overtime)}</td>
                                     <td>${formatHours(weekend)}</td>

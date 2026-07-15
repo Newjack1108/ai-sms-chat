@@ -12813,6 +12813,11 @@ class ProductionDatabase {
                     COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
                     COALESCE(SUM(tde.total_hours), 0) as total_hours,
                     COUNT(DISTINCT tde.entry_date) as days_worked,
+                    EXISTS (
+                        SELECT 1 FROM timesheet_daily_entries tde_sick
+                        WHERE tde_sick.weekly_timesheet_id = wt.id
+                          AND tde_sick.day_type IN ('sick_paid', 'sick_unpaid')
+                    ) as has_sick,
                     wt.manager_approved,
                     wt.approved_by,
                     wt.approved_at,
@@ -12824,7 +12829,7 @@ class ProductionDatabase {
                  WHERE ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
+                 GROUP BY u.id, u.username, wt.id, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`,
                 [weekStartDate]
             );
@@ -12842,6 +12847,11 @@ class ProductionDatabase {
                     COALESCE(SUM(tde.overnight_hours), 0) as total_overnight_hours,
                     COALESCE(SUM(tde.total_hours), 0) as total_hours,
                     COUNT(DISTINCT tde.entry_date) as days_worked,
+                    EXISTS (
+                        SELECT 1 FROM timesheet_daily_entries tde_sick
+                        WHERE tde_sick.weekly_timesheet_id = wt.id
+                          AND tde_sick.day_type IN ('sick_paid', 'sick_unpaid')
+                    ) as has_sick,
                     wt.manager_approved,
                     wt.approved_by,
                     wt.approved_at,
@@ -12854,7 +12864,7 @@ class ProductionDatabase {
                    AND ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
+                 GROUP BY u.id, u.username, wt.id, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`
             ).all(weekStartDate);
             
