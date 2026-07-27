@@ -4691,17 +4691,19 @@ class ProductionDatabase {
         }
     }
     
-    // Get WIP data (panels with costs)
+    // Get WIP data (panels with costs).
+    // Uses stored panels.cost_gbp (kept in sync by updatePanelCost on BOM/labour changes)
+    // instead of recalculating every BOM on each request.
     static async getWIPData() {
         const panels = await this.getAllPanels();
         const labourRate = parseFloat(await this.getSetting('labour_rate_per_hour') || 25);
         const wipData = [];
         
         for (const panel of panels) {
-            const bomValue = await this.calculateBOMValue(panel.id);
             const labourHours = parseFloat(panel.labour_hours || 0);
             const labourCost = labourHours * labourRate;
-            const trueCost = bomValue + labourCost;
+            const trueCost = parseFloat(panel.cost_gbp || 0);
+            const bomValue = Math.max(0, trueCost - labourCost);
             const builtQty = parseFloat(panel.built_quantity || 0);
             const minStock = parseFloat(panel.min_stock || 0);
             const wipValue = trueCost * builtQty;
@@ -6034,29 +6036,34 @@ class ProductionDatabase {
     }
     
     static async getTotalStockValue() {
-        const stockItems = await this.getAllStockItems();
-        let totalValue = 0;
-        
-        for (const item of stockItems) {
-            const quantity = parseFloat(item.current_quantity || 0);
-            const cost = parseFloat(item.cost_per_unit_gbp || 0);
-            totalValue += quantity * cost;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT COALESCE(SUM(COALESCE(current_quantity, 0)::numeric * COALESCE(cost_per_unit_gbp, 0)::numeric), 0) AS total
+                 FROM stock_items`
+            );
+            return parseFloat(result.rows[0]?.total || 0);
         }
-        
-        return totalValue;
+        const row = db.prepare(
+            `SELECT COALESCE(SUM(COALESCE(current_quantity, 0) * COALESCE(cost_per_unit_gbp, 0)), 0) AS total
+             FROM stock_items`
+        ).get();
+        return parseFloat(row?.total || 0);
     }
     
+    // Inventory value of built panels using stored cost_gbp (no live BOM recompute).
     static async getTotalPanelValue() {
-        const panels = await this.getAllPanels();
-        let totalValue = 0;
-        
-        for (const panel of panels) {
-            const builtQty = parseFloat(panel.built_quantity || 0);
-            const trueCost = await this.calculatePanelTrueCost(panel.id);
-            totalValue += builtQty * trueCost;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT COALESCE(SUM(COALESCE(built_quantity, 0)::numeric * COALESCE(cost_gbp, 0)::numeric), 0) AS total
+                 FROM panels`
+            );
+            return parseFloat(result.rows[0]?.total || 0);
         }
-        
-        return totalValue;
+        const row = db.prepare(
+            `SELECT COALESCE(SUM(COALESCE(built_quantity, 0) * COALESCE(cost_gbp, 0)), 0) AS total
+             FROM panels`
+        ).get();
+        return parseFloat(row?.total || 0);
     }
     
     static async getLastWeekPlannerSummary() {
@@ -9277,6 +9284,86 @@ class ProductionDatabase {
         return { installation, order, leadlock_items, line_items, sales_only_lines };
     }
     
+    /**
+     * Attach assignments + days to installations in two queries (avoids N+1).
+     */
+    static async attachInstallationRelations(installations) {
+        if (!installations || installations.length === 0) {
+            return installations || [];
+        }
+
+        const ids = installations.map((i) => i.id).filter((id) => id != null);
+        const assignmentsById = new Map();
+        const daysById = new Map();
+
+        if (ids.length > 0) {
+            try {
+                let assignments = [];
+                if (isPostgreSQL) {
+                    const result = await pool.query(
+                        `SELECT ia.*, u.username, u.role as user_role
+                         FROM installation_assignments ia
+                         JOIN production_users u ON ia.user_id = u.id
+                         WHERE ia.installation_id = ANY($1::int[])
+                         ORDER BY ia.assigned_at`,
+                        [ids]
+                    );
+                    assignments = result.rows;
+                } else {
+                    const placeholders = ids.map(() => '?').join(',');
+                    assignments = db.prepare(
+                        `SELECT ia.*, u.username, u.role as user_role
+                         FROM installation_assignments ia
+                         JOIN production_users u ON ia.user_id = u.id
+                         WHERE ia.installation_id IN (${placeholders})
+                         ORDER BY ia.assigned_at`
+                    ).all(...ids);
+                }
+                for (const row of assignments) {
+                    const key = row.installation_id;
+                    if (!assignmentsById.has(key)) assignmentsById.set(key, []);
+                    assignmentsById.get(key).push(row);
+                }
+            } catch (error) {
+                console.log('Error batch-loading installation assignments:', error.message);
+            }
+
+            try {
+                let days = [];
+                if (isPostgreSQL) {
+                    const result = await pool.query(
+                        `SELECT * FROM installation_days
+                         WHERE installation_id = ANY($1::int[])
+                         ORDER BY day_date`,
+                        [ids]
+                    );
+                    days = result.rows;
+                } else {
+                    const placeholders = ids.map(() => '?').join(',');
+                    days = db.prepare(
+                        `SELECT * FROM installation_days
+                         WHERE installation_id IN (${placeholders})
+                         ORDER BY day_date`
+                    ).all(...ids);
+                }
+                for (const row of days) {
+                    const key = row.installation_id;
+                    if (!daysById.has(key)) daysById.set(key, []);
+                    daysById.get(key).push(row);
+                }
+            } catch (error) {
+                // Days table might not exist on older schemas
+                console.log('Error batch-loading installation days:', error.message);
+            }
+        }
+
+        for (const installation of installations) {
+            installation.assigned_users = assignmentsById.get(installation.id) || [];
+            installation.installation_days = daysById.get(installation.id) || [];
+        }
+        return installations;
+    }
+
     static async getAllInstallations(startDate = null, endDate = null) {
         // Check which columns exist and use appropriate query
         let hasStartDate = false;
@@ -9398,46 +9485,12 @@ class ProductionDatabase {
             
             query += ` ORDER BY ${dateOrderBy}, i.start_time`;
             
-            console.log('Executing query:', query);
-            console.log('With params:', params);
-            
             if (isPostgreSQL) {
                 const result = await pool.query(query, params);
-                const installations = result.rows;
-                // Get assignments and days for each installation
-                for (const installation of installations) {
-                    try {
-                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    } catch (error) {
-                        console.log('Error getting installation assignments:', error.message);
-                        installation.assigned_users = [];
-                    }
-                    try {
-                        installation.installation_days = await this.getInstallationDays(installation.id) || [];
-                    } catch (error) {
-                        console.log('Error getting installation days:', error.message);
-                        installation.installation_days = []; // Days table might not exist
-                    }
-                }
-                return installations;
+                return await this.attachInstallationRelations(result.rows);
             } else {
                 const installations = db.prepare(query).all(...params);
-                // Get assignments and days for each installation
-                for (const installation of installations) {
-                    try {
-                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
-                    } catch (error) {
-                        console.log('Error getting installation assignments:', error.message);
-                        installation.assigned_users = [];
-                    }
-                    try {
-                        installation.installation_days = await this.getInstallationDays(installation.id) || [];
-                    } catch (error) {
-                        console.log('Error getting installation days:', error.message);
-                        installation.installation_days = []; // Days table might not exist
-                    }
-                }
-                return installations;
+                return await this.attachInstallationRelations(installations);
             }
         } catch (error) {
             // Fall back to old schema if new columns don't exist
@@ -9486,18 +9539,14 @@ class ProductionDatabase {
                 
                 if (isPostgreSQL) {
                     const result = await pool.query(query, params);
-                    const installations = result.rows;
-                    // Get assignments for each installation
+                    const installations = await this.attachInstallationRelations(result.rows);
                     for (const installation of installations) {
-                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
                         installation.installation_days = []; // No days table in old schema
                     }
                     return installations;
                 } else {
-                    const installations = db.prepare(query).all(...params);
-                    // Get assignments for each installation
+                    const installations = await this.attachInstallationRelations(db.prepare(query).all(...params));
                     for (const installation of installations) {
-                        installation.assigned_users = await this.getInstallationAssignments(installation.id) || [];
                         installation.installation_days = []; // No days table in old schema
                     }
                     return installations;
@@ -11279,7 +11328,7 @@ class ProductionDatabase {
     static async getActiveClockIns() {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT te.*, j.name as job_name, u.username 
+                `SELECT te.*, j.name as job_name, u.username, u.is_driver
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
                  LEFT JOIN production_users u ON te.user_id = u.id
@@ -11289,7 +11338,7 @@ class ProductionDatabase {
             return result.rows;
         } else {
             return db.prepare(
-                `SELECT te.*, j.name as job_name, u.username 
+                `SELECT te.*, j.name as job_name, u.username, u.is_driver
                  FROM timesheet_entries te
                  LEFT JOIN jobs j ON te.job_id = j.id
                  LEFT JOIN production_users u ON te.user_id = u.id
@@ -11297,6 +11346,30 @@ class ProductionDatabase {
                  ORDER BY te.clock_in_time DESC`
             ).all();
         }
+    }
+
+    /** Returns Set of user IDs who already have a daily inspection header for the date (no response rows). */
+    static async getUserIdsWithDailyInspection(userIds, inspectionDate) {
+        const ids = [...new Set((userIds || []).map((id) => parseInt(id, 10)).filter((id) => !Number.isNaN(id)))];
+        if (ids.length === 0) return new Set();
+
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT inspected_by_user_id
+                 FROM daily_vehicle_inspections
+                 WHERE inspection_date = $1 AND inspected_by_user_id = ANY($2::int[])`,
+                [inspectionDate, ids]
+            );
+            return new Set(result.rows.map((r) => Number(r.inspected_by_user_id)));
+        }
+
+        const placeholders = ids.map(() => '?').join(',');
+        const rows = db.prepare(
+            `SELECT inspected_by_user_id
+             FROM daily_vehicle_inspections
+             WHERE inspection_date = ? AND inspected_by_user_id IN (${placeholders})`
+        ).all(inspectionDate, ...ids);
+        return new Set(rows.map((r) => Number(r.inspected_by_user_id)));
     }
     
     static async getTimesheetHistory(userId, startDate, endDate) {

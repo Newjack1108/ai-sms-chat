@@ -1223,7 +1223,7 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
         const panelId = parseInt(req.params.id);
         const bom = await ProductionDatabase.getPanelBOM(panelId);
         
-        // Enrich BOM items with cost information
+        // Enrich BOM items with stored unit costs (no live component BOM recompute)
         const bomWithCosts = await Promise.all(bom.map(async (item) => {
             const qty = parseFloat(item.quantity_required || 0);
             let itemCost = 0;
@@ -1234,8 +1234,10 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
                     itemCost = parseFloat(stockItem.cost_per_unit_gbp || 0) * qty;
                 }
             } else if (item.item_type === 'component') {
-                const componentCost = await ProductionDatabase.calculateComponentTrueCost(item.item_id);
-                itemCost = componentCost * qty;
+                const component = await ProductionDatabase.getComponentById(item.item_id);
+                if (component) {
+                    itemCost = parseFloat(component.cost_gbp || 0) * qty;
+                }
             }
             
             return {
@@ -1325,7 +1327,13 @@ router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdminOrOff
 router.get('/panels/:id/bom-value', requireProductionAuth, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const bomValue = await ProductionDatabase.calculateBOMValue(panelId);
+        const panel = await ProductionDatabase.getPanelById(panelId);
+        if (!panel) {
+            return res.status(404).json({ success: false, error: 'Built item not found' });
+        }
+        const labourRate = parseFloat(await ProductionDatabase.getSetting('labour_rate_per_hour') || 25);
+        const labourCost = parseFloat(panel.labour_hours || 0) * labourRate;
+        const bomValue = Math.max(0, parseFloat(panel.cost_gbp || 0) - labourCost);
         res.json({ success: true, bom_value: bomValue });
     } catch (error) {
         console.error('Calculate BOM value error:', error);
@@ -1336,8 +1344,11 @@ router.get('/panels/:id/bom-value', requireProductionAuth, async (req, res) => {
 router.get('/panels/:id/true-cost', requireProductionAuth, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
-        const trueCost = await ProductionDatabase.calculatePanelTrueCost(panelId);
-        res.json({ success: true, true_cost: trueCost });
+        const panel = await ProductionDatabase.getPanelById(panelId);
+        if (!panel) {
+            return res.status(404).json({ success: false, error: 'Built item not found' });
+        }
+        res.json({ success: true, true_cost: parseFloat(panel.cost_gbp || 0) });
     } catch (error) {
         console.error('Calculate true cost error:', error);
         res.status(500).json({ success: false, error: 'Failed to calculate true cost' });
@@ -1561,7 +1572,13 @@ router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdminO
 router.get('/components/:id/cost', requireProductionAuth, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
-        const bomValue = await ProductionDatabase.calculateComponentBOMValue(componentId);
+        const component = await ProductionDatabase.getComponentById(componentId);
+        if (!component) {
+            return res.status(404).json({ success: false, error: 'Component not found' });
+        }
+        const labourRate = parseFloat(await ProductionDatabase.getSetting('labour_rate_per_hour') || 25);
+        const labourCost = parseFloat(component.labour_hours || 0) * labourRate;
+        const bomValue = Math.max(0, parseFloat(component.cost_gbp || 0) - labourCost);
         res.json({ success: true, bom_value: bomValue });
     } catch (error) {
         console.error('Calculate component BOM value error:', error);
@@ -1572,8 +1589,11 @@ router.get('/components/:id/cost', requireProductionAuth, async (req, res) => {
 router.get('/components/:id/true-cost', requireProductionAuth, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
-        const trueCost = await ProductionDatabase.calculateComponentTrueCost(componentId);
-        res.json({ success: true, true_cost: trueCost });
+        const component = await ProductionDatabase.getComponentById(componentId);
+        if (!component) {
+            return res.status(404).json({ success: false, error: 'Component not found' });
+        }
+        res.json({ success: true, true_cost: parseFloat(component.cost_gbp || 0) });
     } catch (error) {
         console.error('Calculate component true cost error:', error);
         res.status(500).json({ success: false, error: 'Failed to calculate component true cost' });
@@ -1630,24 +1650,24 @@ router.get('/wip', requireProductionAuth, async (req, res) => {
 
 router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
     try {
-        const wipData = await ProductionDatabase.getWIPData();
-        const totalWIPValue = wipData.reduce((sum, panel) => sum + parseFloat(panel.wip_value || 0), 0);
-        
-        const totalStockValue = await ProductionDatabase.getTotalStockValue();
-        const totalPanelValue = await ProductionDatabase.getTotalPanelValue();
-        const lastWeekSummary = await ProductionDatabase.getLastWeekPlannerSummary();
-        const lowStockPreview = await ProductionDatabase.getLowStockItemsPreview(20);
-        const recentOrders = await ProductionDatabase.getProductOrdersPaged({
-            page: 1,
-            pageSize: 10,
-            quoteOnly: false,
-            includeProducts: false
-        });
+        // Panel/WIP totals use stored cost_gbp (same metric); avoid live BOM recompute + double work.
+        const [totalPanelValue, totalStockValue, lastWeekSummary, lowStockPreview, recentOrders] = await Promise.all([
+            ProductionDatabase.getTotalPanelValue(),
+            ProductionDatabase.getTotalStockValue(),
+            ProductionDatabase.getLastWeekPlannerSummary(),
+            ProductionDatabase.getLowStockItemsPreview(20),
+            ProductionDatabase.getProductOrdersPaged({
+                page: 1,
+                pageSize: 10,
+                quoteOnly: false,
+                includeProducts: false
+            })
+        ]);
         
         res.json({
             success: true,
             summary: {
-                total_wip_value: totalWIPValue,
+                total_wip_value: totalPanelValue,
                 total_stock_value: totalStockValue,
                 total_panel_value: totalPanelValue,
                 last_week: lastWeekSummary,
@@ -1857,8 +1877,11 @@ router.get('/products/:id/components', requireProductionAuth, async (req, res) =
 router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const productCost = await ProductionDatabase.calculateProductCost(productId);
-        res.json({ success: true, cost: productCost });
+        const product = await ProductionDatabase.getProductById(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        res.json({ success: true, cost: parseFloat(product.cost_gbp || 0) });
     } catch (error) {
         console.error('Calculate product cost error:', error);
         res.status(500).json({ success: false, error: 'Failed to calculate product cost' });
@@ -1880,8 +1903,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
             return res.status(404).json({ success: false, error: 'Product not found' });
         }
 
-        const costData = await ProductionDatabase.calculateProductCost(productId);
-        const priceExVat = parseFloat(costData ?? product.cost_gbp ?? 0) || 0;
+        const priceExVat = parseFloat(product.cost_gbp ?? 0) || 0;
         const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
         const salesProductType = productTypeForSalesPush(
             product.product_type,
@@ -3552,14 +3574,19 @@ router.get('/timesheet/active', requireProductionAuth, requireAdminOrOffice, asy
     try {
         const activeClockIns = await ProductionDatabase.getActiveClockIns();
         const today = londonYmd(new Date());
-        const withInspectionState = await Promise.all((activeClockIns || []).map(async entry => {
-            const inspectionState = await getInspectionRequirementState(entry.user_id, today);
+        const driverUserIds = (activeClockIns || [])
+            .filter((entry) => entry.is_driver === true || entry.is_driver === 1)
+            .map((entry) => entry.user_id);
+        const completedDrivers = await ProductionDatabase.getUserIdsWithDailyInspection(driverUserIds, today);
+
+        const withInspectionState = (activeClockIns || []).map((entry) => {
+            const inspectionRequired = !!(entry.is_driver === true || entry.is_driver === 1);
             return {
                 ...entry,
-                inspection_required: inspectionState.inspectionRequired,
-                inspection_completed: inspectionState.inspectionCompleted
+                inspection_required: inspectionRequired,
+                inspection_completed: inspectionRequired ? completedDrivers.has(Number(entry.user_id)) : true
             };
-        }));
+        });
         res.json({ success: true, clockIns: withInspectionState });
     } catch (error) {
         console.error('Get active clock ins error:', error);

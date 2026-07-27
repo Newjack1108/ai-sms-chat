@@ -592,8 +592,12 @@
                 });
             }
             
-            // Auto-refresh active clock ins every 30 seconds
-            refreshInterval = setInterval(loadActiveClockIns, 30000);
+            // Auto-refresh active clock-ins every 30s while the tab is visible
+            refreshInterval = setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    loadActiveClockIns();
+                }
+            }, 30000);
             
             // Check for weekly approval reminder (on Saturdays)
             await checkWeeklyApprovalReminder();

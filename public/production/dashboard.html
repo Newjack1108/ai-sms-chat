@@ -279,12 +279,21 @@
                 document.getElementById('recentOrders').innerHTML = '<p>Error loading works orders</p>';
             }
             
-            // Load overdue reminders and pending holiday requests
-            try {
-                const remindersData = await apiCall('/reminders/overdue');
-                const remindersDiv = document.getElementById('overdueReminders');
-                let remindersHtml = '';
+            // Secondary widgets in parallel (reminders, holidays, tasks, inspections)
+            const isAdminOrOffice = user.role === 'admin' || user.role === 'office';
+            const softApi = (promise) => promise.catch(() => null);
+            const [remindersData, holidaysData, tasksData, inspData] = await Promise.all([
+                softApi(apiCall('/reminders/overdue')),
+                isAdminOrOffice ? softApi(apiCall('/holidays/requests/pending')) : Promise.resolve(null),
+                softApi(apiCall('/tasks/my?status=pending')),
+                isAdminOrOffice ? softApi(apiCall('/inspections/overdue')) : Promise.resolve(null)
+            ]);
 
+            const remindersDiv = document.getElementById('overdueReminders');
+            if (!remindersData) {
+                remindersDiv.innerHTML = '<p>Error loading reminders</p>';
+            } else {
+                let remindersHtml = '';
                 if (remindersData.reminders && remindersData.reminders.length > 0) {
                     remindersHtml += remindersData.reminders.slice(0, 5).map(reminder => {
                         if (reminder.type === 'vehicle_inspection_issue') {
@@ -332,57 +341,47 @@
                     }).join('');
                 }
 
-                // Load pending holiday requests (admin/office only; 403 is ignored)
-                try {
-                    const holidaysData = await apiCall('/holidays/requests/pending');
-                    if (holidaysData && holidaysData.success && holidaysData.requests && holidaysData.requests.length > 0) {
-                        if (remindersHtml) remindersHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;"></div>';
-                        remindersHtml += holidaysData.requests.map(req => {
-                            const startStr = formatDate(req.start_date);
-                            const endStr = formatDate(req.end_date);
-                            const days = parseFloat(req.days_requested).toFixed(1);
-                            return `
-                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #e7f3ff;">
-                                    <strong style="color: #004085;">🏖️ ${req.user_name || 'Unknown'}</strong><br>
-                                    <small style="color: #004085;">${startStr} – ${endStr} (${days} days)</small>
-                                    <br>
-                                    <a href="holidays-admin.html" style="font-size: 11px; color: #004085; text-decoration: underline; margin-top: 4px; display: inline-block;">
-                                        Review request →
-                                    </a>
-                                </div>
-                            `;
-                        }).join('');
-                    }
-                } catch (_) { /* not admin/office or API error */ }
+                if (holidaysData && holidaysData.success && holidaysData.requests && holidaysData.requests.length > 0) {
+                    if (remindersHtml) remindersHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;"></div>';
+                    remindersHtml += holidaysData.requests.map(req => {
+                        const startStr = formatDate(req.start_date);
+                        const endStr = formatDate(req.end_date);
+                        const days = parseFloat(req.days_requested).toFixed(1);
+                        return `
+                            <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #e7f3ff;">
+                                <strong style="color: #004085;">🏖️ ${req.user_name || 'Unknown'}</strong><br>
+                                <small style="color: #004085;">${startStr} – ${endStr} (${days} days)</small>
+                                <br>
+                                <a href="holidays-admin.html" style="font-size: 11px; color: #004085; text-decoration: underline; margin-top: 4px; display: inline-block;">
+                                    Review request →
+                                </a>
+                            </div>
+                        `;
+                    }).join('');
+                }
 
                 remindersDiv.innerHTML = remindersHtml || '<p>No overdue reminders</p>';
-            } catch (error) {
-                document.getElementById('overdueReminders').innerHTML = '<p>Error loading reminders</p>';
             }
-            
-            // Load my tasks
-            try {
-                const tasksData = await apiCall('/tasks/my?status=pending');
-                const tasksDiv = document.getElementById('myTasks');
-                if (tasksData.tasks.length === 0) {
-                    tasksDiv.innerHTML = '<p>No pending tasks</p>';
+
+            const tasksDiv = document.getElementById('myTasks');
+            if (!tasksData) {
+                tasksDiv.innerHTML = '<p>Error loading tasks</p>';
+            } else if (!tasksData.tasks || tasksData.tasks.length === 0) {
+                tasksDiv.innerHTML = '<p>No pending tasks</p>';
+            } else {
+                tasksDiv.innerHTML = tasksData.tasks.slice(0, 5).map(task => `
+                    <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
+                        <strong>${task.title}</strong><br>
+                        <small>Due: ${task.due_date ? formatDate(task.due_date) : 'No date'}</small>
+                    </div>
+                `).join('');
+            }
+
+            if (isAdminOrOffice) {
+                const inspDiv = document.getElementById('overdueInspections');
+                if (!inspData) {
+                    inspDiv.innerHTML = '<p>Error loading inspections</p>';
                 } else {
-                    tasksDiv.innerHTML = tasksData.tasks.slice(0, 5).map(task => `
-                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                            <strong>${task.title}</strong><br>
-                            <small>Due: ${task.due_date ? formatDate(task.due_date) : 'No date'}</small>
-                        </div>
-                    `).join('');
-                }
-            } catch (error) {
-                document.getElementById('myTasks').innerHTML = '<p>Error loading tasks</p>';
-            }
-            
-            // Compliance inspections (admin/office only)
-            if (user.role === 'admin' || user.role === 'office') {
-                try {
-                    const inspData = await apiCall('/inspections/overdue');
-                    const inspDiv = document.getElementById('overdueInspections');
                     const list = inspData.inspections || [];
                     const typeLabel = (t) => ({
                         ladder: 'Ladder',
@@ -454,8 +453,6 @@
                             `;
                         }).join('');
                     }
-                } catch (e) {
-                    document.getElementById('overdueInspections').innerHTML = '<p>Error loading inspections</p>';
                 }
             }
         }

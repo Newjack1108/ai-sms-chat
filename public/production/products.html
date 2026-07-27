@@ -304,19 +304,11 @@
                     return;
                 }
                 
-                // Calculate costs for all products on this page
-                const productsWithCosts = await Promise.all(rows.map(async (product) => {
-                    try {
-                        const costData = await apiCall(`/products/${product.id}/cost`);
-                        return { ...product, calculated_cost: costData.cost };
-                    } catch (error) {
-                        console.error(`Error calculating cost for product ${product.id}:`, error);
-                        return { ...product, calculated_cost: product.cost_gbp || 0 };
-                    }
+                // Use stored cost_gbp (kept in sync when BOMs change) — avoid per-row live recalcs
+                allProducts = rows.map((product) => ({
+                    ...product,
+                    calculated_cost: parseFloat(product.cost_gbp || 0)
                 }));
-                
-                // Store all products
-                allProducts = productsWithCosts;
                 
                 // Filter products based on selected category
                 displayProducts();
@@ -426,9 +418,7 @@
                 document.getElementById('productInstallTime').value = product.estimated_install_time || 0;
                 document.getElementById('productTravelTime').value = product.estimated_travel_time || 0;
                 document.getElementById('productNumberOfBoxes').value = product.number_of_boxes ?? 1;
-                // Load calculated cost
-                const costData = await apiCall(`/products/${product.id}/cost`);
-                document.getElementById('productCost').value = costData.cost.toFixed(2);
+                document.getElementById('productCost').value = parseFloat(product.cost_gbp || 0).toFixed(2);
                 showModal('productModal');
             } catch (error) {
                 showAlert('Error loading product', 'error');
@@ -459,12 +449,12 @@
                     productName,
                     onChange: async () => {
                         try {
-                            const costData = await apiCall(`/products/${productId}/cost`);
-                            const totalCost =
-                                costData && typeof costData.cost === 'number' ? costData.cost : 0;
+                            const productData = await apiCall(`/products/${productId}`);
+                            const totalCost = parseFloat(productData.product?.cost_gbp || 0);
                             const productIndex = allProducts.findIndex((p) => p.id === productId);
                             if (productIndex >= 0) {
                                 allProducts[productIndex].calculated_cost = totalCost;
+                                allProducts[productIndex].cost_gbp = totalCost;
                                 displayProducts();
                             }
                         } catch (e) {

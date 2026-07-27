@@ -219,9 +219,7 @@
                 document.getElementById('componentName').value = component.name;
                 document.getElementById('componentDescription').value = component.description || '';
                 document.getElementById('componentType').value = component.component_type || '';
-                // Load calculated cost
-                const trueCostData = await apiCall(`/components/${component.id}/true-cost`);
-                document.getElementById('componentCost').value = trueCostData.true_cost.toFixed(2);
+                document.getElementById('componentCost').value = parseFloat(component.cost_gbp || 0).toFixed(2);
                 document.getElementById('componentBuiltQty').value = component.built_quantity || 0;
                 document.getElementById('componentMinStock').value = component.min_stock || 0;
                 document.getElementById('componentMaxStock').value = component.max_stock || 0;
@@ -238,10 +236,16 @@
                 const component = componentData.component;
                 if (!component) return;
                 
-                const bomValueData = await apiCall(`/components/${id}/cost`);
-                const trueCostData = await apiCall(`/components/${id}/true-cost`);
-                const movementsData = await apiCall(`/components/${id}/movements`);
-                const labourRateData = await apiCall('/settings/labour_rate_per_hour');
+                const [movementsData, labourRateData] = await Promise.all([
+                    apiCall(`/components/${id}/movements`),
+                    apiCall('/settings/labour_rate_per_hour')
+                ]);
+                const labourHours = parseFloat(component.labour_hours || 0);
+                const labourRate = parseFloat(labourRateData.value || 25);
+                const labourCost = labourHours * labourRate;
+                const trueCost = parseFloat(component.cost_gbp || 0);
+                const bomValue = Math.max(0, trueCost - labourCost);
+                const builtQty = parseFloat(component.built_quantity || 0);
                 
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
@@ -254,17 +258,17 @@
                         <div>
                             <div class="grid grid-2" style="margin-bottom: 20px;">
                                 <div>
-                                    <p><strong>BOM Value:</strong> ${formatCurrency(bomValueData.bom_value)}</p>
-                                    <p><strong>Labour Hours:</strong> ${parseFloat(component.labour_hours || 0).toFixed(2)}</p>
-                                    <p><strong>Labour Rate:</strong> ${formatCurrency(labourRateData.value || 25)}/hr</p>
-                                    <p><strong>Labour Cost:</strong> ${formatCurrency(parseFloat(component.labour_hours || 0) * parseFloat(labourRateData.value || 25))}</p>
+                                    <p><strong>BOM Value:</strong> ${formatCurrency(bomValue)}</p>
+                                    <p><strong>Labour Hours:</strong> ${labourHours.toFixed(2)}</p>
+                                    <p><strong>Labour Rate:</strong> ${formatCurrency(labourRate)}/hr</p>
+                                    <p><strong>Labour Cost:</strong> ${formatCurrency(labourCost)}</p>
                                 </div>
                                 <div>
-                                    <p><strong>True Cost:</strong> ${formatCurrency(trueCostData.true_cost)}</p>
-                                    <p><strong>Built Quantity:</strong> ${parseFloat(component.built_quantity || 0).toFixed(2)}</p>
+                                    <p><strong>True Cost:</strong> ${formatCurrency(trueCost)}</p>
+                                    <p><strong>Built Quantity:</strong> ${builtQty.toFixed(2)}</p>
                                     <p><strong>Min Stock:</strong> ${parseFloat(component.min_stock || 0).toFixed(2)}</p>
                                     <p><strong>Max Stock:</strong> ${parseFloat(component.max_stock || 0) > 0 ? parseFloat(component.max_stock).toFixed(2) : 'No limit'}</p>
-                                    <p><strong>WIP Value:</strong> ${formatCurrency(trueCostData.true_cost * parseFloat(component.built_quantity || 0))}</p>
+                                    <p><strong>WIP Value:</strong> ${formatCurrency(trueCost * builtQty)}</p>
                                 </div>
                             </div>
                             
