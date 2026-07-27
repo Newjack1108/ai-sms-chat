@@ -4,7 +4,6 @@
 // Railway GitHub reconnected - trigger deploy
 const express = require('express');
 const path = require('path');
-const zlib = require('zlib');
 const cors = require('cors');
 const session = require('express-session');
 const twilio = require('twilio');
@@ -34,69 +33,6 @@ const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD
 console.log(`🔐 Authentication configured`);
 console.log(`   Username: "${ADMIN_USERNAME}"`);
 console.log(`   Password: "${ADMIN_PASSWORD ? '***' : 'empty'}"`);
-
-// Lightweight gzip for JSON/HTML/JS/CSS (no external compression package required)
-app.use((req, res, next) => {
-    const accept = req.headers['accept-encoding'] || '';
-    if (!/\bgzip\b/i.test(accept)) return next();
-
-    const chunks = [];
-    const originalWrite = res.write;
-    const originalEnd = res.end;
-
-    res.write = function (chunk, encoding, cb) {
-        if (chunk) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
-        }
-        if (typeof encoding === 'function') encoding();
-        else if (typeof cb === 'function') cb();
-        return true;
-    };
-
-    res.end = function (chunk, encoding, cb) {
-        if (typeof chunk === 'function') {
-            cb = chunk;
-            chunk = null;
-        } else if (typeof encoding === 'function') {
-            cb = encoding;
-            encoding = 'utf8';
-        }
-        if (chunk) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf8'));
-        }
-
-        const restore = () => {
-            res.write = originalWrite;
-            res.end = originalEnd;
-        };
-
-        const body = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
-        if (res.getHeader('Content-Encoding') || body.length < 1024) {
-            restore();
-            return originalEnd.call(res, body, cb);
-        }
-
-        const type = String(res.getHeader('Content-Type') || '');
-        const compressible = !type || /json|text|javascript|css|svg|xml|html|ico/i.test(type);
-        if (!compressible) {
-            restore();
-            return originalEnd.call(res, body, cb);
-        }
-
-        zlib.gzip(body, (err, compressed) => {
-            restore();
-            if (err) {
-                return originalEnd.call(res, body, cb);
-            }
-            res.setHeader('Content-Encoding', 'gzip');
-            res.setHeader('Vary', 'Accept-Encoding');
-            res.setHeader('Content-Length', compressed.length);
-            return originalEnd.call(res, compressed, cb);
-        });
-    };
-
-    next();
-});
 
 // Middleware
 app.use(cors());
