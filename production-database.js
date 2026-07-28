@@ -6173,17 +6173,40 @@ class ProductionDatabase {
         }
     }
     
-    static async getAllProducts() {
-        const sql = `
-            SELECT fp.*,
-                (SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at
-            FROM finished_products fp
-            ORDER BY name`;
+    static async getAllProducts(status = null) {
+        const statusFilter = status && String(status).trim() ? String(status).trim() : null;
+        const syncSub = `(SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at`;
         if (isPostgreSQL) {
-            const result = await pool.query(sql);
+            if (statusFilter) {
+                const result = await pool.query(
+                    `SELECT fp.*, ${syncSub}
+                     FROM finished_products fp
+                     WHERE fp.status = $1
+                     ORDER BY name`,
+                    [statusFilter]
+                );
+                return result.rows;
+            }
+            const result = await pool.query(
+                `SELECT fp.*, ${syncSub}
+                 FROM finished_products fp
+                 ORDER BY name`
+            );
             return result.rows;
         } else {
-            return db.prepare(sql).all();
+            if (statusFilter) {
+                return db.prepare(
+                    `SELECT fp.*, ${syncSub}
+                     FROM finished_products fp
+                     WHERE fp.status = ?
+                     ORDER BY name`
+                ).all(statusFilter);
+            }
+            return db.prepare(
+                `SELECT fp.*, ${syncSub}
+                 FROM finished_products fp
+                 ORDER BY name`
+            ).all();
         }
     }
     

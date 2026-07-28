@@ -34,8 +34,16 @@
                 <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
                 <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
             </div>
-            <div style="padding: 12px 0;">
-                <input id="productSearchInput" type="text" class="form-input" placeholder="Search by name, description, category, type or status..." autocomplete="off">
+            <div style="padding: 12px 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
+                <input id="productSearchInput" type="text" class="form-input" placeholder="Search by name, description, category, type or status..." autocomplete="off" style="flex: 1; min-width: 200px;">
+                <label style="display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap;">
+                    <span>Status</span>
+                    <select id="productStatusFilter" class="form-select" style="width: auto; min-width: 120px;" onchange="filterProductStatus(this.value)">
+                        <option value="active" selected>Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="all">All</option>
+                    </select>
+                </label>
             </div>
             <div id="productsList">
                 <div class="loading">Loading...</div>
@@ -52,6 +60,7 @@
             </div>
             <form id="productForm">
                 <input type="hidden" id="productId">
+                <input type="hidden" id="productStatus" value="active">
                 <div class="form-group">
                     <label class="form-label">Name *</label>
                     <input type="text" id="productName" class="form-input" required>
@@ -160,6 +169,7 @@
         let suppliersDb = [];
         let currentProductId = null;
         let selectedCategory = 'Standard Product';
+        let selectedStatusFilter = 'active';
         let allProducts = [];
         let productsPage = 1;
         let productsTotal = 0;
@@ -283,6 +293,9 @@
                 if (selectedCategory !== 'all') {
                     qs.set('category', selectedCategory);
                 }
+                if (selectedStatusFilter !== 'all') {
+                    qs.set('status', selectedStatusFilter);
+                }
                 if (productSearchQuery) {
                     qs.set('search', productSearchQuery);
                 }
@@ -310,12 +323,19 @@
                     calculated_cost: parseFloat(product.cost_gbp || 0)
                 }));
                 
-                // Filter products based on selected category
                 displayProducts();
             } catch (error) {
                 document.getElementById('productsList').innerHTML = '<p>Error loading products</p>';
                 allProducts = [];
             }
+        }
+
+        function statusBadge(status) {
+            const s = (status || 'active').toString().toLowerCase();
+            if (s === 'inactive') {
+                return '<span class="badge badge-secondary">inactive</span>';
+            }
+            return '<span class="badge badge-success">active</span>';
         }
         
         function displayProducts() {
@@ -344,12 +364,17 @@
                         </tr>
                     </thead>
                     <tbody>
-                        ${filteredProducts.map(product => `
+                        ${filteredProducts.map(product => {
+                            const isInactive = (product.status || 'active') === 'inactive';
+                            const statusAction = isInactive
+                                ? `<button onclick="setProductStatus(${product.id}, 'active')" class="btn btn-success btn-sm" style="margin-left: 5px;" title="Show in catalog again">Reactivate</button>`
+                                : `<button onclick="setProductStatus(${product.id}, 'inactive')" class="btn btn-secondary btn-sm" style="margin-left: 5px;" title="Hide from catalog">Deactivate</button>`;
+                            return `
                             <tr>
                                 <td><strong>${product.name}</strong></td>
                                 <td><span class="badge badge-secondary">${product.category || 'Other'}</span></td>
                                 <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>
-                                <td><span class="badge badge-info">${product.status}</span></td>
+                                <td>${statusBadge(product.status)}</td>
                                 <td>${formatPushedToSalesAt(product.last_pushed_to_sales_at)}</td>
                                 <td>${formatCurrency(product.calculated_cost)}</td>
                                 <td>
@@ -359,11 +384,13 @@
                                         <button onclick="manageProductSuppliers(${product.id})" class="btn btn-primary btn-sm" title="Assign approved suppliers">Suppliers</button>
                                         <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
                                         <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
+                                        ${statusAction}
                                         <button onclick="deleteProduct(${product.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
                                     ` : ''}
                                 </td>
                             </tr>
-                        `).join('')}
+                        `;
+                        }).join('')}
                     </tbody>
                 </table>
                 ${renderProductsPager()}
@@ -390,11 +417,18 @@
             
             loadProducts();
         }
+
+        function filterProductStatus(status) {
+            selectedStatusFilter = status || 'active';
+            productsPage = 1;
+            loadProducts();
+        }
         
         function showAddProductModal() {
             document.getElementById('productModalTitle').textContent = 'Add Product';
             document.getElementById('productForm').reset();
             document.getElementById('productId').value = '';
+            document.getElementById('productStatus').value = 'active';
             document.getElementById('productType').value = 'other';
             document.getElementById('leadlockCategory').value = 'sheds';
             showModal('productModal');
@@ -408,6 +442,7 @@
                 
                 document.getElementById('productModalTitle').textContent = 'Edit Product';
                 document.getElementById('productId').value = product.id;
+                document.getElementById('productStatus').value = product.status === 'inactive' ? 'inactive' : 'active';
                 document.getElementById('productName').value = product.name;
                 document.getElementById('productDescription').value = product.description || '';
                 document.getElementById('productType').value = normalizeProductTypeForSelect(product.product_type);
@@ -536,6 +571,48 @@
             }
         }
 
+        async function setProductStatus(id, status) {
+            let product = allProducts.find(p => p.id === id);
+            if (!product) {
+                try {
+                    const r = await apiCall(`/products/${id}`);
+                    product = r.product;
+                } catch (_) { /* ignore */ }
+            }
+            if (!product) {
+                showAlert('Product not found', 'error');
+                return;
+            }
+            const name = product.name || `#${id}`;
+            if (status === 'inactive') {
+                if (!confirm(`Hide "${name}" from the catalog? Existing orders keep this product.`)) return;
+            } else if (!confirm(`Reactivate "${name}" so it appears in the catalog again?`)) {
+                return;
+            }
+            try {
+                await apiCall(`/products/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        name: product.name,
+                        description: product.description || '',
+                        product_type: product.product_type,
+                        leadlock_category: product.leadlock_category || product.product_type,
+                        is_optional_extra: !!product.is_optional_extra,
+                        category: product.category || 'Other',
+                        status,
+                        estimated_load_time: product.estimated_load_time || 0,
+                        estimated_install_time: product.estimated_install_time || 0,
+                        estimated_travel_time: product.estimated_travel_time || 0,
+                        number_of_boxes: product.number_of_boxes ?? 1
+                    })
+                });
+                showAlert(status === 'inactive' ? 'Product deactivated' : 'Product reactivated');
+                loadProducts();
+            } catch (error) {
+                showAlert(error.message || 'Failed to update product status', 'error');
+            }
+        }
+
         async function deleteProduct(id) {
             let product = allProducts.find(p => p.id === id);
             if (!product) {
@@ -545,7 +622,11 @@
                 } catch (_) { /* ignore */ }
             }
             const name = product ? product.name : `#${id}`;
-            if (!confirm(`Delete product "${name}"? This will remove the product and all its components. This cannot be undone.`)) return;
+            let message = `Delete product "${name}"? This will remove the product and all its components. This cannot be undone.`;
+            if (product && product.last_pushed_to_sales_at) {
+                message += '\n\nThis product was previously pushed to the sales app. Deleting here only removes it from production — the sales copy may remain.';
+            }
+            if (!confirm(message)) return;
             try {
                 await apiCall(`/products/${id}`, { method: 'DELETE' });
                 showAlert('Product deleted');
@@ -565,7 +646,7 @@
                 leadlock_category: document.getElementById('leadlockCategory').value,
                 is_optional_extra: document.getElementById('productOptionalExtra').checked,
                 category: document.getElementById('productCategory').value,
-                status: 'active',
+                status: document.getElementById('productStatus').value === 'inactive' ? 'inactive' : 'active',
                 estimated_load_time: parseFloat(document.getElementById('productLoadTime').value) || 0,
                 estimated_install_time: parseFloat(document.getElementById('productInstallTime').value) || 0,
                 estimated_travel_time: parseFloat(document.getElementById('productTravelTime').value) || 0,

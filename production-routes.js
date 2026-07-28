@@ -169,6 +169,13 @@ function normalizeLeadlockCategory(rawCategory) {
     return 'sheds';
 }
 
+function normalizeProductStatus(rawStatus) {
+    const normalized = (rawStatus || '').toString().trim().toLowerCase();
+    if (normalized === 'inactive') return 'inactive';
+    if (!normalized || normalized === 'active') return 'active';
+    return null;
+}
+
 // ============ AUTHENTICATION ROUTES ============
 
 router.post('/login', async (req, res) => {
@@ -1719,7 +1726,11 @@ router.put('/settings/:key', requireProductionAuth, requireAdmin, async (req, re
 router.get('/products', requireProductionAuth, async (req, res) => {
     try {
         if (String(req.query.all) === '1') {
-            const products = await ProductionDatabase.getAllProducts();
+            const statusFilter = req.query.status ? String(req.query.status).trim() : null;
+            if (statusFilter && !['active', 'inactive'].includes(statusFilter)) {
+                return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
+            }
+            const products = await ProductionDatabase.getAllProducts(statusFilter || null);
             return res.json({
                 success: true,
                 products,
@@ -1730,6 +1741,9 @@ router.get('/products', requireProductionAuth, async (req, res) => {
         }
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
         const status = req.query.status ? String(req.query.status).trim() : null;
+        if (status && !['active', 'inactive'].includes(status)) {
+            return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
+        }
         const category = req.query.category ? String(req.query.category).trim() : null;
         const search = req.query.search ? String(req.query.search).trim() : null;
         const { products, total, page: p, page_size } = await ProductionDatabase.getProductsPaged({
@@ -1751,8 +1765,12 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
+        const normalizedStatus = normalizeProductStatus(status);
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
+        }
+        if (status != null && String(status).trim() !== '' && !normalizedStatus) {
+            return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
         }
         
         // Cost is calculated automatically from components (panels + materials) + load time labour
@@ -1763,7 +1781,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
             category,
-            status,
+            status: normalizedStatus || 'active',
             estimated_load_time,
             estimated_install_time,
             estimated_travel_time,
@@ -1799,6 +1817,10 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
+        const normalizedStatus = normalizeProductStatus(status);
+        if (status != null && String(status).trim() !== '' && !normalizedStatus) {
+            return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
+        }
         
         // Cost is calculated automatically from components + load time labour
         const product = await ProductionDatabase.updateProduct(productId, {
@@ -1808,7 +1830,7 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
             leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
             category,
-            status,
+            status: normalizedStatus || 'active',
             estimated_load_time,
             estimated_install_time,
             estimated_travel_time,

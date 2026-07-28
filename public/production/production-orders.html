@@ -1205,7 +1205,7 @@
         
         async function loadProducts() {
             try {
-                const data = await apiCall('/products?all=1');
+                const data = await apiCall('/products?all=1&status=active');
                 products = (data.products || []).filter(p => p.status === 'active');
                 
                 // Populate order product selects in table
