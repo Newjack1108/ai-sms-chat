@@ -525,7 +525,8 @@ function initializeSQLite() {
             { name: 'address_is_delivery_location', type: 'INTEGER', def: ' DEFAULT 0' },
             { name: 'delivery_location_notes', type: 'TEXT' },
             { name: 'crm_customer_address', type: 'TEXT' },
-            { name: 'what3words', type: 'TEXT' }
+            { name: 'what3words', type: 'TEXT' },
+            { name: 'crm_what3words', type: 'TEXT' }
         ];
         const tableInfoExtended = db.prepare(`PRAGMA table_info(product_orders)`).all();
         for (const col of leadlockExtendedCols) {
@@ -2068,7 +2069,8 @@ async function initializePostgreSQL() {
                 { name: 'address_is_delivery_location', type: 'BOOLEAN DEFAULT FALSE' },
                 { name: 'delivery_location_notes', type: 'TEXT' },
                 { name: 'crm_customer_address', type: 'TEXT' },
-                { name: 'what3words', type: 'TEXT' }
+                { name: 'what3words', type: 'TEXT' },
+                { name: 'crm_what3words', type: 'TEXT' }
             ];
             for (const col of leadlockExtendedCols) {
                 const colCheck = await pool.query(`
@@ -7370,6 +7372,8 @@ class ProductionDatabase {
             address_is_delivery_location: order.address_is_delivery_location,
             delivery_location_notes: order.delivery_location_notes || null,
             crm_customer_address: order.crm_customer_address || null,
+            what3words: order.what3words || null,
+            crm_what3words: order.crm_what3words || null,
             products: productsList,
             components,
             built_items: builtItems,
@@ -7575,7 +7579,8 @@ class ProductionDatabase {
             address_is_delivery_location: boolOut(addressIsDelivery),
             delivery_location_notes: payload.delivery_location_notes != null ? String(payload.delivery_location_notes) : null,
             crm_customer_address: payload.crm_customer_address || null,
-            what3words: payload.what3words || null
+            what3words: payload.what3words || null,
+            crm_what3words: payload.crm_what3words || null
         };
     }
 
@@ -7602,8 +7607,8 @@ class ProductionDatabase {
                     fulfillment_method = $15, deposit_paid = $16, balance_paid = $17, paid_in_full = $18,
                     deposit_amount = $19, balance_amount = $20, invoice_number = $21,
                     address_is_delivery_location = $22, delivery_location_notes = $23, crm_customer_address = $24,
-                    what3words = $25
-                 WHERE id = $26`,
+                    what3words = $25, crm_what3words = $26
+                 WHERE id = $27`,
                 [
                     orderDate, payload.customer_name || null, salesOrderRef,
                     payload.customer_postcode || null, payload.customer_address || null,
@@ -7614,7 +7619,7 @@ class ProductionDatabase {
                     ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                     ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                    ext.what3words,
+                    ext.what3words, ext.crm_what3words,
                     orderId
                 ]
             );
@@ -7629,7 +7634,7 @@ class ProductionDatabase {
                     fulfillment_method = ?, deposit_paid = ?, balance_paid = ?, paid_in_full = ?,
                     deposit_amount = ?, balance_amount = ?, invoice_number = ?,
                     address_is_delivery_location = ?, delivery_location_notes = ?, crm_customer_address = ?,
-                    what3words = ?
+                    what3words = ?, crm_what3words = ?
                  WHERE id = ?`
             ).run(
                 orderDate, payload.customer_name || null, salesOrderRef,
@@ -7641,7 +7646,7 @@ class ProductionDatabase {
                 ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                 ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                ext.what3words,
+                ext.what3words, ext.crm_what3words,
                 orderId
             );
         }
@@ -7676,9 +7681,9 @@ class ProductionDatabase {
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
-                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words)
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30) RETURNING id`,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -7692,7 +7697,7 @@ class ProductionDatabase {
                     ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                     ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                    ext.what3words
+                    ext.what3words, ext.crm_what3words
                 ]
             );
             orderId = result.rows[0].id;
@@ -7701,8 +7706,8 @@ class ProductionDatabase {
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
-                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -7717,7 +7722,7 @@ class ProductionDatabase {
                 ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                 ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                ext.what3words
+                ext.what3words, ext.crm_what3words
             );
             orderId = info.lastInsertRowid;
         }

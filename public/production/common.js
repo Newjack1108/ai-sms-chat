@@ -1236,6 +1236,17 @@ function formatWhat3WordsDisplay(words) {
     return `///${w}`;
 }
 
+function renderWhat3WordsLineHtml(words, label) {
+    const w = (words || '').trim().replace(/^\/\/\//, '');
+    if (!w) return '';
+    const w3wUrl = buildWhat3WordsUrl(w);
+    const w3wLabel = escapeHtml(formatWhat3WordsDisplay(w));
+    const w3wLink = w3wUrl
+        ? ` <a href="${escapeHtml(w3wUrl)}" target="_blank" rel="noopener noreferrer" class="w3w-link">Open in what3words</a>`
+        : '';
+    return `<p style="margin: 8px 0 0 0;"><strong>${escapeHtml(label)}:</strong> ${w3wLabel}${w3wLink}</p>`;
+}
+
 /**
  * Address + delivery notes block for LeadLock work orders (load sheet, job sheet, detail).
  * @param {object} order or loadSheet row with customer_* and delivery fields
@@ -1263,21 +1274,17 @@ function renderLeadLockWorkOrderAddressHtml(order) {
     if (!isCollection || address || postcode) {
         html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(addrLabel)}:</strong> ${address ? escapeHtml(address) : '—'}</p>`;
         html += `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(postcodeLabel)}:</strong> ${postcode ? escapeHtml(postcode) : '—'}</p>`;
+        html += renderWhat3WordsLineHtml(resolveInstallationWhat3Words(order), 'what3words');
     }
     if (deliveryNotes) {
         html += `<p style="margin: 0 0 6px 0; padding: 8px 10px; background: #fff8e6; border-left: 3px solid #f0ad4e;"><strong>Delivery access notes:</strong> ${escapeHtml(deliveryNotes)}</p>`;
     }
     if (crmAddress) {
-        html += `<p style="margin: 0; font-size: 14px; color: #555;"><strong>Bill to / CRM address:</strong> ${escapeHtml(crmAddress)}</p>`;
+        html += `<p style="margin: 8px 0 0 0; font-size: 14px; color: #555;"><strong>Bill to / CRM address:</strong> ${escapeHtml(crmAddress)}</p>`;
     }
-    const w3w = resolveInstallationWhat3Words(order);
-    if (w3w) {
-        const w3wUrl = buildWhat3WordsUrl(w3w);
-        const w3wLabel = escapeHtml(formatWhat3WordsDisplay(w3w));
-        const w3wLink = w3wUrl
-            ? ` <a href="${escapeHtml(w3wUrl)}" target="_blank" rel="noopener noreferrer" class="w3w-link">Open in what3words</a>`
-            : '';
-        html += `<p style="margin: 8px 0 0 0;"><strong>what3words:</strong> ${w3wLabel}${w3wLink}</p>`;
+    const crmW3w = (order.crm_what3words || '').trim();
+    if (crmW3w) {
+        html += renderWhat3WordsLineHtml(crmW3w, 'CRM what3words');
     }
     html += '</div>';
     return html;

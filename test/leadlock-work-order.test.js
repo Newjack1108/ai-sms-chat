@@ -163,6 +163,31 @@ describe('normalizeLeadLockWebhookPayload', () => {
         });
         assert.equal(alias.what3words, 'clocks.evening.garden');
     });
+
+    it('normalizes crm_what3words from top-level and nested delivery fields', () => {
+        const top = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            items: [],
+            what3words: '///index.home.raft',
+            crm_what3words: '///filled.count.soap'
+        });
+        assert.equal(top.what3words, 'index.home.raft');
+        assert.equal(top.crm_what3words, 'filled.count.soap');
+        const nested = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-CRM-W3W',
+            order_id: 105,
+            items: [],
+            delivery: { crm_what3words: '///clocks.evening.garden' }
+        });
+        assert.equal(nested.crm_what3words, 'clocks.evening.garden');
+        const alias = normalizeLeadLockWebhookPayload({
+            order_number: 'ORD-CRM-W3W2',
+            order_id: 106,
+            items: [],
+            billing_what3words: 'table.chair.lamp'
+        });
+        assert.equal(alias.crm_what3words, 'table.chair.lamp');
+    });
 });
 
 describe('resolveTravelTimeHoursRoundTrip', () => {

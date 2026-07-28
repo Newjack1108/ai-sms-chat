@@ -147,6 +147,14 @@ function normalizeLeadLockWebhookPayload(body) {
             deliveryBlock && deliveryBlock.what_three_words
         )
     );
+    const crmWhat3words = normalizeWhat3Words(
+        firstPresentString(
+            body.crm_what3words,
+            body.crm_what_three_words,
+            body.billing_what3words,
+            deliveryBlock && deliveryBlock.crm_what3words
+        )
+    );
 
     let addressIsDeliveryLocation = resolveAddressIsDeliveryLocationFlag(body);
     if (addressIsDeliveryLocation === null) {
@@ -210,7 +218,8 @@ function normalizeLeadLockWebhookPayload(body) {
         address_is_delivery_location: addressIsDeliveryLocation,
         delivery_location_notes: deliveryLocationNotes,
         crm_customer_address: crmCustomerAddress,
-        what3words
+        what3words,
+        crm_what3words: crmWhat3words
     };
 }
 

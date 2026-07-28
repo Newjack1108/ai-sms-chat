@@ -70,22 +70,26 @@ describe('LeadLock work order database ingest', () => {
             items: [],
             total_amount: 1500,
             currency: 'GBP',
-            what3words: '///index.home.raft'
+            what3words: '///index.home.raft',
+            crm_what3words: '///filled.count.soap'
         };
         const payload = normalizeLeadLockWebhookPayload(body);
         const { order, updated } = await handleLeadLockWorkOrderWebhook(payload, ProductionDatabase);
         assert.equal(updated, false);
         let row = await ProductionDatabase.getProductOrderById(order.id);
         assert.equal(row.what3words, 'index.home.raft');
+        assert.equal(row.crm_what3words, 'filled.count.soap');
 
         const updatePayload = normalizeLeadLockWebhookPayload({
             ...body,
-            what3words: 'filled.count.soap'
+            what3words: 'clocks.evening.garden',
+            crm_what3words: 'table.chair.lamp'
         });
         const { updated: updatedAgain } = await handleLeadLockWorkOrderWebhook(updatePayload, ProductionDatabase);
         assert.equal(updatedAgain, true);
         row = await ProductionDatabase.getProductOrderByLeadlockOrderId(9003);
-        assert.equal(row.what3words, 'filled.count.soap');
+        assert.equal(row.what3words, 'clocks.evening.garden');
+        assert.equal(row.crm_what3words, 'table.chair.lamp');
     });
 
     it('clears travel time when upserted as collection', async () => {
