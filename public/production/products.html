@@ -25,20 +25,20 @@
         <div class="card">
             <div class="card-header">
                 <h2>Products</h2>
-                <button onclick="showAddProductModal()" class="btn btn-primary admin-only">Add Product</button>
+                <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only">Add Product</button>
             </div>
-            <div class="tabs" style="margin-bottom: 0;">
+            <div class="tabs">
                 <button class="tab-btn" onclick="filterProducts('all')" id="tab-all">All Products</button>
                 <button class="tab-btn active" onclick="filterProducts('Standard Product')" id="tab-standard">Standard Product</button>
                 <button class="tab-btn" onclick="filterProducts('Customer Product')" id="tab-customer">Customer Product</button>
                 <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
                 <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
             </div>
-            <div style="padding: 12px 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
-                <input id="productSearchInput" type="text" class="form-input" placeholder="Search by name, description, category, type or status..." autocomplete="off" style="flex: 1; min-width: 200px;">
-                <label style="display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap;">
+            <div class="page-toolbar">
+                <input id="productSearchInput" type="text" class="form-input" placeholder="Search by name, description, category, type or status..." autocomplete="off">
+                <label class="form-label" style="margin:0; display:flex; align-items:center; gap:8px; white-space:nowrap;">
                     <span>Status</span>
-                    <select id="productStatusFilter" class="form-select" style="width: auto; min-width: 120px;" onchange="filterProductStatus(this.value)">
+                    <select id="productStatusFilter" class="form-select" style="width:auto; min-width:120px; flex:0 0 auto;" onchange="filterProductStatus(this.value)">
                         <option value="active" selected>Active</option>
                         <option value="inactive">Inactive</option>
                         <option value="all">All</option>
@@ -56,80 +56,84 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3 id="productModalTitle">Add Product</h3>
-                <button class="modal-close" onclick="hideModal('productModal')">&times;</button>
+                <button type="button" class="modal-close" onclick="hideModal('productModal')" aria-label="Close">&times;</button>
             </div>
             <form id="productForm">
                 <input type="hidden" id="productId">
                 <input type="hidden" id="productStatus" value="active">
                 <div class="form-group">
-                    <label class="form-label">Name *</label>
+                    <label class="form-label" for="productName">Name *</label>
                     <input type="text" id="productName" class="form-input" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Description</label>
+                    <label class="form-label" for="productDescription">Description</label>
                     <textarea id="productDescription" class="form-textarea"></textarea>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Product Type</label>
-                    <select id="productType" class="form-select">
-                        <option value="stables">Stables</option>
-                        <option value="sheds">Sheds</option>
-                        <option value="cabins">Cabins</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">LeadLock Category</label>
-                    <select id="leadlockCategory" class="form-select">
-                        <option value="stables">STABLES</option>
-                        <option value="sheds">SHEDS</option>
-                        <option value="cabins">CABINS</option>
-                    </select>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="productType">Product Type</label>
+                        <select id="productType" class="form-select">
+                            <option value="stables">Stables</option>
+                            <option value="sheds">Sheds</option>
+                            <option value="cabins">Cabins</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="leadlockCategory">LeadLock Category</label>
+                        <select id="leadlockCategory" class="form-select">
+                            <option value="stables">STABLES</option>
+                            <option value="sheds">SHEDS</option>
+                            <option value="cabins">CABINS</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                         <input type="checkbox" id="productOptionalExtra" style="width: auto;">
                         <span>Optional extra</span>
                     </label>
-                    <small style="color: #6c757d;">When checked, the sales app receives <code>product_type: extra</code>. Push also always includes <code>category</code> from LeadLock Category.</small>
+                    <span class="help-text">When checked, the sales app receives <code>product_type: extra</code>. Push also always includes <code>category</code> from LeadLock Category.</span>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Category *</label>
-                    <select id="productCategory" class="form-select" required>
-                        <option value="Standard Product">Standard Product</option>
-                        <option value="Customer Product">Customer Product</option>
-                        <option value="Bespoke Build">Bespoke Build</option>
-                        <option value="Other">Other</option>
-                    </select>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="productCategory">Category *</label>
+                        <select id="productCategory" class="form-select" required>
+                            <option value="Standard Product">Standard Product</option>
+                            <option value="Customer Product">Customer Product</option>
+                            <option value="Bespoke Build">Bespoke Build</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="productCost">Cost (GBP)</label>
+                        <input type="number" step="0.01" id="productCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
+                        <span class="help-text">Auto-calculated from BOM + load time labour</span>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Cost (GBP)</label>
-                    <input type="number" step="0.01" id="productCost" class="form-input" value="0" readonly style="background: #f8f9fa;">
-                    <small style="color: #6c757d;">Calculated automatically from Raw Materials + Components + Built Items + Load Time Labour</small>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="productLoadTime">Estimated Load Time (hours)</label>
+                        <input type="number" step="0.01" min="0" id="productLoadTime" class="form-input" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="productInstallTime">Estimated Install Time (hours)</label>
+                        <input type="number" step="0.01" min="0" id="productInstallTime" class="form-input" value="0">
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Estimated Load Time (hours)</label>
-                    <input type="number" step="0.01" min="0" id="productLoadTime" class="form-input" value="0">
-                    <small style="color: #6c757d;">Load time labour cost will be added to product cost</small>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="productTravelTime">Estimated Travel Time (hours)</label>
+                        <input type="number" step="0.01" min="0" id="productTravelTime" class="form-input" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="productNumberOfBoxes">Number of Boxes</label>
+                        <input type="number" min="0" id="productNumberOfBoxes" class="form-input" value="1">
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Estimated Install Time (hours)</label>
-                    <input type="number" step="0.01" min="0" id="productInstallTime" class="form-input" value="0">
-                    <small style="color: #6c757d;">For reference only - shown on load sheets</small>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Estimated Travel Time (hours)</label>
-                    <input type="number" step="0.01" min="0" id="productTravelTime" class="form-input" value="0">
-                    <small style="color: #6c757d;">For reference only - shown on load sheets</small>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Number of Boxes</label>
-                    <input type="number" min="0" id="productNumberOfBoxes" class="form-input" value="1">
-                    <small style="color: #6c757d;">Boxes per product for inventory / shipping</small>
-                </div>
-                <div class="text-right">
-                    <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
+                <div class="form-actions">
+                    <button type="button" onclick="hideModal('productModal')" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
                 </div>
             </form>
         </div>
@@ -260,7 +264,7 @@
             const totalPages = Math.max(1, Math.ceil(productsTotal / PRODUCTS_PAGE_SIZE));
             if (productsTotal <= PRODUCTS_PAGE_SIZE) return '';
             return `
-                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div class="pagination">
                     <span>Page ${productsPage} of ${totalPages} (${productsTotal} products)</span>
                     <button type="button" class="btn btn-secondary btn-sm" ${productsPage <= 1 ? 'disabled' : ''} onclick="goProductsPage(${productsPage - 1})">Previous</button>
                     <button type="button" class="btn btn-secondary btn-sm" ${productsPage >= totalPages ? 'disabled' : ''} onclick="goProductsPage(${productsPage + 1})">Next</button>
@@ -312,7 +316,7 @@
                     const emptyMsg = productSearchQuery
                         ? `No products match "${escapeHtml(productSearchQuery)}"`
                         : 'No products found';
-                    productsList.innerHTML = `<p>${emptyMsg}</p>` + renderProductsPager();
+                    productsList.innerHTML = `<div class="empty-state"><p>${emptyMsg}</p></div>` + renderProductsPager();
                     allProducts = [];
                     return;
                 }
@@ -325,7 +329,7 @@
                 
                 displayProducts();
             } catch (error) {
-                document.getElementById('productsList').innerHTML = '<p>Error loading products</p>';
+                document.getElementById('productsList').innerHTML = '<div class="empty-state"><p>Error loading products</p></div>';
                 allProducts = [];
             }
         }
@@ -346,11 +350,12 @@
                 const emptyMsg = productSearchQuery
                     ? `No products match "${escapeHtml(productSearchQuery)}"`
                     : 'No products found in this category';
-                productsList.innerHTML = `<p>${emptyMsg}</p>` + renderProductsPager();
+                productsList.innerHTML = `<div class="empty-state"><p>${emptyMsg}</p></div>` + renderProductsPager();
                 return;
             }
             
             productsList.innerHTML = `
+                <div class="table-wrapper">
                 <table class="table">
                     <thead>
                         <tr>
@@ -367,32 +372,41 @@
                         ${filteredProducts.map(product => {
                             const isInactive = (product.status || 'active') === 'inactive';
                             const statusAction = isInactive
-                                ? `<button onclick="setProductStatus(${product.id}, 'active')" class="btn btn-success btn-sm" style="margin-left: 5px;" title="Show in catalog again">Reactivate</button>`
-                                : `<button onclick="setProductStatus(${product.id}, 'inactive')" class="btn btn-secondary btn-sm" style="margin-left: 5px;" title="Hide from catalog">Deactivate</button>`;
+                                ? `<button onclick="setProductStatus(${product.id}, 'active')" class="btn btn-success btn-sm" title="Show in catalog again">Reactivate</button>`
+                                : `<button onclick="setProductStatus(${product.id}, 'inactive')" class="btn btn-secondary btn-sm" title="Hide from catalog">Deactivate</button>`;
                             return `
                             <tr>
-                                <td><strong>${product.name}</strong></td>
-                                <td><span class="badge badge-secondary">${product.category || 'Other'}</span></td>
+                                <td><strong>${escapeHtml(product.name)}</strong></td>
+                                <td><span class="badge badge-secondary">${escapeHtml(product.category || 'Other')}</span></td>
                                 <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>
                                 <td>${statusBadge(product.status)}</td>
                                 <td>${formatPushedToSalesAt(product.last_pushed_to_sales_at)}</td>
                                 <td>${formatCurrency(product.calculated_cost)}</td>
                                 <td>
-                                    <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">View Components</button>
-                                    ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
-                                        <button onclick="pushToSales(${product.id})" class="btn btn-success btn-sm" title="Push to Sales App">Push to Sales</button>
-                                        <button onclick="manageProductSuppliers(${product.id})" class="btn btn-primary btn-sm" title="Assign approved suppliers">Suppliers</button>
-                                        <button onclick="editProduct(${product.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                        <button onclick="duplicateProduct(${product.id})" class="btn btn-info btn-sm" style="margin-left: 5px;">Duplicate</button>
-                                        ${statusAction}
-                                        <button onclick="deleteProduct(${product.id})" class="btn btn-danger btn-sm" style="margin-left: 5px;">Delete</button>
-                                    ` : ''}
+                                    <div class="action-group">
+                                        <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">BOM</button>
+                                        ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
+                                        <div class="navbar-dropdown">
+                                            <button type="button" class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">More</button>
+                                            <div class="dropdown-menu">
+                                                <button type="button" class="dropdown-item" onclick="pushToSales(${product.id})">Push to Sales</button>
+                                                <button type="button" class="dropdown-item" onclick="manageProductSuppliers(${product.id})">Suppliers</button>
+                                                <button type="button" class="dropdown-item" onclick="editProduct(${product.id})">Edit</button>
+                                                <button type="button" class="dropdown-item" onclick="duplicateProduct(${product.id})">Duplicate</button>
+                                                <button type="button" class="dropdown-item" onclick="setProductStatus(${product.id}, '${isInactive ? 'active' : 'inactive'}')">${isInactive ? 'Reactivate' : 'Deactivate'}</button>
+                                                <div class="dropdown-divider"></div>
+                                                <button type="button" class="dropdown-item" onclick="deleteProduct(${product.id})" style="color:#991b1b;">Delete</button>
+                                            </div>
+                                        </div>
+                                        ` : ''}
+                                    </div>
                                 </td>
                             </tr>
                         `;
                         }).join('')}
                     </tbody>
                 </table>
+                </div>
                 ${renderProductsPager()}
             `;
         }

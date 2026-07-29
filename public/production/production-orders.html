@@ -159,12 +159,11 @@
         .orders-view-toggle {
             display: inline-flex;
             gap: 0;
-            margin-right: 10px;
         }
         .orders-view-toggle .btn.active {
-            background: #667eea;
+            background: #48872B;
             color: #fff;
-            border-color: #667eea;
+            border-color: #48872B;
         }
         .wo-board-toolbar {
             display: flex;
@@ -340,23 +339,23 @@
         <div class="card">
             <div class="card-header">
                 <h2>Works Orders</h2>
-                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div class="action-group">
                     <div class="orders-view-toggle" role="group" aria-label="Works orders view">
                         <button type="button" id="ordersViewTableBtn" class="btn btn-secondary btn-sm active" onclick="setOrdersViewMode('table')">Table</button>
                         <button type="button" id="ordersViewBoardBtn" class="btn btn-secondary btn-sm" onclick="setOrdersViewMode('board')">Board</button>
                     </div>
-                    <button onclick="showAddOrderModal()" class="btn btn-primary">Add Works Order</button>
+                    <button onclick="showAddOrderModal()" class="btn btn-primary btn-sm">Add Works Order</button>
                 </div>
             </div>
-            <div style="padding: 12px 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center;">
-                <input id="orderSearchInput" type="text" class="form-input" placeholder="Search customer, LeadLock ref, product, status, notes..." autocomplete="off" style="flex: 1; min-width: 220px;">
-                <label style="display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; white-space: nowrap;">
+            <div class="page-toolbar">
+                <input id="orderSearchInput" type="text" class="form-input" placeholder="Search customer, LeadLock ref, product, status, notes..." autocomplete="off">
+                <label class="form-label" style="margin:0; display:flex; align-items:center; gap:8px; cursor:pointer; white-space:nowrap;">
                     <input type="checkbox" id="orderLeadlockOnly" style="width: auto;">
                     <span>LeadLock only</span>
                 </label>
-                <label style="display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap;">
+                <label class="form-label" style="margin:0; display:flex; align-items:center; gap:8px; white-space:nowrap;">
                     <span>Per page</span>
-                    <select id="ordersPageSizeSelect" class="form-select" style="width: auto; min-width: 72px;" onchange="onOrdersPageSizeChange()">
+                    <select id="ordersPageSizeSelect" class="form-select" style="width:auto; min-width:72px; flex:0 0 auto;" onchange="onOrdersPageSizeChange()">
                         <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100">100</option>
@@ -395,7 +394,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Add Works Order</h3>
-                <button class="modal-close" onclick="hideModal('orderModal')">&times;</button>
+                <button class="modal-close" onclick="hideModal('orderModal')" aria-label="Close">&times;</button>
             </div>
             <form id="orderForm">
                 <div class="form-group">
@@ -1240,7 +1239,7 @@
             const totalPages = Math.max(1, Math.ceil(ordersTotal / ordersPageSize));
             if (ordersTotal <= ordersPageSize) return '';
             return `
-                <div class="pagination" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div class="pagination">
                     <span>Page ${ordersPage} of ${totalPages} (${ordersTotal} orders)</span>
                     <button type="button" class="btn btn-secondary btn-sm" ${ordersPage <= 1 ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage - 1})">Previous</button>
                     <button type="button" class="btn btn-secondary btn-sm" ${ordersPage >= totalPages ? 'disabled' : ''} onclick="goOrdersPage(${ordersPage + 1})">Next</button>
@@ -1301,7 +1300,7 @@
                     } else if (orderLeadlockOnly) {
                         emptyMsg = 'No LeadLock works orders found';
                     }
-                    ordersList.innerHTML = `<p>${emptyMsg}</p>` + renderOrdersPager();
+                    ordersList.innerHTML = `<div class="empty-state"><p>${emptyMsg}</p></div>` + renderOrdersPager();
                     updateOrdersCheckboxes();
                     return;
                 }
@@ -1965,7 +1964,7 @@
                             ` : ''}
                         </div>
                         <div style="padding: 15px; border-top: 2px solid #E8F5E9; margin-top: 20px; text-align: center;">
-                            <button onclick="saveAndCloseLoadSheet(${orderId})" class="btn btn-primary" style="padding: 12px 30px; font-size: 16px;">Save & Close</button>
+                            <button onclick="saveAndCloseLoadSheet(${orderId})" class="btn btn-primary btn-lg">Save & Close</button>
                         </div>
                     </div>
                 `;

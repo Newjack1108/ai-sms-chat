@@ -76,12 +76,27 @@
     </nav>
     
     <div class="container" style="position: relative; z-index: 1;">
-        <div class="grid grid-3" style="margin-bottom: 20px;">
+        <div class="grid grid-3 mb-20">
+            <div class="card dashboard-kpi kpi-wip">
+                <div class="kpi-label">Total WIP Value</div>
+                <div id="totalWIPValue" class="kpi-value">£0.00</div>
+            </div>
+            <div class="card dashboard-kpi kpi-stock">
+                <div class="kpi-label">Total Stock Value</div>
+                <div id="totalStockValue" class="kpi-value">£0.00</div>
+            </div>
+            <div class="card dashboard-kpi kpi-panel">
+                <div class="kpi-label">Total Panel Value</div>
+                <div id="totalPanelValue" class="kpi-value">£0.00</div>
+            </div>
+        </div>
+
+        <div class="grid grid-3">
             <div class="card" id="lastWeekCard">
                 <div class="card-header">
                     <h2>Last Week's Performance</h2>
                 </div>
-                <div id="lastWeekSummary" class="dashboard-card-scroll" style="padding: 20px; text-align: center;">
+                <div id="lastWeekSummary" class="dashboard-card-scroll text-center">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -108,13 +123,14 @@
         <div class="card">
             <div class="card-header">
                 <h2>My Tasks</h2>
+                <a href="tasks.html" class="btn btn-secondary btn-sm">Open Tasks</a>
             </div>
             <div id="myTasks">
                 <div class="loading">Loading...</div>
             </div>
         </div>
         
-        <div class="card admin-or-office" id="complianceInspectionsCard" style="margin-top: 20px;">
+        <div class="card admin-or-office" id="complianceInspectionsCard">
             <div class="card-header">
                 <h2>Compliance Inspections</h2>
                 <a href="inspections.html" class="btn btn-secondary btn-sm">Open Inspections</a>
@@ -127,33 +143,10 @@
         <div class="card">
             <div class="card-header">
                 <h2>Recent Works Orders</h2>
+                <a href="production-orders.html" class="btn btn-secondary btn-sm">All Works Orders</a>
             </div>
             <div id="recentOrders">
                 <div class="loading">Loading...</div>
-            </div>
-        </div>
-        
-        <!-- Value Summary Cards at Bottom -->
-        <div class="grid grid-3" style="margin-top: 20px;">
-            <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px;">
-                <div style="text-align: center;">
-                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total WIP Value</div>
-                    <div id="totalWIPValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
-                </div>
-            </div>
-            
-            <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 15px;">
-                <div style="text-align: center;">
-                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total Stock Value</div>
-                    <div id="totalStockValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
-                </div>
-            </div>
-            
-            <div class="card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; padding: 15px;">
-                <div style="text-align: center;">
-                    <div style="font-size: 14px; opacity: 0.9; margin-bottom: 8px;">Total Panel Value</div>
-                    <div id="totalPanelValue" style="font-size: 24px; font-weight: bold;">£0.00</div>
-                </div>
             </div>
         </div>
     </div>
@@ -191,12 +184,12 @@
                 const lowStock = summary.low_stock_preview || [];
                 const alertsDiv = document.getElementById('stockAlerts');
                 if (!lowStock.length) {
-                    alertsDiv.innerHTML = '<p>No low stock alerts</p>';
+                    alertsDiv.innerHTML = '<div class="empty-state"><p>No low stock alerts</p></div>';
                 } else {
                     alertsDiv.innerHTML = lowStock.map(item => `
-                        <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                            <strong>${item.name}</strong><br>
-                            <small>Current: ${item.current_quantity} ${item.unit} (Min: ${item.min_quantity})</small>
+                        <div class="list-row">
+                            <strong>${item.name}</strong>
+                            <span class="text-muted">Current: ${item.current_quantity} ${item.unit} (Min: ${item.min_quantity})</span>
                         </div>
                     `).join('');
                 }
@@ -204,9 +197,10 @@
                 const recentOrdersList = summary.recent_orders || [];
                 const ordersDiv = document.getElementById('recentOrders');
                 if (recentOrdersList.length === 0) {
-                    ordersDiv.innerHTML = '<p>No recent works orders</p>';
+                    ordersDiv.innerHTML = '<div class="empty-state"><p>No recent works orders</p></div>';
                 } else {
                     ordersDiv.innerHTML = `
+                        <div class="table-wrapper">
                         <table class="table">
                             <thead>
                                 <tr>
@@ -231,6 +225,7 @@
                                 `).join('')}
                             </tbody>
                         </table>
+                        </div>
                     `;
                 }
                 
@@ -244,34 +239,29 @@
                                           summary.last_week.indicator === 'yellow' ? 'badge-warning' : 'badge-danger';
                     
                     lastWeekDiv.innerHTML = `
-                        <div style="margin-bottom: 15px;">
+                        <div class="mb-20">
                             <strong>Week: ${formatDate(weekStart)} - ${formatDate(weekEnd)}</strong>
                         </div>
-                        <div style="font-size: 28px; font-weight: bold; margin-bottom: 15px;">
-                            <span class="badge ${indicatorClass}" style="font-size: 24px; padding: 10px 20px;">
+                        <div class="mb-20">
+                            <span class="badge ${indicatorClass}">
                                 ${summary.last_week.efficiency.toFixed(1)}% Efficiency
                             </span>
                         </div>
-                        <div style="font-size: 14px; color: #6c757d;">
+                        <div class="text-muted">
                             <div>Hours: ${summary.last_week.hours_used.toFixed(1)} / ${summary.last_week.hours_available.toFixed(1)}</div>
                             <div>Panels: ${summary.last_week.panels_built.toFixed(1)} / ${summary.last_week.panels_planned.toFixed(1)}</div>
                         </div>
-                        <div style="margin-top: 15px;">
+                        <div class="mt-20">
                             <a href="planner.html" class="btn btn-primary btn-sm">View Planner</a>
                         </div>
                     `;
                     
-                    // Set card background based on indicator
                     const card = document.getElementById('lastWeekCard');
-                    if (summary.last_week.indicator === 'green') {
-                        card.style.background = 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)';
-                    } else if (summary.last_week.indicator === 'yellow') {
-                        card.style.background = 'linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%)';
-                    } else {
-                        card.style.background = 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)';
-                    }
+                    card.style.background = '';
+                    card.style.borderColor = summary.last_week.indicator === 'green' ? '#86efac'
+                        : summary.last_week.indicator === 'yellow' ? '#fde68a' : '#fecaca';
                 } else {
-                    lastWeekDiv.innerHTML = '<p>No planner data for last week</p>';
+                    lastWeekDiv.innerHTML = '<div class="empty-state"><p>No planner data for last week</p></div>';
                 }
             } catch (error) {
                 console.error('Error loading dashboard summary:', error);
@@ -299,16 +289,13 @@
                         if (reminder.type === 'vehicle_inspection_issue') {
                             const issuesPreview = (reminder.issues || []).slice(0, 2).map(issue => issue.label).join(', ');
                             return `
-                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #f8d7da;">
-                                    <strong style="color: #721c24;">Vehicle inspection issue: ${reminder.inspected_by_username || 'Driver'}</strong><br>
-                                    <small style="color: #721c24;">
-                                        Vehicle: ${reminder.vehicle_registration || 'Unknown'}${issuesPreview ? ` | ${issuesPreview}` : ''}
-                                    </small>
-                                    <br>
+                                <div class="list-row" style="background:#fef2f2; margin:0 -4px; padding:10px 8px; border-radius:6px;">
+                                    <strong style="color:#991b1b;">Vehicle inspection issue: ${reminder.inspected_by_username || 'Driver'}</strong>
+                                    <span class="text-muted" style="color:#991b1b;">Vehicle: ${reminder.vehicle_registration || 'Unknown'}${issuesPreview ? ` | ${issuesPreview}` : ''}</span>
                                     <a href="timesheet-admin.html"
                                        onclick="localStorage.setItem('inspectionDashboardDate', '${reminder.inspection_date}');"
-                                       style="font-size: 11px; color: #721c24; text-decoration: underline; margin-top: 4px; display: inline-block;">
-                                        Review Vehicle Checklist →
+                                       class="btn btn-danger btn-sm" style="margin-top:6px;">
+                                        Review Checklist
                                     </a>
                                 </div>
                             `;
@@ -316,25 +303,24 @@
                             const weekStart = new Date(reminder.week_start_date);
                             const weekStartFormatted = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
                             return `
-                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #fff3cd;">
-                                    <strong style="color: #856404;">⚠️ ${reminder.reminder_text}</strong><br>
-                                    <small style="color: #856404;">Week: ${weekStartFormatted}</small>
-                                    <br>
-                                    <a href="timesheet-admin.html" onclick="localStorage.setItem('selectedWeek', '${reminder.week_start_date}');" 
-                                       style="font-size: 11px; color: #856404; text-decoration: underline; margin-top: 4px; display: inline-block;">
-                                        Review Timesheets →
+                                <div class="list-row" style="background:#fff8e6; margin:0 -4px; padding:10px 8px; border-radius:6px;">
+                                    <strong style="color:#92400e;">${reminder.reminder_text}</strong>
+                                    <span class="text-muted" style="color:#92400e;">Week: ${weekStartFormatted}</span>
+                                    <a href="timesheet-admin.html" onclick="localStorage.setItem('selectedWeek', '${reminder.week_start_date}');"
+                                       class="btn btn-warning btn-sm" style="margin-top:6px;">
+                                        Review Timesheets
                                     </a>
                                 </div>
                             `;
                         } else {
                             const reminderType = reminder.reminder_type || 'stock_check';
                             const reminderContent = reminderType === 'text'
-                                ? `📝 ${reminder.reminder_text || 'Text Reminder'}`
+                                ? `${reminder.reminder_text || 'Text Reminder'}`
                                 : reminder.stock_item_name || 'Stock Item';
                             return `
-                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                                    <strong>${reminderContent}</strong><br>
-                                    <small>Due: ${formatDate(reminder.next_check_date)}</small>
+                                <div class="list-row">
+                                    <strong>${reminderContent}</strong>
+                                    <span class="text-muted">Due: ${formatDate(reminder.next_check_date)}</span>
                                 </div>
                             `;
                         }
@@ -342,37 +328,36 @@
                 }
 
                 if (holidaysData && holidaysData.success && holidaysData.requests && holidaysData.requests.length > 0) {
-                    if (remindersHtml) remindersHtml += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e9ecef;"></div>';
+                    if (remindersHtml) remindersHtml += '<div class="list-row" style="border-top:1px solid var(--border); margin-top:4px;"></div>';
                     remindersHtml += holidaysData.requests.map(req => {
                         const startStr = formatDate(req.start_date);
                         const endStr = formatDate(req.end_date);
                         const days = parseFloat(req.days_requested).toFixed(1);
                         return `
-                            <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: #e7f3ff;">
-                                <strong style="color: #004085;">🏖️ ${req.user_name || 'Unknown'}</strong><br>
-                                <small style="color: #004085;">${startStr} – ${endStr} (${days} days)</small>
-                                <br>
-                                <a href="holidays-admin.html" style="font-size: 11px; color: #004085; text-decoration: underline; margin-top: 4px; display: inline-block;">
-                                    Review request →
+                            <div class="list-row" style="background:#e8f4fd; margin:0 -4px; padding:10px 8px; border-radius:6px;">
+                                <strong style="color:#0c4a6e;">${req.user_name || 'Unknown'}</strong>
+                                <span class="text-muted" style="color:#0c4a6e;">${startStr} – ${endStr} (${days} days)</span>
+                                <a href="holidays-admin.html" class="btn btn-info btn-sm" style="margin-top:6px;">
+                                    Review request
                                 </a>
                             </div>
                         `;
                     }).join('');
                 }
 
-                remindersDiv.innerHTML = remindersHtml || '<p>No overdue reminders</p>';
+                remindersDiv.innerHTML = remindersHtml || '<div class="empty-state"><p>No overdue reminders</p></div>';
             }
 
             const tasksDiv = document.getElementById('myTasks');
             if (!tasksData) {
-                tasksDiv.innerHTML = '<p>Error loading tasks</p>';
+                tasksDiv.innerHTML = '<div class="empty-state"><p>Error loading tasks</p></div>';
             } else if (!tasksData.tasks || tasksData.tasks.length === 0) {
-                tasksDiv.innerHTML = '<p>No pending tasks</p>';
+                tasksDiv.innerHTML = '<div class="empty-state"><p>No pending tasks</p></div>';
             } else {
                 tasksDiv.innerHTML = tasksData.tasks.slice(0, 5).map(task => `
-                    <div style="padding: 10px; border-bottom: 1px solid #e9ecef;">
-                        <strong>${task.title}</strong><br>
-                        <small>Due: ${task.due_date ? formatDate(task.due_date) : 'No date'}</small>
+                    <div class="list-row">
+                        <strong>${task.title}</strong>
+                        <span class="text-muted">Due: ${task.due_date ? formatDate(task.due_date) : 'No date'}</span>
                     </div>
                 `).join('');
             }
@@ -427,28 +412,26 @@
 
                     const shown = displayRows.slice(0, 8);
                     if (shown.length === 0) {
-                        inspDiv.innerHTML = '<p>No inspections due in the next 7 days</p>';
+                        inspDiv.innerHTML = '<div class="empty-state"><p>No inspections due in the next 7 days</p></div>';
                     } else {
                         inspDiv.innerHTML = shown.map((row) => {
                             const urg = row.urgency || (row.next_inspection_date <= today ? 'overdue' : 'due_soon');
-                            const bg = urg === 'overdue' ? '#f8d7da' : '#fff3cd';
-                            const fg = urg === 'overdue' ? '#721c24' : '#856404';
+                            const bg = urg === 'overdue' ? '#fef2f2' : '#fff8e6';
+                            const fg = urg === 'overdue' ? '#991b1b' : '#92400e';
                             if (row.kind === 'batch') {
                                 return `
-                                    <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: ${bg};">
-                                        <strong style="color: ${fg};">${escapeHtml(row.label)} — ${row.count} due</strong><br>
-                                        <small style="color: ${fg};">Earliest due: ${formatDate(row.next_inspection_date)}</small>
-                                        <br>
-                                        <a href="inspections.html?batch=${encodeURIComponent(row.asset_type)}" style="font-size: 11px; color: ${fg}; text-decoration: underline; margin-top: 4px; display: inline-block;">Inspect all →</a>
+                                    <div class="list-row" style="background:${bg}; margin:0 -4px; padding:10px 8px; border-radius:6px;">
+                                        <strong style="color:${fg};">${escapeHtml(row.label)} — ${row.count} due</strong>
+                                        <span class="text-muted" style="color:${fg};">Earliest due: ${formatDate(row.next_inspection_date)}</span>
+                                        <a href="inspections.html?batch=${encodeURIComponent(row.asset_type)}" class="btn btn-sm ${urg === 'overdue' ? 'btn-danger' : 'btn-warning'}" style="margin-top:6px;">Inspect all</a>
                                     </div>
                                 `;
                             }
                             return `
-                                <div style="padding: 10px; border-bottom: 1px solid #e9ecef; background-color: ${bg};">
-                                    <strong style="color: ${fg};">${typeLabel(row.asset_type)} — ${escapeHtml(row.asset_name)}</strong><br>
-                                    <small style="color: ${fg};">${row.location ? escapeHtml(row.location) + ' · ' : ''}Due: ${formatDate(row.next_inspection_date)}</small>
-                                    <br>
-                                    <a href="inspections.html?asset=${row.id}" style="font-size: 11px; color: ${fg}; text-decoration: underline; margin-top: 4px; display: inline-block;">Inspect →</a>
+                                <div class="list-row" style="background:${bg}; margin:0 -4px; padding:10px 8px; border-radius:6px;">
+                                    <strong style="color:${fg};">${typeLabel(row.asset_type)} — ${escapeHtml(row.asset_name)}</strong>
+                                    <span class="text-muted" style="color:${fg};">${row.location ? escapeHtml(row.location) + ' · ' : ''}Due: ${formatDate(row.next_inspection_date)}</span>
+                                    <a href="inspections.html?asset=${row.id}" class="btn btn-sm ${urg === 'overdue' ? 'btn-danger' : 'btn-warning'}" style="margin-top:6px;">Inspect</a>
                                 </div>
                             `;
                         }).join('');
