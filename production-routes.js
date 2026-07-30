@@ -588,7 +588,8 @@ router.get('/stock/:id', requireProductionAuth, async (req, res) => {
         if (!item) {
             return res.status(404).json({ success: false, error: 'Stock item not found' });
         }
-        res.json({ success: true, item });
+        const suppliers = await ProductionDatabase.getStockItemSuppliers(itemId);
+        res.json({ success: true, item: { ...item, suppliers } });
     } catch (error) {
         console.error('Get stock item error:', error);
         res.status(500).json({ success: false, error: 'Failed to get stock item' });
@@ -597,7 +598,7 @@ router.get('/stock/:id', requireProductionAuth, async (req, res) => {
 
 router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category } = req.body;
+        const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
         if (!name || !unit) {
             return res.status(400).json({ success: false, error: 'Name and unit are required' });
         }
@@ -612,9 +613,17 @@ router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, r
             category: category && category.trim() ? category.trim() : null,
             cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 100) / 100
         });
-        res.json({ success: true, item });
+        if (Array.isArray(suppliers)) {
+            await ProductionDatabase.setStockItemSuppliers(item.id, suppliers);
+        }
+        const linkedSuppliers = await ProductionDatabase.getStockItemSuppliers(item.id);
+        res.json({ success: true, item: { ...item, suppliers: linkedSuppliers } });
     } catch (error) {
         console.error('Create stock item error:', error);
+        const msg = error.message || '';
+        if (msg.includes('supplier') || msg.includes('Duplicate') || msg.includes('preferred') || msg.includes('price')) {
+            return res.status(400).json({ success: false, error: msg });
+        }
         res.status(500).json({ success: false, error: 'Failed to create stock item' });
     }
 });
@@ -622,7 +631,7 @@ router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, r
 router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
-        const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category } = req.body;
+        const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
         
         const item = await ProductionDatabase.updateStockItem(itemId, {
             name,
@@ -633,9 +642,17 @@ router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req
             category: category && category.trim() ? category.trim() : null,
             cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 100) / 100
         });
-        res.json({ success: true, item });
+        if (Array.isArray(suppliers)) {
+            await ProductionDatabase.setStockItemSuppliers(itemId, suppliers);
+        }
+        const linkedSuppliers = await ProductionDatabase.getStockItemSuppliers(itemId);
+        res.json({ success: true, item: { ...item, suppliers: linkedSuppliers } });
     } catch (error) {
         console.error('Update stock item error:', error);
+        const msg = error.message || '';
+        if (msg.includes('supplier') || msg.includes('Duplicate') || msg.includes('preferred') || msg.includes('price') || msg.includes('Stock item')) {
+            return res.status(400).json({ success: false, error: msg });
+        }
         res.status(500).json({ success: false, error: 'Failed to update stock item' });
     }
 });
@@ -648,6 +665,65 @@ router.delete('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (
     } catch (error) {
         console.error('Delete stock item error:', error);
         res.status(500).json({ success: false, error: 'Failed to delete stock item' });
+    }
+});
+
+router.get('/stock/:id/suppliers', requireProductionAuth, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id, 10);
+        if (Number.isNaN(itemId)) {
+            return res.status(400).json({ success: false, error: 'Invalid stock item id' });
+        }
+        const item = await ProductionDatabase.getStockItemById(itemId);
+        if (!item) {
+            return res.status(404).json({ success: false, error: 'Stock item not found' });
+        }
+        const suppliers = await ProductionDatabase.getStockItemSuppliers(itemId);
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Get stock item suppliers error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get stock item suppliers' });
+    }
+});
+
+router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id, 10);
+        if (Number.isNaN(itemId)) {
+            return res.status(400).json({ success: false, error: 'Invalid stock item id' });
+        }
+        const links = Array.isArray(req.body.suppliers) ? req.body.suppliers : req.body;
+        if (!Array.isArray(links)) {
+            return res.status(400).json({ success: false, error: 'suppliers array is required' });
+        }
+        const suppliers = await ProductionDatabase.setStockItemSuppliers(itemId, links);
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Update stock item suppliers error:', error);
+        const msg = error.message || '';
+        if (msg.includes('supplier') || msg.includes('Duplicate') || msg.includes('preferred') || msg.includes('price') || msg.includes('Stock item')) {
+            return res.status(400).json({ success: false, error: msg });
+        }
+        res.status(500).json({ success: false, error: 'Failed to update stock item suppliers' });
+    }
+});
+
+router.put('/stock/:id/suppliers/preferred', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const itemId = parseInt(req.params.id, 10);
+        const supplierId = parseInt(req.body.supplier_id, 10);
+        if (Number.isNaN(itemId) || Number.isNaN(supplierId)) {
+            return res.status(400).json({ success: false, error: 'Valid stock item id and supplier_id are required' });
+        }
+        const suppliers = await ProductionDatabase.setPreferredStockItemSupplier(itemId, supplierId);
+        res.json({ success: true, suppliers });
+    } catch (error) {
+        console.error('Set preferred stock supplier error:', error);
+        const msg = error.message || '';
+        if (msg.includes('Supplier') || msg.includes('linked')) {
+            return res.status(400).json({ success: false, error: msg });
+        }
+        res.status(500).json({ success: false, error: 'Failed to set preferred supplier' });
     }
 });
 
@@ -665,14 +741,40 @@ router.get('/stock/:id/movements', requireProductionAuth, async (req, res) => {
 router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
     try {
         const stockItemId = parseInt(req.params.id);
-        const { movement_type, quantity, reference, cost_gbp } = req.body;
+        const { movement_type, quantity, reference, cost_gbp, supplier_id, update_material_cost } = req.body;
         
-        if (!movement_type || !quantity) {
+        if (!movement_type || quantity === undefined || quantity === null || quantity === '') {
             return res.status(400).json({ success: false, error: 'Movement type and quantity are required' });
         }
         
         if (!['in', 'out', 'adjustment'].includes(movement_type)) {
             return res.status(400).json({ success: false, error: 'Invalid movement type' });
+        }
+
+        const stockItem = await ProductionDatabase.getStockItemById(stockItemId);
+        if (!stockItem) {
+            return res.status(404).json({ success: false, error: 'Stock item not found' });
+        }
+
+        let resolvedSupplierId = null;
+        let unitCostGbp = null;
+        let totalCostGbp = Math.round((parseFloat(cost_gbp) || 0) * 100) / 100;
+        let shouldUpdateMaterialCost = false;
+
+        if (movement_type === 'in') {
+            const supplierId = parseInt(supplier_id, 10);
+            if (Number.isNaN(supplierId) || supplierId <= 0) {
+                return res.status(400).json({ success: false, error: 'A linked supplier is required for stock in' });
+            }
+            const link = await ProductionDatabase.getSupplierStockLink(stockItemId, supplierId);
+            if (!link) {
+                return res.status(400).json({ success: false, error: 'Selected supplier is not linked to this raw material' });
+            }
+            resolvedSupplierId = supplierId;
+            unitCostGbp = Math.round((parseFloat(link.unit_price_gbp) || 0) * 100) / 100;
+            totalCostGbp = Math.round(unitCostGbp * parseFloat(quantity) * 100) / 100;
+            const currentCost = Math.round((parseFloat(stockItem.cost_per_unit_gbp) || 0) * 100) / 100;
+            shouldUpdateMaterialCost = !!update_material_cost && unitCostGbp !== currentCost;
         }
         
         const movement = await ProductionDatabase.recordStockMovement({
@@ -681,7 +783,10 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
             quantity: parseFloat(quantity),
             reference,
             user_id: req.session.production_user.id,
-            cost_gbp: Math.round((parseFloat(cost_gbp) || 0) * 100) / 100
+            cost_gbp: totalCostGbp,
+            supplier_id: resolvedSupplierId,
+            unit_cost_gbp: unitCostGbp,
+            update_material_cost: shouldUpdateMaterialCost
         });
         res.json({ success: true, movement });
     } catch (error) {

@@ -83,7 +83,15 @@
                 <div class="form-group">
                     <label class="form-label">Cost per Unit (GBP)</label>
                     <input type="number" step="0.01" min="0" id="stockCost" class="form-input" value="0">
-                    <small style="color: #6c757d;">Enter 0.00 for free materials</small>
+                    <small style="color: #6c757d;">Enter 0.00 for free materials. Used as the default stored cost for BOM costing.</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Supplier Prices</label>
+                    <div id="stockSupplierLinks" style="border: 1px solid #ddd; border-radius: 6px; padding: 10px; background: #fafafa;">
+                        <div id="stockSupplierRows"></div>
+                        <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 8px;" onclick="addStockSupplierRow()">+ Add Supplier</button>
+                    </div>
+                    <small style="color: #6c757d;">Link suppliers with their individual prices. Mark one as preferred.</small>
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('stockModal')" class="btn btn-secondary">Cancel</button>
@@ -102,25 +110,34 @@
             </div>
             <form id="movementForm">
                 <input type="hidden" id="movementStockId">
+                <input type="hidden" id="movementCurrentCost" value="0">
                 <div class="form-group">
                     <label class="form-label">Movement Type *</label>
-                    <select id="movementType" class="form-select" required>
+                    <select id="movementType" class="form-select" required onchange="onMovementTypeChange()">
                         <option value="in">Stock In</option>
                         <option value="out">Stock Out</option>
                         <option value="adjustment">Adjustment</option>
                     </select>
                 </div>
+                <div class="form-group" id="movementSupplierGroup">
+                    <label class="form-label">Supplier *</label>
+                    <select id="movementSupplier" class="form-select" onchange="onMovementSupplierChange()">
+                        <option value="">Select supplier...</option>
+                    </select>
+                    <small id="movementSupplierHint" style="color: #6c757d;">Required for stock in. Only linked suppliers are shown.</small>
+                </div>
                 <div class="form-group">
                     <label class="form-label">Quantity *</label>
-                    <input type="number" step="0.01" id="movementQty" class="form-input" required>
+                    <input type="number" step="0.01" id="movementQty" class="form-input" required oninput="updateMovementCostDisplay()">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Reference</label>
                     <input type="text" id="movementRef" class="form-input" placeholder="e.g., PO123, Invoice #456">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="movementCostGroup">
                     <label class="form-label">Cost (GBP)</label>
                     <input type="number" step="0.01" id="movementCost" class="form-input" value="0">
+                    <small id="movementCostHint" style="color: #6c757d; display: none;"></small>
                 </div>
                 <div class="text-right">
                     <button type="button" onclick="hideModal('movementModal')" class="btn btn-secondary">Cancel</button>
@@ -148,6 +165,8 @@
         let stockPage = 1;
         const STOCK_PAGE_SIZE = 25;
         let stockTotal = 0;
+        let allSuppliers = [];
+        let movementLinkedSuppliers = [];
         
         async function loadStockCategories() {
             try {
@@ -167,6 +186,86 @@
             } catch (e) {
                 console.error('Categories load failed', e);
             }
+        }
+
+        async function loadAllSuppliers() {
+            try {
+                const data = await apiCall('/suppliers');
+                allSuppliers = (data.suppliers || []).filter(s => s.is_active === true || s.is_active === 1 || s.is_active === '1' || s.is_active == null);
+            } catch (e) {
+                console.error('Suppliers load failed', e);
+                allSuppliers = [];
+            }
+        }
+
+        function clearStockSupplierRows() {
+            document.getElementById('stockSupplierRows').innerHTML = '';
+        }
+
+        function addStockSupplierRow(link = null) {
+            const container = document.getElementById('stockSupplierRows');
+            const row = document.createElement('div');
+            row.className = 'stock-supplier-row';
+            row.style.cssText = 'display: grid; grid-template-columns: 1.4fr 0.8fr 0.9fr auto auto; gap: 8px; align-items: end; margin-bottom: 8px;';
+            const selectedId = link ? String(link.supplier_id) : '';
+            const supplierOptions = allSuppliers.map(s => {
+                const label = s.code ? `${s.name} (${s.code})` : s.name;
+                return `<option value="${s.id}" ${String(s.id) === selectedId ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('');
+            row.innerHTML = `
+                <div>
+                    <label class="form-label" style="font-size: 12px; margin-bottom: 2px;">Supplier</label>
+                    <select class="form-select stock-supplier-select" required>
+                        <option value="">Select...</option>
+                        ${supplierOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label" style="font-size: 12px; margin-bottom: 2px;">Unit Price (£)</label>
+                    <input type="number" step="0.01" min="0" class="form-input stock-supplier-price" value="${link ? (parseFloat(link.unit_price_gbp) || 0) : 0}">
+                </div>
+                <div>
+                    <label class="form-label" style="font-size: 12px; margin-bottom: 2px;">Supplier SKU</label>
+                    <input type="text" class="form-input stock-supplier-sku" value="${link && link.supplier_sku ? escapeHtml(String(link.supplier_sku)) : ''}" placeholder="Optional">
+                </div>
+                <div style="padding-bottom: 8px;">
+                    <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap;">
+                        <input type="radio" name="preferredSupplier" class="stock-supplier-preferred" ${link && link.is_preferred ? 'checked' : ''}>
+                        Preferred
+                    </label>
+                </div>
+                <div style="padding-bottom: 4px;">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('.stock-supplier-row').remove()">Remove</button>
+                </div>
+            `;
+            container.appendChild(row);
+            if (!link && container.querySelectorAll('.stock-supplier-row').length === 1) {
+                row.querySelector('.stock-supplier-preferred').checked = true;
+            }
+        }
+
+        function collectStockSupplierLinks() {
+            const rows = [...document.querySelectorAll('#stockSupplierRows .stock-supplier-row')];
+            const links = [];
+            const seen = new Set();
+            for (const row of rows) {
+                const supplierId = row.querySelector('.stock-supplier-select').value;
+                if (!supplierId) continue;
+                if (seen.has(supplierId)) {
+                    throw new Error('Each supplier can only be linked once');
+                }
+                seen.add(supplierId);
+                links.push({
+                    supplier_id: parseInt(supplierId, 10),
+                    unit_price_gbp: parseFloat(row.querySelector('.stock-supplier-price').value) || 0,
+                    supplier_sku: row.querySelector('.stock-supplier-sku').value.trim() || null,
+                    is_preferred: row.querySelector('.stock-supplier-preferred').checked
+                });
+            }
+            if (links.length > 0 && !links.some(l => l.is_preferred)) {
+                links[0].is_preferred = true;
+            }
+            return links;
         }
         
         function renderStockPager() {
@@ -195,7 +294,7 @@
             
             // Wait a bit for DOM to be fully ready
             setTimeout(async () => {
-                await loadStockCategories();
+                await Promise.all([loadStockCategories(), loadAllSuppliers()]);
                 loadStock();
             }, 100);
         }
@@ -287,9 +386,10 @@
         }
         
         function showAddStockModal() {
-                document.getElementById('stockModalTitle').textContent = 'Add Raw Material';
+            document.getElementById('stockModalTitle').textContent = 'Add Raw Material';
             document.getElementById('stockForm').reset();
             document.getElementById('stockId').value = '';
+            clearStockSupplierRows();
             showModal('stockModal');
         }
         
@@ -309,6 +409,8 @@
                 document.getElementById('stockMinQty').value = item.min_quantity;
                 document.getElementById('stockLocation').value = item.location || '';
                 document.getElementById('stockCost').value = item.cost_per_unit_gbp;
+                clearStockSupplierRows();
+                (item.suppliers || []).forEach(link => addStockSupplierRow(link));
                 showModal('stockModal');
             } catch (error) {
                 showAlert('Error loading stock item', 'error');
@@ -319,6 +421,13 @@
             e.preventDefault();
             const id = document.getElementById('stockId').value;
             const costValue = document.getElementById('stockCost').value;
+            let suppliers;
+            try {
+                suppliers = collectStockSupplierLinks();
+            } catch (err) {
+                showAlert(err.message, 'error');
+                return;
+            }
             const data = {
                 name: document.getElementById('stockName').value,
                 category: document.getElementById('stockCategory').value.trim() || null,
@@ -326,7 +435,8 @@
                 unit: document.getElementById('stockUnit').value,
                 min_quantity: document.getElementById('stockMinQty').value,
                 location: document.getElementById('stockLocation').value,
-                cost_per_unit_gbp: costValue === '' ? 0 : parseFloat(costValue) || 0
+                cost_per_unit_gbp: costValue === '' ? 0 : parseFloat(costValue) || 0,
+                suppliers
             };
             
             try {
@@ -352,22 +462,121 @@
                 showAlert(error.message, 'error');
             }
         });
+
+        function populateMovementSuppliers(links) {
+            movementLinkedSuppliers = links || [];
+            const select = document.getElementById('movementSupplier');
+            const preferred = movementLinkedSuppliers.find(l => l.is_preferred) || movementLinkedSuppliers[0];
+            select.innerHTML = '<option value="">Select supplier...</option>' +
+                movementLinkedSuppliers.map(l => {
+                    const label = l.supplier_code
+                        ? `${l.supplier_name} (${l.supplier_code}) — ${formatCurrency(l.unit_price_gbp || 0)}`
+                        : `${l.supplier_name} — ${formatCurrency(l.unit_price_gbp || 0)}`;
+                    const selected = preferred && String(preferred.supplier_id) === String(l.supplier_id) ? 'selected' : '';
+                    return `<option value="${l.supplier_id}" ${selected}>${escapeHtml(label)}</option>`;
+                }).join('');
+            onMovementSupplierChange();
+        }
+
+        function onMovementTypeChange() {
+            const type = document.getElementById('movementType').value;
+            const supplierGroup = document.getElementById('movementSupplierGroup');
+            const costInput = document.getElementById('movementCost');
+            const costHint = document.getElementById('movementCostHint');
+            if (type === 'in') {
+                supplierGroup.style.display = '';
+                costInput.readOnly = true;
+                costHint.style.display = '';
+                updateMovementCostDisplay();
+            } else {
+                supplierGroup.style.display = 'none';
+                costInput.readOnly = false;
+                costHint.style.display = 'none';
+                costHint.textContent = '';
+            }
+        }
+
+        function onMovementSupplierChange() {
+            updateMovementCostDisplay();
+        }
+
+        function getSelectedMovementSupplierLink() {
+            const supplierId = document.getElementById('movementSupplier').value;
+            if (!supplierId) return null;
+            return movementLinkedSuppliers.find(l => String(l.supplier_id) === String(supplierId)) || null;
+        }
+
+        function updateMovementCostDisplay() {
+            if (document.getElementById('movementType').value !== 'in') return;
+            const link = getSelectedMovementSupplierLink();
+            const qty = parseFloat(document.getElementById('movementQty').value) || 0;
+            const unitPrice = link ? (parseFloat(link.unit_price_gbp) || 0) : 0;
+            const total = Math.round(unitPrice * qty * 100) / 100;
+            document.getElementById('movementCost').value = total.toFixed(2);
+            const costHint = document.getElementById('movementCostHint');
+            if (link) {
+                costHint.textContent = `Unit price from supplier: ${formatCurrency(unitPrice)} × qty = ${formatCurrency(total)}`;
+                costHint.style.display = '';
+            } else {
+                costHint.textContent = 'Select a linked supplier to use their unit price.';
+                costHint.style.display = '';
+            }
+        }
         
-        function showMovementModal(stockId) {
+        async function showMovementModal(stockId) {
             document.getElementById('movementStockId').value = stockId;
             document.getElementById('movementForm').reset();
+            document.getElementById('movementStockId').value = stockId;
+            movementLinkedSuppliers = [];
+            try {
+                const data = await apiCall(`/stock/${stockId}`);
+                const item = data.item;
+                document.getElementById('movementCurrentCost').value = item ? (parseFloat(item.cost_per_unit_gbp) || 0) : 0;
+                populateMovementSuppliers(item && item.suppliers ? item.suppliers : []);
+            } catch (error) {
+                showAlert('Error loading material suppliers', 'error');
+                populateMovementSuppliers([]);
+            }
+            onMovementTypeChange();
             showModal('movementModal');
         }
         
         document.getElementById('movementForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const stockId = document.getElementById('movementStockId').value;
+            const movementType = document.getElementById('movementType').value;
+            const quantity = document.getElementById('movementQty').value;
+            const reference = document.getElementById('movementRef').value;
             const data = {
-                movement_type: document.getElementById('movementType').value,
-                quantity: document.getElementById('movementQty').value,
-                reference: document.getElementById('movementRef').value,
-                cost_gbp: document.getElementById('movementCost').value
+                movement_type: movementType,
+                quantity,
+                reference
             };
+
+            if (movementType === 'in') {
+                const link = getSelectedMovementSupplierLink();
+                if (!link) {
+                    showAlert('Please select a linked supplier for stock in', 'error');
+                    return;
+                }
+                if (!movementLinkedSuppliers.length) {
+                    showAlert('Link at least one supplier to this raw material before recording stock in', 'error');
+                    return;
+                }
+                const supplierUnitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 100) / 100;
+                const currentCost = Math.round((parseFloat(document.getElementById('movementCurrentCost').value) || 0) * 100) / 100;
+                data.supplier_id = parseInt(link.supplier_id, 10);
+                data.update_material_cost = false;
+                if (supplierUnitPrice !== currentCost) {
+                    const updateCost = confirm(
+                        `Supplier unit price (${formatCurrency(supplierUnitPrice)}) differs from the raw material cost (${formatCurrency(currentCost)}).\n\n` +
+                        `Update the raw material cost to ${formatCurrency(supplierUnitPrice)}?`
+                    );
+                    data.update_material_cost = updateCost;
+                }
+            } else {
+                data.cost_gbp = document.getElementById('movementCost').value;
+            }
             
             try {
                 await apiCall(`/stock/${stockId}/movement`, {

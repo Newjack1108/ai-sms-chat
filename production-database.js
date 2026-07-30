@@ -293,6 +293,23 @@ function initializeSQLite() {
         )
     `);
 
+    // Supplier catalogue prices for raw materials (stock items)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS supplier_stock_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            supplier_id INTEGER NOT NULL,
+            stock_item_id INTEGER NOT NULL,
+            unit_price_gbp REAL NOT NULL DEFAULT 0,
+            supplier_sku TEXT,
+            is_preferred INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+            FOREIGN KEY (stock_item_id) REFERENCES stock_items(id) ON DELETE CASCADE,
+            UNIQUE(supplier_id, stock_item_id)
+        )
+    `);
+
     // Purchase orders table
     db.exec(`
         CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -643,10 +660,29 @@ function initializeSQLite() {
             user_id INTEGER,
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             cost_gbp REAL DEFAULT 0,
+            supplier_id INTEGER,
+            unit_cost_gbp REAL,
             FOREIGN KEY (stock_item_id) REFERENCES stock_items(id),
-            FOREIGN KEY (user_id) REFERENCES production_users(id)
+            FOREIGN KEY (user_id) REFERENCES production_users(id),
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
         )
     `);
+
+    // Migrate stock_movements to add supplier/unit cost audit columns
+    try {
+        const smColumns = db.prepare(`PRAGMA table_info(stock_movements)`).all();
+        const smColumnNames = smColumns.map(col => col.name);
+        if (!smColumnNames.includes('supplier_id')) {
+            db.exec(`ALTER TABLE stock_movements ADD COLUMN supplier_id INTEGER`);
+            console.log('✅ Added supplier_id column to stock_movements');
+        }
+        if (!smColumnNames.includes('unit_cost_gbp')) {
+            db.exec(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp REAL`);
+            console.log('✅ Added unit_cost_gbp column to stock_movements');
+        }
+    } catch (error) {
+        console.log('⚠️ Stock movements supplier/unit cost migration skipped:', error.message);
+    }
     
     // Stock check reminders table
     db.exec(`
@@ -1037,6 +1073,8 @@ function initializeSQLite() {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code_unique ON suppliers(code);
         CREATE INDEX IF NOT EXISTS idx_product_suppliers_product ON product_suppliers(product_id);
         CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier ON product_suppliers(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_stock_items_stock ON supplier_stock_items(stock_item_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_stock_items_supplier ON supplier_stock_items(supplier_id);
         CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id);
         CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_at ON purchase_orders(created_at);
         CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id);
@@ -1850,6 +1888,21 @@ async function initializePostgreSQL() {
             )
         `);
 
+        // Supplier catalogue prices for raw materials (stock items)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS supplier_stock_items (
+                id SERIAL PRIMARY KEY,
+                supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+                stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
+                unit_price_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
+                supplier_sku VARCHAR(255),
+                is_preferred BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(supplier_id, stock_item_id)
+            )
+        `);
+
         // Purchase orders
         await pool.query(`
             CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -1971,6 +2024,8 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code_unique ON suppliers(code) WHERE code IS NOT NULL`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_suppliers_product ON product_suppliers(product_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_suppliers_supplier ON product_suppliers(supplier_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_supplier_stock_items_stock ON supplier_stock_items(stock_item_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_supplier_stock_items_supplier ON supplier_stock_items(supplier_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_orders_supplier ON purchase_orders(supplier_id)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_orders_created_at ON purchase_orders(created_at DESC)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_purchase_order_items_po ON purchase_order_items(purchase_order_id)`);
@@ -2246,9 +2301,35 @@ async function initializePostgreSQL() {
                 reference TEXT,
                 user_id INTEGER REFERENCES production_users(id),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                cost_gbp DECIMAL(10,2) DEFAULT 0
+                cost_gbp DECIMAL(10,2) DEFAULT 0,
+                supplier_id INTEGER REFERENCES suppliers(id),
+                unit_cost_gbp DECIMAL(12,2)
             )
         `);
+
+        // Migrate stock_movements to add supplier/unit cost audit columns
+        try {
+            const smSupplierCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'stock_movements' AND column_name = 'supplier_id'
+            `);
+            if (smSupplierCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE stock_movements ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)`);
+                console.log('✅ Added supplier_id column to stock_movements');
+            }
+            const smUnitCostCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'stock_movements' AND column_name = 'unit_cost_gbp'
+            `);
+            if (smUnitCostCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp DECIMAL(12,2)`);
+                console.log('✅ Added unit_cost_gbp column to stock_movements');
+            }
+        } catch (error) {
+            console.log('⚠️ Stock movements supplier/unit cost migration skipped:', error.message);
+        }
         
         // Stock check reminders
         await pool.query(`
@@ -3798,57 +3879,79 @@ class ProductionDatabase {
     }
     
     static async recordStockMovement(data) {
+        const supplierId = data.supplier_id != null ? parseInt(data.supplier_id, 10) : null;
+        const unitCostGbp = data.unit_cost_gbp != null && data.unit_cost_gbp !== ''
+            ? Math.round((parseFloat(data.unit_cost_gbp) || 0) * 100) / 100
+            : null;
+        const costGbp = Math.round((parseFloat(data.cost_gbp) || 0) * 100) / 100;
+        const updateMaterialCost = !!data.update_material_cost;
+
+        let movement;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO stock_movements (stock_item_id, movement_type, quantity, reference, user_id, cost_gbp)
-                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-                [data.stock_item_id, data.movement_type, data.quantity, data.reference, data.user_id, data.cost_gbp || 0]
+                `INSERT INTO stock_movements (stock_item_id, movement_type, quantity, reference, user_id, cost_gbp, supplier_id, unit_cost_gbp)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+                [data.stock_item_id, data.movement_type, data.quantity, data.reference, data.user_id, costGbp, Number.isNaN(supplierId) ? null : supplierId, unitCostGbp]
             );
-            // Update stock quantity
-            const stockItem = await this.getStockItemById(data.stock_item_id);
-            let newQuantity = parseFloat(stockItem.current_quantity) || 0;
-            if (data.movement_type === 'in') {
-                newQuantity += parseFloat(data.quantity);
-            } else if (data.movement_type === 'out') {
-                newQuantity -= parseFloat(data.quantity);
-            } else if (data.movement_type === 'adjustment') {
-                newQuantity = parseFloat(data.quantity);
-            }
-            await this.updateStockQuantity(data.stock_item_id, newQuantity);
-            return result.rows[0];
+            movement = result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO stock_movements (stock_item_id, movement_type, quantity, reference, user_id, cost_gbp)
-                 VALUES (?, ?, ?, ?, ?, ?)`
+                `INSERT INTO stock_movements (stock_item_id, movement_type, quantity, reference, user_id, cost_gbp, supplier_id, unit_cost_gbp)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            stmt.run(data.stock_item_id, data.movement_type, data.quantity, data.reference, data.user_id, data.cost_gbp || 0);
-            const stockItem = await this.getStockItemById(data.stock_item_id);
-            let newQuantity = parseFloat(stockItem.current_quantity) || 0;
-            if (data.movement_type === 'in') {
-                newQuantity += parseFloat(data.quantity);
-            } else if (data.movement_type === 'out') {
-                newQuantity -= parseFloat(data.quantity);
-            } else if (data.movement_type === 'adjustment') {
-                newQuantity = parseFloat(data.quantity);
-            }
-            await this.updateStockQuantity(data.stock_item_id, newQuantity);
-            return db.prepare(`SELECT * FROM stock_movements WHERE id = (SELECT MAX(id) FROM stock_movements)`).get();
+            stmt.run(data.stock_item_id, data.movement_type, data.quantity, data.reference, data.user_id, costGbp, Number.isNaN(supplierId) ? null : supplierId, unitCostGbp);
+            movement = db.prepare(`SELECT * FROM stock_movements WHERE id = (SELECT MAX(id) FROM stock_movements)`).get();
         }
+
+        // Update stock quantity
+        const stockItem = await this.getStockItemById(data.stock_item_id);
+        let newQuantity = parseFloat(stockItem.current_quantity) || 0;
+        if (data.movement_type === 'in') {
+            newQuantity += parseFloat(data.quantity);
+        } else if (data.movement_type === 'out') {
+            newQuantity -= parseFloat(data.quantity);
+        } else if (data.movement_type === 'adjustment') {
+            newQuantity = parseFloat(data.quantity);
+        }
+        await this.updateStockQuantity(data.stock_item_id, newQuantity);
+
+        // Optionally update the material's stored unit cost (stock-in confirmation flow)
+        if (updateMaterialCost && unitCostGbp != null && data.movement_type === 'in') {
+            if (isPostgreSQL) {
+                await pool.query(
+                    `UPDATE stock_items SET cost_per_unit_gbp = $1 WHERE id = $2`,
+                    [unitCostGbp, data.stock_item_id]
+                );
+            } else {
+                db.prepare(`UPDATE stock_items SET cost_per_unit_gbp = ? WHERE id = ?`).run(unitCostGbp, data.stock_item_id);
+            }
+            try {
+                await this.recalculateCostsForStockItem(data.stock_item_id);
+            } catch (error) {
+                console.error(`Error recalculating dependent costs for stock item ${data.stock_item_id}:`, error);
+            }
+        }
+
+        return movement;
     }
     
     static async getStockMovements(stockItemId) {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT sm.*, u.username as user_name FROM stock_movements sm
+                `SELECT sm.*, u.username as user_name, s.name as supplier_name
+                 FROM stock_movements sm
                  LEFT JOIN production_users u ON sm.user_id = u.id
+                 LEFT JOIN suppliers s ON sm.supplier_id = s.id
                  WHERE sm.stock_item_id = $1 ORDER BY sm.timestamp DESC`,
                 [stockItemId]
             );
             return result.rows;
         } else {
             return db.prepare(
-                `SELECT sm.*, u.username as user_name FROM stock_movements sm
+                `SELECT sm.*, u.username as user_name, s.name as supplier_name
+                 FROM stock_movements sm
                  LEFT JOIN production_users u ON sm.user_id = u.id
+                 LEFT JOIN suppliers s ON sm.supplier_id = s.id
                  WHERE sm.stock_item_id = ? ORDER BY sm.timestamp DESC`
             ).all(stockItemId);
         }
@@ -6632,6 +6735,217 @@ class ProductionDatabase {
              WHERE ps.product_id = ?
              ORDER BY s.name ASC`
         ).all(productId);
+    }
+
+    static normalizeSupplierStockLinks(links) {
+        const seen = new Set();
+        const normalized = [];
+        let preferredCount = 0;
+        for (const link of links || []) {
+            const supplierId = parseInt(link.supplier_id, 10);
+            if (Number.isNaN(supplierId) || supplierId <= 0) {
+                throw new Error('Each supplier link requires a valid supplier_id');
+            }
+            if (seen.has(supplierId)) {
+                throw new Error('Duplicate suppliers are not allowed for a raw material');
+            }
+            seen.add(supplierId);
+            const unitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 100) / 100;
+            if (unitPrice < 0) {
+                throw new Error('Supplier unit price cannot be negative');
+            }
+            const isPreferred = !!link.is_preferred;
+            if (isPreferred) preferredCount += 1;
+            normalized.push({
+                supplier_id: supplierId,
+                unit_price_gbp: unitPrice,
+                supplier_sku: link.supplier_sku != null && String(link.supplier_sku).trim()
+                    ? String(link.supplier_sku).trim()
+                    : null,
+                is_preferred: isPreferred
+            });
+        }
+        if (preferredCount > 1) {
+            throw new Error('Only one preferred supplier is allowed per raw material');
+        }
+        if (normalized.length > 0 && preferredCount === 0) {
+            normalized[0].is_preferred = true;
+        }
+        return normalized;
+    }
+
+    static async getStockItemSuppliers(stockItemId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT ssi.id, ssi.supplier_id, ssi.stock_item_id, ssi.unit_price_gbp, ssi.supplier_sku, ssi.is_preferred,
+                        ssi.created_at, ssi.updated_at,
+                        s.name AS supplier_name, s.code AS supplier_code, s.is_active AS supplier_is_active
+                 FROM supplier_stock_items ssi
+                 INNER JOIN suppliers s ON s.id = ssi.supplier_id
+                 WHERE ssi.stock_item_id = $1
+                 ORDER BY ssi.is_preferred DESC, s.name ASC`,
+                [stockItemId]
+            );
+            return result.rows.map(row => ({
+                ...row,
+                is_preferred: !!row.is_preferred
+            }));
+        }
+        return db.prepare(
+            `SELECT ssi.id, ssi.supplier_id, ssi.stock_item_id, ssi.unit_price_gbp, ssi.supplier_sku, ssi.is_preferred,
+                    ssi.created_at, ssi.updated_at,
+                    s.name AS supplier_name, s.code AS supplier_code, s.is_active AS supplier_is_active
+             FROM supplier_stock_items ssi
+             INNER JOIN suppliers s ON s.id = ssi.supplier_id
+             WHERE ssi.stock_item_id = ?
+             ORDER BY ssi.is_preferred DESC, s.name ASC`
+        ).all(stockItemId).map(row => ({
+            ...row,
+            is_preferred: !!row.is_preferred
+        }));
+    }
+
+    static async getSupplierStockLink(stockItemId, supplierId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM supplier_stock_items WHERE stock_item_id = $1 AND supplier_id = $2`,
+                [stockItemId, supplierId]
+            );
+            return result.rows[0] || null;
+        }
+        return db.prepare(
+            `SELECT * FROM supplier_stock_items WHERE stock_item_id = ? AND supplier_id = ?`
+        ).get(stockItemId, supplierId) || null;
+    }
+
+    static async setStockItemSuppliers(stockItemId, links) {
+        const stockItem = await this.getStockItemById(stockItemId);
+        if (!stockItem) {
+            throw new Error('Stock item not found');
+        }
+        const normalized = this.normalizeSupplierStockLinks(links);
+        for (const link of normalized) {
+            const supplier = await this.getSupplierById(link.supplier_id);
+            if (!supplier) {
+                throw new Error(`Supplier ${link.supplier_id} not found`);
+            }
+        }
+
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM supplier_stock_items WHERE stock_item_id = $1`, [stockItemId]);
+            for (const link of normalized) {
+                await pool.query(
+                    `INSERT INTO supplier_stock_items (supplier_id, stock_item_id, unit_price_gbp, supplier_sku, is_preferred, updated_at)
+                     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+                    [link.supplier_id, stockItemId, link.unit_price_gbp, link.supplier_sku, link.is_preferred]
+                );
+            }
+            return this.getStockItemSuppliers(stockItemId);
+        }
+
+        db.prepare(`DELETE FROM supplier_stock_items WHERE stock_item_id = ?`).run(stockItemId);
+        const insertStmt = db.prepare(
+            `INSERT INTO supplier_stock_items (supplier_id, stock_item_id, unit_price_gbp, supplier_sku, is_preferred, updated_at)
+             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+        );
+        for (const link of normalized) {
+            insertStmt.run(link.supplier_id, stockItemId, link.unit_price_gbp, link.supplier_sku, link.is_preferred ? 1 : 0);
+        }
+        return this.getStockItemSuppliers(stockItemId);
+    }
+
+    static async setPreferredStockItemSupplier(stockItemId, supplierId) {
+        const link = await this.getSupplierStockLink(stockItemId, supplierId);
+        if (!link) {
+            throw new Error('Supplier is not linked to this raw material');
+        }
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE supplier_stock_items SET is_preferred = FALSE, updated_at = CURRENT_TIMESTAMP WHERE stock_item_id = $1`,
+                [stockItemId]
+            );
+            await pool.query(
+                `UPDATE supplier_stock_items SET is_preferred = TRUE, updated_at = CURRENT_TIMESTAMP
+                 WHERE stock_item_id = $1 AND supplier_id = $2`,
+                [stockItemId, supplierId]
+            );
+            return this.getStockItemSuppliers(stockItemId);
+        }
+        db.prepare(
+            `UPDATE supplier_stock_items SET is_preferred = 0, updated_at = CURRENT_TIMESTAMP WHERE stock_item_id = ?`
+        ).run(stockItemId);
+        db.prepare(
+            `UPDATE supplier_stock_items SET is_preferred = 1, updated_at = CURRENT_TIMESTAMP
+             WHERE stock_item_id = ? AND supplier_id = ?`
+        ).run(stockItemId, supplierId);
+        return this.getStockItemSuppliers(stockItemId);
+    }
+
+    static async recalculateCostsForStockItem(stockItemId) {
+        // Components that use this raw material
+        let componentIds = [];
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT component_id FROM component_bom_items WHERE stock_item_id = $1`,
+                [stockItemId]
+            );
+            componentIds = result.rows.map(r => r.component_id);
+        } else {
+            componentIds = db.prepare(
+                `SELECT DISTINCT component_id FROM component_bom_items WHERE stock_item_id = ?`
+            ).all(stockItemId).map(r => r.component_id);
+        }
+        for (const componentId of componentIds) {
+            try {
+                await this.updateComponentCost(componentId);
+            } catch (error) {
+                console.error(`Error recalculating component ${componentId} after stock cost change:`, error);
+            }
+        }
+
+        // Panels/built items that directly use this raw material
+        let panelIds = [];
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT panel_id FROM bom_items WHERE item_type = 'raw_material' AND item_id = $1`,
+                [stockItemId]
+            );
+            panelIds = result.rows.map(r => r.panel_id);
+        } else {
+            panelIds = db.prepare(
+                `SELECT DISTINCT panel_id FROM bom_items WHERE item_type = 'raw_material' AND item_id = ?`
+            ).all(stockItemId).map(r => r.panel_id);
+        }
+        for (const panelId of panelIds) {
+            try {
+                await this.updatePanelCost(panelId);
+            } catch (error) {
+                console.error(`Error recalculating panel ${panelId} after stock cost change:`, error);
+            }
+        }
+
+        // Products that directly use this raw material
+        let productIds = [];
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT product_id FROM product_components
+                 WHERE component_type = 'raw_material' AND component_id = $1`,
+                [stockItemId]
+            );
+            productIds = result.rows.map(r => r.product_id);
+        } else {
+            productIds = db.prepare(
+                `SELECT DISTINCT product_id FROM product_components
+                 WHERE component_type = 'raw_material' AND component_id = ?`
+            ).all(stockItemId).map(r => r.product_id);
+        }
+        for (const productId of productIds) {
+            try {
+                await this.updateProductCost(productId);
+            } catch (error) {
+                console.error(`Error recalculating product ${productId} after stock cost change:`, error);
+            }
+        }
     }
 
     static async getPurchaseOrderById(id) {
