@@ -32,7 +32,7 @@ let db;
 let dbPath;
 
 function payrollEligibleRoleClause(alias = 'u') {
-    return `(${alias}.role = 'staff' OR ${alias}.role = 'installer' OR ${alias}.role = 'office' OR ${alias}.role = 'admin' OR ${alias}.role = 'manager')`;
+    return `(${alias}.role = 'staff' OR ${alias}.role = 'installer' OR ${alias}.role = 'office' OR ${alias}.role = 'manager')`;
 }
 
 // Initialize SQLite if PostgreSQL not available
