@@ -1651,6 +1651,16 @@ function initializeSQLite() {
             db.exec('UPDATE installations SET end_date = start_date WHERE end_date IS NULL');
             console.log('✅ Added end_date column to installations table');
         }
+
+        // Re-read columns after possible end_date add
+        const tableInfoAfter = db.prepare(`PRAGMA table_info(installations)`).all();
+        const hasCompletedAt = tableInfoAfter.some(col => col.name === 'completed_at');
+        if (!hasCompletedAt) {
+            db.exec('ALTER TABLE installations ADD COLUMN completed_at TEXT');
+            db.exec(`UPDATE installations SET completed_at = COALESCE(end_date, start_date)
+                     WHERE status = 'completed' AND completed_at IS NULL`);
+            console.log('✅ Added completed_at column to installations table');
+        }
     } catch (error) {
         console.log('⚠️ Installations migration check skipped:', error.message);
     }
@@ -3345,6 +3355,18 @@ async function initializePostgreSQL() {
                 await pool.query(`ALTER TABLE installations ADD COLUMN end_date DATE`);
                 await pool.query(`UPDATE installations SET end_date = start_date WHERE end_date IS NULL`);
                 console.log('✅ Added end_date column to installations table');
+            }
+
+            const completedAtCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'installations' AND column_name = 'completed_at'
+            `);
+            if (completedAtCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE installations ADD COLUMN completed_at TIMESTAMP`);
+                await pool.query(`UPDATE installations SET completed_at = COALESCE(end_date, start_date)::timestamp
+                                 WHERE status = 'completed' AND completed_at IS NULL`);
+                console.log('✅ Added completed_at column to installations table');
             }
         } catch (error) {
             console.log('⚠️ Installations migration check skipped:', error.message);
@@ -5877,43 +5899,67 @@ class ProductionDatabase {
             const result = await pool.query(query, [plannerId]);
             return result.rows;
         } else {
+            const plannerColumns = db.prepare(`PRAGMA table_info(planner_items)`).all();
+            const hasPanelId = plannerColumns.some(col => col.name === 'panel_id');
+            const panelJoin = hasPanelId
+                ? `(pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)`
+                : `(pi.item_type = 'built_item' AND pi.item_id = p.id)`;
+            const nullTypePanelBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.name`
+                : '';
+            const nullTypeLabourBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.labour_hours`
+                : '';
+            const nullTypeMinBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.min_stock`
+                : '';
+            const nullTypeBuiltBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.built_quantity`
+                : '';
+            const nullTypeMaxBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.max_stock`
+                : '';
+            const nullTypeIdBranch = hasPanelId
+                ? `
+                     WHEN pi.item_type IS NULL THEN p.id`
+                : '';
+
             return db.prepare(
                 `SELECT pi.*, 
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.name
                      WHEN pi.item_type = 'built_item' THEN p.name
-                     WHEN pi.item_type = 'job' THEN pi.job_name
-                     WHEN pi.item_type IS NULL THEN p.name
+                     WHEN pi.item_type = 'job' THEN pi.job_name${nullTypePanelBranch}
                  END as item_name,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.labour_hours
                      WHEN pi.item_type = 'built_item' THEN p.labour_hours
-                     WHEN pi.item_type = 'job' THEN pi.quantity_to_build
-                     WHEN pi.item_type IS NULL THEN p.labour_hours
+                     WHEN pi.item_type = 'job' THEN pi.quantity_to_build${nullTypeLabourBranch}
                  END as labour_hours,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.min_stock
-                     WHEN pi.item_type = 'built_item' THEN p.min_stock
-                     WHEN pi.item_type IS NULL THEN p.min_stock
+                     WHEN pi.item_type = 'built_item' THEN p.min_stock${nullTypeMinBranch}
                  END as min_stock,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.built_quantity
-                     WHEN pi.item_type = 'built_item' THEN p.built_quantity
-                     WHEN pi.item_type IS NULL THEN p.built_quantity
+                     WHEN pi.item_type = 'built_item' THEN p.built_quantity${nullTypeBuiltBranch}
                  END as built_quantity,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.max_stock
-                     WHEN pi.item_type = 'built_item' THEN p.max_stock
-                     WHEN pi.item_type IS NULL THEN p.max_stock
+                     WHEN pi.item_type = 'built_item' THEN p.max_stock${nullTypeMaxBranch}
                  END as max_stock,
                  CASE 
                      WHEN pi.item_type = 'component' THEN c.id
-                     WHEN pi.item_type = 'built_item' THEN p.id
-                     WHEN pi.item_type IS NULL THEN p.id
+                     WHEN pi.item_type = 'built_item' THEN p.id${nullTypeIdBranch}
                  END as item_id_for_movement
                  FROM planner_items pi
                  LEFT JOIN components c ON pi.item_type = 'component' AND pi.item_id = c.id
-                 LEFT JOIN panels p ON (pi.item_type = 'built_item' AND pi.item_id = p.id) OR (pi.item_type IS NULL AND pi.panel_id = p.id)
+                 LEFT JOIN panels p ON ${panelJoin}
                  WHERE pi.planner_id = ? ORDER BY pi.priority DESC, pi.created_at`
             ).all(plannerId);
         }
@@ -6299,6 +6345,241 @@ class ProductionDatabase {
             hours_available: efficiency.hours_available,
             panels_built: efficiency.panels_built,
             panels_planned: efficiency.panels_planned
+        };
+    }
+
+    /**
+     * Installations completed in a London civil week, with linked works-order value.
+     * Effective completion date: COALESCE(completed_at, end_date, start_date).
+     * Total value sums distinct works_order_id amounts (no double-count for multi-visit orders).
+     */
+    static async getInstallationsCompletedForWeek(weekStart, weekEnd) {
+        let rows;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT i.id, i.works_order_id, i.start_date, i.end_date, i.completed_at, i.status,
+                        i.location, i.address, i.duration_hours,
+                        COALESCE(
+                            (CASE
+                                WHEN i.completed_at IS NOT NULL THEN (i.completed_at AT TIME ZONE 'Europe/London')::date
+                                ELSE NULL
+                            END),
+                            i.end_date::date,
+                            i.start_date::date
+                        ) AS completion_date,
+                        po.customer_name, po.sales_order_ref, po.invoice_number,
+                        COALESCE(po.total_amount, 0) AS total_amount,
+                        CASE WHEN i.works_order_id IS NULL THEN true ELSE false END AS missing_works_order
+                 FROM installations i
+                 LEFT JOIN product_orders po ON i.works_order_id = po.id
+                 WHERE i.status = 'completed'
+                   AND COALESCE(
+                        (CASE
+                            WHEN i.completed_at IS NOT NULL THEN (i.completed_at AT TIME ZONE 'Europe/London')::date
+                            ELSE NULL
+                        END),
+                        i.end_date::date,
+                        i.start_date::date
+                   ) BETWEEN $1::date AND $2::date
+                 ORDER BY completion_date ASC, i.id ASC`,
+                [weekStart, weekEnd]
+            );
+            rows = result.rows;
+        } else {
+            rows = db.prepare(
+                `SELECT i.id, i.works_order_id, i.start_date, i.end_date, i.completed_at, i.status,
+                        i.location, i.address, i.duration_hours,
+                        date(COALESCE(i.completed_at, i.end_date, i.start_date)) AS completion_date,
+                        po.customer_name, po.sales_order_ref, po.invoice_number,
+                        COALESCE(po.total_amount, 0) AS total_amount,
+                        CASE WHEN i.works_order_id IS NULL THEN 1 ELSE 0 END AS missing_works_order
+                 FROM installations i
+                 LEFT JOIN product_orders po ON i.works_order_id = po.id
+                 WHERE i.status = 'completed'
+                   AND date(COALESCE(i.completed_at, i.end_date, i.start_date)) >= ?
+                   AND date(COALESCE(i.completed_at, i.end_date, i.start_date)) <= ?
+                 ORDER BY completion_date ASC, i.id ASC`
+            ).all(weekStart, weekEnd);
+        }
+
+        const installations = (rows || []).map(r => ({
+            id: r.id,
+            works_order_id: r.works_order_id,
+            start_date: r.start_date,
+            end_date: r.end_date,
+            completed_at: r.completed_at,
+            completion_date: r.completion_date,
+            status: r.status,
+            location: r.location,
+            address: r.address,
+            duration_hours: parseFloat(r.duration_hours || 0),
+            customer_name: r.customer_name || null,
+            sales_order_ref: r.sales_order_ref || null,
+            invoice_number: r.invoice_number || null,
+            total_amount: parseFloat(r.total_amount || 0),
+            missing_works_order: !!(r.missing_works_order === true || r.missing_works_order === 1 || r.missing_works_order === 't')
+        }));
+
+        const seenOrders = new Set();
+        let totalValue = 0;
+        for (const inst of installations) {
+            if (inst.works_order_id == null) continue;
+            if (seenOrders.has(inst.works_order_id)) continue;
+            seenOrders.add(inst.works_order_id);
+            totalValue += inst.total_amount;
+        }
+
+        return {
+            quantity: installations.length,
+            total_value: totalValue,
+            distinct_orders: seenOrders.size,
+            installations
+        };
+    }
+
+    /**
+     * Stock-in movements for a London civil week, with line values and current on-hand totals.
+     */
+    static async getStockAddedForWeek(weekStart, weekEnd) {
+        let rows;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT sm.id, sm.stock_item_id, sm.quantity, sm.cost_gbp, sm.unit_cost_gbp, sm.timestamp, sm.reference,
+                        si.name AS item_name, si.unit, si.cost_per_unit_gbp,
+                        COALESCE(
+                            NULLIF(sm.cost_gbp, 0),
+                            sm.quantity * NULLIF(sm.unit_cost_gbp, 0),
+                            sm.quantity * COALESCE(si.cost_per_unit_gbp, 0)
+                        ) AS line_value
+                 FROM stock_movements sm
+                 LEFT JOIN stock_items si ON sm.stock_item_id = si.id
+                 WHERE sm.movement_type = 'in'
+                   AND ((sm.timestamp AT TIME ZONE 'Europe/London')::date) >= $1::date
+                   AND ((sm.timestamp AT TIME ZONE 'Europe/London')::date) <= $2::date
+                 ORDER BY sm.timestamp ASC, sm.id ASC`,
+                [weekStart, weekEnd]
+            );
+            rows = result.rows;
+        } else {
+            const startIso = londonDayStartUtc(weekStart);
+            const endExclusive = londonNextDayStartUtc(weekEnd);
+            rows = db.prepare(
+                `SELECT sm.id, sm.stock_item_id, sm.quantity, sm.cost_gbp, sm.unit_cost_gbp, sm.timestamp, sm.reference,
+                        si.name AS item_name, si.unit, si.cost_per_unit_gbp,
+                        COALESCE(
+                            NULLIF(sm.cost_gbp, 0),
+                            CASE WHEN sm.unit_cost_gbp IS NOT NULL AND sm.unit_cost_gbp != 0
+                                 THEN sm.quantity * sm.unit_cost_gbp ELSE NULL END,
+                            sm.quantity * COALESCE(si.cost_per_unit_gbp, 0)
+                        ) AS line_value
+                 FROM stock_movements sm
+                 LEFT JOIN stock_items si ON sm.stock_item_id = si.id
+                 WHERE sm.movement_type = 'in'
+                   AND sm.timestamp >= ?
+                   AND sm.timestamp < ?
+                 ORDER BY sm.timestamp ASC, sm.id ASC`
+            ).all(startIso, endExclusive);
+        }
+
+        const items = (rows || []).map(r => ({
+            id: r.id,
+            stock_item_id: r.stock_item_id,
+            item_name: r.item_name || 'Unknown',
+            unit: r.unit || '',
+            quantity: parseFloat(r.quantity || 0),
+            line_value: parseFloat(r.line_value || 0),
+            timestamp: r.timestamp,
+            reference: r.reference || null
+        }));
+
+        const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
+        const totalValue = items.reduce((s, i) => s + i.line_value, 0);
+        const [rawMaterialsValue, builtItemsValue] = await Promise.all([
+            this.getTotalStockValue(),
+            this.getTotalPanelValue()
+        ]);
+
+        return {
+            movement_count: items.length,
+            total_quantity: totalQuantity,
+            total_value: totalValue,
+            current_raw_materials_value: rawMaterialsValue,
+            current_built_items_value: builtItemsValue,
+            current_total_stock_value: rawMaterialsValue + builtItemsValue,
+            items
+        };
+    }
+
+    /**
+     * Clocked production hours for a Monday-start week (from timesheet daily entries).
+     */
+    static async getProductionHoursForWeek(weekStart) {
+        const perUser = await this.getPayrollSummary(weekStart);
+        const users = (perUser || []).map(r => ({
+            user_id: r.user_id,
+            username: r.username,
+            regular_hours: parseFloat(r.total_regular_hours || 0),
+            overtime_hours: parseFloat(r.total_overtime_hours || 0),
+            weekend_hours: parseFloat(r.total_weekend_hours || 0),
+            overnight_hours: parseFloat(r.total_overnight_hours || 0),
+            total_hours: parseFloat(r.total_hours || 0),
+            days_worked: parseInt(r.days_worked || 0, 10)
+        }));
+
+        const totals = users.reduce((acc, u) => {
+            acc.regular_hours += u.regular_hours;
+            acc.overtime_hours += u.overtime_hours;
+            acc.weekend_hours += u.weekend_hours;
+            acc.overnight_hours += u.overnight_hours;
+            acc.total_hours += u.total_hours;
+            acc.days_worked += u.days_worked;
+            return acc;
+        }, {
+            regular_hours: 0,
+            overtime_hours: 0,
+            weekend_hours: 0,
+            overnight_hours: 0,
+            total_hours: 0,
+            days_worked: 0
+        });
+
+        return {
+            users,
+            totals,
+            user_count: users.length
+        };
+    }
+
+    /**
+     * Weekly planner hours summary. Returns null when no planner exists for the week.
+     */
+    static async getPlannerHoursForWeek(weekStart) {
+        const planner = await this.getWeeklyPlannerByDate(weekStart);
+        if (!planner) return null;
+
+        const [efficiency, items] = await Promise.all([
+            this.calculatePlannerEfficiency(planner.id),
+            this.getPlannerItems(planner.id)
+        ]);
+        if (!efficiency) return null;
+
+        const itemsList = items || [];
+        const itemsCompleted = itemsList.filter(i => i.status === 'completed').length;
+        const itemsPlanned = itemsList.length;
+
+        return {
+            planner_id: planner.id,
+            week_start: planner.week_start_date,
+            staff_available: planner.staff_available,
+            hours_available: efficiency.hours_available,
+            hours_planned: efficiency.hours_planned,
+            hours_used: efficiency.hours_used,
+            items_planned: itemsPlanned,
+            items_completed: itemsCompleted,
+            panels_planned: efficiency.panels_planned,
+            panels_built: efficiency.panels_built,
+            overall_efficiency: efficiency.overall_efficiency,
+            indicator: efficiency.indicator
         };
     }
     
@@ -9132,9 +9413,10 @@ class ProductionDatabase {
                 endTime = end.toTimeString().slice(0, 5);
             }
             
+            const status = data.status || 'scheduled';
             const result = await pool.query(
-                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, completed_at, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
                 [
                     data.works_order_id || null,
                     startDate,
@@ -9145,7 +9427,8 @@ class ProductionDatabase {
                     data.location || null,
                     data.address || null,
                     data.notes || null,
-                    data.status || 'scheduled',
+                    status,
+                    status === 'completed' ? new Date().toISOString() : null,
                     data.created_by
                 ]
             );
@@ -9197,9 +9480,10 @@ class ProductionDatabase {
                 endTime = end.toTimeString().slice(0, 5);
             }
             
+            const status = data.status || 'scheduled';
             const stmt = db.prepare(
-                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO installations (works_order_id, start_date, end_date, start_time, end_time, duration_hours, location, address, notes, status, completed_at, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 data.works_order_id || null,
@@ -9211,7 +9495,8 @@ class ProductionDatabase {
                 data.location || null,
                 data.address || null,
                 data.notes || null,
-                data.status || 'scheduled',
+                status,
+                status === 'completed' ? new Date().toISOString() : null,
                 data.created_by
             );
             
@@ -10216,6 +10501,17 @@ class ProductionDatabase {
         } else {
             updates.push(`updated_at = datetime('now')`);
         }
+
+        // Stamp/clear completed_at based on status change (literal SQL; must stay after parameterized fields)
+        if (data.status !== undefined) {
+            if (data.status === 'completed') {
+                updates.push(isPostgreSQL
+                    ? `completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)`
+                    : `completed_at = COALESCE(completed_at, datetime('now'))`);
+            } else {
+                updates.push(`completed_at = NULL`);
+            }
+        }
         
         if (updates.length === 0) {
             return this.getInstallationById(id);
@@ -10225,7 +10521,7 @@ class ProductionDatabase {
         
         if (isPostgreSQL) {
             const setClause = updates.map((update, idx) => {
-                if (update.includes('CURRENT_TIMESTAMP')) {
+                if (update.includes('CURRENT_TIMESTAMP') || update === 'completed_at = NULL') {
                     return update;
                 }
                 const field = update.split(' = ')[0];
@@ -10234,7 +10530,7 @@ class ProductionDatabase {
             await pool.query(`UPDATE installations SET ${setClause} WHERE id = $${paramIndex}`, values);
         } else {
             const setClause = updates.map((update, idx) => {
-                if (update.includes("datetime('now')")) {
+                if (update.includes("datetime('now')") || update === 'completed_at = NULL') {
                     return update;
                 }
                 const field = update.split(' = ')[0];

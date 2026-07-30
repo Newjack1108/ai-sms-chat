@@ -1794,6 +1794,42 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
     }
 });
 
+// Weekly Production Manager Report (installs, stock, hours)
+router.get('/reports/weekly-manager', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const rawWeekStart = (req.query.week_start || '').toString().trim();
+        const ymdPattern = /^\d{4}-\d{2}-\d{2}$/;
+        let weekStart;
+        if (rawWeekStart && ymdPattern.test(rawWeekStart)) {
+            weekStart = londonMondayYmdFromYmd(rawWeekStart);
+        } else {
+            // Default to last completed week (previous Monday)
+            weekStart = londonYmdAddDays(londonMondayYmd(new Date()), -7);
+        }
+        const weekEnd = londonYmdAddDays(weekStart, 6);
+
+        const [installations, stock, hours, planner] = await Promise.all([
+            ProductionDatabase.getInstallationsCompletedForWeek(weekStart, weekEnd),
+            ProductionDatabase.getStockAddedForWeek(weekStart, weekEnd),
+            ProductionDatabase.getProductionHoursForWeek(weekStart),
+            ProductionDatabase.getPlannerHoursForWeek(weekStart)
+        ]);
+
+        res.json({
+            success: true,
+            week_start: weekStart,
+            week_end: weekEnd,
+            installations,
+            stock,
+            hours,
+            planner
+        });
+    } catch (error) {
+        console.error('Get weekly manager report error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get weekly manager report' });
+    }
+});
+
 // ============ SETTINGS ROUTES ============
 
 router.get('/settings', requireProductionAuth, requireAdmin, async (req, res) => {

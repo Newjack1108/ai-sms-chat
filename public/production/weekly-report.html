@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Manager Report - Production System</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="apple-touch-icon" href="logo.png">
+    <link rel="stylesheet" href="common.css">
+    <style>
+        .report-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-end;
+            margin-bottom: 8px;
+        }
+        .report-controls .form-group {
+            margin: 0;
+        }
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 900px) {
+            .kpi-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .kpi-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .kpi-card h3 {
+            margin: 0 0 8px 0;
+            color: #2c3e50;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .kpi-card .kpi-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+            margin: 0;
+        }
+        .section-note {
+            color: #6c757d;
+            font-size: 13px;
+            margin: 0 0 12px 0;
+        }
+        .missing-order {
+            color: #dc3545;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-logo">
+            <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            <h1>Weekly Manager Report</h1>
+        </div>
+        <div class="navbar-right">
+            <span class="navbar-user" id="userInfo"></span>
+            <div class="navbar-dropdown admin-or-office">
+                <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">Production</button>
+                <div class="dropdown-menu">
+                    <a href="dashboard.html" class="dropdown-item">Dashboard</a>
+                    <a href="stock.html" class="dropdown-item">Raw Materials</a>
+                    <a href="planner.html" class="dropdown-item">Planner</a>
+                    <a href="production-orders.html" class="dropdown-item">Works Orders</a>
+                    <a href="installations.html" class="dropdown-item">Installation Calendar</a>
+                    <a href="weekly-report.html" class="dropdown-item">Weekly Report</a>
+                </div>
+            </div>
+            <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">
+                <h2>Weekly Production Manager Report</h2>
+                <button id="downloadPdfBtn" class="btn btn-primary" onclick="downloadPdf()" disabled>Download PDF</button>
+            </div>
+
+            <div class="report-controls">
+                <div class="form-group">
+                    <label class="form-label" for="weekStartInput">Week commencing (Monday)</label>
+                    <input type="date" id="weekStartInput" class="form-input" onchange="onWeekInputChange()">
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="shiftWeek(-7)">Previous week</button>
+                <button type="button" class="btn btn-secondary" onclick="shiftWeek(7)">Next week</button>
+                <button type="button" class="btn btn-primary" onclick="loadReport()">Refresh</button>
+            </div>
+            <p class="section-note" id="weekLabel">Loading…</p>
+
+            <div id="summaryCards" class="kpi-grid">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Installations Completed</h2>
+            </div>
+            <div id="installationsSection">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Stock Added</h2>
+            </div>
+            <div id="stockSection">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Production Hours</h2>
+            </div>
+            <div id="hoursSection">
+                <div class="loading">Loading…</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="common.js"></script>
+    <script>
+        let currentUser = null;
+        let reportData = null;
+        let selectedWeekStart = null;
+
+        function formatHours(hours) {
+            const n = parseFloat(hours || 0);
+            if (!Number.isFinite(n)) return '0.0h';
+            return n.toFixed(1) + 'h';
+        }
+
+        function defaultWeekStart() {
+            // Last completed week (previous Monday)
+            return londonYmdAddDays(londonMondayYmd(new Date()), -7);
+        }
+
+        async function init() {
+            if (await restrictStaffAccess()) return;
+
+            currentUser = await checkAuth();
+            if (!currentUser) return;
+            initNavbar();
+
+            if (currentUser.role !== 'admin' && currentUser.role !== 'office') {
+                showAlert('Admin or office access required for the weekly manager report', 'error');
+                window.location.href = '/production/dashboard.html';
+                return;
+            }
+
+            selectedWeekStart = defaultWeekStart();
+            document.getElementById('weekStartInput').value = selectedWeekStart;
+            await loadReport();
+        }
+
+        function onWeekInputChange() {
+            const raw = document.getElementById('weekStartInput').value;
+            if (!raw) return;
+            selectedWeekStart = londonMondayYmdFromYmd(raw);
+            document.getElementById('weekStartInput').value = selectedWeekStart;
+            loadReport();
+        }
+
+        function shiftWeek(deltaDays) {
+            if (!selectedWeekStart) selectedWeekStart = defaultWeekStart();
+            selectedWeekStart = londonYmdAddDays(selectedWeekStart, deltaDays);
+            document.getElementById('weekStartInput').value = selectedWeekStart;
+            loadReport();
+        }
+
+        async function loadReport() {
+            if (!selectedWeekStart) selectedWeekStart = defaultWeekStart();
+            document.getElementById('downloadPdfBtn').disabled = true;
+            document.getElementById('weekLabel').textContent = 'Loading…';
+            document.getElementById('summaryCards').innerHTML = '<div class="loading">Loading…</div>';
+            document.getElementById('installationsSection').innerHTML = '<div class="loading">Loading…</div>';
+            document.getElementById('stockSection').innerHTML = '<div class="loading">Loading…</div>';
+            document.getElementById('hoursSection').innerHTML = '<div class="loading">Loading…</div>';
+
+            try {
+                const data = await apiCall(`/reports/weekly-manager?week_start=${encodeURIComponent(selectedWeekStart)}`);
+                if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'Failed to load report');
+                }
+                reportData = data;
+                selectedWeekStart = data.week_start;
+                document.getElementById('weekStartInput').value = selectedWeekStart;
+                document.getElementById('weekLabel').textContent =
+                    `Week: ${formatDate(data.week_start)} – ${formatDate(data.week_end)}`;
+                renderSummary(data);
+                renderInstallations(data.installations);
+                renderStock(data.stock);
+                renderHours(data.hours, data.planner);
+                document.getElementById('downloadPdfBtn').disabled = false;
+            } catch (error) {
+                console.error('Error loading weekly report:', error);
+                showAlert(error.message || 'Failed to load weekly report', 'error');
+                document.getElementById('summaryCards').innerHTML = '<p>Error loading report</p>';
+                document.getElementById('installationsSection').innerHTML = '<p>Error loading report</p>';
+                document.getElementById('stockSection').innerHTML = '<p>Error loading report</p>';
+                document.getElementById('hoursSection').innerHTML = '<p>Error loading report</p>';
+            }
+        }
+
+        function renderSummary(data) {
+            const installs = data.installations || {};
+            const stock = data.stock || {};
+            const hours = data.hours || {};
+            const planner = data.planner;
+            const clocked = (hours.totals && hours.totals.total_hours) || 0;
+            const plannerUsed = planner ? planner.hours_used : null;
+
+            document.getElementById('summaryCards').innerHTML = `
+                <div class="kpi-card">
+                    <h3>Installs Completed</h3>
+                    <p class="kpi-value">${installs.quantity || 0}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Installation Value</h3>
+                    <p class="kpi-value">${formatCurrency(installs.total_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Stock Added Value</h3>
+                    <p class="kpi-value">${formatCurrency(stock.total_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Total Stock on Hand</h3>
+                    <p class="kpi-value">${formatCurrency(stock.current_total_stock_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Clocked Hours</h3>
+                    <p class="kpi-value">${formatHours(clocked)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Planner Hours Used</h3>
+                    <p class="kpi-value">${plannerUsed == null ? 'N/A' : formatHours(plannerUsed)}</p>
+                </div>
+            `;
+        }
+
+        function renderInstallations(installations) {
+            const list = (installations && installations.installations) || [];
+            if (list.length === 0) {
+                document.getElementById('installationsSection').innerHTML =
+                    `<p class="section-note">No installations completed this week. Qty: 0 · Value: ${formatCurrency(0)}</p>`;
+                return;
+            }
+
+            document.getElementById('installationsSection').innerHTML = `
+                <p class="section-note">
+                    Qty: <strong>${installations.quantity}</strong>
+                    · Distinct works orders: <strong>${installations.distinct_orders || 0}</strong>
+                    · Total value: <strong>${formatCurrency(installations.total_value || 0)}</strong>
+                    (value counted once per works order)
+                </p>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Completed</th>
+                            <th>Customer</th>
+                            <th>Works Order / Ref</th>
+                            <th>Invoice</th>
+                            <th class="text-right">Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${list.map(inst => `
+                            <tr>
+                                <td>${formatDate(inst.completion_date)}</td>
+                                <td>${escapeHtml(inst.customer_name || '-')}</td>
+                                <td>
+                                    ${inst.works_order_id
+                                        ? `#${inst.works_order_id}${inst.sales_order_ref ? ' / ' + escapeHtml(inst.sales_order_ref) : ''}`
+                                        : '<span class="missing-order">No works order linked</span>'}
+                                </td>
+                                <td>${escapeHtml(inst.invoice_number || '-')}</td>
+                                <td class="text-right">${formatCurrency(inst.total_amount || 0)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderStock(stock) {
+            const items = (stock && stock.items) || [];
+            document.getElementById('stockSection').innerHTML = `
+                <p class="section-note">
+                    Movements in: <strong>${stock.movement_count || 0}</strong>
+                    · Qty added: <strong>${(stock.total_quantity || 0).toFixed(2)}</strong>
+                    · Value added: <strong>${formatCurrency(stock.total_value || 0)}</strong>
+                </p>
+                <p class="section-note">
+                    Current stock on hand —
+                    Raw materials: <strong>${formatCurrency(stock.current_raw_materials_value || 0)}</strong>
+                    · Built items: <strong>${formatCurrency(stock.current_built_items_value || 0)}</strong>
+                    · Total: <strong>${formatCurrency(stock.current_total_stock_value || 0)}</strong>
+                </p>
+                ${items.length === 0 ? '<p>No stock-in movements this week.</p>' : `
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Item</th>
+                            <th>Unit</th>
+                            <th class="text-right">Qty</th>
+                            <th class="text-right">Value</th>
+                            <th>Reference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(item => `
+                            <tr>
+                                <td>${formatDate(item.timestamp)}</td>
+                                <td>${escapeHtml(item.item_name)}</td>
+                                <td>${escapeHtml(item.unit || '-')}</td>
+                                <td class="text-right">${(item.quantity || 0).toFixed(2)}</td>
+                                <td class="text-right">${formatCurrency(item.line_value || 0)}</td>
+                                <td>${escapeHtml(item.reference || '-')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>`}
+            `;
+        }
+
+        function renderHours(hours, planner) {
+            const users = (hours && hours.users) || [];
+            const totals = (hours && hours.totals) || {};
+
+            let plannerHtml = '';
+            if (!planner) {
+                plannerHtml = '<p class="section-note">No weekly planner was created for this week.</p>';
+            } else {
+                plannerHtml = `
+                    <p class="section-note">
+                        Planner — Available: <strong>${formatHours(planner.hours_available)}</strong>
+                        · Planned: <strong>${formatHours(planner.hours_planned)}</strong>
+                        · Used: <strong>${formatHours(planner.hours_used)}</strong>
+                        · Items: <strong>${planner.items_completed}/${planner.items_planned}</strong> completed
+                        · Efficiency: <strong>${(planner.overall_efficiency || 0).toFixed(1)}%</strong>
+                    </p>
+                `;
+            }
+
+            document.getElementById('hoursSection').innerHTML = `
+                ${plannerHtml}
+                <p class="section-note">
+                    Clocked totals — Regular: <strong>${formatHours(totals.regular_hours)}</strong>
+                    · Overtime: <strong>${formatHours(totals.overtime_hours)}</strong>
+                    · Weekend: <strong>${formatHours(totals.weekend_hours)}</strong>
+                    · Overnight: <strong>${formatHours(totals.overnight_hours)}</strong>
+                    · Total: <strong>${formatHours(totals.total_hours)}</strong>
+                    · People: <strong>${hours.user_count || 0}</strong>
+                </p>
+                ${users.length === 0 ? '<p>No clocked hours recorded this week.</p>' : `
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Person</th>
+                            <th class="text-right">Regular</th>
+                            <th class="text-right">Overtime</th>
+                            <th class="text-right">Weekend</th>
+                            <th class="text-right">Overnight</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-right">Days</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${users.map(u => `
+                            <tr>
+                                <td>${escapeHtml(u.username)}</td>
+                                <td class="text-right">${formatHours(u.regular_hours)}</td>
+                                <td class="text-right">${formatHours(u.overtime_hours)}</td>
+                                <td class="text-right">${formatHours(u.weekend_hours)}</td>
+                                <td class="text-right">${formatHours(u.overnight_hours)}</td>
+                                <td class="text-right"><strong>${formatHours(u.total_hours)}</strong></td>
+                                <td class="text-right">${u.days_worked || 0}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>`}
+            `;
+        }
+
+        async function loadLogoDataUrl() {
+            try {
+                const logoImg = new Image();
+                logoImg.crossOrigin = 'anonymous';
+                logoImg.src = 'logo.png';
+                await new Promise((resolve) => {
+                    logoImg.onload = () => resolve();
+                    logoImg.onerror = () => resolve();
+                    setTimeout(() => resolve(), 2000);
+                });
+                if (!logoImg.width) return null;
+                const canvas = document.createElement('canvas');
+                canvas.width = logoImg.width;
+                canvas.height = logoImg.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(logoImg, 0, 0);
+                return {
+                    dataUrl: canvas.toDataURL('image/png'),
+                    width: logoImg.width,
+                    height: logoImg.height
+                };
+            } catch (err) {
+                console.warn('Could not load logo for PDF:', err);
+                return null;
+            }
+        }
+
+        async function downloadPdf() {
+            if (!reportData) {
+                showAlert('Load a report before downloading', 'error');
+                return;
+            }
+
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                let yPos = 20;
+
+                const logo = await loadLogoDataUrl();
+                if (logo) {
+                    const logoHeight = 16;
+                    const logoWidth = (logo.width / logo.height) * logoHeight;
+                    doc.addImage(logo.dataUrl, 'PNG', 14, 10, logoWidth, logoHeight);
+                    yPos = 32;
+                }
+
+                doc.setFontSize(18);
+                doc.setFont(undefined, 'bold');
+                doc.text('Weekly Production Manager Report', 105, yPos, { align: 'center' });
+                yPos += 8;
+
+                doc.setFontSize(11);
+                doc.setFont(undefined, 'normal');
+                doc.text(
+                    `Week: ${formatDate(reportData.week_start)} – ${formatDate(reportData.week_end)}`,
+                    105, yPos, { align: 'center' }
+                );
+                yPos += 12;
+
+                const installs = reportData.installations || {};
+                const stock = reportData.stock || {};
+                const hours = reportData.hours || {};
+                const planner = reportData.planner;
+                const totals = hours.totals || {};
+
+                doc.setFontSize(13);
+                doc.setFont(undefined, 'bold');
+                doc.text('Summary', 14, yPos);
+                yPos += 6;
+
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                const summaryRows = [
+                    ['Installs completed', String(installs.quantity || 0)],
+                    ['Installation value', formatCurrency(installs.total_value || 0)],
+                    ['Stock added value', formatCurrency(stock.total_value || 0)],
+                    ['Raw materials on hand', formatCurrency(stock.current_raw_materials_value || 0)],
+                    ['Built items on hand', formatCurrency(stock.current_built_items_value || 0)],
+                    ['Total stock on hand', formatCurrency(stock.current_total_stock_value || 0)],
+                    ['Clocked hours', formatHours(totals.total_hours)],
+                    ['Planner hours used', planner ? formatHours(planner.hours_used) : 'No planner']
+                ];
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Metric', 'Value']],
+                    body: summaryRows,
+                    theme: 'striped',
+                    headStyles: { fillColor: [102, 126, 234] },
+                    margin: { left: 14, right: 14 },
+                    styles: { fontSize: 9 }
+                });
+                yPos = doc.lastAutoTable.finalY + 10;
+
+                // Installations
+                doc.setFontSize(13);
+                doc.setFont(undefined, 'bold');
+                doc.text('Installations Completed', 14, yPos);
+                yPos += 4;
+
+                const installRows = ((installs.installations) || []).map(inst => [
+                    formatDate(inst.completion_date),
+                    inst.customer_name || '-',
+                    inst.works_order_id
+                        ? `#${inst.works_order_id}${inst.sales_order_ref ? ' / ' + inst.sales_order_ref : ''}`
+                        : 'No works order',
+                    formatCurrency(inst.total_amount || 0)
+                ]);
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Completed', 'Customer', 'Works Order / Ref', 'Value']],
+                    body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—']],
+                    theme: 'striped',
+                    headStyles: { fillColor: [102, 126, 234] },
+                    margin: { left: 14, right: 14 },
+                    styles: { fontSize: 8 }
+                });
+                yPos = doc.lastAutoTable.finalY + 10;
+
+                // Stock
+                if (yPos > 250) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                doc.setFontSize(13);
+                doc.setFont(undefined, 'bold');
+                doc.text('Stock Added', 14, yPos);
+                yPos += 4;
+
+                const stockRows = ((stock.items) || []).map(item => [
+                    formatDate(item.timestamp),
+                    item.item_name || '-',
+                    (item.quantity || 0).toFixed(2),
+                    formatCurrency(item.line_value || 0),
+                    item.reference || '-'
+                ]);
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Date', 'Item', 'Qty', 'Value', 'Reference']],
+                    body: stockRows.length ? stockRows : [['—', 'No stock-in movements', '—', '—', '—']],
+                    theme: 'striped',
+                    headStyles: { fillColor: [102, 126, 234] },
+                    margin: { left: 14, right: 14 },
+                    styles: { fontSize: 8 }
+                });
+                yPos = doc.lastAutoTable.finalY + 10;
+
+                // Hours
+                if (yPos > 240) {
+                    doc.addPage();
+                    yPos = 20;
+                }
+                doc.setFontSize(13);
+                doc.setFont(undefined, 'bold');
+                doc.text('Production Hours', 14, yPos);
+                yPos += 6;
+
+                doc.setFontSize(9);
+                doc.setFont(undefined, 'normal');
+                if (planner) {
+                    doc.text(
+                        `Planner: Available ${formatHours(planner.hours_available)} · Planned ${formatHours(planner.hours_planned)} · Used ${formatHours(planner.hours_used)} · Items ${planner.items_completed}/${planner.items_planned} · Efficiency ${(planner.overall_efficiency || 0).toFixed(1)}%`,
+                        14, yPos
+                    );
+                } else {
+                    doc.text('Planner: No weekly planner was created for this week.', 14, yPos);
+                }
+                yPos += 6;
+
+                const hourRows = ((hours.users) || []).map(u => [
+                    u.username,
+                    formatHours(u.regular_hours),
+                    formatHours(u.overtime_hours),
+                    formatHours(u.weekend_hours),
+                    formatHours(u.overnight_hours),
+                    formatHours(u.total_hours),
+                    String(u.days_worked || 0)
+                ]);
+                if (hourRows.length) {
+                    hourRows.push([
+                        'TOTAL',
+                        formatHours(totals.regular_hours),
+                        formatHours(totals.overtime_hours),
+                        formatHours(totals.weekend_hours),
+                        formatHours(totals.overnight_hours),
+                        formatHours(totals.total_hours),
+                        String(totals.days_worked || 0)
+                    ]);
+                }
+
+                doc.autoTable({
+                    startY: yPos,
+                    head: [['Person', 'Regular', 'OT', 'Weekend', 'Overnight', 'Total', 'Days']],
+                    body: hourRows.length ? hourRows : [['—', 'No clocked hours', '—', '—', '—', '—', '—']],
+                    theme: 'striped',
+                    headStyles: { fillColor: [102, 126, 234] },
+                    margin: { left: 14, right: 14 },
+                    styles: { fontSize: 8 }
+                });
+
+                const fileName = `Weekly_Production_Report_${reportData.week_start}.pdf`;
+                doc.save(fileName);
+            } catch (error) {
+                console.error('PDF generation error:', error);
+                showAlert('Failed to generate PDF: ' + (error.message || 'unknown error'), 'error');
+            }
+        }
+
+        init();
+    </script>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <img src="logo.png" alt="Company Logo" onerror="this.style.display='none';">
+            </div>
+            <div class="footer-info">
+                <p>&copy; <script>document.write(new Date().getFullYear())</script> Production System. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
