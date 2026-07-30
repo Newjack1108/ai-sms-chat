@@ -5808,6 +5808,32 @@ router.delete('/reminders/:id', requireProductionAuth, requireAdminOrOffice, asy
 
 // ============ COMPLIANCE INSPECTIONS ============
 
+router.get('/inspections/checklists', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        res.json({ success: true, checklists: ProductionDatabase.INSPECTION_CHECKLISTS });
+    } catch (error) {
+        console.error('Get inspection checklists error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to get checklists' });
+    }
+});
+
+router.get('/inspections/records/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const recordId = parseInt(req.params.id, 10);
+        if (Number.isNaN(recordId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const result = await ProductionDatabase.getInspectionRecordWithItems(recordId);
+        if (!result) {
+            return res.status(404).json({ success: false, error: 'Record not found' });
+        }
+        res.json({ success: true, record: result.record, items: result.items });
+    } catch (error) {
+        console.error('Get inspection record error:', error);
+        res.status(500).json({ success: false, error: error.message || 'Failed to get record' });
+    }
+});
+
 router.get('/inspections/overdue', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const inspections = await ProductionDatabase.getInspectionsDashboardDue();
@@ -5929,8 +5955,9 @@ router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdm
         res.json({ success: true, record });
     } catch (error) {
         console.error('Create inspection record error:', error);
-        const status = error.message && error.message.includes('required') ? 400 : 500;
-        res.status(status).json({ success: false, error: error.message || 'Failed to save inspection' });
+        const msg = error.message || 'Failed to save inspection';
+        const status = msg.includes('required') || msg.includes('Invalid') || msg.includes('missing') ? 400 : 500;
+        res.status(status).json({ success: false, error: msg });
     }
 });
 

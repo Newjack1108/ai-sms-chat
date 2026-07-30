@@ -690,7 +690,7 @@ function initializeSQLite() {
     db.exec(`
         CREATE TABLE IF NOT EXISTS inspection_assets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
+            asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer')),
             asset_name TEXT NOT NULL,
             location TEXT,
             identifier TEXT,
@@ -733,6 +733,20 @@ function initializeSQLite() {
             FOREIGN KEY (inspector_user_id) REFERENCES production_users(id)
         )
     `);
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS inspection_record_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            record_id INTEGER NOT NULL,
+            item_key TEXT NOT NULL,
+            item_number INTEGER,
+            item_label TEXT NOT NULL,
+            answer TEXT NOT NULL CHECK(answer IN ('pass', 'fail', 'na')),
+            comment TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (record_id) REFERENCES inspection_records(id) ON DELETE CASCADE,
+            UNIQUE(record_id, item_key)
+        )
+    `);
     try {
         const inspRecCols = db.prepare("PRAGMA table_info(inspection_records)").all();
         if (!inspRecCols.some(c => c.name === 'session_id')) {
@@ -749,7 +763,7 @@ function initializeSQLite() {
             db.exec(`
                 CREATE TABLE inspection_assets_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
+                    asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer')),
                     asset_name TEXT NOT NULL,
                     location TEXT,
                     identifier TEXT,
@@ -776,6 +790,41 @@ function initializeSQLite() {
         }
     } catch (e) {
         console.log('⚠️ inspection_assets first_aid_box migration skipped:', e.message);
+    }
+    try {
+        const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='inspection_assets'").get();
+        if (tableInfo && tableInfo.sql && !tableInfo.sql.includes("'trailer'")) {
+            console.log('🔄 Migrating inspection_assets to support trailer type...');
+            db.exec(`
+                CREATE TABLE inspection_assets_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    asset_type TEXT NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer')),
+                    asset_name TEXT NOT NULL,
+                    location TEXT,
+                    identifier TEXT,
+                    frequency_days INTEGER NOT NULL DEFAULT 30,
+                    last_inspection_date TEXT,
+                    next_inspection_date TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    created_by_user_id INTEGER,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (created_by_user_id) REFERENCES production_users(id)
+                )
+            `);
+            db.exec(`
+                INSERT INTO inspection_assets_new
+                SELECT id, asset_type, asset_name, location, identifier, frequency_days,
+                       last_inspection_date, next_inspection_date, is_active, created_by_user_id,
+                       created_at, updated_at
+                FROM inspection_assets
+            `);
+            db.exec('DROP TABLE inspection_assets');
+            db.exec('ALTER TABLE inspection_assets_new RENAME TO inspection_assets');
+            console.log('✅ Migrated inspection_assets table to support trailer type');
+        }
+    } catch (e) {
+        console.log('⚠️ inspection_assets trailer migration skipped:', e.message);
     }
     try {
         const seedCount = db.prepare('SELECT COUNT(*) AS c FROM inspection_assets').get();
@@ -2262,7 +2311,7 @@ async function initializePostgreSQL() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS inspection_assets (
                 id SERIAL PRIMARY KEY,
-                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box')),
+                asset_type VARCHAR(40) NOT NULL CHECK(asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer')),
                 asset_name VARCHAR(255) NOT NULL,
                 location TEXT,
                 identifier TEXT,
@@ -2300,6 +2349,19 @@ async function initializePostgreSQL() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS inspection_record_items (
+                id SERIAL PRIMARY KEY,
+                record_id INTEGER NOT NULL REFERENCES inspection_records(id) ON DELETE CASCADE,
+                item_key VARCHAR(80) NOT NULL,
+                item_number INTEGER,
+                item_label TEXT NOT NULL,
+                answer VARCHAR(10) NOT NULL CHECK(answer IN ('pass', 'fail', 'na')),
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(record_id, item_key)
+            )
+        `);
         try {
             await pool.query(`
                 DO $$ BEGIN
@@ -2330,13 +2392,36 @@ async function initializePostgreSQL() {
                     ) THEN
                         ALTER TABLE inspection_assets DROP CONSTRAINT inspection_assets_asset_type_check;
                         ALTER TABLE inspection_assets ADD CONSTRAINT inspection_assets_asset_type_check
-                            CHECK (asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box'));
+                            CHECK (asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer'));
                     END IF;
                 END $$
             `);
             console.log('✅ Checked inspection_assets asset_type constraint for first_aid_box');
         } catch (migErr) {
             console.log('⚠️ inspection_assets first_aid_box migration skipped:', migErr.message);
+        }
+        try {
+            await pool.query(`
+                DO $$ BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'inspection_assets_asset_type_check'
+                    ) AND NOT EXISTS (
+                        SELECT 1 FROM pg_constraint c
+                        JOIN pg_class t ON c.conrelid = t.oid
+                        WHERE t.relname = 'inspection_assets'
+                          AND c.conname = 'inspection_assets_asset_type_check'
+                          AND pg_get_constraintdef(c.oid) LIKE '%trailer%'
+                    ) THEN
+                        ALTER TABLE inspection_assets DROP CONSTRAINT inspection_assets_asset_type_check;
+                        ALTER TABLE inspection_assets ADD CONSTRAINT inspection_assets_asset_type_check
+                            CHECK (asset_type IN ('ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer'));
+                    END IF;
+                END $$
+            `);
+            console.log('✅ Checked inspection_assets asset_type constraint for trailer');
+        } catch (migErr) {
+            console.log('⚠️ inspection_assets trailer migration skipped:', migErr.message);
         }
         try {
             const seedRes = await pool.query('SELECT COUNT(*)::int AS c FROM inspection_assets');
@@ -13953,9 +14038,90 @@ class ProductionDatabase {
     
     // ============ COMPLIANCE INSPECTIONS ============
     
-    static INSPECTION_ASSET_TYPES = ['ladder', 'emergency_lighting', 'lev', 'first_aid_box'];
+    static INSPECTION_ASSET_TYPES = ['ladder', 'emergency_lighting', 'lev', 'first_aid_box', 'trailer'];
     static BATCH_INSPECTION_ASSET_TYPES = ['ladder', 'first_aid_box'];
-    
+    static INSPECTION_CHECKLISTS = {
+        trailer: [
+            { number: 1, key: 'identification_registration', group: 'Identification & condition', label: 'Trailer identification/registration' },
+            { number: 2, key: 'general_condition', group: 'Identification & condition', label: 'General condition of trailer' },
+            { number: 3, key: 'drawbar_a_frame', group: 'Coupling & drawbar', label: 'Drawbar/A-frame free from damage' },
+            { number: 4, key: 'tow_hitch_coupling', group: 'Coupling & drawbar', label: 'Tow hitch/coupling secure and undamaged' },
+            { number: 5, key: 'coupling_locking', group: 'Coupling & drawbar', label: 'Coupling locking mechanism operates correctly' },
+            { number: 6, key: 'breakaway_cable', group: 'Coupling & drawbar', label: 'Breakaway cable fitted, secure and undamaged' },
+            { number: 7, key: 'jockey_wheel', group: 'Coupling & drawbar', label: 'Jockey wheel operates correctly and secures' },
+            { number: 8, key: 'electrical_plug', group: 'Electrics & lights', label: '13-pin electrical plug clean and undamaged' },
+            { number: 9, key: 'electrical_cable', group: 'Electrics & lights', label: 'Electrical cable free from damage' },
+            { number: 10, key: 'side_lights', group: 'Electrics & lights', label: 'Side lights working' },
+            { number: 11, key: 'brake_lights', group: 'Electrics & lights', label: 'Brake lights working' },
+            { number: 12, key: 'indicators', group: 'Electrics & lights', label: 'Indicators working' },
+            { number: 13, key: 'hazard_lights', group: 'Electrics & lights', label: 'Hazard lights working' },
+            { number: 14, key: 'number_plate_light', group: 'Electrics & lights', label: 'Number plate light working' },
+            { number: 15, key: 'reflectors', group: 'Electrics & lights', label: 'Reflectors clean and secure' },
+            { number: 16, key: 'tyres_condition', group: 'Wheels & tyres', label: 'Tyres free from cuts, bulges and exposed cords' },
+            { number: 17, key: 'tyre_tread_depth', group: 'Wheels & tyres', label: 'Tyre tread depth ≥1.6 mm (central 3/4 of tread, full circumference)' },
+            { number: 18, key: 'tyre_pressures', group: 'Wheels & tyres', label: 'Tyre pressures satisfactory' },
+            { number: 19, key: 'wheel_nuts', group: 'Wheels & tyres', label: 'Wheel nuts secure and present' },
+            { number: 20, key: 'wheel_rims', group: 'Wheels & tyres', label: 'Wheel rims undamaged' },
+            { number: 21, key: 'mudguards', group: 'Wheels & tyres', label: 'Mudguards secure' },
+            { number: 22, key: 'suspension', group: 'Brakes & suspension', label: 'Suspension appears in good condition' },
+            { number: 23, key: 'overrun_brakes', group: 'Brakes & suspension', label: 'Overrun brakes operate correctly' },
+            { number: 24, key: 'handbrake', group: 'Brakes & suspension', label: 'Handbrake operates correctly' },
+            { number: 25, key: 'chassis', group: 'Body & load', label: 'Chassis free from cracks or damage' },
+            { number: 26, key: 'floor', group: 'Body & load', label: 'Floor in good condition' },
+            { number: 27, key: 'side_panels', group: 'Body & load', label: 'Side panels secure (if fitted)' },
+            { number: 28, key: 'tailgate_doors_ramps', group: 'Body & load', label: 'Tailgate/doors/ramps secure' },
+            { number: 29, key: 'number_plate', group: 'Body & load', label: 'Number plate fitted and legible' },
+            { number: 30, key: 'load_securing_points', group: 'Body & load', label: 'Load securing points/serviceable' },
+            { number: 31, key: 'no_loose_parts', group: 'Body & load', label: 'No loose or missing parts' },
+            { number: 32, key: 'safe_and_roadworthy', group: 'Sign-off', label: 'Trailer safe and roadworthy for use' }
+        ]
+    };
+
+    static getInspectionChecklist(assetType) {
+        return this.INSPECTION_CHECKLISTS[assetType] || null;
+    }
+
+    static normalizeChecklistItems(assetType, itemsPayload) {
+        const checklist = this.getInspectionChecklist(assetType);
+        if (!checklist) return null;
+        const source = Array.isArray(itemsPayload) ? itemsPayload : [];
+        const byKey = new Map();
+        for (const row of source) {
+            if (!row || typeof row !== 'object') continue;
+            const key = String(row.item_key || row.key || '').trim();
+            if (!key) continue;
+            byKey.set(key, row);
+        }
+        const normalized = [];
+        const missing = [];
+        for (const def of checklist) {
+            const row = byKey.get(def.key);
+            if (!row) {
+                missing.push(def.key);
+                continue;
+            }
+            const answerRaw = String(row.answer || '').trim().toLowerCase();
+            const answer = answerRaw === 'pass' || answerRaw === 'fail' || answerRaw === 'na' ? answerRaw : null;
+            if (!answer) {
+                throw new Error(`Invalid answer for checklist item "${def.key}"`);
+            }
+            const comment = row.comment != null ? String(row.comment).trim() : '';
+            if (answer === 'fail' && !comment) {
+                throw new Error(`Comment is required when item fails (${def.number}. ${def.label})`);
+            }
+            normalized.push({
+                item_key: def.key,
+                item_number: def.number,
+                item_label: def.label,
+                answer,
+                comment: comment || null
+            });
+        }
+        if (missing.length > 0) {
+            throw new Error(`All checklist items are required (${missing.length} missing)`);
+        }
+        return normalized;
+    } 
     static async createInspectionAsset(data) {
         const assetType = data.asset_type;
         if (!this.INSPECTION_ASSET_TYPES.includes(assetType)) {
@@ -14178,7 +14344,9 @@ class ProductionDatabase {
         const aid = parseInt(assetId, 10);
         if (isPostgreSQL) {
             const r = await pool.query(
-                `SELECT r.*, u.username AS inspector_username
+                `SELECT r.*, u.username AS inspector_username,
+                        (SELECT COUNT(*)::int FROM inspection_record_items i WHERE i.record_id = r.id) AS items_total,
+                        (SELECT COUNT(*)::int FROM inspection_record_items i WHERE i.record_id = r.id AND i.answer = 'fail') AS items_failed
                  FROM inspection_records r
                  LEFT JOIN production_users u ON r.inspector_user_id = u.id
                  WHERE r.asset_id = $1
@@ -14190,7 +14358,9 @@ class ProductionDatabase {
         }
         return db
             .prepare(
-                `SELECT r.*, u.username AS inspector_username
+                `SELECT r.*, u.username AS inspector_username,
+                        (SELECT COUNT(*) FROM inspection_record_items i WHERE i.record_id = r.id) AS items_total,
+                        (SELECT COUNT(*) FROM inspection_record_items i WHERE i.record_id = r.id AND i.answer = 'fail') AS items_failed
                  FROM inspection_records r
                  LEFT JOIN production_users u ON r.inspector_user_id = u.id
                  WHERE r.asset_id = ?
@@ -14199,19 +14369,76 @@ class ProductionDatabase {
             )
             .all(aid, limit);
     }
+
+    static async getInspectionRecordWithItems(recordId) {
+        const rid = parseInt(recordId, 10);
+        if (Number.isNaN(rid)) return null;
+        if (isPostgreSQL) {
+            const rec = await pool.query(
+                `SELECT r.*, u.username AS inspector_username, a.asset_name, a.asset_type, a.identifier AS asset_identifier
+                 FROM inspection_records r
+                 LEFT JOIN production_users u ON r.inspector_user_id = u.id
+                 LEFT JOIN inspection_assets a ON a.id = r.asset_id
+                 WHERE r.id = $1`,
+                [rid]
+            );
+            if (!rec.rows[0]) return null;
+            const items = await pool.query(
+                `SELECT * FROM inspection_record_items
+                 WHERE record_id = $1
+                 ORDER BY item_number ASC, id ASC`,
+                [rid]
+            );
+            return { record: rec.rows[0], items: items.rows };
+        }
+        const record = db
+            .prepare(
+                `SELECT r.*, u.username AS inspector_username, a.asset_name, a.asset_type, a.identifier AS asset_identifier
+                 FROM inspection_records r
+                 LEFT JOIN production_users u ON r.inspector_user_id = u.id
+                 LEFT JOIN inspection_assets a ON a.id = r.asset_id
+                 WHERE r.id = ?`
+            )
+            .get(rid);
+        if (!record) return null;
+        const items = db
+            .prepare(
+                `SELECT * FROM inspection_record_items
+                 WHERE record_id = ?
+                 ORDER BY item_number ASC, id ASC`
+            )
+            .all(rid);
+        return { record, items };
+    }
     
     static async createInspectionRecord(assetId, data) {
         const asset = await this.getInspectionAssetById(assetId);
         if (!asset || !(isPostgreSQL ? asset.is_active : asset.is_active === 1)) {
             throw new Error('Asset not found or inactive');
         }
-        const status = data.status === 'fail' ? 'fail' : 'pass';
-        let defects = data.defects != null ? String(data.defects).trim() : '';
-        const notes = data.notes != null ? String(data.notes).trim() : null;
-        if (status === 'fail' && !defects) {
-            throw new Error('defects are required when status is fail');
+
+        const checklist = this.getInspectionChecklist(asset.asset_type);
+        let checklistItems = null;
+        let status;
+        let defects;
+        const notes = data.notes != null ? String(data.notes).trim() || null : null;
+
+        if (checklist) {
+            checklistItems = this.normalizeChecklistItems(asset.asset_type, data.items);
+            const failed = checklistItems.filter((i) => i.answer === 'fail');
+            status = failed.length > 0 ? 'fail' : 'pass';
+            defects = failed.length > 0
+                ? failed.map((i) => `${i.item_number}. ${i.item_label}${i.comment ? ' — ' + i.comment : ''}`).join('\n')
+                : null;
+        } else {
+            status = data.status === 'fail' ? 'fail' : 'pass';
+            defects = data.defects != null ? String(data.defects).trim() : '';
+            if (status === 'fail' && !defects) {
+                throw new Error('defects are required when status is fail');
+            }
+            if (status === 'pass') defects = defects || null;
         }
-        if (status === 'pass') defects = defects || null;
+
         let inspectionDate = data.inspection_date || new Date().toISOString().split('T')[0];
         const inspectorUserId = data.inspector_user_id != null ? parseInt(data.inspector_user_id, 10) : null;
         const inspectorName = data.inspector_name || null;
@@ -14231,6 +14458,16 @@ class ProductionDatabase {
                      RETURNING *`,
                     [parseInt(assetId, 10), sessionId, inspectorUserId, inspectorName, inspectionDate, status, defects || null, notes]
                 );
+                const record = ins.rows[0];
+                if (checklistItems) {
+                    for (const item of checklistItems) {
+                        await pool.query(
+                            `INSERT INTO inspection_record_items (record_id, item_key, item_number, item_label, answer, comment)
+                             VALUES ($1, $2, $3, $4, $5, $6)`,
+                            [record.id, item.item_key, item.item_number, item.item_label, item.answer, item.comment]
+                        );
+                    }
+                }
                 await pool.query(
                     `UPDATE inspection_assets
                      SET last_inspection_date = $1::date,
@@ -14240,7 +14477,7 @@ class ProductionDatabase {
                     [inspectionDate, nextInspectionDate, parseInt(assetId, 10)]
                 );
                 await pool.query('COMMIT');
-                return ins.rows[0];
+                return record;
             } catch (e) {
                 await pool.query('ROLLBACK');
                 throw e;
@@ -14262,12 +14499,22 @@ class ProductionDatabase {
                     defects || null,
                     notes
                 );
+            const recordId = rec.lastInsertRowid;
+            if (checklistItems) {
+                const insertItem = db.prepare(
+                    `INSERT INTO inspection_record_items (record_id, item_key, item_number, item_label, answer, comment)
+                     VALUES (?, ?, ?, ?, ?, ?)`
+                );
+                for (const item of checklistItems) {
+                    insertItem.run(recordId, item.item_key, item.item_number, item.item_label, item.answer, item.comment);
+                }
+            }
             db.prepare(
                 `UPDATE inspection_assets
                  SET last_inspection_date = ?, next_inspection_date = ?, updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?`
             ).run(inspectionDate, nextInspectionDate, parseInt(assetId, 10));
-            return rec.lastInsertRowid;
+            return recordId;
         })();
         const row = db.prepare(`SELECT * FROM inspection_records WHERE id = ?`).get(rid);
         return row;

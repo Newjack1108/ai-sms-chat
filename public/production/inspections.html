@@ -52,6 +52,7 @@
                         <option value="first_aid_box">First Aid Box</option>
                         <option value="emergency_lighting">Emergency Lighting</option>
                         <option value="lev">LEV</option>
+                        <option value="trailer">Trailer</option>
                     </select>
                 </div>
                 <div class="form-group" style="margin: 0;">
@@ -78,38 +79,61 @@
 
     <!-- Inspect modal (individual types only) -->
     <div id="inspectModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 820px;">
             <div class="modal-header">
                 <h3>Record inspection</h3>
                 <button class="modal-close" onclick="hideModal('inspectModal')">&times;</button>
             </div>
             <form id="inspectForm">
                 <input type="hidden" id="inspectAssetId">
+                <input type="hidden" id="inspectAssetType">
                 <p id="inspectAssetSummary" style="margin-bottom: 12px; color: #495057;"></p>
                 <div class="form-group">
                     <label class="form-label">Inspection date</label>
-                    <input type="date" id="inspectDate" class="form-input" required>
+                    <input type="date" id="inspectDate" class="form-input" required onchange="updateSigningLine()">
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Result</label>
-                    <div>
-                        <label><input type="radio" name="inspectStatus" value="pass" checked onchange="toggleDefectsRequired()"> Pass</label>
-                        <label style="margin-left: 16px;"><input type="radio" name="inspectStatus" value="fail" onchange="toggleDefectsRequired()"> Fail</label>
+                <div id="inspectSimpleBlock">
+                    <div class="form-group">
+                        <label class="form-label">Result</label>
+                        <div>
+                            <label><input type="radio" name="inspectStatus" value="pass" checked onchange="toggleDefectsRequired()"> Pass</label>
+                            <label style="margin-left: 16px;"><input type="radio" name="inspectStatus" value="fail" onchange="toggleDefectsRequired()"> Fail</label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="defectsGroup" style="display: none;">
+                        <label class="form-label">Defects *</label>
+                        <textarea id="inspectDefects" class="form-input" rows="3" placeholder="Describe defects"></textarea>
                     </div>
                 </div>
-                <div class="form-group" id="defectsGroup" style="display: none;">
-                    <label class="form-label">Defects *</label>
-                    <textarea id="inspectDefects" class="form-input" rows="3" placeholder="Describe defects"></textarea>
+                <div id="inspectChecklistBlock" style="display: none;">
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom: 10px;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="passAllChecklistItems()">Pass all</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="clearChecklistItems()">Clear</button>
+                        <span id="checklistProgress" style="font-size: 13px; color: #495057;"></span>
+                    </div>
+                    <div id="checklistItemsHost" style="max-height: 420px; overflow: auto; border: 1px solid #e9ecef; border-radius: 6px; padding: 8px;"></div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Notes</label>
                     <textarea id="inspectNotes" class="form-input" rows="2" placeholder="Optional notes"></textarea>
                 </div>
+                <p id="inspectSigningLine" style="font-size: 13px; color: #495057; margin: 8px 0 12px;"></p>
                 <div class="text-right">
                     <button type="button" class="btn btn-secondary" onclick="hideModal('inspectModal')">Cancel</button>
                     <button type="submit" class="btn btn-primary">Submit</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Checklist record detail modal -->
+    <div id="recordDetailModal" class="modal">
+        <div class="modal-content" style="max-width: 820px;">
+            <div class="modal-header">
+                <h3 id="recordDetailTitle">Inspection detail</h3>
+                <button class="modal-close" onclick="hideModal('recordDetailModal')">&times;</button>
+            </div>
+            <div id="recordDetailBody" style="max-height: 480px; overflow: auto;"></div>
         </div>
     </div>
 
@@ -191,6 +215,7 @@
                         <option value="first_aid_box">First Aid Box</option>
                         <option value="emergency_lighting">Emergency Lighting</option>
                         <option value="lev">LEV</option>
+                        <option value="trailer">Trailer</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -228,12 +253,14 @@
     <script>
         let currentUser = null;
         let allAssets = [];
+        let inspectionChecklists = {};
 
         const TYPE_LABEL = {
             ladder: 'Ladder',
             first_aid_box: 'First Aid Box',
             emergency_lighting: 'Emergency Lighting',
-            lev: 'LEV'
+            lev: 'LEV',
+            trailer: 'Trailer'
         };
 
         const BATCH_TYPES = ['ladder', 'first_aid_box'];
@@ -288,6 +315,12 @@
                 return;
             }
             await initNavbar();
+            try {
+                const checklistData = await apiCall('/inspections/checklists');
+                inspectionChecklists = checklistData.checklists || {};
+            } catch (e) {
+                inspectionChecklists = {};
+            }
             await loadAssets();
 
             const params = new URLSearchParams(window.location.search);
@@ -443,16 +476,148 @@
             openInspect(a);
         }
 
+        function updateSigningLine() {
+            const dateVal = document.getElementById('inspectDate').value || todayStr();
+            document.getElementById('inspectSigningLine').textContent =
+                `Signing as ${currentUser.username} — ${formatDate(dateVal)}`;
+        }
+
         function openInspect(a) {
             document.getElementById('inspectAssetId').value = a.id;
+            document.getElementById('inspectAssetType').value = a.asset_type;
             document.getElementById('inspectAssetSummary').innerHTML =
-                `<strong>${escapeHtml(a.asset_name)}</strong> (${TYPE_LABEL[a.asset_type] || a.asset_type})`;
+                `<strong>${escapeHtml(a.asset_name)}</strong> (${TYPE_LABEL[a.asset_type] || a.asset_type})` +
+                (a.identifier ? ` · ID: ${escapeHtml(a.identifier)}` : '');
             document.getElementById('inspectDate').value = todayStr();
-            document.querySelector('input[name="inspectStatus"][value="pass"]').checked = true;
-            document.getElementById('inspectDefects').value = '';
             document.getElementById('inspectNotes').value = '';
-            toggleDefectsRequired();
+            updateSigningLine();
+
+            const checklist = inspectionChecklists[a.asset_type];
+            const simpleBlock = document.getElementById('inspectSimpleBlock');
+            const checklistBlock = document.getElementById('inspectChecklistBlock');
+            if (checklist && checklist.length) {
+                simpleBlock.style.display = 'none';
+                checklistBlock.style.display = 'block';
+                document.getElementById('inspectDefects').required = false;
+                renderChecklistForm(checklist);
+            } else {
+                simpleBlock.style.display = 'block';
+                checklistBlock.style.display = 'none';
+                document.getElementById('checklistItemsHost').innerHTML = '';
+                document.querySelector('input[name="inspectStatus"][value="pass"]').checked = true;
+                document.getElementById('inspectDefects').value = '';
+                toggleDefectsRequired();
+            }
             document.getElementById('inspectModal').classList.add('show');
+        }
+
+        function renderChecklistForm(checklist) {
+            const groups = [];
+            const groupMap = new Map();
+            for (const item of checklist) {
+                const g = item.group || 'Checks';
+                if (!groupMap.has(g)) {
+                    groupMap.set(g, []);
+                    groups.push(g);
+                }
+                groupMap.get(g).push(item);
+            }
+            const host = document.getElementById('checklistItemsHost');
+            host.innerHTML = groups.map((groupName) => {
+                const items = groupMap.get(groupName);
+                return `
+                    <div style="margin-bottom: 14px;">
+                        <h4 style="margin: 8px 0; font-size: 14px; color: #343a40;">${escapeHtml(groupName)}</h4>
+                        ${items.map((item) => `
+                            <div style="padding: 10px; margin-bottom: 8px; border: 1px solid #e9ecef; border-radius: 6px; background: #fff;" data-item-key="${escapeHtml(item.key)}">
+                                <div style="font-size: 14px; margin-bottom: 6px;">
+                                    <strong>${item.number}.</strong> ${escapeHtml(item.label)}
+                                </div>
+                                <div>
+                                    <label><input type="radio" name="check_${escapeHtml(item.key)}" value="pass" onchange="onChecklistAnswerChange('${escapeHtml(item.key)}')"> Pass</label>
+                                    <label style="margin-left: 10px;"><input type="radio" name="check_${escapeHtml(item.key)}" value="fail" onchange="onChecklistAnswerChange('${escapeHtml(item.key)}')"> Fail</label>
+                                    <label style="margin-left: 10px;"><input type="radio" name="check_${escapeHtml(item.key)}" value="na" onchange="onChecklistAnswerChange('${escapeHtml(item.key)}')"> N/A</label>
+                                </div>
+                                <textarea id="checkComment_${escapeHtml(item.key)}" class="form-input" rows="2" placeholder="Comment required if fail" style="display: none; margin-top: 8px;"></textarea>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }).join('');
+            updateChecklistProgress();
+        }
+
+        function onChecklistAnswerChange(itemKey) {
+            const answer = document.querySelector(`input[name="check_${itemKey}"]:checked`);
+            const commentEl = document.getElementById('checkComment_' + itemKey);
+            const isFail = answer && answer.value === 'fail';
+            commentEl.style.display = isFail ? 'block' : 'none';
+            commentEl.required = !!isFail;
+            if (!isFail) commentEl.value = '';
+            updateChecklistProgress();
+        }
+
+        function updateChecklistProgress() {
+            const assetType = document.getElementById('inspectAssetType').value;
+            const checklist = inspectionChecklists[assetType] || [];
+            if (!checklist.length) {
+                document.getElementById('checklistProgress').textContent = '';
+                return;
+            }
+            let answered = 0;
+            for (const item of checklist) {
+                if (document.querySelector(`input[name="check_${item.key}"]:checked`)) answered++;
+            }
+            document.getElementById('checklistProgress').textContent = `${answered} of ${checklist.length} answered`;
+        }
+
+        function passAllChecklistItems() {
+            const assetType = document.getElementById('inspectAssetType').value;
+            const checklist = inspectionChecklists[assetType] || [];
+            for (const item of checklist) {
+                const passRadio = document.querySelector(`input[name="check_${item.key}"][value="pass"]`);
+                if (passRadio) {
+                    passRadio.checked = true;
+                    onChecklistAnswerChange(item.key);
+                }
+            }
+        }
+
+        function clearChecklistItems() {
+            const assetType = document.getElementById('inspectAssetType').value;
+            const checklist = inspectionChecklists[assetType] || [];
+            for (const item of checklist) {
+                document.querySelectorAll(`input[name="check_${item.key}"]`).forEach((el) => { el.checked = false; });
+                const commentEl = document.getElementById('checkComment_' + item.key);
+                if (commentEl) {
+                    commentEl.value = '';
+                    commentEl.style.display = 'none';
+                    commentEl.required = false;
+                }
+            }
+            updateChecklistProgress();
+        }
+
+        function collectChecklistItems() {
+            const assetType = document.getElementById('inspectAssetType').value;
+            const checklist = inspectionChecklists[assetType] || [];
+            const items = [];
+            for (const def of checklist) {
+                const answerEl = document.querySelector(`input[name="check_${def.key}"]:checked`);
+                if (!answerEl) {
+                    throw new Error(`Please answer item ${def.number}: ${def.label}`);
+                }
+                const comment = (document.getElementById('checkComment_' + def.key).value || '').trim();
+                if (answerEl.value === 'fail' && !comment) {
+                    throw new Error(`Comment is required for failed item ${def.number}: ${def.label}`);
+                }
+                items.push({
+                    item_key: def.key,
+                    answer: answerEl.value,
+                    comment: comment || null
+                });
+            }
+            return items;
         }
 
         function toggleDefectsRequired() {
@@ -464,14 +629,19 @@
         async function submitInspect(e) {
             e.preventDefault();
             const assetId = parseInt(document.getElementById('inspectAssetId').value, 10);
-            const status = document.querySelector('input[name="inspectStatus"]:checked').value;
+            const assetType = document.getElementById('inspectAssetType').value;
+            const checklist = inspectionChecklists[assetType];
             const body = {
-                status,
                 inspection_date: document.getElementById('inspectDate').value,
-                defects: document.getElementById('inspectDefects').value,
                 notes: document.getElementById('inspectNotes').value || null
             };
             try {
+                if (checklist && checklist.length) {
+                    body.items = collectChecklistItems();
+                } else {
+                    body.status = document.querySelector('input[name="inspectStatus"]:checked').value;
+                    body.defects = document.getElementById('inspectDefects').value;
+                }
                 await apiCall('/inspections/assets/' + assetId + '/records', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -682,6 +852,7 @@
                     document.getElementById('historyBody').innerHTML = '<p>No records yet.</p>';
                     return;
                 }
+                const hasChecklist = a && inspectionChecklists[a.asset_type];
                 document.getElementById('historyBody').innerHTML = `
                     <table class="table">
                         <thead>
@@ -691,23 +862,98 @@
                                 <th>Result</th>
                                 <th>Defects</th>
                                 <th>Notes</th>
+                                ${hasChecklist ? '<th></th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${records.map(r => `
+                            ${records.map(r => {
+                                const itemsTotal = parseInt(r.items_total, 10) || 0;
+                                const itemsFailed = parseInt(r.items_failed, 10) || 0;
+                                const resultExtra = itemsTotal > 0
+                                    ? `<div style="font-size:12px;color:#6c757d;margin-top:2px;">${itemsFailed} of ${itemsTotal} failed</div>`
+                                    : '';
+                                const viewBtn = hasChecklist && itemsTotal > 0
+                                    ? `<button type="button" class="btn btn-secondary btn-sm" onclick="showRecordDetailModal(${r.id})">View</button>`
+                                    : '';
+                                return `
                                 <tr>
                                     <td>${formatDate(r.inspection_date)}</td>
                                     <td>${escapeHtml(r.inspector_name || r.inspector_username || '')}</td>
-                                    <td><span class="badge ${r.status === 'pass' ? 'badge-success' : 'badge-danger'}">${r.status}</span></td>
-                                    <td>${escapeHtml(r.defects || '')}</td>
+                                    <td>
+                                        <span class="badge ${r.status === 'pass' ? 'badge-success' : 'badge-danger'}">${r.status}</span>
+                                        ${resultExtra}
+                                    </td>
+                                    <td style="white-space: pre-wrap;">${escapeHtml(r.defects || '')}</td>
                                     <td>${escapeHtml(r.notes || '')}</td>
+                                    ${hasChecklist ? `<td>${viewBtn}</td>` : ''}
                                 </tr>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </tbody>
                     </table>
                 `;
             } catch (e) {
                 document.getElementById('historyBody').innerHTML = '<p>Error loading history</p>';
+            }
+        }
+
+        async function showRecordDetailModal(recordId) {
+            document.getElementById('recordDetailTitle').textContent = 'Inspection detail';
+            document.getElementById('recordDetailBody').innerHTML = '<div class="loading">Loading...</div>';
+            document.getElementById('recordDetailModal').classList.add('show');
+            try {
+                const data = await apiCall('/inspections/records/' + recordId);
+                const r = data.record;
+                const items = data.items || [];
+                document.getElementById('recordDetailTitle').textContent =
+                    (r.asset_name || 'Inspection') + ' — ' + formatDate(r.inspection_date);
+                const groups = [];
+                const groupMap = new Map();
+                const checklist = inspectionChecklists[r.asset_type] || [];
+                const groupByKey = new Map(checklist.map((c) => [c.key, c.group || 'Checks']));
+                for (const item of items) {
+                    const g = groupByKey.get(item.item_key) || 'Checks';
+                    if (!groupMap.has(g)) {
+                        groupMap.set(g, []);
+                        groups.push(g);
+                    }
+                    groupMap.get(g).push(item);
+                }
+                document.getElementById('recordDetailBody').innerHTML = `
+                    <p style="margin-bottom: 12px;">
+                        Inspector: <strong>${escapeHtml(r.inspector_name || r.inspector_username || '')}</strong>
+                        · Result: <span class="badge ${r.status === 'pass' ? 'badge-success' : 'badge-danger'}">${r.status}</span>
+                        ${r.asset_identifier ? '<br>Trailer ID: ' + escapeHtml(r.asset_identifier) : ''}
+                        ${r.notes ? '<br>Notes: ' + escapeHtml(r.notes) : ''}
+                    </p>
+                    ${groups.map((groupName) => `
+                        <div style="margin-bottom: 14px;">
+                            <h4 style="margin: 8px 0; font-size: 14px;">${escapeHtml(groupName)}</h4>
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:40px;">#</th>
+                                        <th>Check</th>
+                                        <th style="width:80px;">Result</th>
+                                        <th>Comment</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${groupMap.get(groupName).map((item) => `
+                                        <tr>
+                                            <td>${item.item_number || ''}</td>
+                                            <td>${escapeHtml(item.item_label)}</td>
+                                            <td><span class="badge ${item.answer === 'pass' ? 'badge-success' : item.answer === 'fail' ? 'badge-danger' : 'badge-secondary'}">${item.answer}</span></td>
+                                            <td>${escapeHtml(item.comment || '')}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `).join('') || '<p>No checklist items on this record.</p>'}
+                `;
+            } catch (e) {
+                document.getElementById('recordDetailBody').innerHTML = '<p>Error loading record</p>';
             }
         }
 
