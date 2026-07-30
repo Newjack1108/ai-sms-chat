@@ -223,7 +223,7 @@ function renderCompanyDetailsHtml() {
         `<p style="margin: 0 0 4px 0; font-size: 14px;"><strong>${escapeHtml(COMPANY_DETAILS.name)}</strong></p>`,
         `<p style="margin: 0 0 4px 0; font-size: 12px;">${escapeHtml(COMPANY_DETAILS.tradingAs)}</p>`,
         ...COMPANY_DETAILS.addressLines.map((line) => `<p style="margin: 0 0 4px 0; font-size: 12px;">${escapeHtml(line)}</p>`),
-        `<p style="margin: 0 0 4px 0; font-size: 12px;">Tel: ${escapeHtml(COMPANY_DETAILS.phone)}</p>`,
+        `<p style="margin: 0 0 4px 0; font-size: 12px;">Tel: ${formatPhoneLink(COMPANY_DETAILS.phone, '')}</p>`,
         `<p style="margin: 0; font-size: 12px;">${escapeHtml(COMPANY_DETAILS.email)}</p>`
     ];
     return lines.join('');
@@ -251,6 +251,19 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = String(text);
     return div.innerHTML;
+}
+
+/** Clickable tel: link for displayed phone numbers. Empty values return fallback. */
+function formatPhoneLink(phone, fallback = '—') {
+    const raw = (phone == null ? '' : String(phone)).trim();
+    if (!raw) {
+        return fallback;
+    }
+    const href = raw.replace(/[^\d+]/g, '');
+    if (!href) {
+        return escapeHtml(raw);
+    }
+    return `<a href="tel:${escapeHtml(href)}">${escapeHtml(raw)}</a>`;
 }
 
 function formatCustomerName(name) {
@@ -302,11 +315,9 @@ function renderLoadSheetCustomerHeader(loadSheet) {
     const leadlockRef = renderLeadLockOrderRefHtml(loadSheet);
     const nameRaw = (loadSheet.customer_name || '').trim();
     const nameDisplay = nameRaw ? escapeHtml(nameRaw) : '—';
-    const phoneRaw = (loadSheet.customer_phone || '').trim();
-    const phoneDisplay = phoneRaw ? escapeHtml(phoneRaw) : '—';
     return `${leadlockRef}<div style="margin-bottom: 16px; padding: 12px 16px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px;">
 <p style="margin: 0 0 6px 0; font-size: 16px;"><strong>Customer:</strong> ${nameDisplay}</p>
-<p style="margin: 0; font-size: 16px;"><strong>Phone:</strong> ${phoneDisplay}</p>
+<p style="margin: 0; font-size: 16px;"><strong>Phone:</strong> ${formatPhoneLink(loadSheet.customer_phone)}</p>
 </div>`;
 }
 

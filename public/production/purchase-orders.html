@@ -565,7 +565,7 @@
                 supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Email: ${escapeHtml(order.supplier_email)}</p>`);
             }
             if (order.supplier_phone) {
-                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Phone: ${escapeHtml(order.supplier_phone)}</p>`);
+                supplierLines.push(`<p style="margin: 0 0 4px 0; font-size: 12px;">Phone: ${formatPhoneLink(order.supplier_phone)}</p>`);
             }
             if (order.supplier_address) {
                 supplierLines.push(`<p style="margin: 0; font-size: 12px; white-space: pre-wrap;">${escapeHtml(order.supplier_address)}</p>`);

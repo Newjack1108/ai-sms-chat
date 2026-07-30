@@ -346,7 +346,7 @@
                     <h2>Customer &amp; contact</h2>
                     <table>
                         ${row('Customer', order.customer_name ? esc(order.customer_name) : '—')}
-                        ${row('Phone', order.customer_phone ? esc(order.customer_phone) : '—')}
+                        ${rowHtml('Phone', formatPhoneLink(order.customer_phone))}
                         ${row('Email', order.customer_email ? esc(order.customer_email) : '—')}
                     </table>
                     ${renderLeadLockWorkOrderDetailsHtml(order)}
@@ -383,7 +383,7 @@
                     <h2>Customer sign-off</h2>
                     <table>
                         ${row('Signed by', signoff.signer_name ? esc(signoff.signer_name) : '—')}
-                        ${row('Phone', signoff.signer_phone ? esc(signoff.signer_phone) : '—')}
+                        ${rowHtml('Phone', formatPhoneLink(signoff.signer_phone))}
                         ${row('Signed at', signedAt)}
                         ${row('Social media consent', consentLabel)}
                         ${row('Satisfaction', signoff.satisfaction_emoji ? esc(signoff.satisfaction_emoji) : '—')}

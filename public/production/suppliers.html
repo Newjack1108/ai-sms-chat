@@ -110,7 +110,7 @@
                                 <td>${escapeHtml(s.code || '-')}</td>
                                 <td>${escapeHtml(s.contact_name || '-')}</td>
                                 <td>${escapeHtml(s.email || '-')}</td>
-                                <td>${escapeHtml(s.phone || '-')}</td>
+                                <td>${s.phone ? formatPhoneLink(s.phone) : '-'}</td>
                                 <td><span class="badge ${s.is_active ? 'badge-success' : 'badge-secondary'}">${s.is_active ? 'active' : 'inactive'}</span></td>
                                 <td>
                                     ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `

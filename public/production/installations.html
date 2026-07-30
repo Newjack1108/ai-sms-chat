@@ -2222,7 +2222,7 @@
             return `
                 <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
                     ${signoff.signer_name ? `<p style="margin: 0 0 4px 0;"><strong>Signed by:</strong> ${escapeHtml(signoff.signer_name)}</p>` : ''}
-                    ${signoff.signer_phone ? `<p style="margin: 0 0 4px 0;"><strong>Phone:</strong> ${escapeHtml(signoff.signer_phone)}</p>` : ''}
+                    ${signoff.signer_phone ? `<p style="margin: 0 0 4px 0;"><strong>Phone:</strong> ${formatPhoneLink(signoff.signer_phone)}</p>` : ''}
                     ${signoff.signed_at ? `<p style="margin: 0 0 4px 0;"><strong>Signed at:</strong> ${formatSignoffDateTime(signoff.signed_at)}</p>` : ''}
                     <p style="margin: 0 0 4px 0;"><strong>Social media consent:</strong> ${consentLabel}</p>
                     <p style="margin: 0 0 8px 0;"><strong>Satisfaction:</strong> ${signoff.satisfaction_emoji ? escapeHtml(signoff.satisfaction_emoji) : '—'}</p>
