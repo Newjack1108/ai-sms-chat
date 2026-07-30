@@ -55,6 +55,19 @@ describe('buildStatusPayload', () => {
         });
     });
 
+    it('builds balance paid as paid in full set', () => {
+        const payload = buildStatusPayload({
+            orderId: 42,
+            balancePaid: true,
+        });
+        assert.deepEqual(payload, {
+            order_id: 42,
+            deposit_paid: true,
+            balance_paid: true,
+            paid_in_full: true,
+        });
+    });
+
     it('respects explicit installation_booked false with a date', () => {
         const payload = buildStatusPayload({
             orderId: 1,

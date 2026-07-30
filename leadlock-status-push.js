@@ -44,7 +44,10 @@ function normalizeLeadLockDate(value) {
  *   installationBooked?: boolean,
  *   installationScheduledAt?: string|Date|null,
  *   installationScheduledEndAt?: string|Date|null,
- *   installationCompleted?: boolean
+ *   installationCompleted?: boolean,
+ *   depositPaid?: boolean,
+ *   balancePaid?: boolean,
+ *   paidInFull?: boolean
  * }} opts
  */
 function buildStatusPayload(opts) {
@@ -72,6 +75,15 @@ function buildStatusPayload(opts) {
     if (opts.installationCompleted !== undefined) {
         payload.installation_completed = !!opts.installationCompleted;
     }
+    if (opts.depositPaid !== undefined) {
+        payload.deposit_paid = !!opts.depositPaid;
+    }
+    if (opts.balancePaid !== undefined) {
+        payload.balance_paid = !!opts.balancePaid;
+    }
+    if (opts.paidInFull !== undefined) {
+        payload.paid_in_full = !!opts.paidInFull;
+    }
 
     // Sending a date implies booked unless explicitly false
     if (
@@ -79,6 +91,15 @@ function buildStatusPayload(opts) {
         opts.installationBooked === undefined
     ) {
         payload.installation_booked = true;
+    }
+
+    // Balance paid / paid in full imply the full paid set (matches LeadLock reconcile)
+    if (payload.balance_paid === true || payload.paid_in_full === true) {
+        payload.deposit_paid = true;
+        payload.balance_paid = true;
+        payload.paid_in_full = true;
+    } else if (payload.deposit_paid === true && payload.balance_paid === true) {
+        payload.paid_in_full = true;
     }
 
     return payload;

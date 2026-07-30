@@ -8497,6 +8497,13 @@ class ProductionDatabase {
             values.push(JSON.stringify(normalized));
             paramIndex++;
         }
+        for (const payField of ['deposit_paid', 'balance_paid', 'paid_in_full']) {
+            if (data[payField] !== undefined) {
+                updates.push(`${payField} = $${paramIndex}`);
+                values.push(!!data[payField]);
+                paramIndex++;
+            }
+        }
         
         if (updates.length === 0) {
             return currentOrder;

@@ -2309,6 +2309,57 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
     }
 });
 
+router.post('/orders/:id/leadlock/balance-paid', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        const leadlockOrderId = order.leadlock_order_id != null
+            ? String(order.leadlock_order_id).trim()
+            : '';
+        if (!leadlockOrderId) {
+            return res.status(400).json({
+                success: false,
+                error: 'This works order is not linked to a LeadLock order',
+            });
+        }
+
+        const { payload, result } = await pushStatusToLeadLock({
+            orderId: leadlockOrderId,
+            balancePaid: true,
+            paidInFull: true,
+        });
+
+        // Keep production copy in sync so load sheets show paid in full
+        await ProductionDatabase.updateProductOrder(orderId, {
+            deposit_paid: true,
+            balance_paid: true,
+            paid_in_full: true,
+        });
+        await ProductionDatabase.recordLeadLockStatusSync(orderId, 'balance_paid');
+        const syncs = await ProductionDatabase.getLatestLeadLockStatusSyncs(orderId);
+        res.json({
+            success: true,
+            message: 'Balance paid / paid in full sent to LeadLock',
+            payload,
+            result,
+            syncs,
+        });
+    } catch (error) {
+        console.error('LeadLock balance-paid push error:', error);
+        const status = error.statusCode || 500;
+        res.status(status).json({
+            success: false,
+            error: error.message || 'Failed to push balance paid to LeadLock',
+        });
+    }
+});
+
 // ============ ORDER PRODUCTS ROUTES ============
 
 router.get('/orders/:id/products', requireProductionAuth, async (req, res) => {

@@ -654,6 +654,7 @@
             if (isLeadlock) {
                 menu += `<button type="button" class="dropdown-item" onclick="showProductionSetup(${order.id})">Production setup</button>`;
                 menu += `<button type="button" class="dropdown-item" onclick="sendInstallDateToLeadLock(${order.id})">Send install date to LeadLock</button>`;
+                menu += `<button type="button" class="dropdown-item" onclick="sendBalancePaidToLeadLock(${order.id})">Send balance paid to LeadLock</button>`;
                 menu += `<button type="button" class="dropdown-item" onclick="sendCompletedToLeadLock(${order.id})">Send completed to LeadLock</button>`;
             }
             menu += `
@@ -1643,6 +1644,9 @@
                         if (syncs.install_booked) {
                             parts.push(`Install date last sent: ${escapeHtml(String(syncs.install_booked))}`);
                         }
+                        if (syncs.balance_paid) {
+                            parts.push(`Balance paid last sent: ${escapeHtml(String(syncs.balance_paid))}`);
+                        }
                         if (syncs.completed) {
                             parts.push(`Completed last sent: ${escapeHtml(String(syncs.completed))}`);
                         }
@@ -1652,6 +1656,7 @@
                                 <p style="margin: 6px 0 10px 0; font-size: 13px; color: #555;">${parts.length ? parts.join('<br>') : 'Not sent yet'}</p>
                                 <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="sendInstallDateToLeadLock(${orderId})">Send install date</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="sendBalancePaidToLeadLock(${orderId})">Send balance paid</button>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="sendCompletedToLeadLock(${orderId})">Send completed</button>
                                 </div>
                             </div>`;
@@ -1659,6 +1664,7 @@
                         leadlockSyncHtml = `
                             <div style="margin-top: 12px;">
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="sendInstallDateToLeadLock(${orderId})">Send install date to LeadLock</button>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="sendBalancePaidToLeadLock(${orderId})">Send balance paid to LeadLock</button>
                                 <button type="button" class="btn btn-secondary btn-sm" onclick="sendCompletedToLeadLock(${orderId})">Send completed to LeadLock</button>
                             </div>`;
                     }
@@ -3055,6 +3061,20 @@
                 showAlert(result.message || 'Completed status sent to LeadLock');
             } catch (error) {
                 showAlert(error.message || 'Failed to send completed status to LeadLock', 'error');
+            }
+        }
+
+        async function sendBalancePaidToLeadLock(orderId) {
+            if (!confirm('Mark balance paid and paid in full on LeadLock for this order?')) return;
+            try {
+                const result = await apiCall(`/orders/${orderId}/leadlock/balance-paid`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                showAlert(result.message || 'Balance paid sent to LeadLock');
+                loadOrders();
+            } catch (error) {
+                showAlert(error.message || 'Failed to send balance paid to LeadLock', 'error');
             }
         }
         
