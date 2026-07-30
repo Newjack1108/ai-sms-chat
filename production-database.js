@@ -578,6 +578,17 @@ function initializeSQLite() {
             FOREIGN KEY (product_id) REFERENCES finished_products(id)
         )
     `);
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS leadlock_order_status_sync (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES product_orders(id)
+        )
+    `);
     
     // Migrate existing orders to order_products table
     try {
@@ -2170,6 +2181,16 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS product_sales_sync (
                 id SERIAL PRIMARY KEY,
                 product_id INTEGER NOT NULL REFERENCES finished_products(id),
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS leadlock_order_status_sync (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER NOT NULL REFERENCES product_orders(id),
+                event_type VARCHAR(50) NOT NULL,
                 synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -7591,6 +7612,128 @@ class ProductionDatabase {
             return db.prepare(`SELECT * FROM product_sales_sync WHERE id = ?`).get(info.lastInsertRowid);
         }
     }
+
+    static async recordLeadLockStatusSync(orderId, eventType) {
+        if (!orderId || orderId < 1) return null;
+        const type = String(eventType || '').trim();
+        if (!type) return null;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO leadlock_order_status_sync (order_id, event_type) VALUES ($1, $2) RETURNING *`,
+                [orderId, type]
+            );
+            return result.rows[0];
+        } else {
+            const info = db.prepare(
+                `INSERT INTO leadlock_order_status_sync (order_id, event_type) VALUES (?, ?)`
+            ).run(orderId, type);
+            return db.prepare(`SELECT * FROM leadlock_order_status_sync WHERE id = ?`).get(info.lastInsertRowid);
+        }
+    }
+
+    static async getLatestLeadLockStatusSyncs(orderId) {
+        if (!orderId || orderId < 1) return {};
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT DISTINCT ON (event_type) event_type, synced_at
+                 FROM leadlock_order_status_sync
+                 WHERE order_id = $1
+                 ORDER BY event_type, synced_at DESC`,
+                [orderId]
+            );
+            const out = {};
+            for (const row of result.rows) {
+                out[row.event_type] = row.synced_at;
+            }
+            return out;
+        } else {
+            const rows = db.prepare(
+                `SELECT event_type, synced_at FROM leadlock_order_status_sync
+                 WHERE order_id = ?
+                 ORDER BY synced_at DESC, id DESC`
+            ).all(orderId);
+            const out = {};
+            for (const row of rows) {
+                if (!(row.event_type in out)) {
+                    out[row.event_type] = row.synced_at;
+                }
+            }
+            return out;
+        }
+    }
+
+    /**
+     * Earliest start / latest end across installations for a works order.
+     * @returns {{ start_date: string|null, end_date: string|null }|null}
+     */
+    static async getInstallationDatesForWorkOrder(orderId) {
+        if (!orderId || orderId < 1) return null;
+        if (isPostgreSQL) {
+            try {
+                const colCheck = await pool.query(`
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'installations'
+                      AND column_name IN ('start_date', 'end_date', 'installation_date')
+                `);
+                const cols = colCheck.rows.map(r => r.column_name);
+                const useStart = cols.includes('start_date');
+                const useEnd = cols.includes('end_date');
+                const useLegacy = cols.includes('installation_date');
+                let sql;
+                if (useStart && useEnd) {
+                    sql = `SELECT MIN(start_date)::text AS start_date, MAX(COALESCE(end_date, start_date))::text AS end_date
+                           FROM installations WHERE works_order_id = $1`;
+                } else if (useStart) {
+                    sql = `SELECT MIN(start_date)::text AS start_date, MAX(start_date)::text AS end_date
+                           FROM installations WHERE works_order_id = $1`;
+                } else if (useLegacy) {
+                    sql = `SELECT MIN(installation_date)::text AS start_date, MAX(installation_date)::text AS end_date
+                           FROM installations WHERE works_order_id = $1`;
+                } else {
+                    return null;
+                }
+                const result = await pool.query(sql, [orderId]);
+                const row = result.rows[0];
+                if (!row || !row.start_date) return null;
+                return { start_date: row.start_date, end_date: row.end_date || row.start_date };
+            } catch (error) {
+                console.log('getInstallationDatesForWorkOrder failed:', error.message);
+                return null;
+            }
+        } else {
+            try {
+                const tableInfo = db.prepare(`PRAGMA table_info(installations)`).all();
+                const hasStart = tableInfo.some(col => col.name === 'start_date');
+                const hasEnd = tableInfo.some(col => col.name === 'end_date');
+                const hasLegacy = tableInfo.some(col => col.name === 'installation_date');
+                let row;
+                if (hasStart && hasEnd) {
+                    row = db.prepare(
+                        `SELECT MIN(start_date) AS start_date, MAX(COALESCE(end_date, start_date)) AS end_date
+                         FROM installations WHERE works_order_id = ?`
+                    ).get(orderId);
+                } else if (hasStart) {
+                    row = db.prepare(
+                        `SELECT MIN(start_date) AS start_date, MAX(start_date) AS end_date
+                         FROM installations WHERE works_order_id = ?`
+                    ).get(orderId);
+                } else if (hasLegacy) {
+                    row = db.prepare(
+                        `SELECT MIN(installation_date) AS start_date, MAX(installation_date) AS end_date
+                         FROM installations WHERE works_order_id = ?`
+                    ).get(orderId);
+                } else {
+                    return null;
+                }
+                if (!row || !row.start_date) return null;
+                return { start_date: row.start_date, end_date: row.end_date || row.start_date };
+            } catch (error) {
+                console.log('getInstallationDatesForWorkOrder failed:', error.message);
+                return null;
+            }
+        }
+    }
     
     static async getProductOrderByLeadlockOrderId(leadlockOrderId) {
         if (leadlockOrderId == null) return null;
@@ -8815,7 +8958,7 @@ class ProductionDatabase {
                 if (isPostgreSQL) {
                     const orderResult = await pool.query(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name,
+                         po.customer_name, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -8827,6 +8970,7 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
+                        installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
                             ? Number(row.travel_time_hours_round_trip)
@@ -8835,7 +8979,7 @@ class ProductionDatabase {
                 } else {
                     const row = db.prepare(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name,
+                         po.customer_name, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -8845,6 +8989,7 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
+                        installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
                             ? Number(row.travel_time_hours_round_trip)

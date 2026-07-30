@@ -20,6 +20,7 @@ const {
     normalizeLeadLockWebhookPayload,
     handleLeadLockWorkOrderWebhook
 } = require('./leadlock-work-order');
+const { pushStatusToLeadLock } = require('./leadlock-status-push');
 
 function parsePaginationQuery(req, defaults = {}) {
     const maxPageSize = defaults.maxPageSize ?? 100;
@@ -2171,6 +2172,140 @@ router.get('/orders/:id/load-sheet', requireProductionAuth, async (req, res) => 
     } catch (error) {
         console.error('Get load sheet error:', error);
         res.status(500).json({ success: false, error: error.message || 'Failed to get load sheet' });
+    }
+});
+
+router.get('/orders/:id/leadlock/status-sync', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const syncs = await ProductionDatabase.getLatestLeadLockStatusSyncs(orderId);
+        res.json({ success: true, syncs });
+    } catch (error) {
+        console.error('Get LeadLock status sync error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get LeadLock sync status' });
+    }
+});
+
+router.post('/orders/:id/leadlock/install-booked', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        const leadlockOrderId = order.leadlock_order_id != null
+            ? String(order.leadlock_order_id).trim()
+            : '';
+        if (!leadlockOrderId) {
+            return res.status(400).json({
+                success: false,
+                error: 'This works order is not linked to a LeadLock order',
+            });
+        }
+
+        let startDate = null;
+        let endDate = null;
+        const installationId = req.body?.installation_id != null
+            ? parseInt(req.body.installation_id, 10)
+            : null;
+
+        if (installationId && !Number.isNaN(installationId)) {
+            const installation = await ProductionDatabase.getInstallationById(installationId);
+            if (!installation) {
+                return res.status(404).json({ success: false, error: 'Installation not found' });
+            }
+            if (Number(installation.works_order_id) !== orderId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Installation does not belong to this works order',
+                });
+            }
+            startDate = installation.start_date || installation.installation_date;
+            endDate = installation.end_date || startDate;
+        } else {
+            const dates = await ProductionDatabase.getInstallationDatesForWorkOrder(orderId);
+            if (!dates || !dates.start_date) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'No installation booked for this works order',
+                });
+            }
+            startDate = dates.start_date;
+            endDate = dates.end_date || dates.start_date;
+        }
+
+        if (!startDate) {
+            return res.status(400).json({
+                success: false,
+                error: 'Installation has no start date',
+            });
+        }
+
+        const { payload, result } = await pushStatusToLeadLock({
+            orderId: leadlockOrderId,
+            installationBooked: true,
+            installationScheduledAt: startDate,
+            installationScheduledEndAt: endDate,
+        });
+        await ProductionDatabase.recordLeadLockStatusSync(orderId, 'install_booked');
+        const syncs = await ProductionDatabase.getLatestLeadLockStatusSyncs(orderId);
+        res.json({
+            success: true,
+            message: 'Install date sent to LeadLock',
+            payload,
+            result,
+            syncs,
+        });
+    } catch (error) {
+        console.error('LeadLock install-booked push error:', error);
+        const status = error.statusCode || 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to push install date to LeadLock' });
+    }
+});
+
+router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        const leadlockOrderId = order.leadlock_order_id != null
+            ? String(order.leadlock_order_id).trim()
+            : '';
+        if (!leadlockOrderId) {
+            return res.status(400).json({
+                success: false,
+                error: 'This works order is not linked to a LeadLock order',
+            });
+        }
+
+        const { payload, result } = await pushStatusToLeadLock({
+            orderId: leadlockOrderId,
+            installationCompleted: true,
+        });
+        await ProductionDatabase.recordLeadLockStatusSync(orderId, 'completed');
+        const syncs = await ProductionDatabase.getLatestLeadLockStatusSyncs(orderId);
+        res.json({
+            success: true,
+            message: 'Completed status sent to LeadLock',
+            payload,
+            result,
+            syncs,
+        });
+    } catch (error) {
+        console.error('LeadLock completed push error:', error);
+        const status = error.statusCode || 500;
+        res.status(status).json({ success: false, error: error.message || 'Failed to push completed status to LeadLock' });
     }
 });
 

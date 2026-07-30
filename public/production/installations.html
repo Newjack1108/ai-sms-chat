@@ -1806,6 +1806,9 @@
                         ${loadSheetSection}
                         <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px;">
                             <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>
+                            ${canManageInstallations && inst.leadlock_order_id != null && String(inst.leadlock_order_id).trim() !== '' && inst.works_order_id ? `
+                            <button type="button" onclick="sendInstallDateToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send install date to LeadLock</button>
+                            <button type="button" onclick="sendCompletedToLeadLock(${inst.works_order_id})" class="btn btn-secondary">Send completed to LeadLock</button>` : ''}
                             ${canManageInstallations ? `
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
                             <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>` : ''}
@@ -1824,6 +1827,32 @@
                 showModal('installationDetailsModal');
             } catch (error) {
                 showAlert('Error loading installation details: ' + error.message, 'error');
+            }
+        }
+
+        async function sendInstallDateToLeadLock(orderId, installationId) {
+            try {
+                const body = installationId ? { installation_id: installationId } : {};
+                const result = await apiCall(`/orders/${orderId}/leadlock/install-booked`, {
+                    method: 'POST',
+                    body: JSON.stringify(body)
+                });
+                showAlert(result.message || 'Install date sent to LeadLock');
+            } catch (error) {
+                showAlert(error.message || 'Failed to send install date to LeadLock', 'error');
+            }
+        }
+
+        async function sendCompletedToLeadLock(orderId) {
+            if (!confirm('Send completed status to LeadLock for this order?')) return;
+            try {
+                const result = await apiCall(`/orders/${orderId}/leadlock/completed`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                showAlert(result.message || 'Completed status sent to LeadLock');
+            } catch (error) {
+                showAlert(error.message || 'Failed to send completed status to LeadLock', 'error');
             }
         }
 
