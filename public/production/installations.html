@@ -419,6 +419,7 @@
                 <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
                     <h4 style="margin-bottom: 10px;">Customer Sign-Off</h4>
                     <small style="display: block; margin-bottom: 8px;">Generate and share a secure customer link for signature, consent, and emoji satisfaction.</small>
+                    <div id="signoffReceivedDisplay" style="margin-bottom: 10px;"></div>
                     <button type="button" id="generateSignoffLinkBtn" class="btn btn-secondary btn-sm">Generate Customer Sign-Off Link</button>
                     <div id="signoffLinkDisplay" style="margin-top: 8px;"></div>
                 </div>
@@ -1263,14 +1264,17 @@
         }
 
         async function loadInstallationChecklistData(id) {
+            const signoffReceivedEl = document.getElementById('signoffReceivedDisplay');
             if (!id) {
                 checklistData = { pre_fitting: {}, completion: {} };
                 installationPhotos = [];
                 document.getElementById('signoffLinkDisplay').innerHTML = '';
+                if (signoffReceivedEl) signoffReceivedEl.innerHTML = '';
             } else {
                 const result = await apiCall(`/installations/${id}/checklists`);
                 checklistData = result.checklists || { pre_fitting: {}, completion: {} };
                 installationPhotos = result.photos || [];
+                if (signoffReceivedEl) signoffReceivedEl.innerHTML = renderSignoffSectionHtml(result.signoff);
             }
             renderYesNoChecklist('preFittingChecklistContainer', PRE_FITTING_QUESTIONS, 'pre_fitting');
             renderYesNoChecklist('completionChecklistContainer', COMPLETION_QUESTIONS, 'completion');
@@ -1799,8 +1803,7 @@
                                 '<li>No users assigned</li>'}
                         </ul>
                         <h5>Completion Sign-Off:</h5>
-                        <p>${inst.signoff?.signature_data_url ? 'Customer signature received' : 'Awaiting customer signature'}</p>
-                        <p>${inst.signoff?.satisfaction_emoji ? `Satisfaction: ${inst.signoff.satisfaction_emoji}` : 'Satisfaction not submitted yet'}</p>
+                        ${renderSignoffSectionHtml(inst.signoff)}
                         <h5>Uploaded Photos:</h5>
                         <p>${Array.isArray(inst.photos) ? inst.photos.length : 0} uploaded</p>
                         ${loadSheetSection}
@@ -1908,6 +1911,41 @@
         function formatDate(dateStr) {
             const date = new Date(dateStr);
             return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+
+        function formatSignoffDateTime(dateStr) {
+            if (!dateStr) return '';
+            const date = new Date(dateStr);
+            if (Number.isNaN(date.getTime())) return escapeHtml(String(dateStr));
+            return escapeHtml(date.toLocaleString('en-GB', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }));
+        }
+
+        function renderSignoffSectionHtml(signoff) {
+            if (!signoff || !signoff.signature_data_url) {
+                return `<p>Awaiting customer signature</p>
+                        <p>${signoff?.satisfaction_emoji ? `Satisfaction: ${escapeHtml(signoff.satisfaction_emoji)}` : 'Satisfaction not submitted yet'}</p>`;
+            }
+            const sigSrc = String(signoff.signature_data_url).startsWith('data:image/')
+                ? signoff.signature_data_url
+                : '';
+            const consentLabel = signoff.social_media_consent === true || signoff.social_media_consent === 1
+                ? 'Yes'
+                : (signoff.social_media_consent === false || signoff.social_media_consent === 0 ? 'No' : '—');
+            return `
+                <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px;">
+                    ${signoff.signer_name ? `<p style="margin: 0 0 4px 0;"><strong>Signed by:</strong> ${escapeHtml(signoff.signer_name)}</p>` : ''}
+                    ${signoff.signer_phone ? `<p style="margin: 0 0 4px 0;"><strong>Phone:</strong> ${escapeHtml(signoff.signer_phone)}</p>` : ''}
+                    ${signoff.signed_at ? `<p style="margin: 0 0 4px 0;"><strong>Signed at:</strong> ${formatSignoffDateTime(signoff.signed_at)}</p>` : ''}
+                    <p style="margin: 0 0 4px 0;"><strong>Social media consent:</strong> ${consentLabel}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Satisfaction:</strong> ${signoff.satisfaction_emoji ? escapeHtml(signoff.satisfaction_emoji) : '—'}</p>
+                    ${sigSrc ? `<img src="${sigSrc}" alt="Customer signature" style="display: block; max-width: 100%; max-height: 160px; background: #fff; border: 1px solid #ced4da; border-radius: 4px;">` : '<p>Signature image unavailable</p>'}
+                </div>`;
         }
     </script>
 </body>

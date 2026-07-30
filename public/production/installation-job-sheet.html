@@ -94,6 +94,15 @@
         .sheet td {
             word-break: break-word;
         }
+        .sheet .signature-img {
+            display: block;
+            max-width: 360px;
+            max-height: 140px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-top: 6px;
+        }
         .maps-link,
         .w3w-link {
             display: inline-block;
@@ -351,6 +360,39 @@
 
             const instNotes = inst.notes ? `<h2>Installation notes</h2><div class="notes-block">${esc(inst.notes)}</div>` : '';
 
+            const signoff = inst.signoff;
+            let signoffSection = '';
+            if (signoff && signoff.signature_data_url) {
+                const sigSrc = String(signoff.signature_data_url).startsWith('data:image/')
+                    ? signoff.signature_data_url
+                    : '';
+                const consentLabel = signoff.social_media_consent === true || signoff.social_media_consent === 1
+                    ? 'Yes'
+                    : (signoff.social_media_consent === false || signoff.social_media_consent === 0 ? 'No' : '—');
+                let signedAt = '—';
+                if (signoff.signed_at) {
+                    const d = new Date(signoff.signed_at);
+                    signedAt = Number.isNaN(d.getTime())
+                        ? esc(signoff.signed_at)
+                        : esc(d.toLocaleString('en-GB', {
+                            year: 'numeric', month: 'short', day: 'numeric',
+                            hour: '2-digit', minute: '2-digit'
+                        }));
+                }
+                signoffSection = `
+                    <h2>Customer sign-off</h2>
+                    <table>
+                        ${row('Signed by', signoff.signer_name ? esc(signoff.signer_name) : '—')}
+                        ${row('Phone', signoff.signer_phone ? esc(signoff.signer_phone) : '—')}
+                        ${row('Signed at', signedAt)}
+                        ${row('Social media consent', consentLabel)}
+                        ${row('Satisfaction', signoff.satisfaction_emoji ? esc(signoff.satisfaction_emoji) : '—')}
+                        ${rowHtml('Signature', sigSrc
+                            ? `<img class="signature-img" src="${sigSrc}" alt="Customer signature">`
+                            : '—')}
+                    </table>`;
+            }
+
             return `
                 <div class="sheet">
                     <h1>Installation job sheet</h1>
@@ -373,6 +415,7 @@
 
                     ${orderSection}
                     ${instNotes}
+                    ${signoffSection}
                 </div>`;
         }
 
