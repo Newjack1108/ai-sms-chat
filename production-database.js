@@ -590,11 +590,23 @@ function initializeSQLite() {
         CREATE TABLE IF NOT EXISTS product_sales_sync (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             product_id INTEGER NOT NULL,
+            cost_gbp REAL,
             synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (product_id) REFERENCES finished_products(id)
         )
     `);
+
+    try {
+        const pssColumns = db.prepare(`PRAGMA table_info(product_sales_sync)`).all();
+        const pssColumnNames = pssColumns.map(col => col.name);
+        if (!pssColumnNames.includes('cost_gbp')) {
+            db.exec(`ALTER TABLE product_sales_sync ADD COLUMN cost_gbp REAL`);
+            console.log('✅ Added cost_gbp column to product_sales_sync');
+        }
+    } catch (error) {
+        console.log('⚠️ product_sales_sync cost_gbp migration skipped:', error.message);
+    }
 
     db.exec(`
         CREATE TABLE IF NOT EXISTS leadlock_order_status_sync (
@@ -2246,10 +2258,25 @@ async function initializePostgreSQL() {
             CREATE TABLE IF NOT EXISTS product_sales_sync (
                 id SERIAL PRIMARY KEY,
                 product_id INTEGER NOT NULL REFERENCES finished_products(id),
+                cost_gbp DECIMAL(12,2),
                 synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        try {
+            const pssCostCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'product_sales_sync' AND column_name = 'cost_gbp'
+            `);
+            if (pssCostCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE product_sales_sync ADD COLUMN cost_gbp DECIMAL(12,2)`);
+                console.log('✅ Added cost_gbp column to product_sales_sync');
+            }
+        } catch (error) {
+            console.log('⚠️ product_sales_sync cost_gbp migration skipped:', error.message);
+        }
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS leadlock_order_status_sync (
@@ -8192,20 +8219,97 @@ class ProductionDatabase {
         }
     }
     
-    static async recordProductSalesSync(productId) {
+    static async recordProductSalesSync(productId, costGbp = null) {
         if (!productId || productId < 1) return null;
+        const cost = costGbp == null || costGbp === ''
+            ? null
+            : Math.round((parseFloat(costGbp) || 0) * 100) / 100;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO product_sales_sync (product_id) VALUES ($1) RETURNING *`,
-                [productId]
+                `INSERT INTO product_sales_sync (product_id, cost_gbp) VALUES ($1, $2) RETURNING *`,
+                [productId, cost]
             );
             return result.rows[0];
         } else {
             const info = db.prepare(
-                `INSERT INTO product_sales_sync (product_id) VALUES (?)`
-            ).run(productId);
+                `INSERT INTO product_sales_sync (product_id, cost_gbp) VALUES (?, ?)`
+            ).run(productId, cost);
             return db.prepare(`SELECT * FROM product_sales_sync WHERE id = ?`).get(info.lastInsertRowid);
         }
+    }
+
+    /**
+     * Active products previously pushed to sales, optionally filtered by production category and sync mode.
+     * @param {{ mode?: 'cost_changed'|'all_synced', category?: string }} opts
+     */
+    static async getProductsForSalesBulkPush(opts = {}) {
+        const mode = opts.mode === 'all_synced' ? 'all_synced' : 'cost_changed';
+        const category = opts.category && opts.category !== 'all' ? String(opts.category) : null;
+
+        const params = [];
+        let categorySql = '';
+        if (category) {
+            if (isPostgreSQL) {
+                params.push(category);
+                categorySql = ` AND fp.category = $${params.length}`;
+            } else {
+                params.push(category);
+                categorySql = ` AND fp.category = ?`;
+            }
+        }
+
+        // Latest sync per product (by id, which is chronological for append-only inserts)
+        const latestSyncJoin = isPostgreSQL
+            ? `INNER JOIN LATERAL (
+                   SELECT s.cost_gbp AS last_pushed_cost_gbp, s.synced_at AS last_pushed_to_sales_at
+                   FROM product_sales_sync s
+                   WHERE s.product_id = fp.id
+                   ORDER BY s.id DESC
+                   LIMIT 1
+               ) last_sync ON TRUE`
+            : `INNER JOIN (
+                   SELECT s1.product_id, s1.cost_gbp AS last_pushed_cost_gbp, s1.synced_at AS last_pushed_to_sales_at
+                   FROM product_sales_sync s1
+                   INNER JOIN (
+                       SELECT product_id, MAX(id) AS max_id
+                       FROM product_sales_sync
+                       GROUP BY product_id
+                   ) latest ON latest.product_id = s1.product_id AND latest.max_id = s1.id
+               ) last_sync ON last_sync.product_id = fp.id`;
+
+        let costFilter = '';
+        if (mode === 'cost_changed') {
+            // NULL last cost = unknown history → include once to backfill
+            costFilter = isPostgreSQL
+                ? ` AND (
+                       last_sync.last_pushed_cost_gbp IS NULL
+                       OR ROUND(COALESCE(fp.cost_gbp, 0)::numeric, 2)
+                          <> ROUND(last_sync.last_pushed_cost_gbp::numeric, 2)
+                   )`
+                : ` AND (
+                       last_sync.last_pushed_cost_gbp IS NULL
+                       OR ROUND(COALESCE(fp.cost_gbp, 0), 2)
+                          <> ROUND(last_sync.last_pushed_cost_gbp, 2)
+                   )`;
+        }
+
+        const sql = `
+            SELECT fp.*,
+                   last_sync.last_pushed_to_sales_at,
+                   last_sync.last_pushed_cost_gbp
+            FROM finished_products fp
+            ${latestSyncJoin}
+            WHERE COALESCE(fp.status, 'active') = 'active'
+              ${categorySql}
+              ${costFilter}
+            ORDER BY fp.name ASC, fp.id ASC
+        `;
+
+        if (isPostgreSQL) {
+            const result = await pool.query(sql, params);
+            return result.rows;
+        }
+        return db.prepare(sql).all(...params);
     }
 
     static async recordLeadLockStatusSync(orderId, eventType) {

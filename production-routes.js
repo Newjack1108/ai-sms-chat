@@ -170,6 +170,90 @@ function normalizeLeadlockCategory(rawCategory) {
     return 'sheds';
 }
 
+const BULK_PUSH_CATEGORIES = new Set([
+    'Standard Product',
+    'Customer Product',
+    'Bespoke Build',
+    'Other',
+    'all'
+]);
+const BULK_PUSH_MODES = new Set(['cost_changed', 'all_synced']);
+const BULK_PUSH_CHUNK_SIZE = 50;
+const BULK_PUSH_CHUNK_CONCURRENCY = 2;
+const BULK_PUSH_SINGLE_CONCURRENCY = 3;
+
+function buildSalesProductPayload(product) {
+    const productId = parseInt(product.id, 10);
+    const priceExVat = parseFloat(product.cost_gbp ?? 0) || 0;
+    const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
+    const salesProductType = productTypeForSalesPush(
+        product.product_type,
+        isFinishedProductMarkedOptionalExtra(product)
+    );
+    const leadlockCategory = normalizeLeadlockCategory(product.leadlock_category || product.product_type);
+    return {
+        product_id: productId,
+        name: product.name,
+        description: product.description || '',
+        price_ex_vat: priceExVat,
+        install_hours: parseFloat(product.estimated_install_time ?? 0) || 0,
+        number_of_boxes: numberOfBoxes,
+        product_type: salesProductType,
+        category: LEADLOCK_CATEGORY_VALUES.has(leadlockCategory) ? leadlockCategory : 'sheds'
+    };
+}
+
+function salesAppAuthHeaders(salesApiKey) {
+    return {
+        'Content-Type': 'application/json',
+        ...(salesApiKey && salesApiKey.trim() && { Authorization: `Bearer ${salesApiKey.trim()}` })
+    };
+}
+
+function deriveSalesBatchApiUrl(salesApiUrl) {
+    const base = String(salesApiUrl || '').trim().replace(/\/+$/, '');
+    if (!base) return null;
+    if (/\/products$/i.test(base)) return `${base}/batch`;
+    return null;
+}
+
+function chunkArray(items, size) {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += size) {
+        chunks.push(items.slice(i, i + size));
+    }
+    return chunks;
+}
+
+async function mapPool(items, concurrency, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    async function worker() {
+        while (nextIndex < items.length) {
+            const i = nextIndex++;
+            results[i] = await mapper(items[i], i);
+        }
+    }
+    const workers = Array.from({ length: Math.min(concurrency, Math.max(items.length, 1)) }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
+
+async function pushSalesProductPayload(salesApiUrl, headers, payload) {
+    const response = await fetch(salesApiUrl.trim(), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+        const text = await response.text();
+        const err = new Error(`Sales app returned ${response.status}: ${text || response.statusText}`);
+        err.status = 502;
+        throw err;
+    }
+    return response.json().catch(() => ({}));
+}
+
 function normalizeProductStatus(rawStatus) {
     const normalized = (rawStatus || '').toString().trim().toLowerCase();
     if (normalized === 'inactive') return 'inactive';
@@ -2052,6 +2136,137 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.post('/products/push-to-sales-bulk', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const salesApiUrl = process.env.SALES_APP_API_URL;
+        const salesApiKey = process.env.SALES_APP_API_KEY;
+
+        if (!salesApiUrl || !salesApiUrl.trim()) {
+            return res.status(503).json({ success: false, error: 'Sales app not configured. Set SALES_APP_API_URL in environment.' });
+        }
+
+        const mode = BULK_PUSH_MODES.has(req.body?.mode) ? req.body.mode : 'cost_changed';
+        const category = req.body?.category != null && String(req.body.category).trim() !== ''
+            ? String(req.body.category).trim()
+            : 'all';
+        if (!BULK_PUSH_CATEGORIES.has(category)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid category. Expected one of: ${[...BULK_PUSH_CATEGORIES].join(', ')}`
+            });
+        }
+        if (req.body?.mode != null && !BULK_PUSH_MODES.has(req.body.mode)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid mode. Expected one of: ${[...BULK_PUSH_MODES].join(', ')}`
+            });
+        }
+
+        const products = await ProductionDatabase.getProductsForSalesBulkPush({ mode, category });
+        if (!products.length) {
+            return res.json({
+                success: true,
+                mode,
+                category,
+                total: 0,
+                succeeded: [],
+                failed: [],
+                message: 'No matching previously synced active products to push'
+            });
+        }
+
+        const headers = salesAppAuthHeaders(salesApiKey);
+        const batchUrl = deriveSalesBatchApiUrl(salesApiUrl);
+        const succeeded = [];
+        const failed = [];
+
+        const entries = products.map((product) => ({
+            product,
+            payload: buildSalesProductPayload(product)
+        }));
+
+        if (batchUrl) {
+            const chunks = chunkArray(entries, BULK_PUSH_CHUNK_SIZE);
+            await mapPool(chunks, BULK_PUSH_CHUNK_CONCURRENCY, async (chunk) => {
+                try {
+                    const response = await fetch(batchUrl, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ products: chunk.map((e) => e.payload) })
+                    });
+                    if (!response.ok) {
+                        const text = await response.text();
+                        const errMsg = `Sales app batch returned ${response.status}: ${text || response.statusText}`;
+                        for (const { product, payload } of chunk) {
+                            failed.push({ id: payload.product_id, name: product.name, error: errMsg });
+                        }
+                        return;
+                    }
+                    const body = await response.json().catch(() => ({}));
+                    const results = Array.isArray(body.results) ? body.results : [];
+                    for (let i = 0; i < chunk.length; i++) {
+                        const { product, payload } = chunk[i];
+                        const item = results[i];
+                        if (item && item.success) {
+                            await ProductionDatabase.recordProductSalesSync(payload.product_id, payload.price_ex_vat);
+                            succeeded.push({
+                                id: payload.product_id,
+                                name: product.name,
+                                leadlock_product_id: item.product_id != null ? String(item.product_id) : null
+                            });
+                        } else {
+                            failed.push({
+                                id: payload.product_id,
+                                name: product.name,
+                                error: (item && item.error) || 'Unknown batch item failure'
+                            });
+                        }
+                    }
+                } catch (error) {
+                    const errMsg = error.message || 'Failed to push batch to sales app';
+                    for (const { product, payload } of chunk) {
+                        failed.push({ id: payload.product_id, name: product.name, error: errMsg });
+                    }
+                }
+            });
+        } else {
+            await mapPool(entries, BULK_PUSH_SINGLE_CONCURRENCY, async ({ product, payload }) => {
+                try {
+                    const result = await pushSalesProductPayload(salesApiUrl, headers, payload);
+                    await ProductionDatabase.recordProductSalesSync(payload.product_id, payload.price_ex_vat);
+                    succeeded.push({
+                        id: payload.product_id,
+                        name: product.name,
+                        leadlock_product_id: result.product_id != null ? String(result.product_id) : null
+                    });
+                } catch (error) {
+                    failed.push({
+                        id: payload.product_id,
+                        name: product.name,
+                        error: error.message || 'Failed to push product to sales app'
+                    });
+                }
+            });
+        }
+
+        res.json({
+            success: failed.length === 0,
+            mode,
+            category,
+            total: products.length,
+            succeeded,
+            failed
+        });
+    } catch (error) {
+        console.error('Bulk push to sales error:', error);
+        const msg = error.message || 'Failed to bulk push products to sales app';
+        if (error.cause?.code === 'ENOTFOUND' || error.cause?.code === 'ECONNREFUSED') {
+            return res.status(503).json({ success: false, error: 'Cannot reach sales app. Check SALES_APP_API_URL.' });
+        }
+        res.status(500).json({ success: false, error: msg });
+    }
+});
+
 router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
@@ -2067,48 +2282,20 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
             return res.status(404).json({ success: false, error: 'Product not found' });
         }
 
-        const priceExVat = parseFloat(product.cost_gbp ?? 0) || 0;
-        const numberOfBoxes = parseInt(product.number_of_boxes ?? 1, 10) || 1;
-        const salesProductType = productTypeForSalesPush(
-            product.product_type,
-            isFinishedProductMarkedOptionalExtra(product)
-        );
-        const leadlockCategory = normalizeLeadlockCategory(product.leadlock_category || product.product_type);
+        const payload = buildSalesProductPayload(product);
+        const headers = salesAppAuthHeaders(salesApiKey);
 
-        const payload = {
-            product_id: productId,
-            name: product.name,
-            description: product.description || '',
-            price_ex_vat: priceExVat,
-            install_hours: parseFloat(product.estimated_install_time ?? 0) || 0,
-            number_of_boxes: numberOfBoxes,
-            product_type: salesProductType,
-            category: LEADLOCK_CATEGORY_VALUES.has(leadlockCategory) ? leadlockCategory : 'sheds'
-        };
-
-        const headers = {
-            'Content-Type': 'application/json',
-            ...(salesApiKey && salesApiKey.trim() && { 'Authorization': `Bearer ${salesApiKey.trim()}` })
-        };
-
-        const response = await fetch(salesApiUrl.trim(), {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const text = await response.text();
-            console.error('Sales app push failed:', response.status, text);
-            return res.status(502).json({
-                success: false,
-                error: `Sales app returned ${response.status}: ${text || response.statusText}`
-            });
+        try {
+            const result = await pushSalesProductPayload(salesApiUrl, headers, payload);
+            await ProductionDatabase.recordProductSalesSync(productId, payload.price_ex_vat);
+            res.json({ success: true, message: 'Product pushed to sales app', result });
+        } catch (error) {
+            if (error.status === 502) {
+                console.error('Sales app push failed:', error.message);
+                return res.status(502).json({ success: false, error: error.message });
+            }
+            throw error;
         }
-
-        const result = await response.json().catch(() => ({}));
-        await ProductionDatabase.recordProductSalesSync(productId);
-        res.json({ success: true, message: 'Product pushed to sales app', result });
     } catch (error) {
         console.error('Push to sales error:', error);
         const msg = error.message || 'Failed to push product to sales app';

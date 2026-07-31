@@ -25,7 +25,10 @@
         <div class="card">
             <div class="card-header">
                 <h2>Products</h2>
-                <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only">Add Product</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <button onclick="showBulkPushToSalesModal()" class="btn btn-secondary btn-sm admin-or-office">Push to Sales (bulk)</button>
+                    <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only">Add Product</button>
+                </div>
             </div>
             <div class="tabs">
                 <button class="tab-btn" onclick="filterProducts('all')" id="tab-all">All Products</button>
@@ -160,6 +163,40 @@
             </div>
             <div id="suppliersModalContent">
                 <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="bulkPushModal" class="modal">
+        <div class="modal-content" style="max-width:520px;">
+            <div class="modal-header">
+                <h3>Bulk push to sales</h3>
+                <button type="button" class="modal-close" onclick="hideModal('bulkPushModal')" aria-label="Close">&times;</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="bulkPushMode">What to push</label>
+                <select id="bulkPushMode" class="form-select">
+                    <option value="cost_changed" selected>Cost changes since last push</option>
+                    <option value="all_synced">All previously synced active products</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="bulkPushCategory">Category</label>
+                <select id="bulkPushCategory" class="form-select">
+                    <option value="all">All</option>
+                    <option value="Standard Product">Standard Product</option>
+                    <option value="Customer Product">Customer Product</option>
+                    <option value="Bespoke Build">Bespoke Build</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+            <p class="help-text" style="margin-bottom:16px;">
+                Only active products that have already been pushed to sales are included.
+                Never-synced products stay out of bulk — use per-row Push to Sales first.
+            </p>
+            <div class="form-actions">
+                <button type="button" onclick="hideModal('bulkPushModal')" class="btn btn-secondary btn-sm">Cancel</button>
+                <button type="button" id="bulkPushConfirmBtn" onclick="runBulkPushToSales()" class="btn btn-primary btn-sm">Push</button>
             </div>
         </div>
     </div>
@@ -582,6 +619,71 @@
                 await loadProducts();
             } catch (error) {
                 showAlert(error.message || 'Failed to push to sales app', 'error');
+            }
+        }
+
+        function showBulkPushToSalesModal() {
+            const categorySelect = document.getElementById('bulkPushCategory');
+            const modeSelect = document.getElementById('bulkPushMode');
+            if (modeSelect) modeSelect.value = 'cost_changed';
+            if (categorySelect) {
+                const tabValue = selectedCategory || 'all';
+                const allowed = ['all', 'Standard Product', 'Customer Product', 'Bespoke Build', 'Other'];
+                categorySelect.value = allowed.includes(tabValue) ? tabValue : 'all';
+            }
+            const btn = document.getElementById('bulkPushConfirmBtn');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Push';
+            }
+            showModal('bulkPushModal');
+        }
+
+        async function runBulkPushToSales() {
+            const mode = document.getElementById('bulkPushMode')?.value || 'cost_changed';
+            const category = document.getElementById('bulkPushCategory')?.value || 'all';
+            const modeLabel = mode === 'all_synced'
+                ? 'all previously synced active products'
+                : 'products with cost changes since last push';
+            const categoryLabel = category === 'all' ? 'all categories' : category;
+            if (!confirm(`Push ${modeLabel} for ${categoryLabel} to sales?\n\nNever-synced products are excluded.`)) {
+                return;
+            }
+
+            const btn = document.getElementById('bulkPushConfirmBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Pushing…';
+            }
+            try {
+                const result = await apiCall('/products/push-to-sales-bulk', {
+                    method: 'POST',
+                    body: JSON.stringify({ mode, category })
+                });
+                hideModal('bulkPushModal');
+                const succeeded = (result && result.succeeded) || [];
+                const failed = (result && result.failed) || [];
+                const total = result && typeof result.total === 'number' ? result.total : succeeded.length + failed.length;
+                if (total === 0) {
+                    showAlert(result.message || 'No matching products to push');
+                } else if (failed.length === 0) {
+                    showAlert(`Pushed ${succeeded.length} product(s) to sales`);
+                } else {
+                    const failSample = failed.slice(0, 5).map((f) => `#${f.id}${f.name ? ` ${f.name}` : ''}: ${f.error || 'failed'}`).join('; ');
+                    const more = failed.length > 5 ? ` (+${failed.length - 5} more)` : '';
+                    showAlert(
+                        `Pushed ${succeeded.length}/${total}; ${failed.length} failed. ${failSample}${more}`,
+                        'error'
+                    );
+                }
+                await loadProducts();
+            } catch (error) {
+                showAlert(error.message || 'Failed to bulk push to sales app', 'error');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Push';
+                }
             }
         }
 
