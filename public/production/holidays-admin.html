@@ -36,13 +36,13 @@
             <div class="card">
                 <div class="card-header">
                     <h2>Holiday Entitlements</h2>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="yearFilter" onchange="filterByYear(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div class="action-group">
+                        <select id="yearFilter" class="form-select" onchange="filterByYear(this.value)" style="width:auto; min-width:120px;">
                             <option value="">All Years</option>
                         </select>
-                        <button onclick="recalculateEntitlements()" class="btn btn-secondary">Recalculate Entitlements</button>
-                        <button onclick="showAddHolidayModal()" class="btn btn-primary">Add Holiday for User</button>
-                        <button onclick="showAddEntitlementModal()" class="btn btn-primary">Add/Update Entitlement</button>
+                        <button onclick="recalculateEntitlements()" class="btn btn-secondary btn-sm">Recalculate Entitlements</button>
+                        <button onclick="showAddHolidayModal()" class="btn btn-primary btn-sm">Add Holiday for User</button>
+                        <button onclick="showAddEntitlementModal()" class="btn btn-primary btn-sm">Add/Update Entitlement</button>
                     </div>
                 </div>
                 <div id="entitlementsList">
@@ -69,11 +69,11 @@
             <div class="card">
                 <div class="card-header">
                     <h2>All Holiday Requests</h2>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <select id="allRequestsYearFilter" onchange="filterAllRequestsByYear(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div class="action-group">
+                        <select id="allRequestsYearFilter" class="form-select" onchange="filterAllRequestsByYear(this.value)" style="width:auto; min-width:120px;">
                             <option value="">All Years</option>
                         </select>
-                        <select id="allRequestsStatusFilter" onchange="filterAllRequestsByStatus(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <select id="allRequestsStatusFilter" class="form-select" onchange="filterAllRequestsByStatus(this.value)" style="width:auto; min-width:130px;">
                             <option value="">All Statuses</option>
                             <option value="pending">Pending</option>
                             <option value="approved">Approved</option>
@@ -94,9 +94,9 @@
             <div class="card">
                 <div class="card-header">
                     <h2>Holiday Calendar</h2>
-                    <div style="display: flex; align-items: center; gap: 15px;">
+                    <div class="action-group" style="justify-content:center;">
                         <button onclick="previousMonth()" class="btn btn-secondary btn-sm">← Previous</button>
-                        <h3 id="calendarMonthYear" style="margin: 0; min-width: 200px; text-align: center;"></h3>
+                        <h3 id="calendarMonthYear" style="margin: 0; min-width: 140px; text-align: center; flex: 1 1 auto;"></h3>
                         <button onclick="nextMonth()" class="btn btn-secondary btn-sm">Next →</button>
                         <button onclick="goToToday()" class="btn btn-primary btn-sm">Today</button>
                     </div>

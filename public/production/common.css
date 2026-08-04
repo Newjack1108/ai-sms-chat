@@ -773,6 +773,7 @@ body.dashboard-page {
     padding-bottom: 0;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
 }
 
 .tab-btn {
@@ -788,6 +789,8 @@ body.dashboard-page {
     transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
     white-space: nowrap;
     border-radius: 6px 6px 0 0;
+    flex: 0 0 auto;
+    min-height: 40px;
 }
 
 .tab-btn:hover {
@@ -890,8 +893,88 @@ body.dashboard-page {
     margin: 4px 0;
 }
 
-/* Mobile dropdown / navbar */
+/* Mobile dropdown / navbar / layout */
 @media (max-width: 768px) {
+    body {
+        overflow-x: hidden;
+    }
+
+    .container {
+        padding: 0 12px 20px;
+        max-width: 100%;
+    }
+
+    .card {
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+
+    .card-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .card-header > div,
+    .card-header .action-group {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .page-toolbar,
+    .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .page-toolbar .form-input,
+    .page-toolbar .form-select,
+    .toolbar .form-input,
+    .toolbar .form-select {
+        width: 100%;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .page-toolbar .form-label,
+    .toolbar .form-label {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .form-actions,
+    .card-header .action-group {
+        width: 100%;
+    }
+
+    .form-actions .btn,
+    .card-header .action-group .btn {
+        flex: 1 1 auto;
+        min-width: calc(50% - 4px);
+    }
+
+    .tabs {
+        gap: 2px;
+        margin-left: -4px;
+        margin-right: -4px;
+        padding: 0 4px 2px;
+        scrollbar-width: none;
+    }
+
+    .tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .tab-btn {
+        padding: 10px 14px;
+        min-height: 44px;
+        font-size: 13px;
+    }
+
     .navbar-dropdown {
         width: auto;
         flex-shrink: 0;
@@ -899,8 +982,11 @@ body.dashboard-page {
 
     .dropdown-menu {
         position: absolute;
+        left: 0;
+        right: auto;
         width: max-content;
         min-width: 180px;
+        max-width: min(280px, calc(100vw - 24px));
         box-shadow: var(--shadow-md);
         border: 1px solid var(--border);
         margin-top: 0;
@@ -909,6 +995,9 @@ body.dashboard-page {
     .dropdown-toggle {
         width: auto;
         justify-content: space-between;
+        min-height: 36px;
+        padding: 6px 10px;
+        font-size: 12.5px;
     }
 
     .navbar {
@@ -916,6 +1005,7 @@ body.dashboard-page {
         align-items: flex-start;
         padding: 10px 12px;
         gap: 8px;
+        margin-bottom: 12px;
     }
 
     .navbar-logo img {
@@ -933,6 +1023,11 @@ body.dashboard-page {
         -webkit-overflow-scrolling: touch;
         padding-bottom: 2px;
         flex-wrap: nowrap;
+        scrollbar-width: none;
+    }
+
+    .navbar-right::-webkit-scrollbar {
+        display: none;
     }
 
     .navbar-right > .btn:not(.btn-danger),
@@ -941,6 +1036,13 @@ body.dashboard-page {
         flex-shrink: 0;
         white-space: nowrap;
         order: 1;
+    }
+
+    .navbar-right > .btn:not(.btn-danger),
+    .navbar-right > a.btn:not(.btn-danger) {
+        min-height: 36px;
+        padding: 6px 10px;
+        font-size: 12.5px;
     }
 
     .navbar-user {
@@ -958,6 +1060,9 @@ body.dashboard-page {
     .navbar-right > button.btn-danger {
         order: 999;
         flex-shrink: 0;
+        min-height: 36px;
+        padding: 6px 10px;
+        font-size: 12.5px;
     }
 
     .navbar-logo {
@@ -976,11 +1081,21 @@ body.dashboard-page {
         padding: 0;
         color: var(--brand-darker);
         text-align: center;
+        line-height: 1.3;
+        word-break: break-word;
     }
 
     .dashboard-card-scroll {
         max-height: none;
         overflow: visible;
+    }
+
+    .pagination {
+        justify-content: space-between;
+    }
+
+    .pagination .btn {
+        flex: 1 1 auto;
     }
 }
 

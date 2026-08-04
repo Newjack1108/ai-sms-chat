@@ -320,6 +320,39 @@
             height: 18px;
             flex-shrink: 0;
         }
+        @media (max-width: 768px) {
+            .wo-board-toolbar {
+                gap: 6px;
+            }
+            .wo-board-toolbar__scope {
+                display: flex;
+                flex-wrap: wrap;
+                width: 100%;
+                margin-right: 0;
+                padding-right: 0;
+                border-right: none;
+                padding-bottom: 8px;
+                margin-bottom: 4px;
+                border-bottom: 1px solid #dee2e6;
+            }
+            .wo-flag-filter {
+                flex: 1 1 auto;
+                min-height: 40px;
+                justify-content: center;
+            }
+            .orders-view-toggle {
+                width: 100%;
+            }
+            .orders-view-toggle .btn {
+                flex: 1 1 0;
+            }
+            .wo-board-grid {
+                grid-template-columns: 1fr;
+            }
+            .wo-orders-table {
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
