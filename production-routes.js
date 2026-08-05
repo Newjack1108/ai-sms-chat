@@ -21,6 +21,7 @@ const {
     handleLeadLockWorkOrderWebhook
 } = require('./leadlock-work-order');
 const { pushStatusToLeadLock } = require('./leadlock-status-push');
+const { productsToCsv } = require('./product-csv-export');
 
 function parsePaginationQuery(req, defaults = {}) {
     const maxPageSize = defaults.maxPageSize ?? 100;
@@ -1983,6 +1984,35 @@ router.get('/products', requireProductionAuth, async (req, res) => {
     } catch (error) {
         console.error('Get products error:', error);
         res.status(500).json({ success: false, error: 'Failed to get products' });
+    }
+});
+
+// Must be registered before /products/:id
+router.get('/products/export', requireProductionAuth, async (req, res) => {
+    try {
+        const status = req.query.status ? String(req.query.status).trim() : null;
+        if (status && status !== 'all' && !['active', 'inactive'].includes(status)) {
+            return res.status(400).json({ success: false, error: 'Status must be "active", "inactive", or "all"' });
+        }
+        const category = req.query.category ? String(req.query.category).trim() : null;
+        const search = req.query.search ? String(req.query.search).trim() : null;
+        const isOptionalExtra = req.query.is_optional_extra !== undefined
+            ? req.query.is_optional_extra
+            : null;
+        const products = await ProductionDatabase.getProductsForExport({
+            status: status && status !== 'all' ? status : null,
+            category: category && category !== 'all' ? category : null,
+            search: search || null,
+            is_optional_extra: isOptionalExtra
+        });
+        const csv = productsToCsv(products);
+        const dateStr = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="products-export-${dateStr}.csv"`);
+        res.send(csv);
+    } catch (error) {
+        console.error('Export products CSV error:', error);
+        res.status(500).json({ success: false, error: 'Failed to export products' });
     }
 });
 

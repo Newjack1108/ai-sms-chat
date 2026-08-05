@@ -26,6 +26,7 @@
             <div class="card-header">
                 <h2>Products</h2>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <button onclick="exportProductsCsv()" class="btn btn-success btn-sm">Export CSV</button>
                     <button onclick="showBulkPushToSalesModal()" class="btn btn-secondary btn-sm admin-or-office">Push to Sales (bulk)</button>
                     <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only">Add Product</button>
                 </div>
@@ -325,21 +326,57 @@
             }, 300);
         }
         
+        function buildProductListQueryParams(includePaging) {
+            const qs = new URLSearchParams();
+            if (includePaging) {
+                qs.set('page', String(productsPage));
+                qs.set('page_size', String(PRODUCTS_PAGE_SIZE));
+            }
+            if (selectedCategory !== 'all') {
+                qs.set('category', selectedCategory);
+            }
+            if (selectedStatusFilter !== 'all') {
+                qs.set('status', selectedStatusFilter);
+            }
+            if (productSearchQuery) {
+                qs.set('search', productSearchQuery);
+            }
+            return qs;
+        }
+
+        async function exportProductsCsv() {
+            try {
+                const qs = buildProductListQueryParams(false);
+                const response = await fetch(`${API_BASE}/products/export?${qs.toString()}`, {
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    let msg = 'Export failed';
+                    try {
+                        const err = await response.json();
+                        if (err && err.error) msg = err.error;
+                    } catch (e) { /* ignore */ }
+                    throw new Error(msg);
+                }
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const dateStr = new Date().toISOString().slice(0, 10);
+                a.download = `products-export-${dateStr}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                showAlert('CSV downloaded');
+            } catch (error) {
+                showAlert(error.message || 'Failed to export CSV', 'error');
+            }
+        }
+
         async function loadProducts() {
             try {
-                const qs = new URLSearchParams({
-                    page: String(productsPage),
-                    page_size: String(PRODUCTS_PAGE_SIZE)
-                });
-                if (selectedCategory !== 'all') {
-                    qs.set('category', selectedCategory);
-                }
-                if (selectedStatusFilter !== 'all') {
-                    qs.set('status', selectedStatusFilter);
-                }
-                if (productSearchQuery) {
-                    qs.set('search', productSearchQuery);
-                }
+                const qs = buildProductListQueryParams(true);
                 const data = await apiCall(`/products?${qs.toString()}`);
                 const productsList = document.getElementById('productsList');
                 const rows = data.products || [];
@@ -396,6 +433,7 @@
                 <table class="table">
                     <thead>
                         <tr>
+                            <th>ID</th>
                             <th>Name</th>
                             <th>Category</th>
                             <th>Type</th>
@@ -413,6 +451,7 @@
                                 : `<button onclick="setProductStatus(${product.id}, 'inactive')" class="btn btn-secondary btn-sm" title="Hide from catalog">Deactivate</button>`;
                             return `
                             <tr>
+                                <td>${product.id}</td>
                                 <td><strong>${escapeHtml(product.name)}</strong></td>
                                 <td><span class="badge badge-secondary">${escapeHtml(product.category || 'Other')}</span></td>
                                 <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>

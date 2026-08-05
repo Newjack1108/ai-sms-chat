@@ -6798,6 +6798,81 @@ class ProductionDatabase {
         }
         return { products: rows, total, page, page_size: pageSize };
     }
+
+    /** Full filtered product list for CSV export (no pagination). */
+    static async getProductsForExport(opts = {}) {
+        const status = opts.status && String(opts.status).trim() ? String(opts.status).trim() : null;
+        const category = opts.category && String(opts.category).trim() ? String(opts.category).trim() : null;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
+        let isOptionalExtra = null;
+        if (opts.is_optional_extra !== undefined && opts.is_optional_extra !== null && opts.is_optional_extra !== '') {
+            const raw = opts.is_optional_extra;
+            if (raw === true || raw === 1 || raw === '1' || String(raw).toLowerCase() === 'true') {
+                isOptionalExtra = true;
+            } else if (raw === false || raw === 0 || raw === '0' || String(raw).toLowerCase() === 'false') {
+                isOptionalExtra = false;
+            }
+        }
+        const baseFrom = `FROM finished_products fp`;
+        const syncSub = `(SELECT MAX(s.synced_at) FROM product_sales_sync s WHERE s.product_id = fp.id) AS last_pushed_to_sales_at`;
+        const condsPg = [];
+        const condsLite = [];
+        const paramsPg = [];
+        const paramsLite = [];
+        if (status) {
+            condsPg.push(`fp.status = $${paramsPg.length + 1}`);
+            paramsPg.push(status);
+            condsLite.push('fp.status = ?');
+            paramsLite.push(status);
+        }
+        if (category) {
+            condsPg.push(`fp.category = $${paramsPg.length + 1}`);
+            paramsPg.push(category);
+            condsLite.push('fp.category = ?');
+            paramsLite.push(category);
+        }
+        if (isOptionalExtra === true) {
+            condsPg.push(`fp.is_optional_extra = TRUE`);
+            condsLite.push('fp.is_optional_extra = 1');
+        } else if (isOptionalExtra === false) {
+            condsPg.push(`(fp.is_optional_extra = FALSE OR fp.is_optional_extra IS NULL)`);
+            condsLite.push('(fp.is_optional_extra = 0 OR fp.is_optional_extra IS NULL)');
+        }
+        if (search) {
+            const pattern = `%${search}%`;
+            condsPg.push(`(
+                fp.name ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.description, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.category, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.product_type, '') ILIKE $${paramsPg.length + 1}
+                OR COALESCE(fp.status, '') ILIKE $${paramsPg.length + 1}
+                OR CAST(fp.id AS TEXT) ILIKE $${paramsPg.length + 1}
+            )`);
+            paramsPg.push(pattern);
+            const patternLite = `%${search.toLowerCase()}%`;
+            condsLite.push(`(
+                LOWER(fp.name) LIKE ?
+                OR LOWER(COALESCE(fp.description, '')) LIKE ?
+                OR LOWER(COALESCE(fp.category, '')) LIKE ?
+                OR LOWER(COALESCE(fp.product_type, '')) LIKE ?
+                OR LOWER(COALESCE(fp.status, '')) LIKE ?
+                OR CAST(fp.id AS TEXT) LIKE ?
+            )`);
+            paramsLite.push(patternLite, patternLite, patternLite, patternLite, patternLite, patternLite);
+        }
+        const whereSql = condsPg.length ? `WHERE ${condsPg.join(' AND ')}` : '';
+        const whereSqlLite = condsLite.length ? `WHERE ${condsLite.join(' AND ')}` : '';
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT fp.*, ${syncSub} ${baseFrom} ${whereSql} ORDER BY fp.name ASC`,
+                paramsPg
+            );
+            return result.rows;
+        }
+        return db.prepare(
+            `SELECT fp.*, ${syncSub} ${baseFrom} ${whereSqlLite} ORDER BY fp.name ASC`
+        ).all(...paramsLite);
+    }
     
     static async getProductByName(name) {
         if (!name || typeof name !== 'string') return null;
