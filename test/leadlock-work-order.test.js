@@ -6,7 +6,8 @@ const {
     normalizeWhat3Words,
     reconcileLeadLockPaymentFlags,
     deriveLeadLockPaymentStatusLabel,
-    resolveTravelTimeHoursRoundTrip
+    resolveTravelTimeHoursRoundTrip,
+    deriveDeliveryInstallFromItems
 } = require('../leadlock-work-order');
 
 const basePayload = {
@@ -258,5 +259,48 @@ describe('deriveLeadLockPaymentStatusLabel', () => {
             'Deposit paid — balance outstanding'
         );
         assert.equal(deriveLeadLockPaymentStatusLabel({}), 'Payment pending');
+    });
+});
+
+describe('delivery_install_ex_vat', () => {
+    it('uses explicit webhook field when provided', () => {
+        const p = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            delivery_install_ex_vat: 850.5,
+            delivery_install_label: 'Delivery & Installation',
+            items: [
+                ...basePayload.items,
+                {
+                    product_name: 'Delivery & Installation',
+                    description: 'Delivery & Installation',
+                    quantity: 1,
+                    unit_price: 850.5,
+                    line_type: 'DELIVERY',
+                    install_hours: 0,
+                    number_of_boxes: 0
+                }
+            ]
+        });
+        assert.equal(p.delivery_install_ex_vat, 850.5);
+        assert.equal(p.delivery_install_label, 'Delivery & Installation');
+    });
+
+    it('derives from delivery line items when field omitted', () => {
+        const derived = deriveDeliveryInstallFromItems([
+            { description: 'Cabin', quantity: 1, unit_price: 9000 },
+            { description: 'Delivery only', quantity: 2, unit_price: 100, line_type: 'DELIVERY' }
+        ]);
+        assert.equal(derived.amount, 200);
+        assert.equal(derived.label, 'Delivery only');
+
+        const p = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            items: [
+                { description: 'Cabin', quantity: 1, unit_price: 9000, install_hours: 0, number_of_boxes: 1 },
+                { description: 'Delivery only', quantity: 1, unit_price: 175, install_hours: 0, number_of_boxes: 0 }
+            ]
+        });
+        assert.equal(p.delivery_install_ex_vat, 175);
+        assert.equal(p.delivery_install_label, 'Delivery only');
     });
 });

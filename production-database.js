@@ -543,7 +543,16 @@ function initializeSQLite() {
             { name: 'delivery_location_notes', type: 'TEXT' },
             { name: 'crm_customer_address', type: 'TEXT' },
             { name: 'what3words', type: 'TEXT' },
-            { name: 'crm_what3words', type: 'TEXT' }
+            { name: 'crm_what3words', type: 'TEXT' },
+            { name: 'delivery_install_ex_vat', type: 'REAL' },
+            { name: 'delivery_install_label', type: 'TEXT' },
+            { name: 'actual_cost_mileage', type: 'REAL' },
+            { name: 'actual_cost_labour', type: 'REAL' },
+            { name: 'actual_cost_hotel', type: 'REAL' },
+            { name: 'actual_cost_meals', type: 'REAL' },
+            { name: 'actual_cost_total', type: 'REAL' },
+            { name: 'actual_cost_notes', type: 'TEXT' },
+            { name: 'actual_cost_recorded_at', type: 'TEXT' }
         ];
         const tableInfoExtended = db.prepare(`PRAGMA table_info(product_orders)`).all();
         for (const col of leadlockExtendedCols) {
@@ -555,6 +564,30 @@ function initializeSQLite() {
     } catch (error) {
         console.log('⚠️ Product orders migration check skipped:', error.message);
     }
+
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS install_cost_scenarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            works_order_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            notes TEXT,
+            cost_mileage REAL NOT NULL DEFAULT 0,
+            cost_labour REAL NOT NULL DEFAULT 0,
+            cost_hotel REAL NOT NULL DEFAULT 0,
+            cost_meals REAL NOT NULL DEFAULT 0,
+            cost_total REAL NOT NULL DEFAULT 0,
+            is_planned INTEGER NOT NULL DEFAULT 0,
+            created_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (works_order_id) REFERENCES product_orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by) REFERENCES production_users(id)
+        )
+    `);
+    db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_install_cost_scenarios_order
+        ON install_cost_scenarios(works_order_id)
+    `);
     
     // LeadLock work order items table
     db.exec(`
@@ -1743,7 +1776,7 @@ function initializeSQLite() {
     `);
     
     ensureSQLitePendingAmendmentUniqueness();
-    
+
     console.log('✅ Production SQLite database initialized');
 }
 
@@ -2207,7 +2240,16 @@ async function initializePostgreSQL() {
                 { name: 'delivery_location_notes', type: 'TEXT' },
                 { name: 'crm_customer_address', type: 'TEXT' },
                 { name: 'what3words', type: 'TEXT' },
-                { name: 'crm_what3words', type: 'TEXT' }
+                { name: 'crm_what3words', type: 'TEXT' },
+                { name: 'delivery_install_ex_vat', type: 'DECIMAL(10,2)' },
+                { name: 'delivery_install_label', type: 'TEXT' },
+                { name: 'actual_cost_mileage', type: 'DECIMAL(10,2)' },
+                { name: 'actual_cost_labour', type: 'DECIMAL(10,2)' },
+                { name: 'actual_cost_hotel', type: 'DECIMAL(10,2)' },
+                { name: 'actual_cost_meals', type: 'DECIMAL(10,2)' },
+                { name: 'actual_cost_total', type: 'DECIMAL(10,2)' },
+                { name: 'actual_cost_notes', type: 'TEXT' },
+                { name: 'actual_cost_recorded_at', type: 'TIMESTAMP' }
             ];
             for (const col of leadlockExtendedCols) {
                 const colCheck = await pool.query(`
@@ -2222,6 +2264,28 @@ async function initializePostgreSQL() {
         } catch (error) {
             console.log('⚠️ Product orders migration check skipped:', error.message);
         }
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS install_cost_scenarios (
+                id SERIAL PRIMARY KEY,
+                works_order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                notes TEXT,
+                cost_mileage DECIMAL(10,2) NOT NULL DEFAULT 0,
+                cost_labour DECIMAL(10,2) NOT NULL DEFAULT 0,
+                cost_hotel DECIMAL(10,2) NOT NULL DEFAULT 0,
+                cost_meals DECIMAL(10,2) NOT NULL DEFAULT 0,
+                cost_total DECIMAL(10,2) NOT NULL DEFAULT 0,
+                is_planned BOOLEAN NOT NULL DEFAULT FALSE,
+                created_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_install_cost_scenarios_order
+            ON install_cost_scenarios(works_order_id)
+        `);
         
         // LeadLock work order items table
         await pool.query(`
@@ -3461,7 +3525,7 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_vehicle_responses_inspection ON daily_vehicle_inspection_responses(inspection_id, section)`);
         
         await ensurePostgresPendingAmendmentUniqueness();
-        
+
         console.log('✅ Production PostgreSQL database initialized');
     } catch (error) {
         console.error('❌ Error initializing Production PostgreSQL:', error);
@@ -6396,9 +6460,18 @@ class ProductionDatabase {
                         ) AS completion_date,
                         po.customer_name, po.sales_order_ref, po.invoice_number,
                         COALESCE(po.total_amount, 0) AS total_amount,
+                        po.delivery_install_ex_vat,
+                        po.delivery_install_label,
+                        po.actual_cost_total,
+                        planned.cost_total AS planned_cost_total,
                         CASE WHEN i.works_order_id IS NULL THEN true ELSE false END AS missing_works_order
                  FROM installations i
                  LEFT JOIN product_orders po ON i.works_order_id = po.id
+                 LEFT JOIN LATERAL (
+                    SELECT cost_total FROM install_cost_scenarios
+                    WHERE works_order_id = po.id AND is_planned = TRUE
+                    ORDER BY id ASC LIMIT 1
+                 ) planned ON true
                  WHERE i.status = 'completed'
                    AND COALESCE(
                         (CASE
@@ -6419,6 +6492,12 @@ class ProductionDatabase {
                         date(COALESCE(i.completed_at, i.end_date, i.start_date)) AS completion_date,
                         po.customer_name, po.sales_order_ref, po.invoice_number,
                         COALESCE(po.total_amount, 0) AS total_amount,
+                        po.delivery_install_ex_vat,
+                        po.delivery_install_label,
+                        po.actual_cost_total,
+                        (SELECT cost_total FROM install_cost_scenarios
+                         WHERE works_order_id = po.id AND is_planned = 1
+                         ORDER BY id ASC LIMIT 1) AS planned_cost_total,
                         CASE WHEN i.works_order_id IS NULL THEN 1 ELSE 0 END AS missing_works_order
                  FROM installations i
                  LEFT JOIN product_orders po ON i.works_order_id = po.id
@@ -6429,37 +6508,82 @@ class ProductionDatabase {
             ).all(weekStart, weekEnd);
         }
 
-        const installations = (rows || []).map(r => ({
-            id: r.id,
-            works_order_id: r.works_order_id,
-            start_date: r.start_date,
-            end_date: r.end_date,
-            completed_at: r.completed_at,
-            completion_date: r.completion_date,
-            status: r.status,
-            location: r.location,
-            address: r.address,
-            duration_hours: parseFloat(r.duration_hours || 0),
-            customer_name: r.customer_name || null,
-            sales_order_ref: r.sales_order_ref || null,
-            invoice_number: r.invoice_number || null,
-            total_amount: parseFloat(r.total_amount || 0),
-            missing_works_order: !!(r.missing_works_order === true || r.missing_works_order === 1 || r.missing_works_order === 't')
-        }));
+        const installations = (rows || []).map(r => {
+            const sold = r.delivery_install_ex_vat != null ? parseFloat(r.delivery_install_ex_vat) : null;
+            const planned = r.planned_cost_total != null ? parseFloat(r.planned_cost_total) : null;
+            const actual = r.actual_cost_total != null ? parseFloat(r.actual_cost_total) : null;
+            return {
+                id: r.id,
+                works_order_id: r.works_order_id,
+                start_date: r.start_date,
+                end_date: r.end_date,
+                completed_at: r.completed_at,
+                completion_date: r.completion_date,
+                status: r.status,
+                location: r.location,
+                address: r.address,
+                duration_hours: parseFloat(r.duration_hours || 0),
+                customer_name: r.customer_name || null,
+                sales_order_ref: r.sales_order_ref || null,
+                invoice_number: r.invoice_number || null,
+                total_amount: parseFloat(r.total_amount || 0),
+                delivery_install_ex_vat: Number.isFinite(sold) ? sold : null,
+                delivery_install_label: r.delivery_install_label || null,
+                planned_cost_total: Number.isFinite(planned) ? planned : null,
+                actual_cost_total: Number.isFinite(actual) ? actual : null,
+                margin_pct: Number.isFinite(sold) && sold > 0 && Number.isFinite(actual)
+                    ? Math.round(((sold - actual) / sold) * 10000) / 100
+                    : null,
+                cost_variance_pct: Number.isFinite(planned) && planned > 0 && Number.isFinite(actual)
+                    ? Math.round(((actual - planned) / planned) * 10000) / 100
+                    : null,
+                missing_works_order: !!(r.missing_works_order === true || r.missing_works_order === 1 || r.missing_works_order === 't')
+            };
+        });
 
         const seenOrders = new Set();
         let totalValue = 0;
+        let soldTotal = 0;
+        let plannedTotal = 0;
+        let actualTotal = 0;
+        let marginSoldSum = 0;
+        let marginActualSum = 0;
+        let variancePlannedSum = 0;
+        let varianceActualSum = 0;
         for (const inst of installations) {
             if (inst.works_order_id == null) continue;
             if (seenOrders.has(inst.works_order_id)) continue;
             seenOrders.add(inst.works_order_id);
             totalValue += inst.total_amount;
+            if (inst.delivery_install_ex_vat != null) soldTotal += inst.delivery_install_ex_vat;
+            if (inst.planned_cost_total != null) plannedTotal += inst.planned_cost_total;
+            if (inst.actual_cost_total != null) actualTotal += inst.actual_cost_total;
+            if (inst.delivery_install_ex_vat != null && inst.actual_cost_total != null) {
+                marginSoldSum += inst.delivery_install_ex_vat;
+                marginActualSum += inst.actual_cost_total;
+            }
+            if (inst.planned_cost_total != null && inst.actual_cost_total != null) {
+                variancePlannedSum += inst.planned_cost_total;
+                varianceActualSum += inst.actual_cost_total;
+            }
         }
+
+        const weekMarginPct = marginSoldSum > 0
+            ? Math.round(((marginSoldSum - marginActualSum) / marginSoldSum) * 10000) / 100
+            : null;
+        const weekVariancePct = variancePlannedSum > 0
+            ? Math.round(((varianceActualSum - variancePlannedSum) / variancePlannedSum) * 10000) / 100
+            : null;
 
         return {
             quantity: installations.length,
             total_value: totalValue,
             distinct_orders: seenOrders.size,
+            delivery_install_sold_total: Math.round(soldTotal * 100) / 100,
+            planned_cost_total: Math.round(plannedTotal * 100) / 100,
+            actual_cost_total: Math.round(actualTotal * 100) / 100,
+            margin_pct: weekMarginPct,
+            cost_variance_pct: weekVariancePct,
             installations
         };
     }
@@ -8583,7 +8707,7 @@ class ProductionDatabase {
 
     /** LeadLock payment + delivery fields for INSERT/UPDATE from webhook payload. */
     static _leadLockExtendedOrderValues(payload, { sqlite = false } = {}) {
-        const { reconcileLeadLockPaymentFlags } = require('./leadlock-work-order');
+        const { reconcileLeadLockPaymentFlags, deriveDeliveryInstallFromItems } = require('./leadlock-work-order');
         const payment = reconcileLeadLockPaymentFlags(payload);
         const depositPaid = payment.deposit_paid;
         const balancePaid = payment.balance_paid;
@@ -8593,6 +8717,19 @@ class ProductionDatabase {
         const invoice = payload.invoice_number != null && String(payload.invoice_number).trim() !== ''
             ? String(payload.invoice_number).trim()
             : null;
+        let deliveryInstallExVat = null;
+        if (payload.delivery_install_ex_vat !== undefined && payload.delivery_install_ex_vat !== null && payload.delivery_install_ex_vat !== '') {
+            const n = leadlockParseAmount(payload.delivery_install_ex_vat, NaN);
+            deliveryInstallExVat = Number.isFinite(n) ? n : null;
+        } else {
+            deliveryInstallExVat = deriveDeliveryInstallFromItems(payload.items).amount;
+        }
+        let deliveryInstallLabel = payload.delivery_install_label != null && String(payload.delivery_install_label).trim() !== ''
+            ? String(payload.delivery_install_label).trim()
+            : null;
+        if (!deliveryInstallLabel && deliveryInstallExVat != null) {
+            deliveryInstallLabel = deriveDeliveryInstallFromItems(payload.items).label;
+        }
         return {
             fulfillment_method: payload.fulfillment_method || null,
             deposit_paid: boolOut(depositPaid),
@@ -8605,7 +8742,9 @@ class ProductionDatabase {
             delivery_location_notes: payload.delivery_location_notes != null ? String(payload.delivery_location_notes) : null,
             crm_customer_address: payload.crm_customer_address || null,
             what3words: payload.what3words || null,
-            crm_what3words: payload.crm_what3words || null
+            crm_what3words: payload.crm_what3words || null,
+            delivery_install_ex_vat: deliveryInstallExVat,
+            delivery_install_label: deliveryInstallLabel
         };
     }
 
@@ -8632,8 +8771,9 @@ class ProductionDatabase {
                     fulfillment_method = $15, deposit_paid = $16, balance_paid = $17, paid_in_full = $18,
                     deposit_amount = $19, balance_amount = $20, invoice_number = $21,
                     address_is_delivery_location = $22, delivery_location_notes = $23, crm_customer_address = $24,
-                    what3words = $25, crm_what3words = $26
-                 WHERE id = $27`,
+                    what3words = $25, crm_what3words = $26,
+                    delivery_install_ex_vat = $27, delivery_install_label = $28
+                 WHERE id = $29`,
                 [
                     orderDate, payload.customer_name || null, salesOrderRef,
                     payload.customer_postcode || null, payload.customer_address || null,
@@ -8645,6 +8785,7 @@ class ProductionDatabase {
                     ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                     ext.what3words, ext.crm_what3words,
+                    ext.delivery_install_ex_vat, ext.delivery_install_label,
                     orderId
                 ]
             );
@@ -8659,7 +8800,8 @@ class ProductionDatabase {
                     fulfillment_method = ?, deposit_paid = ?, balance_paid = ?, paid_in_full = ?,
                     deposit_amount = ?, balance_amount = ?, invoice_number = ?,
                     address_is_delivery_location = ?, delivery_location_notes = ?, crm_customer_address = ?,
-                    what3words = ?, crm_what3words = ?
+                    what3words = ?, crm_what3words = ?,
+                    delivery_install_ex_vat = ?, delivery_install_label = ?
                  WHERE id = ?`
             ).run(
                 orderDate, payload.customer_name || null, salesOrderRef,
@@ -8672,6 +8814,7 @@ class ProductionDatabase {
                 ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                 ext.what3words, ext.crm_what3words,
+                ext.delivery_install_ex_vat, ext.delivery_install_label,
                 orderId
             );
         }
@@ -8706,9 +8849,10 @@ class ProductionDatabase {
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
-                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words)
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words,
+                 delivery_install_ex_vat, delivery_install_label)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31) RETURNING id`,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -8722,7 +8866,8 @@ class ProductionDatabase {
                     ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                     ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                    ext.what3words, ext.crm_what3words
+                    ext.what3words, ext.crm_what3words,
+                    ext.delivery_install_ex_vat, ext.delivery_install_label
                 ]
             );
             orderId = result.rows[0].id;
@@ -8731,8 +8876,9 @@ class ProductionDatabase {
                 `INSERT INTO product_orders (product_id, quantity, order_date, status, created_by, customer_name, sales_order_ref,
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
-                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words,
+                 delivery_install_ex_vat, delivery_install_label)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -8747,13 +8893,300 @@ class ProductionDatabase {
                 ext.fulfillment_method, ext.deposit_paid, ext.balance_paid, ext.paid_in_full,
                 ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
-                ext.what3words, ext.crm_what3words
+                ext.what3words, ext.crm_what3words,
+                ext.delivery_install_ex_vat, ext.delivery_install_label
             );
             orderId = info.lastInsertRowid;
         }
 
         await this.replaceLeadlockWorkOrderItems(orderId, items);
         return this.getProductOrderById(orderId);
+    }
+
+    /** Best-effort fill delivery_install_ex_vat from stored LeadLock line items when null. */
+    static async backfillDeliveryInstallFromItems() {
+        const { deriveDeliveryInstallFromItems } = require('./leadlock-work-order');
+        let orders;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT id FROM product_orders
+                 WHERE delivery_install_ex_vat IS NULL AND leadlock_order_id IS NOT NULL`
+            );
+            orders = result.rows;
+        } else {
+            orders = db.prepare(
+                `SELECT id FROM product_orders
+                 WHERE delivery_install_ex_vat IS NULL AND leadlock_order_id IS NOT NULL`
+            ).all();
+        }
+        let updated = 0;
+        for (const row of orders || []) {
+            let items;
+            if (isPostgreSQL) {
+                const r = await pool.query(
+                    `SELECT description, quantity, unit_price FROM leadlock_work_order_items WHERE order_id = $1`,
+                    [row.id]
+                );
+                items = r.rows;
+            } else {
+                items = db.prepare(
+                    `SELECT description, quantity, unit_price FROM leadlock_work_order_items WHERE order_id = ?`
+                ).all(row.id);
+            }
+            const derived = deriveDeliveryInstallFromItems(items || []);
+            if (derived.amount == null) continue;
+            if (isPostgreSQL) {
+                await pool.query(
+                    `UPDATE product_orders
+                     SET delivery_install_ex_vat = $1, delivery_install_label = COALESCE(delivery_install_label, $2)
+                     WHERE id = $3 AND delivery_install_ex_vat IS NULL`,
+                    [derived.amount, derived.label, row.id]
+                );
+            } else {
+                db.prepare(
+                    `UPDATE product_orders
+                     SET delivery_install_ex_vat = ?, delivery_install_label = COALESCE(delivery_install_label, ?)
+                     WHERE id = ? AND delivery_install_ex_vat IS NULL`
+                ).run(derived.amount, derived.label, row.id);
+            }
+            updated += 1;
+        }
+        if (updated > 0) {
+            console.log(`✅ Backfilled delivery_install_ex_vat on ${updated} works order(s)`);
+        }
+        return updated;
+    }
+
+    static _normalizeCostBreakdown(data = {}) {
+        const mileage = Math.max(0, leadlockParseAmount(data.cost_mileage ?? data.actual_cost_mileage, 0));
+        const labour = Math.max(0, leadlockParseAmount(data.cost_labour ?? data.actual_cost_labour, 0));
+        const hotel = Math.max(0, leadlockParseAmount(data.cost_hotel ?? data.actual_cost_hotel, 0));
+        const meals = Math.max(0, leadlockParseAmount(data.cost_meals ?? data.actual_cost_meals, 0));
+        const total = Math.round((mileage + labour + hotel + meals) * 100) / 100;
+        return {
+            cost_mileage: Math.round(mileage * 100) / 100,
+            cost_labour: Math.round(labour * 100) / 100,
+            cost_hotel: Math.round(hotel * 100) / 100,
+            cost_meals: Math.round(meals * 100) / 100,
+            cost_total: total
+        };
+    }
+
+    static async getInstallCostScenarios(worksOrderId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM install_cost_scenarios
+                 WHERE works_order_id = $1
+                 ORDER BY is_planned DESC, id ASC`,
+                [worksOrderId]
+            );
+            return result.rows.map((r) => ({
+                ...r,
+                is_planned: !!(r.is_planned === true || r.is_planned === 1 || r.is_planned === 't')
+            }));
+        }
+        return db.prepare(
+            `SELECT * FROM install_cost_scenarios
+             WHERE works_order_id = ?
+             ORDER BY is_planned DESC, id ASC`
+        ).all(worksOrderId).map((r) => ({
+            ...r,
+            is_planned: !!(r.is_planned === 1 || r.is_planned === true)
+        }));
+    }
+
+    static async getInstallCostScenarioById(id) {
+        if (isPostgreSQL) {
+            const result = await pool.query(`SELECT * FROM install_cost_scenarios WHERE id = $1`, [id]);
+            const r = result.rows[0];
+            if (!r) return null;
+            return { ...r, is_planned: !!(r.is_planned === true || r.is_planned === 1 || r.is_planned === 't') };
+        }
+        const r = db.prepare(`SELECT * FROM install_cost_scenarios WHERE id = ?`).get(id);
+        if (!r) return null;
+        return { ...r, is_planned: !!(r.is_planned === 1 || r.is_planned === true) };
+    }
+
+    static async createInstallCostScenario(worksOrderId, data, createdBy = null) {
+        const costs = this._normalizeCostBreakdown(data);
+        const name = (data.name != null ? String(data.name) : '').trim() || 'Scenario';
+        const notes = data.notes != null ? String(data.notes) : null;
+        const isPlanned = !!(data.is_planned === true || data.is_planned === 1 || data.is_planned === 'true');
+        if (isPlanned) {
+            await this.clearPlannedInstallCostScenario(worksOrderId);
+        }
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `INSERT INTO install_cost_scenarios
+                 (works_order_id, name, notes, cost_mileage, cost_labour, cost_hotel, cost_meals, cost_total, is_planned, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+                [
+                    worksOrderId, name, notes,
+                    costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals, costs.cost_total,
+                    isPlanned, createdBy
+                ]
+            );
+            const r = result.rows[0];
+            return { ...r, is_planned: !!(r.is_planned === true || r.is_planned === 1 || r.is_planned === 't') };
+        }
+        const info = db.prepare(
+            `INSERT INTO install_cost_scenarios
+             (works_order_id, name, notes, cost_mileage, cost_labour, cost_hotel, cost_meals, cost_total, is_planned, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+            worksOrderId, name, notes,
+            costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals, costs.cost_total,
+            isPlanned ? 1 : 0, createdBy
+        );
+        return this.getInstallCostScenarioById(info.lastInsertRowid);
+    }
+
+    static async updateInstallCostScenario(id, data) {
+        const existing = await this.getInstallCostScenarioById(id);
+        if (!existing) return null;
+        const costs = this._normalizeCostBreakdown({
+            cost_mileage: data.cost_mileage !== undefined ? data.cost_mileage : existing.cost_mileage,
+            cost_labour: data.cost_labour !== undefined ? data.cost_labour : existing.cost_labour,
+            cost_hotel: data.cost_hotel !== undefined ? data.cost_hotel : existing.cost_hotel,
+            cost_meals: data.cost_meals !== undefined ? data.cost_meals : existing.cost_meals
+        });
+        const name = data.name !== undefined
+            ? ((String(data.name || '').trim()) || existing.name)
+            : existing.name;
+        const notes = data.notes !== undefined
+            ? (data.notes != null ? String(data.notes) : null)
+            : existing.notes;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE install_cost_scenarios SET
+                    name = $1, notes = $2,
+                    cost_mileage = $3, cost_labour = $4, cost_hotel = $5, cost_meals = $6, cost_total = $7,
+                    updated_at = CURRENT_TIMESTAMP
+                 WHERE id = $8 RETURNING *`,
+                [name, notes, costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals, costs.cost_total, id]
+            );
+            const r = result.rows[0];
+            return r ? { ...r, is_planned: !!(r.is_planned === true || r.is_planned === 1 || r.is_planned === 't') } : null;
+        }
+        db.prepare(
+            `UPDATE install_cost_scenarios SET
+                name = ?, notes = ?,
+                cost_mileage = ?, cost_labour = ?, cost_hotel = ?, cost_meals = ?, cost_total = ?,
+                updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`
+        ).run(name, notes, costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals, costs.cost_total, id);
+        return this.getInstallCostScenarioById(id);
+    }
+
+    static async clearPlannedInstallCostScenario(worksOrderId) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE install_cost_scenarios SET is_planned = FALSE, updated_at = CURRENT_TIMESTAMP
+                 WHERE works_order_id = $1 AND is_planned = TRUE`,
+                [worksOrderId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE install_cost_scenarios SET is_planned = 0, updated_at = CURRENT_TIMESTAMP
+                 WHERE works_order_id = ? AND is_planned = 1`
+            ).run(worksOrderId);
+        }
+    }
+
+    static async setPlannedInstallCostScenario(worksOrderId, scenarioId) {
+        const scenario = await this.getInstallCostScenarioById(scenarioId);
+        if (!scenario || Number(scenario.works_order_id) !== Number(worksOrderId)) {
+            return null;
+        }
+        await this.clearPlannedInstallCostScenario(worksOrderId);
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE install_cost_scenarios SET is_planned = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                [scenarioId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE install_cost_scenarios SET is_planned = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+            ).run(scenarioId);
+        }
+        return this.getInstallCostScenarioById(scenarioId);
+    }
+
+    static async deleteInstallCostScenario(id) {
+        const existing = await this.getInstallCostScenarioById(id);
+        if (!existing) return false;
+        if (isPostgreSQL) {
+            await pool.query(`DELETE FROM install_cost_scenarios WHERE id = $1`, [id]);
+        } else {
+            db.prepare(`DELETE FROM install_cost_scenarios WHERE id = ?`).run(id);
+        }
+        return true;
+    }
+
+    static async getPlannedInstallCostScenario(worksOrderId) {
+        const scenarios = await this.getInstallCostScenarios(worksOrderId);
+        return scenarios.find((s) => s.is_planned) || null;
+    }
+
+    static async setInstallActualCost(worksOrderId, data) {
+        const costs = this._normalizeCostBreakdown(data);
+        const notes = data.notes != null ? String(data.notes) : (data.actual_cost_notes != null ? String(data.actual_cost_notes) : null);
+        const recordedAt = new Date().toISOString();
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE product_orders SET
+                    actual_cost_mileage = $1, actual_cost_labour = $2, actual_cost_hotel = $3, actual_cost_meals = $4,
+                    actual_cost_total = $5, actual_cost_notes = $6, actual_cost_recorded_at = $7
+                 WHERE id = $8 RETURNING *`,
+                [
+                    costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals,
+                    costs.cost_total, notes, recordedAt, worksOrderId
+                ]
+            );
+            return result.rows[0] || null;
+        }
+        db.prepare(
+            `UPDATE product_orders SET
+                actual_cost_mileage = ?, actual_cost_labour = ?, actual_cost_hotel = ?, actual_cost_meals = ?,
+                actual_cost_total = ?, actual_cost_notes = ?, actual_cost_recorded_at = ?
+             WHERE id = ?`
+        ).run(
+            costs.cost_mileage, costs.cost_labour, costs.cost_hotel, costs.cost_meals,
+            costs.cost_total, notes, recordedAt, worksOrderId
+        );
+        return this.getProductOrderById(worksOrderId);
+    }
+
+    static async getInstallCostSummaryForOrder(worksOrderId) {
+        const order = await this.getProductOrderById(worksOrderId);
+        if (!order) return null;
+        const scenarios = await this.getInstallCostScenarios(worksOrderId);
+        const planned = scenarios.find((s) => s.is_planned) || null;
+        const sold = order.delivery_install_ex_vat != null ? parseFloat(order.delivery_install_ex_vat) : null;
+        const plannedTotal = planned ? parseFloat(planned.cost_total || 0) : null;
+        const actualTotal = order.actual_cost_total != null ? parseFloat(order.actual_cost_total) : null;
+        return {
+            order_id: worksOrderId,
+            delivery_install_ex_vat: Number.isFinite(sold) ? sold : null,
+            delivery_install_label: order.delivery_install_label || null,
+            scenarios,
+            planned,
+            actual: order.actual_cost_total != null ? {
+                cost_mileage: parseFloat(order.actual_cost_mileage || 0),
+                cost_labour: parseFloat(order.actual_cost_labour || 0),
+                cost_hotel: parseFloat(order.actual_cost_hotel || 0),
+                cost_meals: parseFloat(order.actual_cost_meals || 0),
+                cost_total: actualTotal,
+                notes: order.actual_cost_notes || null,
+                recorded_at: order.actual_cost_recorded_at || null
+            } : null,
+            margin_pct: sold != null && sold > 0 && actualTotal != null
+                ? Math.round(((sold - actualTotal) / sold) * 10000) / 100
+                : null,
+            cost_variance_pct: plannedTotal != null && plannedTotal > 0 && actualTotal != null
+                ? Math.round(((actualTotal - plannedTotal) / plannedTotal) * 10000) / 100
+                : null
+        };
     }
     
     static async getOrderProducts(orderId) {
@@ -17004,10 +17437,21 @@ class ProductionDatabase {
 }
 
 // Initialize database on module load
+async function runStartupBackfill() {
+    try {
+        await ProductionDatabase.backfillDeliveryInstallFromItems();
+    } catch (err) {
+        console.log('⚠️ delivery_install backfill skipped:', err.message);
+    }
+}
+
 if (isPostgreSQL) {
-    initializePostgreSQL().catch(console.error);
+    initializePostgreSQL()
+        .then(() => runStartupBackfill())
+        .catch(console.error);
 } else {
     initializeSQLite();
+    runStartupBackfill();
 }
 
 module.exports = { ProductionDatabase, initializeProductionDatabase };

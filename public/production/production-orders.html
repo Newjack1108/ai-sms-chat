@@ -1709,22 +1709,27 @@
                 const modal = document.createElement('div');
                 modal.className = 'modal show';
                 modal.innerHTML = `
-                    <div class="modal-content" style="max-width: 640px;">
+                    <div class="modal-content" style="max-width: 920px;">
                         <div class="modal-header">
                             <h3>Work order #${order.id}${isLeadlock ? ' · LeadLock' : ''}</h3>
                             <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
                         </div>
                         <div class="requirements-section" style="padding: 16px;">
                             ${renderLoadSheetCustomerHeader(order)}
-                            ${renderLeadLockWorkOrderDetailsHtml(order)}
+                            ${renderLeadLockWorkOrderDetailsHtml(order, { includeTotal: true })}
                             ${addressFallback}
                             ${productionLinesHtml}
                             ${setupHint}
                             ${leadlockSyncHtml}
+                            <div id="installCostHost_${orderId}"></div>
                             ${order.notes ? `<div style="margin-top: 12px;"><strong>Notes:</strong><div class="notes-block" style="margin-top: 6px;">${escapeHtml(order.notes)}</div></div>` : ''}
                         </div>
                     </div>`;
                 document.body.appendChild(modal);
+                const costHost = document.getElementById(`installCostHost_${orderId}`);
+                if (costHost && typeof loadInstallCostPanel === 'function') {
+                    await loadInstallCostPanel(orderId, costHost);
+                }
             } catch (error) {
                 showAlert(error.message || 'Failed to load work order', 'error');
             }
@@ -3087,6 +3092,9 @@
         async function sendCompletedToLeadLock(orderId) {
             if (!confirm('Send completed status to LeadLock for this order?')) return;
             try {
+                if (typeof promptInstallActualCostIfNeeded === 'function') {
+                    await promptInstallActualCostIfNeeded(orderId);
+                }
                 const result = await apiCall(`/orders/${orderId}/leadlock/completed`, {
                     method: 'POST',
                     body: JSON.stringify({})

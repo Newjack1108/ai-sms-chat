@@ -24,7 +24,12 @@
             gap: 16px;
             margin-bottom: 20px;
         }
-        @media (max-width: 900px) {
+        @media (max-width: 1100px) {
+            .kpi-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media (max-width: 700px) {
             .kpi-grid {
                 grid-template-columns: 1fr;
             }
@@ -218,6 +223,11 @@
             }
         }
 
+        function formatPct(value) {
+            if (value == null || !Number.isFinite(Number(value))) return '—';
+            return `${Number(value).toFixed(1)}%`;
+        }
+
         function renderSummary(data) {
             const installs = data.installations || {};
             const stock = data.stock || {};
@@ -234,6 +244,26 @@
                 <div class="kpi-card">
                     <h3>Installation Value</h3>
                     <p class="kpi-value">${formatCurrency(installs.total_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>D&I Sold (ex VAT)</h3>
+                    <p class="kpi-value">${formatCurrency(installs.delivery_install_sold_total || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>D&I Planned Cost</h3>
+                    <p class="kpi-value">${formatCurrency(installs.planned_cost_total || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>D&I Actual Cost</h3>
+                    <p class="kpi-value">${formatCurrency(installs.actual_cost_total || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>D&I Margin %</h3>
+                    <p class="kpi-value">${formatPct(installs.margin_pct)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>D&I Cost Variance %</h3>
+                    <p class="kpi-value">${formatPct(installs.cost_variance_pct)}</p>
                 </div>
                 <div class="kpi-card">
                     <h3>Stock Added Value</h3>
@@ -266,8 +296,13 @@
                 <p class="section-note">
                     Qty: <strong>${installations.quantity}</strong>
                     · Distinct works orders: <strong>${installations.distinct_orders || 0}</strong>
-                    · Total value: <strong>${formatCurrency(installations.total_value || 0)}</strong>
-                    (value counted once per works order)
+                    · Order value: <strong>${formatCurrency(installations.total_value || 0)}</strong>
+                    · D&amp;I sold: <strong>${formatCurrency(installations.delivery_install_sold_total || 0)}</strong>
+                    · Planned: <strong>${formatCurrency(installations.planned_cost_total || 0)}</strong>
+                    · Actual: <strong>${formatCurrency(installations.actual_cost_total || 0)}</strong>
+                    · Margin: <strong>${formatPct(installations.margin_pct)}</strong>
+                    · Cost variance: <strong>${formatPct(installations.cost_variance_pct)}</strong>
+                    (amounts counted once per works order)
                 </p>
                 <table class="table">
                     <thead>
@@ -276,7 +311,12 @@
                             <th>Customer</th>
                             <th>Works Order / Ref</th>
                             <th>Invoice</th>
-                            <th class="text-right">Value</th>
+                            <th class="text-right">Order value</th>
+                            <th class="text-right">D&amp;I sold</th>
+                            <th class="text-right">Planned</th>
+                            <th class="text-right">Actual</th>
+                            <th class="text-right">Margin %</th>
+                            <th class="text-right">Variance %</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -291,6 +331,11 @@
                                 </td>
                                 <td>${escapeHtml(inst.invoice_number || '-')}</td>
                                 <td class="text-right">${formatCurrency(inst.total_amount || 0)}</td>
+                                <td class="text-right">${inst.delivery_install_ex_vat != null ? formatCurrency(inst.delivery_install_ex_vat) : '—'}</td>
+                                <td class="text-right">${inst.planned_cost_total != null ? formatCurrency(inst.planned_cost_total) : '—'}</td>
+                                <td class="text-right">${inst.actual_cost_total != null ? formatCurrency(inst.actual_cost_total) : '—'}</td>
+                                <td class="text-right">${formatPct(inst.margin_pct)}</td>
+                                <td class="text-right">${formatPct(inst.cost_variance_pct)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -474,6 +519,11 @@
                 const summaryRows = [
                     ['Installs completed', String(installs.quantity || 0)],
                     ['Installation value', formatCurrency(installs.total_value || 0)],
+                    ['D&I sold (ex VAT)', formatCurrency(installs.delivery_install_sold_total || 0)],
+                    ['D&I planned cost', formatCurrency(installs.planned_cost_total || 0)],
+                    ['D&I actual cost', formatCurrency(installs.actual_cost_total || 0)],
+                    ['D&I margin %', formatPct(installs.margin_pct)],
+                    ['D&I cost variance %', formatPct(installs.cost_variance_pct)],
                     ['Stock added value', formatCurrency(stock.total_value || 0)],
                     ['Raw materials on hand', formatCurrency(stock.current_raw_materials_value || 0)],
                     ['Built items on hand', formatCurrency(stock.current_built_items_value || 0)],
@@ -505,17 +555,22 @@
                     inst.works_order_id
                         ? `#${inst.works_order_id}${inst.sales_order_ref ? ' / ' + inst.sales_order_ref : ''}`
                         : 'No works order',
-                    formatCurrency(inst.total_amount || 0)
+                    formatCurrency(inst.total_amount || 0),
+                    inst.delivery_install_ex_vat != null ? formatCurrency(inst.delivery_install_ex_vat) : '—',
+                    inst.planned_cost_total != null ? formatCurrency(inst.planned_cost_total) : '—',
+                    inst.actual_cost_total != null ? formatCurrency(inst.actual_cost_total) : '—',
+                    formatPct(inst.margin_pct),
+                    formatPct(inst.cost_variance_pct)
                 ]);
 
                 doc.autoTable({
                     startY: yPos,
-                    head: [['Completed', 'Customer', 'Works Order / Ref', 'Value']],
-                    body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—']],
+                    head: [['Completed', 'Customer', 'Works Order', 'Order £', 'D&I sold', 'Planned', 'Actual', 'Margin %', 'Var %']],
+                    body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—', '—', '—', '—', '—', '—']],
                     theme: 'striped',
                     headStyles: { fillColor: [102, 126, 234] },
                     margin: { left: 14, right: 14 },
-                    styles: { fontSize: 8 }
+                    styles: { fontSize: 7 }
                 });
                 yPos = doc.lastAutoTable.finalY + 10;
 

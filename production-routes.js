@@ -2627,6 +2627,129 @@ router.post('/orders/:id/leadlock/install-booked', requireProductionAuth, requir
     }
 });
 
+// ============ INSTALL COST SCENARIOS ============
+
+router.get('/orders/:id/install-cost', requireProductionAuth, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        if (!summary) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        res.json({ success: true, ...summary });
+    } catch (error) {
+        console.error('Get install cost summary error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get install cost summary' });
+    }
+});
+
+router.post('/orders/:id/install-cost/scenarios', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        const createdBy = req.session && req.session.production_user
+            ? req.session.production_user.id
+            : null;
+        const scenario = await ProductionDatabase.createInstallCostScenario(
+            orderId,
+            req.body || {},
+            createdBy
+        );
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        res.status(201).json({ success: true, scenario, ...summary });
+    } catch (error) {
+        console.error('Create install cost scenario error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create install cost scenario' });
+    }
+});
+
+router.put('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const scenarioId = parseInt(req.params.scenarioId, 10);
+        if (Number.isNaN(orderId) || Number.isNaN(scenarioId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const existing = await ProductionDatabase.getInstallCostScenarioById(scenarioId);
+        if (!existing || Number(existing.works_order_id) !== orderId) {
+            return res.status(404).json({ success: false, error: 'Scenario not found' });
+        }
+        const scenario = await ProductionDatabase.updateInstallCostScenario(scenarioId, req.body || {});
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        res.json({ success: true, scenario, ...summary });
+    } catch (error) {
+        console.error('Update install cost scenario error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update install cost scenario' });
+    }
+});
+
+router.post('/orders/:id/install-cost/scenarios/:scenarioId/set-planned', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const scenarioId = parseInt(req.params.scenarioId, 10);
+        if (Number.isNaN(orderId) || Number.isNaN(scenarioId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const scenario = await ProductionDatabase.setPlannedInstallCostScenario(orderId, scenarioId);
+        if (!scenario) {
+            return res.status(404).json({ success: false, error: 'Scenario not found' });
+        }
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        res.json({ success: true, scenario, ...summary });
+    } catch (error) {
+        console.error('Set planned install cost scenario error:', error);
+        res.status(500).json({ success: false, error: 'Failed to set planned scenario' });
+    }
+});
+
+router.delete('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        const scenarioId = parseInt(req.params.scenarioId, 10);
+        if (Number.isNaN(orderId) || Number.isNaN(scenarioId)) {
+            return res.status(400).json({ success: false, error: 'Invalid id' });
+        }
+        const existing = await ProductionDatabase.getInstallCostScenarioById(scenarioId);
+        if (!existing || Number(existing.works_order_id) !== orderId) {
+            return res.status(404).json({ success: false, error: 'Scenario not found' });
+        }
+        await ProductionDatabase.deleteInstallCostScenario(scenarioId);
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        res.json({ success: true, ...summary });
+    } catch (error) {
+        console.error('Delete install cost scenario error:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete install cost scenario' });
+    }
+});
+
+router.put('/orders/:id/install-cost/actual', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const orderId = parseInt(req.params.id, 10);
+        if (Number.isNaN(orderId)) {
+            return res.status(400).json({ success: false, error: 'Invalid order id' });
+        }
+        const order = await ProductionDatabase.getProductOrderById(orderId);
+        if (!order) {
+            return res.status(404).json({ success: false, error: 'Order not found' });
+        }
+        await ProductionDatabase.setInstallActualCost(orderId, req.body || {});
+        const summary = await ProductionDatabase.getInstallCostSummaryForOrder(orderId);
+        res.json({ success: true, ...summary });
+    } catch (error) {
+        console.error('Set install actual cost error:', error);
+        res.status(500).json({ success: false, error: 'Failed to save actual install cost' });
+    }
+});
+
 router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);

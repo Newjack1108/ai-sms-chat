@@ -219,8 +219,69 @@ function normalizeLeadLockWebhookPayload(body) {
         delivery_location_notes: deliveryLocationNotes,
         crm_customer_address: crmCustomerAddress,
         what3words,
-        crm_what3words: crmWhat3words
+        crm_what3words: crmWhat3words,
+        delivery_install_ex_vat: resolveDeliveryInstallExVat(body),
+        delivery_install_label: optionalString(body.delivery_install_label)
+            || deriveDeliveryInstallFromItems(body.items).label
     };
+}
+
+const DELIVERY_INSTALL_DESCRIPTIONS = new Set([
+    'Delivery & Installation',
+    'Delivery only',
+    'Delivery',
+    'Installation'
+]);
+
+function isDeliveryOrInstallItem(item) {
+    if (!item || typeof item !== 'object') return false;
+    const lineType = item.line_type != null ? String(item.line_type).trim().toUpperCase() : '';
+    if (lineType === 'DELIVERY' || lineType === 'INSTALLATION') return true;
+    const desc = item.description != null ? String(item.description).trim() : '';
+    return DELIVERY_INSTALL_DESCRIPTIONS.has(desc);
+}
+
+/**
+ * Best-effort sold delivery/install Ex VAT from line items when webhook omits the field.
+ * @param {unknown} items
+ * @returns {{ amount: number|null, label: string|null }}
+ */
+function deriveDeliveryInstallFromItems(items) {
+    if (!Array.isArray(items)) return { amount: null, label: null };
+    const matched = items.filter(isDeliveryOrInstallItem);
+    if (matched.length === 0) return { amount: null, label: null };
+    let total = 0;
+    const labels = [];
+    const seen = new Set();
+    for (const item of matched) {
+        const qty = parseAmount(item.quantity, 1);
+        const unit = parseAmount(item.unit_price, 0);
+        const lineTotal = item.final_line_total != null
+            ? parseAmount(item.final_line_total, qty * unit)
+            : qty * unit;
+        total += lineTotal;
+        const desc = item.description != null ? String(item.description).trim() : '';
+        if (desc && !seen.has(desc)) {
+            seen.add(desc);
+            labels.push(desc);
+        }
+    }
+    return {
+        amount: Math.round(total * 100) / 100,
+        label: labels.length ? labels.join(', ') : 'Delivery / Installation'
+    };
+}
+
+/**
+ * @param {object} body
+ * @returns {number|null}
+ */
+function resolveDeliveryInstallExVat(body) {
+    if (body.delivery_install_ex_vat !== undefined && body.delivery_install_ex_vat !== null && body.delivery_install_ex_vat !== '') {
+        const n = parseAmount(body.delivery_install_ex_vat, NaN);
+        return Number.isFinite(n) ? n : null;
+    }
+    return deriveDeliveryInstallFromItems(body.items).amount;
 }
 
 /**
@@ -295,5 +356,7 @@ module.exports = {
     reconcileLeadLockPaymentFlags,
     deriveLeadLockPaymentStatusLabel,
     resolveTravelTimeHoursRoundTrip,
+    deriveDeliveryInstallFromItems,
+    isDeliveryOrInstallItem,
     handleLeadLockWorkOrderWebhook
 };

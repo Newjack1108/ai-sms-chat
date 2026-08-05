@@ -1420,8 +1420,10 @@ function renderLeadLockWorkOrderAddressHtml(order) {
 
 /**
  * Payment summary for LeadLock work orders.
+ * @param {object} order
+ * @param {{ includeTotal?: boolean }} options Order total is opt-in so it stays off printed sheets.
  */
-function renderLeadLockPaymentSummaryHtml(order) {
+function renderLeadLockPaymentSummaryHtml(order, options = {}) {
     if (!order || order.leadlock_order_id == null || String(order.leadlock_order_id).trim() === '') {
         return '';
     }
@@ -1430,9 +1432,14 @@ function renderLeadLockPaymentSummaryHtml(order) {
     const pay = reconcileLeadLockPaymentFlagsForDisplay(order);
     const statusLabel = deriveLeadLockPaymentStatusLabel(pay);
     const invoice = (order.invoice_number || '').trim();
+    // LeadLock sends total_amount excluding VAT, while deposit / balance are inclusive.
+    const totalAmt = parseFloat(order.total_amount);
+    const totalHtml = options.includeTotal === true && Number.isFinite(totalAmt)
+        ? `<p style="margin: 0 0 6px 0;"><strong>Order total (ex VAT):</strong> ${formatCurrency(totalAmt)}</p>`
+        : '';
     return `<div style="margin-bottom: 16px; padding: 12px 16px; background: #eef6ff; border: 1px solid #b8d4f0; border-radius: 8px;">
 <h4 style="margin: 0 0 10px 0; font-size: 15px;">Payment</h4>
-<p style="margin: 0 0 6px 0;"><strong>Status:</strong> ${escapeHtml(statusLabel)}</p>
+${totalHtml}<p style="margin: 0 0 6px 0;"><strong>Status:</strong> ${escapeHtml(statusLabel)}</p>
 <p style="margin: 0 0 6px 0;"><strong>Deposit:</strong> ${escapeHtml(formatLeadLockPaidLabel(pay.deposit_paid))} — ${formatCurrency(Number.isFinite(depositAmt) ? depositAmt : 0)}</p>
 <p style="margin: 0 0 6px 0;"><strong>Balance:</strong> ${escapeHtml(formatLeadLockPaidLabel(pay.balance_paid))} — ${formatCurrency(Number.isFinite(balanceAmt) ? balanceAmt : 0)}</p>
 <p style="margin: 0 0 6px 0;"><strong>Paid in full:</strong> ${pay.paid_in_full ? 'Yes' : 'No'}</p>
@@ -1444,5 +1451,312 @@ function renderLeadLockPaymentSummaryHtml(order) {
 function renderLeadLockWorkOrderDetailsHtml(order, options = {}) {
     if (!isLeadLockOrder(order)) return '';
     const includePayment = options.includePayment !== false;
-    return renderLeadLockWorkOrderAddressHtml(order) + (includePayment ? renderLeadLockPaymentSummaryHtml(order) : '');
+    return renderLeadLockWorkOrderAddressHtml(order)
+        + (includePayment
+            ? renderLeadLockPaymentSummaryHtml(order, { includeTotal: options.includeTotal === true })
+            : '');
+}
+
+function formatInstallCostPct(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    return `${Number(value).toFixed(1)}%`;
+}
+
+function parseInstallCostField(value) {
+    const n = parseFloat(value);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
+}
+
+function readInstallCostBreakdownFromPrefix(prefix) {
+    return {
+        cost_mileage: parseInstallCostField(document.getElementById(`${prefix}_mileage`)?.value),
+        cost_labour: parseInstallCostField(document.getElementById(`${prefix}_labour`)?.value),
+        cost_hotel: parseInstallCostField(document.getElementById(`${prefix}_hotel`)?.value),
+        cost_meals: parseInstallCostField(document.getElementById(`${prefix}_meals`)?.value)
+    };
+}
+
+function installCostBreakdownInputsHtml(prefix, values = {}, { includeNotes = false, notesValue = '' } = {}) {
+    const v = {
+        mileage: values.cost_mileage != null ? values.cost_mileage : 0,
+        labour: values.cost_labour != null ? values.cost_labour : 0,
+        hotel: values.cost_hotel != null ? values.cost_hotel : 0,
+        meals: values.cost_meals != null ? values.cost_meals : 0
+    };
+    const notesHtml = includeNotes
+        ? `<label style="display:block;margin-top:8px;">Notes
+            <textarea id="${prefix}_notes" class="form-input" rows="2">${escapeHtml(notesValue || '')}</textarea>
+           </label>`
+        : '';
+    return `
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
+            <label>Mileage £<input type="number" min="0" step="0.01" id="${prefix}_mileage" class="form-input" value="${v.mileage}"></label>
+            <label>Labour £<input type="number" min="0" step="0.01" id="${prefix}_labour" class="form-input" value="${v.labour}"></label>
+            <label>Hotel £<input type="number" min="0" step="0.01" id="${prefix}_hotel" class="form-input" value="${v.hotel}"></label>
+            <label>Meals £<input type="number" min="0" step="0.01" id="${prefix}_meals" class="form-input" value="${v.meals}"></label>
+        </div>
+        ${notesHtml}
+    `;
+}
+
+function renderInstallCostComparisonHtml(summary) {
+    const sold = summary.delivery_install_ex_vat;
+    const planned = summary.planned ? parseFloat(summary.planned.cost_total) : null;
+    const actual = summary.actual ? parseFloat(summary.actual.cost_total) : null;
+    return `
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:10px 0 14px;">
+            <div><strong>Sold (ex VAT)</strong><div>${sold != null ? formatCurrency(sold) : '—'}</div>
+                <div style="font-size:12px;color:#666;">${escapeHtml(summary.delivery_install_label || 'Delivery / install')}</div></div>
+            <div><strong>Planned</strong><div>${planned != null ? formatCurrency(planned) : '—'}</div></div>
+            <div><strong>Actual</strong><div>${actual != null ? formatCurrency(actual) : '—'}</div></div>
+            <div><strong>Margin %</strong><div>${formatInstallCostPct(summary.margin_pct)}</div>
+                <div style="font-size:12px;color:#666;">(sold − actual) / sold</div></div>
+            <div><strong>Cost variance %</strong><div>${formatInstallCostPct(summary.cost_variance_pct)}</div>
+                <div style="font-size:12px;color:#666;">(actual − planned) / planned</div></div>
+        </div>
+    `;
+}
+
+function renderInstallCostPanelHtml(orderId, summary) {
+    const scenarios = summary.scenarios || [];
+    const scenarioRows = scenarios.length === 0
+        ? '<p style="margin:0 0 10px;color:#666;">No cost scenarios yet.</p>'
+        : `<table class="table" style="margin-bottom:12px;">
+            <thead><tr>
+                <th>Name</th><th class="text-right">Mileage</th><th class="text-right">Labour</th>
+                <th class="text-right">Hotel</th><th class="text-right">Meals</th>
+                <th class="text-right">Total</th><th></th>
+            </tr></thead>
+            <tbody>
+            ${scenarios.map((s) => `
+                <tr style="${s.is_planned ? 'background:#e8f5e9;' : ''}">
+                    <td>${escapeHtml(s.name || 'Scenario')}${s.is_planned ? ' <strong>(planned)</strong>' : ''}</td>
+                    <td class="text-right">${formatCurrency(s.cost_mileage || 0)}</td>
+                    <td class="text-right">${formatCurrency(s.cost_labour || 0)}</td>
+                    <td class="text-right">${formatCurrency(s.cost_hotel || 0)}</td>
+                    <td class="text-right">${formatCurrency(s.cost_meals || 0)}</td>
+                    <td class="text-right">${formatCurrency(s.cost_total || 0)}</td>
+                    <td style="white-space:nowrap;">
+                        ${s.is_planned ? '' : `<button type="button" class="btn btn-secondary btn-sm" onclick="setPlannedInstallCostScenario(${orderId}, ${s.id})">Set planned</button>`}
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="editInstallCostScenario(${orderId}, ${s.id})">Edit</button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="deleteInstallCostScenario(${orderId}, ${s.id})">Delete</button>
+                    </td>
+                </tr>
+            `).join('')}
+            </tbody></table>`;
+
+    const actual = summary.actual || {};
+    return `
+        <div id="installCostPanel" style="margin-top:16px;padding:12px 14px;background:#f7faf7;border:1px solid #c5d6c5;border-radius:8px;">
+            <h4 style="margin:0 0 8px 0;">Install cost scenarios</h4>
+            <p style="margin:0 0 8px;font-size:13px;color:#555;">
+                Sold = LeadLock delivery/install charge (ex VAT). Scenarios/actual are production costs (mileage + labour + hotel + meals), no sales margin.
+            </p>
+            ${renderInstallCostComparisonHtml(summary)}
+            ${scenarioRows}
+            <div style="padding:10px;background:#fff;border:1px solid #dde5dd;border-radius:6px;margin-bottom:12px;">
+                <strong>New scenario</strong>
+                <label style="display:block;margin:8px 0;">Name
+                    <input type="text" id="ics_new_name" class="form-input" value="Scenario ${scenarios.length + 1}">
+                </label>
+                ${installCostBreakdownInputsHtml('ics_new')}
+                <label style="display:block;margin-top:8px;">Notes
+                    <textarea id="ics_new_notes" class="form-input" rows="2"></textarea>
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+                    <input type="checkbox" id="ics_new_planned"> Set as planned
+                </label>
+                <button type="button" class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="createInstallCostScenario(${orderId})">Add scenario</button>
+            </div>
+            <div style="padding:10px;background:#fff;border:1px solid #dde5dd;border-radius:6px;">
+                <strong>Actual cost</strong>
+                ${installCostBreakdownInputsHtml('ics_actual', {
+                    cost_mileage: actual.cost_mileage,
+                    cost_labour: actual.cost_labour,
+                    cost_hotel: actual.cost_hotel,
+                    cost_meals: actual.cost_meals
+                }, { includeNotes: true, notesValue: actual.notes || '' })}
+                <button type="button" class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="saveInstallActualCost(${orderId})">Save actual</button>
+            </div>
+        </div>
+    `;
+}
+
+async function loadInstallCostPanel(orderId, containerEl) {
+    if (!containerEl) return null;
+    try {
+        const summary = await apiCall(`/orders/${orderId}/install-cost`);
+        containerEl.innerHTML = renderInstallCostPanelHtml(orderId, summary);
+        return summary;
+    } catch (error) {
+        containerEl.innerHTML = `<p style="color:#c0392b;">Could not load install costs: ${escapeHtml(error.message || 'error')}</p>`;
+        return null;
+    }
+}
+
+async function refreshInstallCostPanel(orderId) {
+    const panel = document.getElementById('installCostPanel');
+    const host = panel ? panel.parentElement : document.getElementById(`installCostHost_${orderId}`);
+    if (!host) return;
+    await loadInstallCostPanel(orderId, host);
+}
+
+async function createInstallCostScenario(orderId) {
+    try {
+        const body = {
+            name: document.getElementById('ics_new_name')?.value || 'Scenario',
+            notes: document.getElementById('ics_new_notes')?.value || null,
+            is_planned: !!(document.getElementById('ics_new_planned')?.checked),
+            ...readInstallCostBreakdownFromPrefix('ics_new')
+        };
+        await apiCall(`/orders/${orderId}/install-cost/scenarios`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+        await refreshInstallCostPanel(orderId);
+        if (typeof showAlert === 'function') showAlert('Scenario created');
+    } catch (error) {
+        if (typeof showAlert === 'function') showAlert(error.message || 'Failed to create scenario', 'error');
+    }
+}
+
+async function setPlannedInstallCostScenario(orderId, scenarioId) {
+    try {
+        await apiCall(`/orders/${orderId}/install-cost/scenarios/${scenarioId}/set-planned`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        await refreshInstallCostPanel(orderId);
+        if (typeof showAlert === 'function') showAlert('Planned scenario updated');
+    } catch (error) {
+        if (typeof showAlert === 'function') showAlert(error.message || 'Failed to set planned scenario', 'error');
+    }
+}
+
+async function deleteInstallCostScenario(orderId, scenarioId) {
+    if (!confirm('Delete this cost scenario?')) return;
+    try {
+        await apiCall(`/orders/${orderId}/install-cost/scenarios/${scenarioId}`, { method: 'DELETE' });
+        await refreshInstallCostPanel(orderId);
+        if (typeof showAlert === 'function') showAlert('Scenario deleted');
+    } catch (error) {
+        if (typeof showAlert === 'function') showAlert(error.message || 'Failed to delete scenario', 'error');
+    }
+}
+
+async function editInstallCostScenario(orderId, scenarioId) {
+    try {
+        const summary = await apiCall(`/orders/${orderId}/install-cost`);
+        const scenario = (summary.scenarios || []).find((s) => Number(s.id) === Number(scenarioId));
+        if (!scenario) {
+            if (typeof showAlert === 'function') showAlert('Scenario not found', 'error');
+            return;
+        }
+        const name = prompt('Scenario name', scenario.name || 'Scenario');
+        if (name == null) return;
+        const mileage = prompt('Mileage £', String(scenario.cost_mileage || 0));
+        if (mileage == null) return;
+        const labour = prompt('Labour £', String(scenario.cost_labour || 0));
+        if (labour == null) return;
+        const hotel = prompt('Hotel £', String(scenario.cost_hotel || 0));
+        if (hotel == null) return;
+        const meals = prompt('Meals £', String(scenario.cost_meals || 0));
+        if (meals == null) return;
+        await apiCall(`/orders/${orderId}/install-cost/scenarios/${scenarioId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                name,
+                cost_mileage: parseInstallCostField(mileage),
+                cost_labour: parseInstallCostField(labour),
+                cost_hotel: parseInstallCostField(hotel),
+                cost_meals: parseInstallCostField(meals)
+            })
+        });
+        await refreshInstallCostPanel(orderId);
+        if (typeof showAlert === 'function') showAlert('Scenario updated');
+    } catch (error) {
+        if (typeof showAlert === 'function') showAlert(error.message || 'Failed to update scenario', 'error');
+    }
+}
+
+async function saveInstallActualCost(orderId) {
+    try {
+        const body = {
+            ...readInstallCostBreakdownFromPrefix('ics_actual'),
+            notes: document.getElementById('ics_actual_notes')?.value || null
+        };
+        await apiCall(`/orders/${orderId}/install-cost/actual`, {
+            method: 'PUT',
+            body: JSON.stringify(body)
+        });
+        await refreshInstallCostPanel(orderId);
+        if (typeof showAlert === 'function') showAlert('Actual cost saved');
+    } catch (error) {
+        if (typeof showAlert === 'function') showAlert(error.message || 'Failed to save actual cost', 'error');
+    }
+}
+
+/**
+ * Prompt for actual install cost when completing an install if none recorded yet.
+ * Returns true if caller should continue (saved, skipped, or already present).
+ */
+async function promptInstallActualCostIfNeeded(orderId) {
+    if (!orderId) return true;
+    let summary;
+    try {
+        summary = await apiCall(`/orders/${orderId}/install-cost`);
+    } catch (error) {
+        return true;
+    }
+    if (summary && summary.actual && summary.actual.cost_total != null) {
+        return true;
+    }
+    return new Promise((resolve) => {
+        const existing = document.getElementById('installActualPromptModal');
+        if (existing) existing.remove();
+        const modal = document.createElement('div');
+        modal.className = 'modal show';
+        modal.id = 'installActualPromptModal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:480px;">
+                <div class="modal-header">
+                    <h3>Record actual install cost</h3>
+                    <button class="modal-close" type="button" data-action="skip">&times;</button>
+                </div>
+                <div style="padding:16px;">
+                    <p style="margin-top:0;">No actual install cost is recorded for works order #${orderId}. Enter costs (ex VAT) or skip for now.</p>
+                    ${installCostBreakdownInputsHtml('ics_prompt', {}, { includeNotes: true })}
+                    <div style="display:flex;gap:8px;margin-top:12px;">
+                        <button type="button" class="btn btn-primary" data-action="save">Save actual</button>
+                        <button type="button" class="btn btn-secondary" data-action="skip">Skip for now</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', async (ev) => {
+            const action = ev.target && ev.target.getAttribute('data-action');
+            if (!action) return;
+            if (action === 'skip') {
+                modal.remove();
+                resolve(true);
+                return;
+            }
+            if (action === 'save') {
+                try {
+                    await apiCall(`/orders/${orderId}/install-cost/actual`, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            ...readInstallCostBreakdownFromPrefix('ics_prompt'),
+                            notes: document.getElementById('ics_prompt_notes')?.value || null
+                        })
+                    });
+                    modal.remove();
+                    if (typeof showAlert === 'function') showAlert('Actual install cost saved');
+                    resolve(true);
+                } catch (error) {
+                    if (typeof showAlert === 'function') showAlert(error.message || 'Failed to save actual cost', 'error');
+                }
+            }
+        });
+    });
 }

@@ -2009,6 +2009,13 @@
                     });
                     showAlert('Installation created successfully');
                 }
+
+                if (payload.status === 'completed' && formData.works_order_id && typeof promptInstallActualCostIfNeeded === 'function') {
+                    const woId = parseInt(formData.works_order_id, 10);
+                    if (!Number.isNaN(woId)) {
+                        await promptInstallActualCostIfNeeded(woId);
+                    }
+                }
                 
                 hideModal('installationModal');
                 await loadData();
@@ -2132,6 +2139,9 @@
         async function sendCompletedToLeadLock(orderId) {
             if (!confirm('Send completed status to LeadLock for this order?')) return;
             try {
+                if (typeof promptInstallActualCostIfNeeded === 'function') {
+                    await promptInstallActualCostIfNeeded(orderId);
+                }
                 const result = await apiCall(`/orders/${orderId}/leadlock/completed`, {
                     method: 'POST',
                     body: JSON.stringify({})
