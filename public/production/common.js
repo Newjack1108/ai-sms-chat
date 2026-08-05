@@ -1476,19 +1476,40 @@ function readInstallCostBreakdownFromPrefix(prefix) {
     };
 }
 
-function installCostBreakdownInputsHtml(prefix, values = {}, { includeNotes = false, notesValue = '' } = {}) {
+function installCostBreakdownInputsHtml(prefix, values = {}, { includeNotes = false, notesValue = '', suggested = null } = {}) {
     const v = {
         mileage: values.cost_mileage != null ? values.cost_mileage : 0,
         labour: values.cost_labour != null ? values.cost_labour : 0,
         hotel: values.cost_hotel != null ? values.cost_hotel : 0,
         meals: values.cost_meals != null ? values.cost_meals : 0
     };
+    const hours = values.install_hours != null
+        ? values.install_hours
+        : (suggested && suggested.install_hours != null ? suggested.install_hours : 0);
+    const miles = values.one_way_miles != null
+        ? values.one_way_miles
+        : (suggested && suggested.one_way_miles != null ? suggested.one_way_miles : 0);
+    const hourlyRate = suggested && suggested.hourly_rate != null ? suggested.hourly_rate : 45;
+    const costPerMile = suggested && suggested.cost_per_mile != null ? suggested.cost_per_mile : 0.45;
     const notesHtml = includeNotes
         ? `<label style="display:block;margin-top:8px;">Notes
             <textarea id="${prefix}_notes" class="form-input" rows="2">${escapeHtml(notesValue || '')}</textarea>
            </label>`
         : '';
     return `
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:8px;">
+            <label>Install hours
+                <input type="number" min="0" step="0.25" id="${prefix}_hours" class="form-input" value="${hours}"
+                    data-hourly-rate="${hourlyRate}" oninput="recalcInstallCostFromDrivers('${prefix}')">
+            </label>
+            <label>One-way miles
+                <input type="number" min="0" step="0.1" id="${prefix}_miles" class="form-input" value="${miles}"
+                    data-cost-per-mile="${costPerMile}" oninput="recalcInstallCostFromDrivers('${prefix}')">
+            </label>
+        </div>
+        <p style="margin:0 0 8px;font-size:12px;color:#666;">
+            Hours × £${Number(hourlyRate).toFixed(2)}/h → labour. Miles × 2 × fitting days × £${Number(costPerMile).toFixed(2)}/mi → mileage. Edit hours/miles or the £ amounts below.
+        </p>
         <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;">
             <label>Mileage £<input type="number" min="0" step="0.01" id="${prefix}_mileage" class="form-input" value="${v.mileage}"></label>
             <label>Labour £<input type="number" min="0" step="0.01" id="${prefix}_labour" class="form-input" value="${v.labour}"></label>
@@ -1497,6 +1518,22 @@ function installCostBreakdownInputsHtml(prefix, values = {}, { includeNotes = fa
         </div>
         ${notesHtml}
     `;
+}
+
+function recalcInstallCostFromDrivers(prefix) {
+    const hoursEl = document.getElementById(`${prefix}_hours`);
+    const milesEl = document.getElementById(`${prefix}_miles`);
+    const labourEl = document.getElementById(`${prefix}_labour`);
+    const mileageEl = document.getElementById(`${prefix}_mileage`);
+    if (!hoursEl || !milesEl || !labourEl || !mileageEl) return;
+    const hours = parseInstallCostField(hoursEl.value);
+    const oneWayMiles = parseInstallCostField(milesEl.value);
+    const hourlyRate = parseInstallCostField(hoursEl.getAttribute('data-hourly-rate') || 45);
+    const costPerMile = parseInstallCostField(milesEl.getAttribute('data-cost-per-mile') || 0.45);
+    const fittingDays = hours > 0 ? Math.max(1, Math.ceil(hours / 8)) : 0;
+    const roundTrips = oneWayMiles > 0 && fittingDays > 0 ? fittingDays : 0;
+    labourEl.value = String(Math.round(hours * hourlyRate * 100) / 100);
+    mileageEl.value = String(Math.round(oneWayMiles * 2 * roundTrips * costPerMile * 100) / 100);
 }
 
 function renderInstallCostComparisonHtml(summary) {
@@ -1519,6 +1556,7 @@ function renderInstallCostComparisonHtml(summary) {
 
 function renderInstallCostPanelHtml(orderId, summary) {
     const scenarios = summary.scenarios || [];
+    const suggested = summary.suggested || {};
     const scenarioRows = scenarios.length === 0
         ? '<p style="margin:0 0 10px;color:#666;">No cost scenarios yet.</p>'
         : `<table class="table" style="margin-bottom:12px;">
@@ -1545,7 +1583,22 @@ function renderInstallCostPanelHtml(orderId, summary) {
             `).join('')}
             </tbody></table>`;
 
-    const actual = summary.actual || {};
+    const hasActual = !!(summary.actual && summary.actual.cost_total != null);
+    const actualSource = hasActual
+        ? summary.actual
+        : (summary.planned || suggested);
+    const actualPrefill = {
+        cost_mileage: actualSource.cost_mileage != null ? actualSource.cost_mileage : 0,
+        cost_labour: actualSource.cost_labour != null ? actualSource.cost_labour : 0,
+        cost_hotel: actualSource.cost_hotel != null ? actualSource.cost_hotel : 0,
+        cost_meals: actualSource.cost_meals != null ? actualSource.cost_meals : 0,
+        install_hours: suggested.install_hours,
+        one_way_miles: suggested.one_way_miles
+    };
+    const suggestedNote = suggested.note
+        ? `<p style="margin:0 0 8px;font-size:12px;color:#2e7d32;">${escapeHtml(suggested.note)}</p>`
+        : '';
+
     return `
         <div id="installCostPanel" style="margin-top:16px;padding:12px 14px;background:#f7faf7;border:1px solid #c5d6c5;border-radius:8px;">
             <h4 style="margin:0 0 8px 0;">Install cost scenarios</h4>
@@ -1556,10 +1609,18 @@ function renderInstallCostPanelHtml(orderId, summary) {
             ${scenarioRows}
             <div style="padding:10px;background:#fff;border:1px solid #dde5dd;border-radius:6px;margin-bottom:12px;">
                 <strong>New scenario</strong>
+                ${suggestedNote}
                 <label style="display:block;margin:8px 0;">Name
                     <input type="text" id="ics_new_name" class="form-input" value="Scenario ${scenarios.length + 1}">
                 </label>
-                ${installCostBreakdownInputsHtml('ics_new')}
+                ${installCostBreakdownInputsHtml('ics_new', {
+                    cost_mileage: suggested.cost_mileage,
+                    cost_labour: suggested.cost_labour,
+                    cost_hotel: 0,
+                    cost_meals: 0,
+                    install_hours: suggested.install_hours,
+                    one_way_miles: suggested.one_way_miles
+                }, { suggested })}
                 <label style="display:block;margin-top:8px;">Notes
                     <textarea id="ics_new_notes" class="form-input" rows="2"></textarea>
                 </label>
@@ -1570,12 +1631,12 @@ function renderInstallCostPanelHtml(orderId, summary) {
             </div>
             <div style="padding:10px;background:#fff;border:1px solid #dde5dd;border-radius:6px;">
                 <strong>Actual cost</strong>
-                ${installCostBreakdownInputsHtml('ics_actual', {
-                    cost_mileage: actual.cost_mileage,
-                    cost_labour: actual.cost_labour,
-                    cost_hotel: actual.cost_hotel,
-                    cost_meals: actual.cost_meals
-                }, { includeNotes: true, notesValue: actual.notes || '' })}
+                ${!hasActual ? '<p style="margin:6px 0 8px;font-size:12px;color:#666;">Pre-filled from planned scenario (or suggested defaults). Edit before saving.</p>' : ''}
+                ${installCostBreakdownInputsHtml('ics_actual', actualPrefill, {
+                    includeNotes: true,
+                    notesValue: (summary.actual && summary.actual.notes) || '',
+                    suggested
+                })}
                 <button type="button" class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="saveInstallActualCost(${orderId})">Save actual</button>
             </div>
         </div>
@@ -1711,6 +1772,16 @@ async function promptInstallActualCostIfNeeded(orderId) {
     if (summary && summary.actual && summary.actual.cost_total != null) {
         return true;
     }
+    const suggested = summary.suggested || {};
+    const source = summary.planned || suggested;
+    const prefill = {
+        cost_mileage: source.cost_mileage != null ? source.cost_mileage : 0,
+        cost_labour: source.cost_labour != null ? source.cost_labour : 0,
+        cost_hotel: source.cost_hotel != null ? source.cost_hotel : 0,
+        cost_meals: source.cost_meals != null ? source.cost_meals : 0,
+        install_hours: suggested.install_hours,
+        one_way_miles: suggested.one_way_miles
+    };
     return new Promise((resolve) => {
         const existing = document.getElementById('installActualPromptModal');
         if (existing) existing.remove();
@@ -1718,14 +1789,15 @@ async function promptInstallActualCostIfNeeded(orderId) {
         modal.className = 'modal show';
         modal.id = 'installActualPromptModal';
         modal.innerHTML = `
-            <div class="modal-content" style="max-width:480px;">
+            <div class="modal-content" style="max-width:520px;">
                 <div class="modal-header">
                     <h3>Record actual install cost</h3>
                     <button class="modal-close" type="button" data-action="skip">&times;</button>
                 </div>
                 <div style="padding:16px;">
-                    <p style="margin-top:0;">No actual install cost is recorded for works order #${orderId}. Enter costs (ex VAT) or skip for now.</p>
-                    ${installCostBreakdownInputsHtml('ics_prompt', {}, { includeNotes: true })}
+                    <p style="margin-top:0;">No actual install cost is recorded for works order #${orderId}. Values are pre-filled from planned/suggested costs — edit or skip.</p>
+                    ${suggested.note ? `<p style="font-size:12px;color:#2e7d32;">${escapeHtml(suggested.note)}</p>` : ''}
+                    ${installCostBreakdownInputsHtml('ics_prompt', prefill, { includeNotes: true, suggested })}
                     <div style="display:flex;gap:8px;margin-top:12px;">
                         <button type="button" class="btn btn-primary" data-action="save">Save actual</button>
                         <button type="button" class="btn btn-secondary" data-action="skip">Skip for now</button>

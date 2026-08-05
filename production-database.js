@@ -1214,6 +1214,17 @@ function initializeSQLite() {
     if (settingCheck.count === 0) {
         db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run('labour_rate_per_hour', '25.00');
     }
+    const installCostDefaultSettings = [
+        ['install_hourly_rate', '45.00'],
+        ['install_cost_per_mile', '0.45'],
+        ['install_average_speed_mph', '45']
+    ];
+    for (const [key, value] of installCostDefaultSettings) {
+        const exists = db.prepare('SELECT COUNT(*) as count FROM production_settings WHERE key = ?').get(key);
+        if (!exists || exists.count === 0) {
+            db.prepare('INSERT INTO production_settings (key, value) VALUES (?, ?)').run(key, value);
+        }
+    }
     
     // Migrate production_users role constraint to include 'office' role
     // SQLite doesn't support ALTER TABLE for CHECK constraints, so we need to recreate the table
@@ -3082,6 +3093,17 @@ async function initializePostgreSQL() {
         const settingCheck = await pool.query(`SELECT COUNT(*) as count FROM production_settings WHERE key = 'labour_rate_per_hour'`);
         if (parseInt(settingCheck.rows[0].count) === 0) {
             await pool.query(`INSERT INTO production_settings (key, value) VALUES ('labour_rate_per_hour', '25.00')`);
+        }
+        const installCostDefaultSettings = [
+            ['install_hourly_rate', '45.00'],
+            ['install_cost_per_mile', '0.45'],
+            ['install_average_speed_mph', '45']
+        ];
+        for (const [key, value] of installCostDefaultSettings) {
+            const exists = await pool.query(`SELECT COUNT(*) as count FROM production_settings WHERE key = $1`, [key]);
+            if (parseInt(exists.rows[0].count) === 0) {
+                await pool.query(`INSERT INTO production_settings (key, value) VALUES ($1, $2)`, [key, value]);
+            }
         }
         
         // Migrate timesheet_entries to add hour calculation columns
@@ -9157,6 +9179,72 @@ class ProductionDatabase {
         return this.getProductOrderById(worksOrderId);
     }
 
+    /**
+     * Suggested mileage/labour costs from works-order install hours + drive time.
+     * Uses production_settings: install_hourly_rate, install_cost_per_mile, install_average_speed_mph.
+     * Assumes no overnight (round trips = fitting days) — editable in the UI.
+     */
+    static async getInstallCostSuggestedDefaults(order) {
+        const hourlyRate = parseFloat(await this.getSetting('install_hourly_rate') || 45);
+        const costPerMile = parseFloat(await this.getSetting('install_cost_per_mile') || 0.45);
+        const averageSpeedMph = parseFloat(await this.getSetting('install_average_speed_mph') || 45);
+
+        let installHours = order && order.labour_estimate_hours != null
+            ? parseFloat(order.labour_estimate_hours)
+            : NaN;
+        if (!Number.isFinite(installHours) || installHours < 0) {
+            installHours = 0;
+            if (order && order.id != null) {
+                let items;
+                if (isPostgreSQL) {
+                    const r = await pool.query(
+                        `SELECT install_hours FROM leadlock_work_order_items WHERE order_id = $1`,
+                        [order.id]
+                    );
+                    items = r.rows;
+                } else {
+                    items = db.prepare(
+                        `SELECT install_hours FROM leadlock_work_order_items WHERE order_id = ?`
+                    ).all(order.id);
+                }
+                installHours = (items || []).reduce((sum, i) => sum + (parseFloat(i.install_hours) || 0), 0);
+            }
+        }
+
+        const travelRt = order && order.travel_time_hours_round_trip != null
+            ? parseFloat(order.travel_time_hours_round_trip)
+            : NaN;
+        const travelRtHours = Number.isFinite(travelRt) && travelRt > 0 ? travelRt : 0;
+        const speed = Number.isFinite(averageSpeedMph) && averageSpeedMph > 0 ? averageSpeedMph : 45;
+        const oneWayMiles = travelRtHours > 0 ? (travelRtHours / 2) * speed : 0;
+        const fittingDays = installHours > 0 ? Math.max(1, Math.ceil(installHours / 8)) : 1;
+        const roundTrips = travelRtHours > 0 ? fittingDays : 0;
+
+        const rate = Number.isFinite(hourlyRate) && hourlyRate > 0 ? hourlyRate : 0;
+        const perMile = Number.isFinite(costPerMile) && costPerMile > 0 ? costPerMile : 0;
+        const costLabour = Math.round(installHours * rate * 100) / 100;
+        const costMileage = Math.round(oneWayMiles * 2 * roundTrips * perMile * 100) / 100;
+
+        return {
+            install_hours: Math.round(installHours * 100) / 100,
+            one_way_miles: Math.round(oneWayMiles * 100) / 100,
+            round_trips: roundTrips,
+            fitting_days: fittingDays,
+            travel_time_hours_round_trip: travelRtHours || null,
+            hourly_rate: rate,
+            cost_per_mile: perMile,
+            average_speed_mph: speed,
+            cost_mileage: costMileage,
+            cost_labour: costLabour,
+            cost_hotel: 0,
+            cost_meals: 0,
+            cost_total: Math.round((costMileage + costLabour) * 100) / 100,
+            note: travelRtHours > 0
+                ? `From ${installHours.toFixed(2)}h install × £${rate.toFixed(2)}/h; ~${oneWayMiles.toFixed(1)} mi one-way × ${roundTrips} round trip(s) @ £${perMile.toFixed(2)}/mi`
+                : `From ${installHours.toFixed(2)}h install × £${rate.toFixed(2)}/h (no drive time on order — mileage left at 0)`
+        };
+    }
+
     static async getInstallCostSummaryForOrder(worksOrderId) {
         const order = await this.getProductOrderById(worksOrderId);
         if (!order) return null;
@@ -9165,10 +9253,12 @@ class ProductionDatabase {
         const sold = order.delivery_install_ex_vat != null ? parseFloat(order.delivery_install_ex_vat) : null;
         const plannedTotal = planned ? parseFloat(planned.cost_total || 0) : null;
         const actualTotal = order.actual_cost_total != null ? parseFloat(order.actual_cost_total) : null;
+        const suggested = await this.getInstallCostSuggestedDefaults(order);
         return {
             order_id: worksOrderId,
             delivery_install_ex_vat: Number.isFinite(sold) ? sold : null,
             delivery_install_label: order.delivery_install_label || null,
+            suggested,
             scenarios,
             planned,
             actual: order.actual_cost_total != null ? {
