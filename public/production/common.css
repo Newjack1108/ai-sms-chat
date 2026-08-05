@@ -986,7 +986,12 @@ body.dashboard-page {
         box-shadow: var(--shadow-md);
         border: 1px solid var(--border);
         margin-top: 0;
-        z-index: 2000;
+        z-index: 10000;
+    }
+
+    /* Portaled mobile menus live on body; keep them visible above page chrome */
+    body > .dropdown-menu.show {
+        display: block;
     }
 
     .dropdown-toggle {

@@ -1053,26 +1053,76 @@ async function initNavbar() {
 }
 
 // Dropdown functionality
+// On mobile the navbar/table overflow clips absolute menus, so we portal open
+// menus onto document.body and position them fixed under the toggle.
+const dropdownMenuByButton = new WeakMap();
+const dropdownButtonByMenu = new WeakMap();
+
 function isMobileNavViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
 }
 
+function getDropdownMenuForButton(button) {
+    if (!button) return null;
+    const cached = dropdownMenuByButton.get(button);
+    if (cached) return cached;
+    const sibling = button.nextElementSibling;
+    if (sibling && sibling.classList.contains('dropdown-menu')) {
+        dropdownMenuByButton.set(button, sibling);
+        dropdownButtonByMenu.set(sibling, button);
+        return sibling;
+    }
+    return null;
+}
+
+function restoreDropdownMenuHome(menu) {
+    if (!menu || !menu._dropdownHome) return;
+    const { parent, placeholder } = menu._dropdownHome;
+    if (placeholder && placeholder.parentNode === parent) {
+        parent.insertBefore(menu, placeholder);
+        placeholder.remove();
+    } else if (parent) {
+        parent.appendChild(menu);
+    }
+    menu._dropdownHome = null;
+}
+
+function portalDropdownMenuToBody(menu) {
+    if (!menu || menu.parentElement === document.body) return;
+    if (!menu._dropdownHome) {
+        const placeholder = document.createComment('dropdown-home');
+        menu.parentNode.insertBefore(placeholder, menu);
+        menu._dropdownHome = { parent: placeholder.parentNode, placeholder };
+    }
+    document.body.appendChild(menu);
+}
+
 function clearDropdownMenuPosition(menu) {
     if (!menu) return;
+    menu.classList.remove('show');
     menu.style.position = '';
     menu.style.top = '';
     menu.style.left = '';
     menu.style.right = '';
     menu.style.maxWidth = '';
     menu.style.zIndex = '';
+    restoreDropdownMenuHome(menu);
 }
 
 function positionMobileDropdownMenu(button, menu) {
     if (!button || !menu) return;
     if (!isMobileNavViewport()) {
-        clearDropdownMenuPosition(menu);
+        restoreDropdownMenuHome(menu);
+        menu.style.position = '';
+        menu.style.top = '';
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.maxWidth = '';
+        menu.style.zIndex = '';
         return;
     }
+
+    portalDropdownMenuToBody(menu);
 
     const rect = button.getBoundingClientRect();
     const gutter = 8;
@@ -1080,10 +1130,9 @@ function positionMobileDropdownMenu(button, menu) {
     menu.style.position = 'fixed';
     menu.style.right = 'auto';
     menu.style.maxWidth = maxWidth + 'px';
-    menu.style.zIndex = '2000';
+    menu.style.zIndex = '10000';
     menu.style.top = Math.round(rect.bottom + 4) + 'px';
 
-    // Measure after making it visible so width is accurate
     const menuWidth = Math.min(menu.offsetWidth || 200, maxWidth);
     let left = Math.round(rect.left);
     if (left + menuWidth > window.innerWidth - gutter) {
@@ -1091,66 +1140,70 @@ function positionMobileDropdownMenu(button, menu) {
     }
     if (left < gutter) left = gutter;
     menu.style.left = left + 'px';
+
+    // If menu would go below the viewport, open upward when there is room
+    const menuHeight = menu.offsetHeight || 0;
+    if (menuHeight && rect.bottom + 4 + menuHeight > window.innerHeight - gutter && rect.top > menuHeight + gutter) {
+        menu.style.top = Math.round(rect.top - menuHeight - 4) + 'px';
+    }
 }
 
 function closeAllDropdowns() {
-    document.querySelectorAll('.dropdown-menu').forEach(menu => {
-        menu.classList.remove('show');
+    document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
         clearDropdownMenuPosition(menu);
     });
-    document.querySelectorAll('.dropdown-toggle').forEach(btn => btn.classList.remove('open'));
+    // Also clear any menus that lost .show but are still portaled
+    document.querySelectorAll('body > .dropdown-menu').forEach(menu => {
+        clearDropdownMenuPosition(menu);
+    });
+    document.querySelectorAll('.dropdown-toggle.open').forEach(btn => btn.classList.remove('open'));
 }
 
 function toggleDropdown(event, button) {
     event.preventDefault();
     event.stopPropagation();
 
-    const menu = button.nextElementSibling;
-    const willOpen = menu && menu.classList.contains('dropdown-menu') && !menu.classList.contains('show');
+    const menu = getDropdownMenuForButton(button);
+    const willOpen = menu && !menu.classList.contains('show');
 
-    // Close all other dropdowns
-    document.querySelectorAll('.dropdown-menu').forEach(otherMenu => {
-        if (otherMenu !== menu) {
-            otherMenu.classList.remove('show');
-            clearDropdownMenuPosition(otherMenu);
-        }
+    document.querySelectorAll('.dropdown-menu.show').forEach(otherMenu => {
+        if (otherMenu !== menu) clearDropdownMenuPosition(otherMenu);
     });
-    document.querySelectorAll('.dropdown-toggle').forEach(btn => {
+    document.querySelectorAll('.dropdown-toggle.open').forEach(btn => {
         if (btn !== button) btn.classList.remove('open');
     });
 
-    if (!menu || !menu.classList.contains('dropdown-menu')) return;
+    if (!menu) return;
 
     if (willOpen) {
         menu.classList.add('show');
         button.classList.add('open');
         positionMobileDropdownMenu(button, menu);
     } else {
-        menu.classList.remove('show');
         button.classList.remove('open');
         clearDropdownMenuPosition(menu);
     }
 }
 
-// Close dropdowns when clicking/tapping outside
+// Close when clicking outside the toggle and the (possibly portaled) menu
 document.addEventListener('click', function(event) {
-    if (!event.target.closest('.navbar-dropdown')) {
-        closeAllDropdowns();
+    if (event.target.closest('.navbar-dropdown') || event.target.closest('.dropdown-menu')) {
+        return;
     }
+    closeAllDropdowns();
 });
 
-// Keep fixed mobile menus aligned while scrolling/rotating
 window.addEventListener('resize', function() {
-    document.querySelectorAll('.navbar-dropdown .dropdown-menu.show').forEach(menu => {
-        const button = menu.previousElementSibling;
+    document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+        const button = dropdownButtonByMenu.get(menu);
         if (button) positionMobileDropdownMenu(button, menu);
     });
 }, { passive: true });
 
 window.addEventListener('scroll', function() {
     if (!isMobileNavViewport()) return;
-    document.querySelectorAll('.navbar-dropdown .dropdown-menu.show').forEach(menu => {
-        const button = menu.previousElementSibling;
+    document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+        const button = dropdownButtonByMenu.get(menu);
         if (button) positionMobileDropdownMenu(button, menu);
     });
 }, true);
