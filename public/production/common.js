@@ -1053,43 +1053,107 @@ async function initNavbar() {
 }
 
 // Dropdown functionality
+function isMobileNavViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function clearDropdownMenuPosition(menu) {
+    if (!menu) return;
+    menu.style.position = '';
+    menu.style.top = '';
+    menu.style.left = '';
+    menu.style.right = '';
+    menu.style.maxWidth = '';
+    menu.style.zIndex = '';
+}
+
+function positionMobileDropdownMenu(button, menu) {
+    if (!button || !menu) return;
+    if (!isMobileNavViewport()) {
+        clearDropdownMenuPosition(menu);
+        return;
+    }
+
+    const rect = button.getBoundingClientRect();
+    const gutter = 8;
+    const maxWidth = Math.min(280, window.innerWidth - gutter * 2);
+    menu.style.position = 'fixed';
+    menu.style.right = 'auto';
+    menu.style.maxWidth = maxWidth + 'px';
+    menu.style.zIndex = '2000';
+    menu.style.top = Math.round(rect.bottom + 4) + 'px';
+
+    // Measure after making it visible so width is accurate
+    const menuWidth = Math.min(menu.offsetWidth || 200, maxWidth);
+    let left = Math.round(rect.left);
+    if (left + menuWidth > window.innerWidth - gutter) {
+        left = Math.max(gutter, window.innerWidth - gutter - menuWidth);
+    }
+    if (left < gutter) left = gutter;
+    menu.style.left = left + 'px';
+}
+
+function closeAllDropdowns() {
+    document.querySelectorAll('.dropdown-menu').forEach(menu => {
+        menu.classList.remove('show');
+        clearDropdownMenuPosition(menu);
+    });
+    document.querySelectorAll('.dropdown-toggle').forEach(btn => btn.classList.remove('open'));
+}
+
 function toggleDropdown(event, button) {
+    event.preventDefault();
     event.stopPropagation();
-    
-    // Close all other dropdowns
-    const allDropdowns = document.querySelectorAll('.dropdown-menu');
-    const allButtons = document.querySelectorAll('.dropdown-toggle');
-    
-    allDropdowns.forEach(menu => {
-        if (menu !== button.nextElementSibling) {
-            menu.classList.remove('show');
-        }
-    });
-    
-    allButtons.forEach(btn => {
-        if (btn !== button) {
-            btn.classList.remove('open');
-        }
-    });
-    
-    // Toggle current dropdown
+
     const menu = button.nextElementSibling;
-    if (menu && menu.classList.contains('dropdown-menu')) {
-        menu.classList.toggle('show');
-        button.classList.toggle('open');
+    const willOpen = menu && menu.classList.contains('dropdown-menu') && !menu.classList.contains('show');
+
+    // Close all other dropdowns
+    document.querySelectorAll('.dropdown-menu').forEach(otherMenu => {
+        if (otherMenu !== menu) {
+            otherMenu.classList.remove('show');
+            clearDropdownMenuPosition(otherMenu);
+        }
+    });
+    document.querySelectorAll('.dropdown-toggle').forEach(btn => {
+        if (btn !== button) btn.classList.remove('open');
+    });
+
+    if (!menu || !menu.classList.contains('dropdown-menu')) return;
+
+    if (willOpen) {
+        menu.classList.add('show');
+        button.classList.add('open');
+        positionMobileDropdownMenu(button, menu);
+    } else {
+        menu.classList.remove('show');
+        button.classList.remove('open');
+        clearDropdownMenuPosition(menu);
     }
 }
 
-// Close dropdowns when clicking outside
+// Close dropdowns when clicking/tapping outside
 document.addEventListener('click', function(event) {
     if (!event.target.closest('.navbar-dropdown')) {
-        const allDropdowns = document.querySelectorAll('.dropdown-menu');
-        const allButtons = document.querySelectorAll('.dropdown-toggle');
-        
-        allDropdowns.forEach(menu => menu.classList.remove('show'));
-        allButtons.forEach(btn => btn.classList.remove('open'));
+        closeAllDropdowns();
     }
 });
+
+// Keep fixed mobile menus aligned while scrolling/rotating
+window.addEventListener('resize', function() {
+    document.querySelectorAll('.navbar-dropdown .dropdown-menu.show').forEach(menu => {
+        const button = menu.previousElementSibling;
+        if (button) positionMobileDropdownMenu(button, menu);
+    });
+}, { passive: true });
+
+window.addEventListener('scroll', function() {
+    if (!isMobileNavViewport()) return;
+    document.querySelectorAll('.navbar-dropdown .dropdown-menu.show').forEach(menu => {
+        const button = menu.previousElementSibling;
+        if (button) positionMobileDropdownMenu(button, menu);
+    });
+}, true);
 
 /** Works order workflow flag definitions (slug, label, icon, badge tone). */
 const WORK_ORDER_FLAGS = [

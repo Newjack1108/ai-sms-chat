@@ -895,10 +895,6 @@ body.dashboard-page {
 
 /* Mobile dropdown / navbar / layout */
 @media (max-width: 768px) {
-    body {
-        overflow-x: hidden;
-    }
-
     .container {
         padding: 0 12px 20px;
         max-width: 100%;
@@ -981,15 +977,16 @@ body.dashboard-page {
     }
 
     .dropdown-menu {
-        position: absolute;
+        position: fixed;
         left: 0;
         right: auto;
         width: max-content;
         min-width: 180px;
-        max-width: min(280px, calc(100vw - 24px));
+        max-width: min(280px, calc(100vw - 16px));
         box-shadow: var(--shadow-md);
         border: 1px solid var(--border);
         margin-top: 0;
+        z-index: 2000;
     }
 
     .dropdown-toggle {
