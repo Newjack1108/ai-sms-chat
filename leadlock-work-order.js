@@ -222,8 +222,22 @@ function normalizeLeadLockWebhookPayload(body) {
         crm_what3words: crmWhat3words,
         delivery_install_ex_vat: resolveDeliveryInstallExVat(body),
         delivery_install_label: optionalString(body.delivery_install_label)
-            || deriveDeliveryInstallFromItems(body.items).label
+            || deriveDeliveryInstallFromItems(body.items).label,
+        distance_miles_one_way: resolveDistanceMilesOneWay(body)
     };
+}
+
+/**
+ * @param {object} body
+ * @returns {number|null}
+ */
+function resolveDistanceMilesOneWay(body) {
+    const raw = body.distance_miles_one_way != null
+        ? body.distance_miles_one_way
+        : body.distance_miles;
+    if (raw === undefined || raw === null || raw === '') return null;
+    const n = parseAmount(raw, NaN);
+    return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 const DELIVERY_INSTALL_DESCRIPTIONS = new Set([
@@ -358,5 +372,6 @@ module.exports = {
     resolveTravelTimeHoursRoundTrip,
     deriveDeliveryInstallFromItems,
     isDeliveryOrInstallItem,
+    resolveDistanceMilesOneWay,
     handleLeadLockWorkOrderWebhook
 };

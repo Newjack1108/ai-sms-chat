@@ -304,3 +304,13 @@ describe('delivery_install_ex_vat', () => {
         assert.equal(p.delivery_install_label, 'Delivery only');
     });
 });
+
+describe('distance_miles_one_way', () => {
+    it('normalizes one-way distance from webhook', () => {
+        const p = normalizeLeadLockWebhookPayload({
+            ...basePayload,
+            distance_miles_one_way: 87.4
+        });
+        assert.equal(p.distance_miles_one_way, 87.4);
+    });
+});

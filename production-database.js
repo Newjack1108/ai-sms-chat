@@ -546,6 +546,7 @@ function initializeSQLite() {
             { name: 'crm_what3words', type: 'TEXT' },
             { name: 'delivery_install_ex_vat', type: 'REAL' },
             { name: 'delivery_install_label', type: 'TEXT' },
+            { name: 'delivery_distance_miles', type: 'REAL' },
             { name: 'actual_cost_mileage', type: 'REAL' },
             { name: 'actual_cost_labour', type: 'REAL' },
             { name: 'actual_cost_hotel', type: 'REAL' },
@@ -2254,6 +2255,7 @@ async function initializePostgreSQL() {
                 { name: 'crm_what3words', type: 'TEXT' },
                 { name: 'delivery_install_ex_vat', type: 'DECIMAL(10,2)' },
                 { name: 'delivery_install_label', type: 'TEXT' },
+                { name: 'delivery_distance_miles', type: 'DECIMAL(10,2)' },
                 { name: 'actual_cost_mileage', type: 'DECIMAL(10,2)' },
                 { name: 'actual_cost_labour', type: 'DECIMAL(10,2)' },
                 { name: 'actual_cost_hotel', type: 'DECIMAL(10,2)' },
@@ -8752,6 +8754,14 @@ class ProductionDatabase {
         if (!deliveryInstallLabel && deliveryInstallExVat != null) {
             deliveryInstallLabel = deriveDeliveryInstallFromItems(payload.items).label;
         }
+        let deliveryDistanceMiles = null;
+        const rawDistance = payload.distance_miles_one_way != null
+            ? payload.distance_miles_one_way
+            : payload.delivery_distance_miles;
+        if (rawDistance !== undefined && rawDistance !== null && rawDistance !== '') {
+            const n = leadlockParseAmount(rawDistance, NaN);
+            deliveryDistanceMiles = Number.isFinite(n) && n > 0 ? n : null;
+        }
         return {
             fulfillment_method: payload.fulfillment_method || null,
             deposit_paid: boolOut(depositPaid),
@@ -8766,7 +8776,8 @@ class ProductionDatabase {
             what3words: payload.what3words || null,
             crm_what3words: payload.crm_what3words || null,
             delivery_install_ex_vat: deliveryInstallExVat,
-            delivery_install_label: deliveryInstallLabel
+            delivery_install_label: deliveryInstallLabel,
+            delivery_distance_miles: deliveryDistanceMiles
         };
     }
 
@@ -8794,8 +8805,9 @@ class ProductionDatabase {
                     deposit_amount = $19, balance_amount = $20, invoice_number = $21,
                     address_is_delivery_location = $22, delivery_location_notes = $23, crm_customer_address = $24,
                     what3words = $25, crm_what3words = $26,
-                    delivery_install_ex_vat = $27, delivery_install_label = $28
-                 WHERE id = $29`,
+                    delivery_install_ex_vat = $27, delivery_install_label = $28,
+                    delivery_distance_miles = $29
+                 WHERE id = $30`,
                 [
                     orderDate, payload.customer_name || null, salesOrderRef,
                     payload.customer_postcode || null, payload.customer_address || null,
@@ -8808,6 +8820,7 @@ class ProductionDatabase {
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                     ext.what3words, ext.crm_what3words,
                     ext.delivery_install_ex_vat, ext.delivery_install_label,
+                    ext.delivery_distance_miles,
                     orderId
                 ]
             );
@@ -8823,7 +8836,8 @@ class ProductionDatabase {
                     deposit_amount = ?, balance_amount = ?, invoice_number = ?,
                     address_is_delivery_location = ?, delivery_location_notes = ?, crm_customer_address = ?,
                     what3words = ?, crm_what3words = ?,
-                    delivery_install_ex_vat = ?, delivery_install_label = ?
+                    delivery_install_ex_vat = ?, delivery_install_label = ?,
+                    delivery_distance_miles = ?
                  WHERE id = ?`
             ).run(
                 orderDate, payload.customer_name || null, salesOrderRef,
@@ -8837,6 +8851,7 @@ class ProductionDatabase {
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                 ext.what3words, ext.crm_what3words,
                 ext.delivery_install_ex_vat, ext.delivery_install_label,
+                ext.delivery_distance_miles,
                 orderId
             );
         }
@@ -8872,9 +8887,9 @@ class ProductionDatabase {
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
                  address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words,
-                 delivery_install_ex_vat, delivery_install_label)
+                 delivery_install_ex_vat, delivery_install_label, delivery_distance_miles)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33) RETURNING id`,
+                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34) RETURNING id`,
                 [
                     leadlockProduct.id, 1, orderDate, 'pending', null,
                     payload.customer_name || null, salesOrderRef,
@@ -8889,7 +8904,7 @@ class ProductionDatabase {
                     ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                     ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                     ext.what3words, ext.crm_what3words,
-                    ext.delivery_install_ex_vat, ext.delivery_install_label
+                    ext.delivery_install_ex_vat, ext.delivery_install_label, ext.delivery_distance_miles
                 ]
             );
             orderId = result.rows[0].id;
@@ -8899,8 +8914,8 @@ class ProductionDatabase {
                  customer_postcode, customer_address, customer_email, customer_phone, currency, total_amount, installation_booked, leadlock_order_id, labour_estimate_hours, shipping_boxes_count, travel_time_hours_round_trip, notes,
                  fulfillment_method, deposit_paid, balance_paid, paid_in_full, deposit_amount, balance_amount, invoice_number,
                  address_is_delivery_location, delivery_location_notes, crm_customer_address, what3words, crm_what3words,
-                 delivery_install_ex_vat, delivery_install_label)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 delivery_install_ex_vat, delivery_install_label, delivery_distance_miles)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
             const info = stmt.run(
                 leadlockProduct.id, 1, orderDate, 'pending', null,
@@ -8916,7 +8931,7 @@ class ProductionDatabase {
                 ext.deposit_amount, ext.balance_amount, ext.invoice_number,
                 ext.address_is_delivery_location, ext.delivery_location_notes, ext.crm_customer_address,
                 ext.what3words, ext.crm_what3words,
-                ext.delivery_install_ex_vat, ext.delivery_install_label
+                ext.delivery_install_ex_vat, ext.delivery_install_label, ext.delivery_distance_miles
             );
             orderId = info.lastInsertRowid;
         }
@@ -9216,14 +9231,38 @@ class ProductionDatabase {
             : NaN;
         const travelRtHours = Number.isFinite(travelRt) && travelRt > 0 ? travelRt : 0;
         const speed = Number.isFinite(averageSpeedMph) && averageSpeedMph > 0 ? averageSpeedMph : 45;
-        const oneWayMiles = travelRtHours > 0 ? (travelRtHours / 2) * speed : 0;
+
+        // Prefer LeadLock one-way distance; fall back to drive-time × average speed.
+        let oneWayMiles = 0;
+        let milesSource = 'none';
+        const storedDistance = order && order.delivery_distance_miles != null
+            ? parseFloat(order.delivery_distance_miles)
+            : NaN;
+        if (Number.isFinite(storedDistance) && storedDistance > 0) {
+            oneWayMiles = storedDistance;
+            milesSource = 'leadlock_distance';
+        } else if (travelRtHours > 0) {
+            oneWayMiles = (travelRtHours / 2) * speed;
+            milesSource = 'travel_time';
+        }
+
         const fittingDays = installHours > 0 ? Math.max(1, Math.ceil(installHours / 8)) : 1;
-        const roundTrips = travelRtHours > 0 ? fittingDays : 0;
+        const roundTrips = oneWayMiles > 0 ? fittingDays : 0;
 
         const rate = Number.isFinite(hourlyRate) && hourlyRate > 0 ? hourlyRate : 0;
         const perMile = Number.isFinite(costPerMile) && costPerMile > 0 ? costPerMile : 0;
         const costLabour = Math.round(installHours * rate * 100) / 100;
         const costMileage = Math.round(oneWayMiles * 2 * roundTrips * perMile * 100) / 100;
+
+        let note = `From ${installHours.toFixed(2)}h install × £${rate.toFixed(2)}/h`;
+        if (oneWayMiles > 0) {
+            const sourceLabel = milesSource === 'leadlock_distance'
+                ? 'LeadLock distance'
+                : 'estimated from drive time';
+            note += `; ${oneWayMiles.toFixed(1)} mi one-way (${sourceLabel}) × ${roundTrips} round trip(s) @ £${perMile.toFixed(2)}/mi`;
+        } else {
+            note += ' (no distance/drive time on order — mileage left at 0; re-send from LeadLock to populate)';
+        }
 
         return {
             install_hours: Math.round(installHours * 100) / 100,
@@ -9231,6 +9270,8 @@ class ProductionDatabase {
             round_trips: roundTrips,
             fitting_days: fittingDays,
             travel_time_hours_round_trip: travelRtHours || null,
+            delivery_distance_miles: Number.isFinite(storedDistance) && storedDistance > 0 ? storedDistance : null,
+            miles_source: milesSource,
             hourly_rate: rate,
             cost_per_mile: perMile,
             average_speed_mph: speed,
@@ -9239,9 +9280,7 @@ class ProductionDatabase {
             cost_hotel: 0,
             cost_meals: 0,
             cost_total: Math.round((costMileage + costLabour) * 100) / 100,
-            note: travelRtHours > 0
-                ? `From ${installHours.toFixed(2)}h install × £${rate.toFixed(2)}/h; ~${oneWayMiles.toFixed(1)} mi one-way × ${roundTrips} round trip(s) @ £${perMile.toFixed(2)}/mi`
-                : `From ${installHours.toFixed(2)}h install × £${rate.toFixed(2)}/h (no drive time on order — mileage left at 0)`
+            note
         };
     }
 
