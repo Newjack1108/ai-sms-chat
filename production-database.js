@@ -6500,6 +6500,8 @@ class ProductionDatabase {
                         po.delivery_install_ex_vat,
                         po.delivery_install_label,
                         po.actual_cost_total,
+                        po.labour_estimate_hours,
+                        po.travel_time_hours_round_trip,
                         planned.cost_total AS planned_cost_total,
                         CASE WHEN i.works_order_id IS NULL THEN true ELSE false END AS missing_works_order
                  FROM installations i
@@ -6533,6 +6535,8 @@ class ProductionDatabase {
                         po.delivery_install_ex_vat,
                         po.delivery_install_label,
                         po.actual_cost_total,
+                        po.labour_estimate_hours,
+                        po.travel_time_hours_round_trip,
                         (SELECT cost_total FROM install_cost_scenarios
                          WHERE works_order_id = po.id AND is_planned = 1
                          ORDER BY id ASC LIMIT 1) AS planned_cost_total,
@@ -6550,6 +6554,14 @@ class ProductionDatabase {
             const sold = r.delivery_install_ex_vat != null ? parseFloat(r.delivery_install_ex_vat) : null;
             const planned = r.planned_cost_total != null ? parseFloat(r.planned_cost_total) : null;
             const actual = r.actual_cost_total != null ? parseFloat(r.actual_cost_total) : null;
+            const missingWorksOrder = !!(r.missing_works_order === true || r.missing_works_order === 1 || r.missing_works_order === 't');
+            const labourRaw = r.labour_estimate_hours != null ? parseFloat(r.labour_estimate_hours) : null;
+            const travelRaw = r.travel_time_hours_round_trip != null ? parseFloat(r.travel_time_hours_round_trip) : null;
+            const labourHours = !missingWorksOrder && Number.isFinite(labourRaw) ? labourRaw : (!missingWorksOrder ? 0 : null);
+            const travelHours = !missingWorksOrder && Number.isFinite(travelRaw) ? travelRaw : (!missingWorksOrder ? 0 : null);
+            const quotedHours = labourHours != null
+                ? Math.round(((labourHours || 0) + (travelHours || 0)) * 100) / 100
+                : null;
             return {
                 id: r.id,
                 works_order_id: r.works_order_id,
@@ -6569,13 +6581,16 @@ class ProductionDatabase {
                 delivery_install_label: r.delivery_install_label || null,
                 planned_cost_total: Number.isFinite(planned) ? planned : null,
                 actual_cost_total: Number.isFinite(actual) ? actual : null,
+                labour_estimate_hours: labourHours,
+                travel_time_hours_round_trip: travelHours,
+                quoted_hours: quotedHours,
                 margin_pct: Number.isFinite(sold) && sold > 0 && Number.isFinite(actual)
                     ? Math.round(((sold - actual) / sold) * 10000) / 100
                     : null,
                 cost_variance_pct: Number.isFinite(planned) && planned > 0 && Number.isFinite(actual)
                     ? Math.round(((actual - planned) / planned) * 10000) / 100
                     : null,
-                missing_works_order: !!(r.missing_works_order === true || r.missing_works_order === 1 || r.missing_works_order === 't')
+                missing_works_order: missingWorksOrder
             };
         });
 
@@ -6588,6 +6603,9 @@ class ProductionDatabase {
         let marginActualSum = 0;
         let variancePlannedSum = 0;
         let varianceActualSum = 0;
+        let labourHoursTotal = 0;
+        let travelHoursTotal = 0;
+        let quotedHoursTotal = 0;
         for (const inst of installations) {
             if (inst.works_order_id == null) continue;
             if (seenOrders.has(inst.works_order_id)) continue;
@@ -6604,6 +6622,9 @@ class ProductionDatabase {
                 variancePlannedSum += inst.planned_cost_total;
                 varianceActualSum += inst.actual_cost_total;
             }
+            labourHoursTotal += inst.labour_estimate_hours || 0;
+            travelHoursTotal += inst.travel_time_hours_round_trip || 0;
+            quotedHoursTotal += inst.quoted_hours || 0;
         }
 
         const weekMarginPct = marginSoldSum > 0
@@ -6622,6 +6643,9 @@ class ProductionDatabase {
             actual_cost_total: Math.round(actualTotal * 100) / 100,
             margin_pct: weekMarginPct,
             cost_variance_pct: weekVariancePct,
+            labour_estimate_hours_total: Math.round(labourHoursTotal * 100) / 100,
+            travel_time_hours_total: Math.round(travelHoursTotal * 100) / 100,
+            quoted_hours_total: Math.round(quotedHoursTotal * 100) / 100,
             installations
         };
     }
@@ -10319,7 +10343,7 @@ class ProductionDatabase {
                 if (isPostgreSQL) {
                     const orderResult = await pool.query(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name, po.leadlock_order_id,
+                         po.customer_name, po.customer_postcode, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -10331,6 +10355,7 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
+                        installation.customer_postcode = row.customer_postcode || null;
                         installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
@@ -10340,7 +10365,7 @@ class ProductionDatabase {
                 } else {
                     const row = db.prepare(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name, po.leadlock_order_id,
+                         po.customer_name, po.customer_postcode, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -10350,6 +10375,7 @@ class ProductionDatabase {
                         installation.order_id = row.order_id;
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
+                        installation.customer_postcode = row.customer_postcode || null;
                         installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
@@ -11041,6 +11067,7 @@ class ProductionDatabase {
                          ${dateSelect},
                          po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
                          po.customer_name,
+                         po.customer_postcode,
                          fp.name as product_name,
                          u.username as created_by_name
                          FROM installations i
@@ -11120,6 +11147,8 @@ class ProductionDatabase {
                              i.installation_date as start_date,
                              i.installation_date as end_date,
                              po.id as order_id, po.product_id, po.quantity as order_quantity, po.status as order_status,
+                             po.customer_name,
+                             po.customer_postcode,
                              fp.name as product_name,
                              u.username as created_by_name
                              FROM installations i

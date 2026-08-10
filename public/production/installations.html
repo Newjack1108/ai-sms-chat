@@ -1102,6 +1102,15 @@
             renderInstallationsList();
         }
         
+        /** Prefer installation.location; fall back to works-order postcode when blank. */
+        function resolveInstallationLocation(inst, emptyValue = '—') {
+            const loc = (inst && inst.location != null ? String(inst.location) : '').trim();
+            if (loc) return loc;
+            const postcode = (inst && inst.customer_postcode != null ? String(inst.customer_postcode) : '').trim();
+            if (postcode) return postcode;
+            return emptyValue;
+        }
+
         function renderInstallationsList() {
             const container = document.getElementById('installationsListContainer');
             if (!container) return;
@@ -1141,7 +1150,7 @@
                     const startD = inst.start_date || inst.installation_date || '—';
                     const endD = inst.end_date || startD || '—';
                     const customerCell = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
-                    const loc = inst.location || '—';
+                    const loc = resolveInstallationLocation(inst);
                     const woStatus = orderStatusLabel(inst.order_status);
                     const status = instStatusLabel(inst.status);
                     const dateLine = startD === endD ? formatDate(startD) : `${formatDate(startD)} – ${formatDate(endD)}`;
@@ -1171,16 +1180,16 @@
                 const endD = inst.end_date || startD || '—';
                 const productName = inst.product_name ? (inst.order_id ? `Order #${inst.order_id} – ${inst.product_name}` : inst.product_name) : '—';
                 const customerCell = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
-                const loc = inst.location || '—';
+                const loc = resolveInstallationLocation(inst);
                 const woStatus = orderStatusLabel(inst.order_status);
                 const status = instStatusLabel(inst.status);
                 html += `<tr>
                     <td>${formatDate(startD)}</td>
                     <td>${formatDate(endD)}</td>
                     <td>${customerCell}</td>
-                    <td>${productName}</td>
+                    <td>${escapeHtml(productName)}</td>
                     <td><span class="badge badge-secondary">${woStatus}</span></td>
-                    <td>${loc}</td>
+                    <td>${escapeHtml(loc)}</td>
                     <td><span class="badge installation-block ${inst.status || 'scheduled'}">${status}</span></td>
                     <td>
                         ${canManageInstallations ? `
@@ -1416,7 +1425,7 @@
                     <strong>${escapeHtml(block.primary)}</strong>${dateRange}<br>
                     ${block.secondary ? `<small>${escapeHtml(block.secondary)}</small><br>` : ''}
                     ${inst.duration_hours ? `<small>Duration: ${inst.duration_hours} hours</small><br>` : ''}
-                    ${inst.location ? `<small>Location: ${inst.location}</small><br>` : ''}
+                    ${(() => { const loc = resolveInstallationLocation(inst, ''); return loc ? `<small>Location: ${escapeHtml(loc)}</small><br>` : ''; })()}
                     ${inst.assigned_users && inst.assigned_users.length > 0 ? 
                         `<small>Assigned: ${inst.assigned_users.map(u => u.username).join(', ')}</small>` : 
                         '<small>No users assigned</small>'}
@@ -1637,7 +1646,7 @@
                 document.getElementById('installationStartDate').value = startDate;
                 document.getElementById('installationEndDate').value = endDate;
                 document.getElementById('installationDuration').value = inst.duration_hours;
-                document.getElementById('installationLocation').value = inst.location || '';
+                document.getElementById('installationLocation').value = resolveInstallationLocation(inst, '');
                 document.getElementById('installationAddress').value = inst.address || '';
                 document.getElementById('installationStatus').value = inst.status;
                 document.getElementById('installationNotes').value = inst.notes || '';
@@ -2156,7 +2165,7 @@
                             <tr><th>Date:</th><td>${formatDate(inst.installation_date)}</td></tr>
                             <tr><th>Duration:</th><td>${inst.duration_hours} hours</td></tr>
                             ${inst.travel_time_hours_round_trip != null && inst.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(inst.travel_time_hours_round_trip)) ? `<tr><th>LeadLock drive (round trip):</th><td>${parseFloat(inst.travel_time_hours_round_trip).toFixed(2)} h</td></tr>` : ''}
-                            <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
+                            <tr><th>Location:</th><td>${escapeHtml(resolveInstallationLocation(inst, '-'))}</td></tr>
                             <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
                             <tr><th>Status:</th><td><span class="${statusBadgeClass}">${escapeHtml(inst.status || '-')}</span></td></tr>
                             <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>

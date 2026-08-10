@@ -267,6 +267,10 @@
                     <p class="kpi-value">${formatPct(installs.cost_variance_pct)}</p>
                 </div>
                 <div class="kpi-card">
+                    <h3>Quoted Install Hours</h3>
+                    <p class="kpi-value">${formatHours(installs.quoted_hours_total || 0)}</p>
+                </div>
+                <div class="kpi-card">
                     <h3>Stock Added Value</h3>
                     <p class="kpi-value">${formatCurrency(stock.total_value || 0)}</p>
                 </div>
@@ -303,6 +307,9 @@
                     · Actual: <strong>${formatCurrency(installations.actual_cost_total || 0)}</strong>
                     · Margin: <strong>${formatPct(installations.margin_pct)}</strong>
                     · Cost variance: <strong>${formatPct(installations.cost_variance_pct)}</strong>
+                    · Install h: <strong>${formatHours(installations.labour_estimate_hours_total || 0)}</strong>
+                    · Travel h: <strong>${formatHours(installations.travel_time_hours_total || 0)}</strong>
+                    · Quoted h: <strong>${formatHours(installations.quoted_hours_total || 0)}</strong>
                     (amounts counted once per works order)
                 </p>
                 <table class="table">
@@ -318,6 +325,9 @@
                             <th class="text-right">Actual</th>
                             <th class="text-right">Margin %</th>
                             <th class="text-right">Variance %</th>
+                            <th class="text-right">Install h</th>
+                            <th class="text-right">Travel h</th>
+                            <th class="text-right">Quoted h</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -337,6 +347,9 @@
                                 <td class="text-right">${inst.actual_cost_total != null ? formatCurrency(inst.actual_cost_total) : '—'}</td>
                                 <td class="text-right">${formatPct(inst.margin_pct)}</td>
                                 <td class="text-right">${formatPct(inst.cost_variance_pct)}</td>
+                                <td class="text-right">${inst.labour_estimate_hours != null ? formatHours(inst.labour_estimate_hours) : '—'}</td>
+                                <td class="text-right">${inst.travel_time_hours_round_trip != null ? formatHours(inst.travel_time_hours_round_trip) : '—'}</td>
+                                <td class="text-right">${inst.quoted_hours != null ? formatHours(inst.quoted_hours) : '—'}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -525,6 +538,7 @@
                     ['D&I actual cost', formatCurrency(installs.actual_cost_total || 0)],
                     ['D&I margin %', formatPct(installs.margin_pct)],
                     ['D&I cost variance %', formatPct(installs.cost_variance_pct)],
+                    ['Quoted install hours', formatHours(installs.quoted_hours_total || 0)],
                     ['Stock added value', formatCurrency(stock.total_value || 0)],
                     ['Raw materials on hand', formatCurrency(stock.current_raw_materials_value || 0)],
                     ['Built items on hand', formatCurrency(stock.current_built_items_value || 0)],
@@ -561,17 +575,20 @@
                     inst.planned_cost_total != null ? formatCurrency(inst.planned_cost_total) : '—',
                     inst.actual_cost_total != null ? formatCurrency(inst.actual_cost_total) : '—',
                     formatPct(inst.margin_pct),
-                    formatPct(inst.cost_variance_pct)
+                    formatPct(inst.cost_variance_pct),
+                    inst.labour_estimate_hours != null ? formatHours(inst.labour_estimate_hours) : '—',
+                    inst.travel_time_hours_round_trip != null ? formatHours(inst.travel_time_hours_round_trip) : '—',
+                    inst.quoted_hours != null ? formatHours(inst.quoted_hours) : '—'
                 ]);
 
                 doc.autoTable({
                     startY: yPos,
-                    head: [['Install date', 'Customer', 'Works Order', 'Order £', 'D&I sold', 'Planned', 'Actual', 'Margin %', 'Var %']],
-                    body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—', '—', '—', '—', '—', '—']],
+                    head: [['Install date', 'Customer', 'Works Order', 'Order £', 'D&I sold', 'Planned', 'Actual', 'Margin %', 'Var %', 'Install h', 'Travel h', 'Quoted h']],
+                    body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—']],
                     theme: 'striped',
                     headStyles: { fillColor: [102, 126, 234] },
                     margin: { left: 14, right: 14 },
-                    styles: { fontSize: 7 }
+                    styles: { fontSize: 6 }
                 });
                 yPos = doc.lastAutoTable.finalY + 10;
 
