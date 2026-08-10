@@ -2018,7 +2018,7 @@ router.get('/products/export', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
-        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         const normalizedStatus = normalizeProductStatus(status);
@@ -2036,6 +2036,7 @@ router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req
             product_type: normalizedProductType,
             leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
+            management_checked,
             category,
             status: normalizedStatus || 'active',
             estimated_load_time,
@@ -2070,7 +2071,7 @@ router.get('/products/:id', requireProductionAuth, async (req, res) => {
 router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         const normalizedStatus = normalizeProductStatus(status);
@@ -2085,6 +2086,7 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
             product_type: normalizedProductType,
             leadlock_category: normalizedLeadlockCategory,
             is_optional_extra,
+            management_checked,
             category,
             status: normalizedStatus || 'active',
             estimated_load_time,
@@ -2096,6 +2098,27 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
     } catch (error) {
         console.error('Update product error:', error);
         res.status(500).json({ success: false, error: 'Failed to update product' });
+    }
+});
+
+router.put('/products/:id/management-checked', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id, 10);
+        if (Number.isNaN(productId)) {
+            return res.status(400).json({ success: false, error: 'Invalid product id' });
+        }
+        if (req.body == null || typeof req.body.management_checked === 'undefined') {
+            return res.status(400).json({ success: false, error: 'management_checked is required' });
+        }
+        const existing = await ProductionDatabase.getProductById(productId);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        const product = await ProductionDatabase.setProductManagementChecked(productId, !!req.body.management_checked);
+        res.json({ success: true, product });
+    } catch (error) {
+        console.error('Update product management_checked error:', error);
+        res.status(500).json({ success: false, error: 'Failed to update management checked status' });
     }
 });
 

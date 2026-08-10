@@ -37,6 +37,7 @@ describe('product CSV export helpers', () => {
                 product_type: 'sheds',
                 leadlock_category: 'sheds',
                 is_optional_extra: 0,
+                management_checked: 1,
                 status: 'active',
                 cost_gbp: 1200.5,
                 number_of_boxes: 2,
@@ -47,9 +48,10 @@ describe('product CSV export helpers', () => {
             }
         ]);
         assert.match(csv, /^id,name,description,/);
+        assert.match(csv, /management_checked/);
         assert.match(csv, /42,/);
         assert.match(csv, /"Field Shelter, Deluxe"/);
-        assert.match(csv, /false/);
+        assert.match(csv, /false,true,active/);
         assert.match(csv, /1200\.5/);
     });
 });

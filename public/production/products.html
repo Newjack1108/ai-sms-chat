@@ -438,6 +438,7 @@
                             <th>Category</th>
                             <th>Type</th>
                             <th>Status</th>
+                            <th title="Checked by management as correct">Checked</th>
                             <th>Last push date</th>
                             <th>Cost (Auto)</th>
                             <th>Actions</th>
@@ -446,6 +447,8 @@
                     <tbody>
                         ${filteredProducts.map(product => {
                             const isInactive = (product.status || 'active') === 'inactive';
+                            const canToggleChecked = currentUser && (currentUser.role === 'admin' || currentUser.role === 'office');
+                            const isManagementChecked = !!(product.management_checked === true || product.management_checked === 1);
                             const statusAction = isInactive
                                 ? `<button onclick="setProductStatus(${product.id}, 'active')" class="btn btn-success btn-sm" title="Show in catalog again">Reactivate</button>`
                                 : `<button onclick="setProductStatus(${product.id}, 'inactive')" class="btn btn-secondary btn-sm" title="Hide from catalog">Deactivate</button>`;
@@ -456,6 +459,14 @@
                                 <td><span class="badge badge-secondary">${escapeHtml(product.category || 'Other')}</span></td>
                                 <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>
                                 <td>${statusBadge(product.status)}</td>
+                                <td>
+                                    <input type="checkbox"
+                                        ${isManagementChecked ? 'checked' : ''}
+                                        ${canToggleChecked ? '' : 'disabled'}
+                                        title="${canToggleChecked ? 'Mark as checked by management' : 'Checked by management'}"
+                                        onchange="toggleManagementChecked(${product.id}, this.checked, this)"
+                                        style="width:auto; cursor:${canToggleChecked ? 'pointer' : 'default'};">
+                                </td>
                                 <td>${formatPushedToSalesAt(product.last_pushed_to_sales_at)}</td>
                                 <td>${formatCurrency(product.calculated_cost)}</td>
                                 <td>
@@ -726,6 +737,28 @@
             }
         }
 
+        function isManagementCheckedValue(product) {
+            return !!(product && (product.management_checked === true || product.management_checked === 1));
+        }
+
+        async function toggleManagementChecked(id, checked, checkboxEl) {
+            try {
+                const data = await apiCall(`/products/${id}/management-checked`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ management_checked: !!checked })
+                });
+                const idx = allProducts.findIndex(p => p.id === id);
+                if (idx >= 0) {
+                    allProducts[idx].management_checked = data.product
+                        ? isManagementCheckedValue(data.product)
+                        : !!checked;
+                }
+            } catch (error) {
+                if (checkboxEl) checkboxEl.checked = !checked;
+                showAlert(error.message || 'Failed to update management checked status', 'error');
+            }
+        }
+
         async function setProductStatus(id, status) {
             let product = allProducts.find(p => p.id === id);
             if (!product) {
@@ -753,6 +786,7 @@
                         product_type: product.product_type,
                         leadlock_category: product.leadlock_category || product.product_type,
                         is_optional_extra: !!product.is_optional_extra,
+                        management_checked: isManagementCheckedValue(product),
                         category: product.category || 'Other',
                         status,
                         estimated_load_time: product.estimated_load_time || 0,
@@ -794,12 +828,24 @@
         document.getElementById('productForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const id = document.getElementById('productId').value;
+            let managementChecked = false;
+            if (id) {
+                let existing = allProducts.find(p => String(p.id) === String(id));
+                if (!existing) {
+                    try {
+                        const r = await apiCall(`/products/${id}`);
+                        existing = r.product;
+                    } catch (_) { /* ignore */ }
+                }
+                managementChecked = isManagementCheckedValue(existing);
+            }
             const data = {
                 name: document.getElementById('productName').value,
                 description: document.getElementById('productDescription').value,
                 product_type: document.getElementById('productType').value,
                 leadlock_category: document.getElementById('leadlockCategory').value,
                 is_optional_extra: document.getElementById('productOptionalExtra').checked,
+                management_checked: managementChecked,
                 category: document.getElementById('productCategory').value,
                 status: document.getElementById('productStatus').value === 'inactive' ? 'inactive' : 'active',
                 estimated_load_time: parseFloat(document.getElementById('productLoadTime').value) || 0,

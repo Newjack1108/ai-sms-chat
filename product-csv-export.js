@@ -31,6 +31,7 @@ function productsToCsv(products) {
         'product_type',
         'leadlock_category',
         'is_optional_extra',
+        'management_checked',
         'status',
         'cost_gbp',
         'number_of_boxes',
@@ -44,6 +45,9 @@ function productsToCsv(products) {
         const isExtra = p.is_optional_extra === true || p.is_optional_extra === 1
             || (typeof p.is_optional_extra === 'string'
                 && (p.is_optional_extra === '1' || p.is_optional_extra.toLowerCase() === 'true'));
+        const isManagementChecked = p.management_checked === true || p.management_checked === 1
+            || (typeof p.management_checked === 'string'
+                && (p.management_checked === '1' || p.management_checked.toLowerCase() === 'true'));
         rows.push([
             csvEscapeCell(p.id),
             csvEscapeCell(p.name),
@@ -52,6 +56,7 @@ function productsToCsv(products) {
             csvEscapeCell(p.product_type),
             csvEscapeCell(p.leadlock_category),
             csvEscapeCell(isExtra ? 'true' : 'false'),
+            csvEscapeCell(isManagementChecked ? 'true' : 'false'),
             csvEscapeCell(p.status),
             csvEscapeCell(p.cost_gbp != null ? p.cost_gbp : ''),
             csvEscapeCell(p.number_of_boxes != null ? p.number_of_boxes : ''),

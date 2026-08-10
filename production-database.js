@@ -243,6 +243,7 @@ function initializeSQLite() {
             product_type TEXT,
             leadlock_category TEXT NOT NULL DEFAULT 'sheds',
             is_optional_extra INTEGER NOT NULL DEFAULT 0,
+            management_checked INTEGER NOT NULL DEFAULT 0,
             category TEXT DEFAULT 'Other',
             status TEXT DEFAULT 'active',
             cost_gbp REAL DEFAULT 0,
@@ -480,6 +481,11 @@ function initializeSQLite() {
         if (!hasOptionalExtra) {
             db.exec('ALTER TABLE finished_products ADD COLUMN is_optional_extra INTEGER NOT NULL DEFAULT 0');
             console.log('✅ Added is_optional_extra column to finished_products table');
+        }
+        const hasManagementChecked = tableInfo.some(col => col.name === 'management_checked');
+        if (!hasManagementChecked) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN management_checked INTEGER NOT NULL DEFAULT 0');
+            console.log('✅ Added management_checked column to finished_products table');
         }
         const hasLeadlockCategory = tableInfo.some(col => col.name === 'leadlock_category');
         if (!hasLeadlockCategory) {
@@ -1908,6 +1914,7 @@ async function initializePostgreSQL() {
                 product_type VARCHAR(100),
                 leadlock_category VARCHAR(20) NOT NULL DEFAULT 'sheds',
                 is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE,
+                management_checked BOOLEAN NOT NULL DEFAULT FALSE,
                 category VARCHAR(100) DEFAULT 'Other',
                 status VARCHAR(50) DEFAULT 'active',
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
@@ -2153,6 +2160,15 @@ async function initializePostgreSQL() {
             if (optionalExtraCheck.rows.length === 0) {
                 await pool.query(`ALTER TABLE finished_products ADD COLUMN is_optional_extra BOOLEAN NOT NULL DEFAULT FALSE`);
                 console.log('✅ Added is_optional_extra column to finished_products table');
+            }
+            const managementCheckedCheck = await pool.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'finished_products' AND column_name = 'management_checked'
+            `);
+            if (managementCheckedCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN management_checked BOOLEAN NOT NULL DEFAULT FALSE`);
+                console.log('✅ Added management_checked column to finished_products table');
             }
             const leadlockCategoryCheck = await pool.query(`
                 SELECT column_name
@@ -6851,12 +6867,13 @@ class ProductionDatabase {
         const estimatedTravelTime = parseFloat(data.estimated_travel_time || 0);
         const numberOfBoxes = parseInt(data.number_of_boxes || 1, 10) || 1;
         const isOptionalExtra = !!data.is_optional_extra;
+        const managementChecked = !!data.management_checked;
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-                [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+                [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist and includes load time)
@@ -6864,10 +6881,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
+            const info = stmt.run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation (includes load time)
             await this.updateProductCost(product.id);
@@ -7091,6 +7108,7 @@ class ProductionDatabase {
         const estimatedTravelTime = data.estimated_travel_time !== undefined ? parseFloat(data.estimated_travel_time || 0) : null;
         const numberOfBoxes = data.number_of_boxes !== undefined ? (parseInt(data.number_of_boxes, 10) || 1) : null;
         const isOptionalExtra = !!data.is_optional_extra;
+        const managementChecked = !!data.management_checked;
         const leadlockCategory = data.leadlock_category || 'sheds';
         
         if (isPostgreSQL) {
@@ -7098,13 +7116,13 @@ class ProductionDatabase {
             let params;
             
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, category = $6, status = $7, estimated_load_time = $8, estimated_install_time = $9, estimated_travel_time = $10, number_of_boxes = $11
-                         WHERE id = $12 RETURNING *`;
-                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8, estimated_load_time = $9, estimated_install_time = $10, estimated_travel_time = $11, number_of_boxes = $12
+                         WHERE id = $13 RETURNING *`;
+                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
             } else {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, category = $6, status = $7
-                         WHERE id = $8 RETURNING *`;
-                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, data.category || 'Other', data.status, id];
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8
+                         WHERE id = $9 RETURNING *`;
+                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, id];
             }
             
             await pool.query(query, params);
@@ -7115,19 +7133,35 @@ class ProductionDatabase {
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
                 const boxes = numberOfBoxes !== null ? numberOfBoxes : 1;
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
+                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
             } else {
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, category = ?, status = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, data.category || 'Other', data.status, id);
+                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, id);
             }
             // Recalculate cost automatically (includes load time)
             await this.updateProductCost(id);
             return this.getProductById(id);
         }
+    }
+
+    static async setProductManagementChecked(id, managementChecked) {
+        const checked = !!managementChecked;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `UPDATE finished_products SET management_checked = $1 WHERE id = $2 RETURNING *`,
+                [checked, id]
+            );
+            return result.rows[0] || null;
+        }
+        const info = db.prepare(
+            `UPDATE finished_products SET management_checked = ? WHERE id = ?`
+        ).run(checked ? 1 : 0, id);
+        if (!info.changes) return null;
+        return this.getProductById(id);
     }
     
     static async deleteProduct(id) {
