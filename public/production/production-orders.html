@@ -1683,6 +1683,12 @@
                         if (syncs.completed) {
                             parts.push(`Completed last sent: ${escapeHtml(String(syncs.completed))}`);
                         }
+                        const completedSent = !!syncs.completed;
+                        const completedBtnClass = completedSent ? 'btn btn-success btn-sm' : 'btn btn-secondary btn-sm';
+                        const completedBtnLabel = completedSent ? '✓ Completed — sent' : 'Send completed';
+                        const completedBtnTitle = completedSent
+                            ? `Last sent ${syncs.completed}. Click to mark linked installs completed again and re-send.`
+                            : 'Mark linked installation(s) completed and send to LeadLock';
                         leadlockSyncHtml = `
                             <div style="margin-top: 12px; padding: 10px; background: #f8f9fa; border-radius: 6px;">
                                 <strong>LeadLock sync</strong>
@@ -1690,7 +1696,7 @@
                                 <div style="display: flex; flex-wrap: wrap; gap: 8px;">
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="sendInstallDateToLeadLock(${orderId})">Send install date</button>
                                     <button type="button" class="btn btn-secondary btn-sm" onclick="sendBalancePaidToLeadLock(${orderId})">Send balance paid</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" onclick="sendCompletedToLeadLock(${orderId})">Send completed</button>
+                                    <button type="button" class="${completedBtnClass}" title="${escapeHtml(completedBtnTitle)}" onclick="sendCompletedToLeadLock(${orderId})">${escapeHtml(completedBtnLabel)}</button>
                                 </div>
                             </div>`;
                     } catch (e) {

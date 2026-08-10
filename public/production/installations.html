@@ -2095,6 +2095,7 @@
                 );
 
                 let loadSheetSection = '';
+                let leadlockSyncs = {};
                 if (inst.works_order_id) {
                     try {
                         const lsResult = await apiCall(`/orders/${inst.works_order_id}/load-sheet`);
@@ -2112,7 +2113,32 @@
                     } catch (e) {
                         loadSheetSection = `<p class="text-muted" style="margin-top: 16px;">Could not load load sheet.</p>`;
                     }
+                    if (inst.leadlock_order_id != null && String(inst.leadlock_order_id).trim() !== '') {
+                        try {
+                            const syncResult = await apiCall(`/orders/${inst.works_order_id}/leadlock/status-sync`);
+                            leadlockSyncs = syncResult?.syncs || {};
+                        } catch (_) {
+                            leadlockSyncs = {};
+                        }
+                    }
                 }
+
+                const isInstallCompleted = inst.status === 'completed';
+                const completedSentAt = leadlockSyncs.completed || null;
+                const completedBtnClass = (isInstallCompleted || completedSentAt) ? 'btn btn-success' : 'btn btn-secondary';
+                let completedBtnLabel = 'Send completed to LeadLock';
+                let completedBtnTitle = 'Mark completed and send to LeadLock';
+                if (isInstallCompleted && completedSentAt) {
+                    completedBtnLabel = '✓ Completed — sent to LeadLock';
+                    completedBtnTitle = `Completed and last sent ${completedSentAt}. Click to send again.`;
+                } else if (isInstallCompleted) {
+                    completedBtnLabel = '✓ Completed — send to LeadLock';
+                    completedBtnTitle = 'Install is completed locally. Click to send to LeadLock.';
+                } else if (completedSentAt) {
+                    completedBtnLabel = '✓ Sent to LeadLock';
+                    completedBtnTitle = `Last sent ${completedSentAt}. Click to mark completed again and re-send.`;
+                }
+                const statusBadgeClass = isInstallCompleted ? 'badge badge-success' : 'badge badge-info';
                 
                 const customerDisplay = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
                 const worksOrderCell = inst.works_order_id
@@ -2132,7 +2158,7 @@
                             ${inst.travel_time_hours_round_trip != null && inst.travel_time_hours_round_trip !== '' && !Number.isNaN(parseFloat(inst.travel_time_hours_round_trip)) ? `<tr><th>LeadLock drive (round trip):</th><td>${parseFloat(inst.travel_time_hours_round_trip).toFixed(2)} h</td></tr>` : ''}
                             <tr><th>Location:</th><td>${inst.location || '-'}</td></tr>
                             <tr><th>Address:</th><td>${inst.address || '-'}</td></tr>
-                            <tr><th>Status:</th><td><span class="badge badge-info">${inst.status}</span></td></tr>
+                            <tr><th>Status:</th><td><span class="${statusBadgeClass}">${escapeHtml(inst.status || '-')}</span></td></tr>
                             <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>
                         </table>
                         </div>
@@ -2159,7 +2185,7 @@
                             ${canManageInstallations && inst.leadlock_order_id != null && String(inst.leadlock_order_id).trim() !== '' && inst.works_order_id ? `
                             <button type="button" onclick="sendInstallDateToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send install date to LeadLock</button>
                             <button type="button" onclick="sendBalancePaidToLeadLock(${inst.works_order_id})" class="btn btn-secondary">Send balance paid to LeadLock</button>
-                            <button type="button" onclick="sendCompletedToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send completed to LeadLock</button>` : ''}
+                            <button type="button" id="sendCompletedLeadLockBtn" onclick="sendCompletedToLeadLock(${inst.works_order_id}, ${inst.id})" class="${completedBtnClass}" title="${escapeHtml(completedBtnTitle)}">${escapeHtml(completedBtnLabel)}</button>` : ''}
                             ${canManageInstallations ? `
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
                             <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>` : ''}
