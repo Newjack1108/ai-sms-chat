@@ -3090,7 +3090,10 @@
         }
 
         async function sendCompletedToLeadLock(orderId) {
-            if (!confirm('Send completed status to LeadLock for this order?')) return;
+            if (!confirm(
+                'Mark linked installation(s) completed and send to LeadLock?\n\n' +
+                'Incomplete checklist/sign-off items will not block this.'
+            )) return;
             try {
                 if (typeof promptInstallActualCostIfNeeded === 'function') {
                     await promptInstallActualCostIfNeeded(orderId);
@@ -3099,9 +3102,10 @@
                     method: 'POST',
                     body: JSON.stringify({})
                 });
-                showAlert(result.message || 'Completed status sent to LeadLock');
+                showAlert(result.message || 'Installation(s) marked completed and sent to LeadLock');
+                if (typeof loadOrders === 'function') loadOrders();
             } catch (error) {
-                showAlert(error.message || 'Failed to send completed status to LeadLock', 'error');
+                showAlert(error.message || 'Failed to complete and send to LeadLock', 'error');
             }
         }
 

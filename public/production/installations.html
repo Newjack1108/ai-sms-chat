@@ -628,6 +628,7 @@
             { key: 'waste_removed', label: 'Waste removed from site' },
             { key: 'snagging_resolved', label: 'Snagging items resolved' }
         ];
+        const ALLOWED_SATISFACTION_EMOJIS = ['very_happy', 'happy', 'neutral', 'unhappy', 'very_unhappy'];
         const PHOTO_STAGES = [
             { key: 'arrival', label: 'Arrival' },
             { key: 'before', label: 'Before work' },
@@ -638,6 +639,42 @@
         ];
         let checklistData = { pre_fitting: {}, completion: {} };
         let installationPhotos = [];
+
+        function isAdminOrOfficeRole() {
+            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'office');
+        }
+
+        /** Soft reminder list — does not block admin/office completion. */
+        function getMissingCompletionReminders({ completion, signoff } = {}) {
+            const missing = [];
+            const answers = completion || {};
+            const unanswered = COMPLETION_QUESTIONS.filter(
+                q => !Object.prototype.hasOwnProperty.call(answers, q.key)
+            );
+            if (unanswered.length) {
+                missing.push(`Completion checklist incomplete (${unanswered.length} unanswered)`);
+            }
+            if (!signoff || !signoff.signature_data_url) {
+                missing.push('Customer signature');
+            }
+            if (!signoff || signoff.social_media_consent === null || signoff.social_media_consent === undefined) {
+                missing.push('Social media consent');
+            }
+            if (!signoff || !ALLOWED_SATISFACTION_EMOJIS.includes(signoff.satisfaction_emoji)) {
+                missing.push('Customer satisfaction rating');
+            }
+            return missing;
+        }
+
+        function confirmCompleteWithReminders(missing, actionLabel) {
+            let msg = `${actionLabel}\n\n`;
+            if (missing.length) {
+                msg += `Still outstanding:\n- ${missing.join('\n- ')}\n\nContinue anyway?`;
+            } else {
+                msg += 'All checklist/sign-off items are done.\n\nContinue?';
+            }
+            return confirm(msg);
+        }
         
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1988,10 +2025,31 @@
                 : formData;
 
             if (payload.status === 'completed') {
-                const completionAnswered = COMPLETION_QUESTIONS.every(q => Object.prototype.hasOwnProperty.call(payload.completion || {}, q.key));
-                if (!completionAnswered) {
-                    showAlert('Please answer all 5 completion checklist questions before marking completed.', 'error');
-                    return;
+                if (isAdminOrOfficeRole()) {
+                    let signoff = null;
+                    if (editingInstallationId) {
+                        try {
+                            const existing = await apiCall(`/installations/${editingInstallationId}`);
+                            signoff = existing?.installation?.signoff || null;
+                        } catch (_) {
+                            signoff = null;
+                        }
+                    }
+                    const missing = getMissingCompletionReminders({
+                        completion: payload.completion || checklistData.completion || {},
+                        signoff
+                    });
+                    if (!confirmCompleteWithReminders(missing, 'Mark this installation as completed?')) {
+                        return;
+                    }
+                } else {
+                    const completionAnswered = COMPLETION_QUESTIONS.every(
+                        q => Object.prototype.hasOwnProperty.call(payload.completion || {}, q.key)
+                    );
+                    if (!completionAnswered) {
+                        showAlert('Please answer all 5 completion checklist questions before marking completed.', 'error');
+                        return;
+                    }
                 }
             }
             
@@ -2101,7 +2159,7 @@
                             ${canManageInstallations && inst.leadlock_order_id != null && String(inst.leadlock_order_id).trim() !== '' && inst.works_order_id ? `
                             <button type="button" onclick="sendInstallDateToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send install date to LeadLock</button>
                             <button type="button" onclick="sendBalancePaidToLeadLock(${inst.works_order_id})" class="btn btn-secondary">Send balance paid to LeadLock</button>
-                            <button type="button" onclick="sendCompletedToLeadLock(${inst.works_order_id})" class="btn btn-secondary">Send completed to LeadLock</button>` : ''}
+                            <button type="button" onclick="sendCompletedToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send completed to LeadLock</button>` : ''}
                             ${canManageInstallations ? `
                             <button onclick="showEditInstallationModal(${inst.id})" class="btn btn-primary">Edit</button>
                             <button onclick="deleteInstallation(${inst.id})" class="btn btn-danger">Delete</button>` : ''}
@@ -2136,19 +2194,39 @@
             }
         }
 
-        async function sendCompletedToLeadLock(orderId) {
-            if (!confirm('Send completed status to LeadLock for this order?')) return;
+        async function sendCompletedToLeadLock(orderId, installationId) {
             try {
+                let missing = [];
+                if (installationId) {
+                    const result = await apiCall(`/installations/${installationId}`);
+                    const inst = result?.installation;
+                    missing = getMissingCompletionReminders({
+                        completion: inst?.checklists?.completion || {},
+                        signoff: inst?.signoff || null
+                    });
+                }
+                if (!confirmCompleteWithReminders(
+                    missing,
+                    'Mark this installation completed and send to LeadLock?'
+                )) {
+                    return;
+                }
+
                 if (typeof promptInstallActualCostIfNeeded === 'function') {
                     await promptInstallActualCostIfNeeded(orderId);
                 }
+                const body = {};
+                if (installationId) body.installation_id = installationId;
                 const result = await apiCall(`/orders/${orderId}/leadlock/completed`, {
                     method: 'POST',
-                    body: JSON.stringify({})
+                    body: JSON.stringify(body)
                 });
-                showAlert(result.message || 'Completed status sent to LeadLock');
+                showAlert(result.message || 'Installation marked completed and sent to LeadLock');
+                hideModal('installationDetailsModal');
+                await loadData();
+                renderCalendar();
             } catch (error) {
-                showAlert(error.message || 'Failed to send completed status to LeadLock', 'error');
+                showAlert(error.message || 'Failed to complete and send to LeadLock', 'error');
             }
         }
 

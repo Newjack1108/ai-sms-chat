@@ -2770,18 +2770,54 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
             });
         }
 
+        // Mark linked installation(s) completed so the weekly report picks them up.
+        // Admin/office path intentionally skips the checklist/sign-off gate.
+        const completedInstallationIds = [];
+        const rawInstallationId = req.body?.installation_id;
+        if (rawInstallationId !== undefined && rawInstallationId !== null && String(rawInstallationId).trim() !== '') {
+            const installationId = parseInt(rawInstallationId, 10);
+            if (Number.isNaN(installationId)) {
+                return res.status(400).json({ success: false, error: 'Invalid installation_id' });
+            }
+            const installation = await ProductionDatabase.getInstallationById(installationId);
+            if (!installation) {
+                return res.status(404).json({ success: false, error: 'Installation not found' });
+            }
+            if (Number(installation.works_order_id) !== orderId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Installation does not belong to this works order',
+                });
+            }
+            if (installation.status !== 'completed') {
+                await ProductionDatabase.updateInstallation(installationId, { status: 'completed' });
+                completedInstallationIds.push(installationId);
+            }
+        } else {
+            const linked = await ProductionDatabase.getInstallationsForWorksOrder(orderId);
+            for (const inst of linked) {
+                if (inst.status === 'completed') continue;
+                await ProductionDatabase.updateInstallation(inst.id, { status: 'completed' });
+                completedInstallationIds.push(inst.id);
+            }
+        }
+
         const { payload, result } = await pushStatusToLeadLock({
             orderId: leadlockOrderId,
             installationCompleted: true,
         });
         await ProductionDatabase.recordLeadLockStatusSync(orderId, 'completed');
         const syncs = await ProductionDatabase.getLatestLeadLockStatusSyncs(orderId);
+        const completedCount = completedInstallationIds.length;
         res.json({
             success: true,
-            message: 'Completed status sent to LeadLock',
+            message: completedCount > 0
+                ? `Marked ${completedCount} installation(s) completed and sent to LeadLock`
+                : 'Completed status sent to LeadLock',
             payload,
             result,
             syncs,
+            completed_installation_ids: completedInstallationIds,
         });
     } catch (error) {
         console.error('LeadLock completed push error:', error);
@@ -3904,7 +3940,10 @@ router.put('/installations/:id', requireProductionAuth, async (req, res) => {
             await ProductionDatabase.upsertInstallationChecklist(installationId, 'completion', completionPayload, req.session.production_user?.id || null);
         }
 
-        if (updateData.status === 'completed') {
+        // Admin/office can mark completed without checklist/sign-off (soft reminder is UI-only).
+        // Installers and managers still require the full completion gate.
+        const canBypassCompletionGate = user?.role === 'admin' || user?.role === 'office';
+        if (updateData.status === 'completed' && !canBypassCompletionGate) {
             const currentInstallation = await ProductionDatabase.getInstallationById(installationId);
             const gate = getCompletionGateResult(currentInstallation);
             if (!gate.ok) {

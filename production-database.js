@@ -11178,6 +11178,26 @@ class ProductionDatabase {
     static async getInstallationsByDateRange(startDate, endDate) {
         return this.getAllInstallations(startDate, endDate);
     }
+
+    /** Lightweight list of installations linked to a works order (id + status). */
+    static async getInstallationsForWorksOrder(worksOrderId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT id, works_order_id, status, completed_at, start_date, end_date
+                 FROM installations
+                 WHERE works_order_id = $1
+                 ORDER BY id ASC`,
+                [worksOrderId]
+            );
+            return result.rows || [];
+        }
+        return db.prepare(
+            `SELECT id, works_order_id, status, completed_at, start_date, end_date
+             FROM installations
+             WHERE works_order_id = ?
+             ORDER BY id ASC`
+        ).all(worksOrderId) || [];
+    }
     
     static async updateInstallation(id, data) {
         const updates = [];
