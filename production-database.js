@@ -6476,7 +6476,8 @@ class ProductionDatabase {
 
     /**
      * Installations completed in a London civil week, with linked works-order value.
-     * Effective completion date: COALESCE(completed_at, end_date, start_date).
+     * Week bucket uses install dates first (end_date, then start_date), then completed_at.
+     * That way office completing on Monday still counts the job in the week it was installed.
      * Total value sums distinct works_order_id amounts (no double-count for multi-visit orders).
      */
     static async getInstallationsCompletedForWeek(weekStart, weekEnd) {
@@ -6486,12 +6487,13 @@ class ProductionDatabase {
                 `SELECT i.id, i.works_order_id, i.start_date, i.end_date, i.completed_at, i.status,
                         i.location, i.address, i.duration_hours,
                         COALESCE(
-                            (CASE
-                                WHEN i.completed_at IS NOT NULL THEN (i.completed_at AT TIME ZONE 'Europe/London')::date
-                                ELSE NULL
-                            END),
                             i.end_date::date,
-                            i.start_date::date
+                            i.start_date::date,
+                            (CASE
+                                WHEN i.completed_at IS NOT NULL
+                                    THEN ((i.completed_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/London')::date
+                                ELSE NULL
+                            END)
                         ) AS completion_date,
                         po.customer_name, po.sales_order_ref, po.invoice_number,
                         COALESCE(po.total_amount, 0) AS total_amount,
@@ -6509,12 +6511,13 @@ class ProductionDatabase {
                  ) planned ON true
                  WHERE i.status = 'completed'
                    AND COALESCE(
-                        (CASE
-                            WHEN i.completed_at IS NOT NULL THEN (i.completed_at AT TIME ZONE 'Europe/London')::date
-                            ELSE NULL
-                        END),
                         i.end_date::date,
-                        i.start_date::date
+                        i.start_date::date,
+                        (CASE
+                            WHEN i.completed_at IS NOT NULL
+                                THEN ((i.completed_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/London')::date
+                            ELSE NULL
+                        END)
                    ) BETWEEN $1::date AND $2::date
                  ORDER BY completion_date ASC, i.id ASC`,
                 [weekStart, weekEnd]
@@ -6524,7 +6527,7 @@ class ProductionDatabase {
             rows = db.prepare(
                 `SELECT i.id, i.works_order_id, i.start_date, i.end_date, i.completed_at, i.status,
                         i.location, i.address, i.duration_hours,
-                        date(COALESCE(i.completed_at, i.end_date, i.start_date)) AS completion_date,
+                        date(COALESCE(i.end_date, i.start_date, i.completed_at)) AS completion_date,
                         po.customer_name, po.sales_order_ref, po.invoice_number,
                         COALESCE(po.total_amount, 0) AS total_amount,
                         po.delivery_install_ex_vat,
@@ -6537,8 +6540,8 @@ class ProductionDatabase {
                  FROM installations i
                  LEFT JOIN product_orders po ON i.works_order_id = po.id
                  WHERE i.status = 'completed'
-                   AND date(COALESCE(i.completed_at, i.end_date, i.start_date)) >= ?
-                   AND date(COALESCE(i.completed_at, i.end_date, i.start_date)) <= ?
+                   AND date(COALESCE(i.end_date, i.start_date, i.completed_at)) >= ?
+                   AND date(COALESCE(i.end_date, i.start_date, i.completed_at)) <= ?
                  ORDER BY completion_date ASC, i.id ASC`
             ).all(weekStart, weekEnd);
         }

@@ -1888,8 +1888,8 @@ router.get('/reports/weekly-manager', requireProductionAuth, requireAdminOrOffic
         if (rawWeekStart && ymdPattern.test(rawWeekStart)) {
             weekStart = londonMondayYmdFromYmd(rawWeekStart);
         } else {
-            // Default to last completed week (previous Monday)
-            weekStart = londonYmdAddDays(londonMondayYmd(new Date()), -7);
+            // Default to current London week (same as weekly-report.html)
+            weekStart = londonMondayYmd(new Date());
         }
         const weekEnd = londonYmdAddDays(weekStart, 6);
 
@@ -2772,6 +2772,7 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
 
         // Mark linked installation(s) completed so the weekly report picks them up.
         // Admin/office path intentionally skips the checklist/sign-off gate.
+        // Always call updateInstallation so completed_at is stamped when missing.
         const completedInstallationIds = [];
         const rawInstallationId = req.body?.installation_id;
         if (rawInstallationId !== undefined && rawInstallationId !== null && String(rawInstallationId).trim() !== '') {
@@ -2789,14 +2790,11 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
                     error: 'Installation does not belong to this works order',
                 });
             }
-            if (installation.status !== 'completed') {
-                await ProductionDatabase.updateInstallation(installationId, { status: 'completed' });
-                completedInstallationIds.push(installationId);
-            }
+            await ProductionDatabase.updateInstallation(installationId, { status: 'completed' });
+            completedInstallationIds.push(installationId);
         } else {
             const linked = await ProductionDatabase.getInstallationsForWorksOrder(orderId);
             for (const inst of linked) {
-                if (inst.status === 'completed') continue;
                 await ProductionDatabase.updateInstallation(inst.id, { status: 'completed' });
                 completedInstallationIds.push(inst.id);
             }

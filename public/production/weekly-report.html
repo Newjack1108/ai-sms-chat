@@ -152,8 +152,9 @@
         }
 
         function defaultWeekStart() {
-            // Last completed week (previous Monday)
-            return londonYmdAddDays(londonMondayYmd(new Date()), -7);
+            // Current London week so just-completed installs show immediately.
+            // Use Previous week for the prior Mon–Sun manager review.
+            return londonMondayYmd(new Date());
         }
 
         async function init() {
@@ -307,7 +308,7 @@
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>Completed</th>
+                            <th>Install date</th>
                             <th>Customer</th>
                             <th>Works Order / Ref</th>
                             <th>Invoice</th>
@@ -565,7 +566,7 @@
 
                 doc.autoTable({
                     startY: yPos,
-                    head: [['Completed', 'Customer', 'Works Order', 'Order £', 'D&I sold', 'Planned', 'Actual', 'Margin %', 'Var %']],
+                    head: [['Install date', 'Customer', 'Works Order', 'Order £', 'D&I sold', 'Planned', 'Actual', 'Margin %', 'Var %']],
                     body: installRows.length ? installRows : [['—', 'No installations completed', '—', '—', '—', '—', '—', '—', '—']],
                     theme: 'striped',
                     headStyles: { fillColor: [102, 126, 234] },
