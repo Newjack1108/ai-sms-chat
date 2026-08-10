@@ -6202,37 +6202,48 @@ class ProductionDatabase {
         let totalHoursUsed = 0;
         let totalPanelsPlanned = 0;
         let totalPanelsBuilt = 0;
+        let totalExpectedHours = 0;
         
         for (const item of items) {
+            const isJob = item.item_type === 'job';
             const labourHours = parseFloat(item.labour_hours || 0);
             const qtyPlanned = parseFloat(item.quantity_to_build || 0);
             const qtyBuilt = parseFloat(item.quantity_built || 0);
             const hoursUsed = parseFloat(item.hours_used || 0);
             
-            totalHoursPlanned += labourHours * qtyPlanned;
             totalHoursUsed += hoursUsed;
-            totalPanelsPlanned += qtyPlanned;
-            totalPanelsBuilt += qtyBuilt;
+
+            if (isJob) {
+                // For jobs, quantity_to_build IS the hours required (not a panel qty)
+                totalHoursPlanned += qtyPlanned;
+                if (item.status === 'completed' || hoursUsed > 0) {
+                    totalExpectedHours += qtyPlanned;
+                }
+            } else {
+                totalHoursPlanned += labourHours * qtyPlanned;
+                totalPanelsPlanned += qtyPlanned;
+                totalPanelsBuilt += qtyBuilt;
+                totalExpectedHours += labourHours * qtyBuilt;
+            }
         }
         
         const hoursAvailable = parseFloat(planner.hours_available || 0);
         
-        // Calculate expected hours based on what was actually built
-        let totalExpectedHours = 0;
-        for (const item of items) {
-            const labourHours = parseFloat(item.labour_hours || 0);
-            const qtyBuilt = parseFloat(item.quantity_built || 0);
-            totalExpectedHours += labourHours * qtyBuilt;
-        }
-        
         // Efficiency calculations
-        // Hours efficiency: expected hours (based on built panels) vs actual hours used
+        // Hours efficiency: expected hours (based on built panels / completed jobs) vs actual hours used
         const hoursEfficiency = totalHoursUsed > 0 ? (totalExpectedHours / totalHoursUsed) * 100 : (totalExpectedHours > 0 ? 0 : 100);
-        // Panels efficiency: built vs planned
+        // Panels efficiency: built vs planned (jobs are excluded from panel counts)
         const panelsEfficiency = totalPanelsPlanned > 0 ? (totalPanelsBuilt / totalPanelsPlanned) * 100 : 0;
         
-        // Overall efficiency (average of hours and panels)
-        const overallEfficiency = totalHoursUsed > 0 || totalPanelsPlanned > 0 ? (hoursEfficiency + panelsEfficiency) / 2 : 100;
+        // Overall: average hours + panels when both apply; otherwise use the applicable metric
+        let overallEfficiency = 100;
+        if (totalPanelsPlanned > 0 && (totalHoursUsed > 0 || totalExpectedHours > 0 || totalHoursPlanned > 0)) {
+            overallEfficiency = (hoursEfficiency + panelsEfficiency) / 2;
+        } else if (totalPanelsPlanned > 0) {
+            overallEfficiency = panelsEfficiency;
+        } else if (totalHoursUsed > 0 || totalExpectedHours > 0 || totalHoursPlanned > 0) {
+            overallEfficiency = hoursEfficiency;
+        }
         
         // Determine indicator
         let indicator = 'green';

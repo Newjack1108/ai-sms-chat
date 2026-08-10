@@ -872,7 +872,7 @@
                                                         <div class="planner-item-actions">
                                                             <button onclick="editPlannerItem(${item.id})" class="btn btn-secondary btn-sm">Edit</button>
                                                             ${item.status !== 'completed' ? `
-                                                                <button onclick="completePlannerItem(${item.id})" class="btn btn-success btn-sm" title="Mark complete and add to stock">Complete</button>
+                                                                <button onclick="completePlannerItem(${item.id})" class="btn btn-success btn-sm" title="Mark complete (records hours and stock where applicable)">Complete</button>
                                                             ` : ''}
                                                             <button onclick="deletePlannerItem(${item.id})" class="btn btn-danger btn-sm">Remove</button>
                                                         </div>
@@ -1890,10 +1890,10 @@
 
             if (defaults.skipsStock) {
                 lines.push(`Hours: ${defaults.hoursUsed.toFixed(1)}`);
-                lines.push('Removes from this week\'s planner and deducts hours.');
+                lines.push('Marks the job completed and records hours used for the weekly report.');
             } else {
                 lines.push(`Built: ${defaults.quantityBuilt.toFixed(1)} · Hours: ${defaults.hoursUsed.toFixed(1)}`);
-                lines.push('Adds to stock and removes from this week\'s planner.');
+                lines.push('Adds to stock, marks completed, and records hours used for the weekly report.');
             }
 
             return lines.join('\n');
@@ -1943,33 +1943,22 @@
                     return;
                 }
 
-                if (!defaults.skipsStock) {
-                    const itemId = item.item_id_for_movement || item.item_id || item.panel_id;
-                    if (!itemId) {
-                        throw new Error('Item ID not found for stock movement');
-                    }
-
-                    const movementBody = {
-                        movement_type: 'build',
-                        quantity: defaults.quantityBuilt,
-                        reference: `Planner Item #${plannerItemId}`
-                    };
-
-                    if (defaults.itemType === 'component') {
-                        await apiCall(`/components/${itemId}/movement`, {
-                            method: 'POST',
-                            body: JSON.stringify(movementBody)
-                        });
-                    } else {
-                        await apiCall(`/panels/${itemId}/movement`, {
-                            method: 'POST',
-                            body: JSON.stringify(movementBody)
-                        });
-                    }
-                }
+                // Mark completed (do not delete) so weekly report / efficiency can count the item.
+                // Stock build movements are handled by updatePlannerItem when status becomes completed.
+                await apiCall(`/planner/items/${plannerItemId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        quantity_to_build: parseFloat(item.quantity_to_build || 0),
+                        quantity_built: defaults.quantityBuilt,
+                        hours_used: defaults.hoursUsed,
+                        priority: item.priority || 'medium',
+                        status: 'completed',
+                        start_day: item.start_day != null ? parseInt(item.start_day, 10) : null,
+                        end_day: item.end_day != null ? parseInt(item.end_day, 10) : null
+                    })
+                });
 
                 await deductPlannerHours(defaults.hoursUsed);
-                await apiCall(`/planner/items/${plannerItemId}`, { method: 'DELETE' });
 
                 const itemTypeName = defaults.itemType === 'component'
                     ? 'component'
@@ -1978,9 +1967,9 @@
                         : 'built item';
 
                 if (defaults.skipsStock) {
-                    showAlert(`Completed ${itemTypeName} and deducted ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
+                    showAlert(`Completed ${itemTypeName} and recorded ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
                 } else {
-                    showAlert(`Added ${defaults.quantityBuilt.toFixed(1)} units to ${itemTypeName} stock and deducted ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
+                    showAlert(`Completed ${itemTypeName}: added ${defaults.quantityBuilt.toFixed(1)} to stock and recorded ${defaults.hoursUsed.toFixed(1)} hours`, 'success');
                 }
 
                 loadPlanner();
