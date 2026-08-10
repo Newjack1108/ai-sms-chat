@@ -235,6 +235,7 @@
             const hours = data.hours || {};
             const planner = data.planner;
             const clocked = (hours.totals && hours.totals.total_hours) || 0;
+            const installerClocked = (hours.installer_totals && hours.installer_totals.total_hours) || 0;
             const plannerUsed = planner ? planner.hours_used : null;
 
             document.getElementById('summaryCards').innerHTML = `
@@ -279,8 +280,12 @@
                     <p class="kpi-value">${formatCurrency(stock.current_total_stock_value || 0)}</p>
                 </div>
                 <div class="kpi-card">
-                    <h3>Clocked Hours</h3>
+                    <h3>Total Clocked Hours</h3>
                     <p class="kpi-value">${formatHours(clocked)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Installer Clocked Hours</h3>
+                    <p class="kpi-value">${formatHours(installerClocked)}</p>
                 </div>
                 <div class="kpi-card">
                     <h3>Planner Hours Used</h3>
@@ -402,6 +407,7 @@
         function renderHours(hours, planner) {
             const users = (hours && hours.users) || [];
             const totals = (hours && hours.totals) || {};
+            const installerTotals = (hours && hours.installer_totals) || {};
 
             let plannerHtml = '';
             if (!planner) {
@@ -421,18 +427,27 @@
             document.getElementById('hoursSection').innerHTML = `
                 ${plannerHtml}
                 <p class="section-note">
-                    Clocked totals — Regular: <strong>${formatHours(totals.regular_hours)}</strong>
+                    Total clocked — Regular: <strong>${formatHours(totals.regular_hours)}</strong>
                     · Overtime: <strong>${formatHours(totals.overtime_hours)}</strong>
                     · Weekend: <strong>${formatHours(totals.weekend_hours)}</strong>
                     · Overnight: <strong>${formatHours(totals.overnight_hours)}</strong>
                     · Total: <strong>${formatHours(totals.total_hours)}</strong>
                     · People: <strong>${hours.user_count || 0}</strong>
                 </p>
+                <p class="section-note">
+                    Installer clocked — Regular: <strong>${formatHours(installerTotals.regular_hours)}</strong>
+                    · Overtime: <strong>${formatHours(installerTotals.overtime_hours)}</strong>
+                    · Weekend: <strong>${formatHours(installerTotals.weekend_hours)}</strong>
+                    · Overnight: <strong>${formatHours(installerTotals.overnight_hours)}</strong>
+                    · Total: <strong>${formatHours(installerTotals.total_hours)}</strong>
+                    · Installers: <strong>${hours.installer_user_count || 0}</strong>
+                </p>
                 ${users.length === 0 ? '<p>No clocked hours recorded this week.</p>' : `
                 <table class="table">
                     <thead>
                         <tr>
                             <th>Person</th>
+                            <th>Role</th>
                             <th class="text-right">Regular</th>
                             <th class="text-right">Overtime</th>
                             <th class="text-right">Weekend</th>
@@ -445,6 +460,7 @@
                         ${users.map(u => `
                             <tr>
                                 <td>${escapeHtml(u.username)}</td>
+                                <td>${escapeHtml(u.role || '—')}</td>
                                 <td class="text-right">${formatHours(u.regular_hours)}</td>
                                 <td class="text-right">${formatHours(u.overtime_hours)}</td>
                                 <td class="text-right">${formatHours(u.weekend_hours)}</td>
@@ -522,6 +538,7 @@
                 const hours = reportData.hours || {};
                 const planner = reportData.planner;
                 const totals = hours.totals || {};
+                const installerTotals = hours.installer_totals || {};
 
                 doc.setFontSize(13);
                 doc.setFont(undefined, 'bold');
@@ -543,7 +560,8 @@
                     ['Raw materials on hand', formatCurrency(stock.current_raw_materials_value || 0)],
                     ['Built items on hand', formatCurrency(stock.current_built_items_value || 0)],
                     ['Total stock on hand', formatCurrency(stock.current_total_stock_value || 0)],
-                    ['Clocked hours', formatHours(totals.total_hours)],
+                    ['Total clocked hours', formatHours(totals.total_hours)],
+                    ['Installer clocked hours', formatHours(installerTotals.total_hours)],
                     ['Planner hours used', planner ? formatHours(planner.hours_used) : 'No planner']
                 ];
 
@@ -645,6 +663,7 @@
 
                 const hourRows = ((hours.users) || []).map(u => [
                     u.username,
+                    u.role || '—',
                     formatHours(u.regular_hours),
                     formatHours(u.overtime_hours),
                     formatHours(u.weekend_hours),
@@ -655,6 +674,7 @@
                 if (hourRows.length) {
                     hourRows.push([
                         'TOTAL',
+                        '',
                         formatHours(totals.regular_hours),
                         formatHours(totals.overtime_hours),
                         formatHours(totals.weekend_hours),
@@ -662,12 +682,22 @@
                         formatHours(totals.total_hours),
                         String(totals.days_worked || 0)
                     ]);
+                    hourRows.push([
+                        'INSTALLERS',
+                        'installer',
+                        formatHours(installerTotals.regular_hours),
+                        formatHours(installerTotals.overtime_hours),
+                        formatHours(installerTotals.weekend_hours),
+                        formatHours(installerTotals.overnight_hours),
+                        formatHours(installerTotals.total_hours),
+                        String(installerTotals.days_worked || 0)
+                    ]);
                 }
 
                 doc.autoTable({
                     startY: yPos,
-                    head: [['Person', 'Regular', 'OT', 'Weekend', 'Overnight', 'Total', 'Days']],
-                    body: hourRows.length ? hourRows : [['—', 'No clocked hours', '—', '—', '—', '—', '—']],
+                    head: [['Person', 'Role', 'Regular', 'OT', 'Weekend', 'Overnight', 'Total', 'Days']],
+                    body: hourRows.length ? hourRows : [['—', '—', 'No clocked hours', '—', '—', '—', '—', '—']],
                     theme: 'striped',
                     headStyles: { fillColor: [102, 126, 234] },
                     margin: { left: 14, right: 14 },

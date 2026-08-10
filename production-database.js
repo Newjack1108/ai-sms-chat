@@ -6727,10 +6727,29 @@ class ProductionDatabase {
      * Clocked production hours for a Monday-start week (from timesheet daily entries).
      */
     static async getProductionHoursForWeek(weekStart) {
+        const emptyTotals = () => ({
+            regular_hours: 0,
+            overtime_hours: 0,
+            weekend_hours: 0,
+            overnight_hours: 0,
+            total_hours: 0,
+            days_worked: 0
+        });
+        const addUserHours = (acc, u) => {
+            acc.regular_hours += u.regular_hours;
+            acc.overtime_hours += u.overtime_hours;
+            acc.weekend_hours += u.weekend_hours;
+            acc.overnight_hours += u.overnight_hours;
+            acc.total_hours += u.total_hours;
+            acc.days_worked += u.days_worked;
+            return acc;
+        };
+
         const perUser = await this.getPayrollSummary(weekStart);
         const users = (perUser || []).map(r => ({
             user_id: r.user_id,
             username: r.username,
+            role: r.role || null,
             regular_hours: parseFloat(r.total_regular_hours || 0),
             overtime_hours: parseFloat(r.total_overtime_hours || 0),
             weekend_hours: parseFloat(r.total_weekend_hours || 0),
@@ -6739,27 +6758,16 @@ class ProductionDatabase {
             days_worked: parseInt(r.days_worked || 0, 10)
         }));
 
-        const totals = users.reduce((acc, u) => {
-            acc.regular_hours += u.regular_hours;
-            acc.overtime_hours += u.overtime_hours;
-            acc.weekend_hours += u.weekend_hours;
-            acc.overnight_hours += u.overnight_hours;
-            acc.total_hours += u.total_hours;
-            acc.days_worked += u.days_worked;
-            return acc;
-        }, {
-            regular_hours: 0,
-            overtime_hours: 0,
-            weekend_hours: 0,
-            overnight_hours: 0,
-            total_hours: 0,
-            days_worked: 0
-        });
+        const totals = users.reduce(addUserHours, emptyTotals());
+        const installerUsers = users.filter(u => u.role === 'installer');
+        const installer_totals = installerUsers.reduce(addUserHours, emptyTotals());
 
         return {
             users,
             totals,
-            user_count: users.length
+            user_count: users.length,
+            installer_totals,
+            installer_user_count: installerUsers.length
         };
     }
 
@@ -14558,6 +14566,7 @@ class ProductionDatabase {
                 `SELECT 
                     u.id as user_id,
                     u.username,
+                    u.role,
                     $1::date as week_start_date,
                     COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
                     COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
@@ -14581,7 +14590,7 @@ class ProductionDatabase {
                  WHERE ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username, wt.id, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
+                 GROUP BY u.id, u.username, u.role, wt.id, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`,
                 [weekStartDate]
             );
@@ -14592,6 +14601,7 @@ class ProductionDatabase {
                 `SELECT 
                     u.id as user_id,
                     u.username,
+                    u.role,
                     wt.week_start_date,
                     COALESCE(SUM(tde.regular_hours), 0) as total_regular_hours,
                     COALESCE(SUM(tde.overtime_hours), 0) as total_overtime_hours,
@@ -14616,7 +14626,7 @@ class ProductionDatabase {
                    AND ${payrollEligibleRoleClause('u')}
                    AND (u.status IS NULL OR u.status = 'active')
                    AND tde.total_hours > 0
-                 GROUP BY u.id, u.username, wt.id, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
+                 GROUP BY u.id, u.username, u.role, wt.id, wt.week_start_date, wt.manager_approved, wt.approved_by, wt.approved_at, approver.username
                  ORDER BY u.username`
             ).all(weekStartDate);
             
