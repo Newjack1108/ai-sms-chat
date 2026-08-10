@@ -2800,6 +2800,9 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
             }
         }
 
+        // Keep works order status in sync (also triggers stock deduction when newly completed).
+        const updatedOrder = await ProductionDatabase.updateProductOrder(orderId, { status: 'completed' });
+
         const { payload, result } = await pushStatusToLeadLock({
             orderId: leadlockOrderId,
             installationCompleted: true,
@@ -2810,11 +2813,12 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
         res.json({
             success: true,
             message: completedCount > 0
-                ? `Marked ${completedCount} installation(s) completed and sent to LeadLock`
-                : 'Completed status sent to LeadLock',
+                ? `Marked works order completed, ${completedCount} installation(s) completed, and sent to LeadLock`
+                : 'Works order marked completed and sent to LeadLock',
             payload,
             result,
             syncs,
+            order: updatedOrder,
             completed_installation_ids: completedInstallationIds,
         });
     } catch (error) {

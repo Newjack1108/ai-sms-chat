@@ -2242,7 +2242,7 @@
                 }
                 if (!confirmCompleteWithReminders(
                     missing,
-                    'Mark this installation completed and send to LeadLock?'
+                    'Mark this works order and installation completed, and send to LeadLock?'
                 )) {
                     return;
                 }
@@ -2256,7 +2256,7 @@
                     method: 'POST',
                     body: JSON.stringify(body)
                 });
-                showAlert(result.message || 'Installation marked completed and sent to LeadLock');
+                showAlert(result.message || 'Works order marked completed and sent to LeadLock');
                 hideModal('installationDetailsModal');
                 await loadData();
                 renderCalendar();
