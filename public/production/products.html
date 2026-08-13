@@ -36,6 +36,7 @@
                 <button class="tab-btn active" onclick="filterProducts('Standard Product')" id="tab-standard">Standard Product</button>
                 <button class="tab-btn" onclick="filterProducts('Customer Product')" id="tab-customer">Customer Product</button>
                 <button class="tab-btn" onclick="filterProducts('Bespoke Build')" id="tab-bespoke">Bespoke Build</button>
+                <button class="tab-btn" onclick="filterProducts('Configurator')" id="tab-configurator">Configurator</button>
                 <button class="tab-btn" onclick="filterProducts('Other')" id="tab-other">Other</button>
             </div>
             <div class="page-toolbar">
@@ -106,6 +107,7 @@
                             <option value="Standard Product">Standard Product</option>
                             <option value="Customer Product">Customer Product</option>
                             <option value="Bespoke Build">Bespoke Build</option>
+                            <option value="Configurator">Configurator</option>
                             <option value="Other">Other</option>
                         </select>
                     </div>
@@ -188,6 +190,7 @@
                     <option value="Standard Product">Standard Product</option>
                     <option value="Customer Product">Customer Product</option>
                     <option value="Bespoke Build">Bespoke Build</option>
+                    <option value="Configurator">Configurator</option>
                     <option value="Other">Other</option>
                 </select>
             </div>
@@ -242,6 +245,12 @@
             if (normalized === 'sheds') return 'Sheds';
             if (normalized === 'cabins') return 'Cabins';
             return 'Other';
+        }
+
+        function categoryBadge(category) {
+            const label = escapeHtml(category || 'Other');
+            const badgeClass = category === 'Configurator' ? 'badge-warning' : 'badge-secondary';
+            return `<span class="badge ${badgeClass}">${label}</span>`;
         }
         
         async function init() {
@@ -456,7 +465,7 @@
                             <tr>
                                 <td>${product.id}</td>
                                 <td><strong>${escapeHtml(product.name)}</strong></td>
-                                <td><span class="badge badge-secondary">${escapeHtml(product.category || 'Other')}</span></td>
+                                <td>${categoryBadge(product.category)}</td>
                                 <td>${product.is_optional_extra ? '<span class="badge badge-warning" title="Optional extra">Extra</span> ' : ''}${productTypeLabel(product.product_type)}</td>
                                 <td>${statusBadge(product.status)}</td>
                                 <td>
@@ -512,6 +521,8 @@
                 document.getElementById('tab-customer').classList.add('active');
             } else if (category === 'Bespoke Build') {
                 document.getElementById('tab-bespoke').classList.add('active');
+            } else if (category === 'Configurator') {
+                document.getElementById('tab-configurator').classList.add('active');
             } else if (category === 'Other') {
                 document.getElementById('tab-other').classList.add('active');
             }
@@ -678,7 +689,7 @@
             if (modeSelect) modeSelect.value = 'cost_changed';
             if (categorySelect) {
                 const tabValue = selectedCategory || 'all';
-                const allowed = ['all', 'Standard Product', 'Customer Product', 'Bespoke Build', 'Other'];
+                const allowed = ['all', 'Standard Product', 'Customer Product', 'Bespoke Build', 'Configurator', 'Other'];
                 categorySelect.value = allowed.includes(tabValue) ? tabValue : 'all';
             }
             const btn = document.getElementById('bulkPushConfirmBtn');

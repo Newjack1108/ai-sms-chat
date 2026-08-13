@@ -175,6 +175,7 @@ const BULK_PUSH_CATEGORIES = new Set([
     'Standard Product',
     'Customer Product',
     'Bespoke Build',
+    'Configurator',
     'Other',
     'all'
 ]);
