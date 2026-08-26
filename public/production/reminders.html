@@ -128,6 +128,10 @@
             
             currentUser = await checkAuth();
             if (!currentUser) return;
+            if (currentUser.role === 'supervisor') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
             initNavbar();
             await loadStockItems();
             await loadUsers();

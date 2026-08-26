@@ -52,7 +52,7 @@ function requireOffice(req, res, next) {
     });
 }
 
-// Middleware to check if user is admin or office
+// Middleware to check if user is admin or office (clock admin, holiday admin, etc.)
 function requireAdminOrOffice(req, res, next) {
     if (req.session && req.session.production_user && 
         (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
@@ -65,11 +65,39 @@ function requireAdminOrOffice(req, res, next) {
     });
 }
 
+// Middleware: admin, office, or supervisor (production writes + payroll)
+function requireAdminOfficeOrSupervisor(req, res, next) {
+    if (req.session && req.session.production_user &&
+        (req.session.production_user.role === 'admin' ||
+         req.session.production_user.role === 'office' ||
+         req.session.production_user.role === 'supervisor')) {
+        return next();
+    }
+
+    return res.status(403).json({
+        success: false,
+        error: 'Admin, Office, or Supervisor privileges required'
+    });
+}
+
+// Block supervisors from tasks/reminders APIs
+function denySupervisor(req, res, next) {
+    if (req.session && req.session.production_user &&
+        req.session.production_user.role === 'supervisor') {
+        return res.status(403).json({
+            success: false,
+            error: 'Supervisors cannot access tasks or reminders'
+        });
+    }
+    return next();
+}
+
 // Legacy middleware - kept for backward compatibility (maps manager to office)
 function requireManager(req, res, next) {
     if (req.session && req.session.production_user && 
         (req.session.production_user.role === 'admin' || 
          req.session.production_user.role === 'office' || 
+         req.session.production_user.role === 'supervisor' ||
          req.session.production_user.role === 'manager')) {
         return next();
     }
@@ -169,6 +197,8 @@ module.exports = {
     requireAdmin,
     requireOffice,
     requireAdminOrOffice,
+    requireAdminOfficeOrSupervisor,
+    denySupervisor,
     requireManager, // Legacy - kept for backward compatibility
     loginProductionUser,
     hashPassword,

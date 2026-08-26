@@ -51,14 +51,15 @@
                 <div class="dropdown-menu">
                     <a href="timesheet.html" class="dropdown-item">Clock ON/OFF</a>
                     <a href="holidays.html" class="dropdown-item">Holidays</a>
-                    <a href="timesheet-admin.html" class="dropdown-item admin-or-office">Clock ON/OFF Admin</a>
-                    <a href="holidays-admin.html" class="dropdown-item admin-or-office">Holiday Admin</a>
+                    <a href="timesheet-admin.html" class="dropdown-item clock-holiday-admin">Clock ON/OFF Admin</a>
+                    <a href="holidays-admin.html" class="dropdown-item clock-holiday-admin">Holiday Admin</a>
+                    <a href="timesheet-admin.html#payroll" class="dropdown-item payroll-access">Payroll</a>
                 </div>
             </div>
             
             <!-- Always visible items -->
-            <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
-            <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
+            <a href="tasks.html" class="btn btn-secondary btn-sm hide-from-supervisor">Tasks</a>
+            <a href="reminders.html" class="btn btn-secondary btn-sm hide-from-supervisor">Reminders</a>
             <a href="inspections.html" class="btn btn-secondary btn-sm admin-or-office">Inspections</a>
             
             <!-- Admin Dropdown (admin-only) -->
@@ -111,7 +112,7 @@
                 </div>
             </div>
             
-            <div class="card">
+            <div class="card hide-from-supervisor">
                 <div class="card-header">
                     <h2>Overdue Reminders</h2>
                 </div>
@@ -121,7 +122,7 @@
             </div>
         </div>
         
-        <div class="card">
+        <div class="card hide-from-supervisor">
             <div class="card-header">
                 <h2>My Tasks</h2>
                 <a href="tasks.html" class="btn btn-secondary btn-sm">Open Tasks</a>
@@ -271,17 +272,21 @@
             }
             
             // Secondary widgets in parallel (reminders, holidays, tasks, inspections)
-            const isAdminOrOffice = user.role === 'admin' || user.role === 'office';
+            const isAdminOrOffice = isClockHolidayAdmin(user);
+            const canManageProduction = isAdminOfficeOrSupervisor(user);
             const softApi = (promise) => promise.catch(() => null);
             const [remindersData, holidaysData, tasksData, inspData] = await Promise.all([
-                softApi(apiCall('/reminders/overdue')),
+                user.role === 'supervisor' ? Promise.resolve(null) : softApi(apiCall('/reminders/overdue')),
                 isAdminOrOffice ? softApi(apiCall('/holidays/requests/pending')) : Promise.resolve(null),
-                softApi(apiCall('/tasks/my?status=pending')),
-                isAdminOrOffice ? softApi(apiCall('/inspections/overdue')) : Promise.resolve(null)
+                user.role === 'supervisor' ? Promise.resolve(null) : softApi(apiCall('/tasks/my?status=pending')),
+                canManageProduction ? softApi(apiCall('/inspections/overdue')) : Promise.resolve(null)
             ]);
 
             const remindersDiv = document.getElementById('overdueReminders');
-            if (!remindersData) {
+            if (user.role === 'supervisor') {
+                const remindersCard = remindersDiv && remindersDiv.closest('.card');
+                if (remindersCard) remindersCard.style.display = 'none';
+            } else if (!remindersData) {
                 remindersDiv.innerHTML = '<p>Error loading reminders</p>';
             } else {
                 let remindersHtml = '';
@@ -350,7 +355,9 @@
             }
 
             const tasksDiv = document.getElementById('myTasks');
-            if (!tasksData) {
+            if (user.role === 'supervisor') {
+                // My Tasks card hidden via hide-from-supervisor
+            } else if (!tasksData) {
                 tasksDiv.innerHTML = '<div class="empty-state"><p>Error loading tasks</p></div>';
             } else if (!tasksData.tasks || tasksData.tasks.length === 0) {
                 tasksDiv.innerHTML = '<div class="empty-state"><p>No pending tasks</p></div>';
@@ -363,7 +370,7 @@
                 `).join('');
             }
 
-            if (isAdminOrOffice) {
+            if (canManageProduction) {
                 const inspDiv = document.getElementById('overdueInspections');
                 if (!inspData) {
                     inspDiv.innerHTML = '<p>Error loading inspections</p>';

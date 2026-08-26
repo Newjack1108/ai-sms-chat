@@ -373,16 +373,33 @@ function renderLoadSheetSalesOnlyLinesHtml(loadSheet) {
 </table>`;
 }
 
-/** Whether the user may edit product BOM lines (matches API requireAdminOrOffice). */
+/** Whether the user may edit product BOM lines (matches API requireAdminOfficeOrSupervisor). */
 function canEditProductBom(user) {
     if (!user || !user.role) return false;
-    return user.role === 'admin' || user.role === 'office';
+    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor';
 }
 
 /** Whether the user may add/remove/edit quantities on order production lines (matches API requireManager). */
 function canManageOrderProducts(user) {
     if (!user || !user.role) return false;
-    return user.role === 'admin' || user.role === 'office' || user.role === 'manager';
+    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor' || user.role === 'manager';
+}
+
+/** Admin or office (clock admin, holiday admin). Supervisor excluded. */
+function isClockHolidayAdmin(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'office';
+}
+
+/** Admin, office, or supervisor (production writes + payroll). */
+function isAdminOfficeOrSupervisor(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor';
+}
+
+/** Can access payroll processing (admin, office, supervisor). */
+function canAccessPayroll(user) {
+    return isAdminOfficeOrSupervisor(user);
 }
 
 const ProductBomCatalog = {
@@ -1017,7 +1034,33 @@ async function initNavbar() {
             adminItems.forEach(item => item.style.display = 'none');
         }
         
+        // Hide clock/holiday admin items unless admin or office
+        if (!isClockHolidayAdmin(user)) {
+            document.querySelectorAll('.clock-holiday-admin').forEach(item => {
+                if (item.classList.contains('navbar-dropdown')) {
+                    item.style.display = 'none';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        // Hide items supervisors must not see (tasks, reminders, etc.)
+        if (user.role === 'supervisor') {
+            document.querySelectorAll('.hide-from-supervisor').forEach(item => {
+                item.style.display = 'none';
+            });
+        }
+
+        // Show payroll-access items for admin/office/supervisor; hide otherwise
+        if (!canAccessPayroll(user)) {
+            document.querySelectorAll('.payroll-access').forEach(item => {
+                item.style.display = 'none';
+            });
+        }
+        
         // Hide admin-or-office items for staff and installers (including items within dropdowns)
+        // Supervisor can see admin-or-office (production) items
         if (isRestrictedFieldStaff(user)) {
             const adminOrOfficeItems = document.querySelectorAll('.admin-or-office');
             adminOrOfficeItems.forEach(item => {
@@ -1044,8 +1087,8 @@ async function initNavbar() {
             });
         }
         
-        // Show office-only items only for office and admin
-        if (user.role !== 'admin' && user.role !== 'office') {
+        // Show office-only items only for office, admin, and supervisor
+        if (!isAdminOfficeOrSupervisor(user)) {
             const officeOnlyItems = document.querySelectorAll('.office-only');
             officeOnlyItems.forEach(item => item.style.display = 'none');
         }

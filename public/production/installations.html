@@ -641,7 +641,7 @@
         let installationPhotos = [];
 
         function isAdminOrOfficeRole() {
-            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'office');
+            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'office' || currentUser.role === 'supervisor');
         }
 
         /** Soft reminder list — does not block admin/office completion. */
@@ -685,6 +685,7 @@
             canManageInstallations =
                 currentUser.role === 'admin' ||
                 currentUser.role === 'office' ||
+                currentUser.role === 'supervisor' ||
                 currentUser.role === 'manager';
             canInstallerActions = currentUser.role === 'installer';
 

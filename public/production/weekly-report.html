@@ -164,8 +164,8 @@
             if (!currentUser) return;
             initNavbar();
 
-            if (currentUser.role !== 'admin' && currentUser.role !== 'office') {
-                showAlert('Admin or office access required for the weekly manager report', 'error');
+            if (!isAdminOfficeOrSupervisor(currentUser)) {
+                showAlert('Admin, office, or supervisor access required for the weekly manager report', 'error');
                 window.location.href = '/production/dashboard.html';
                 return;
             }

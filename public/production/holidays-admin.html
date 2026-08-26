@@ -326,7 +326,13 @@
         let allEntitlements = [];
         
         async function init() {
-            await checkAuth();
+            const user = await checkAuth();
+            if (!user) return;
+            if (user.role !== 'admin' && user.role !== 'office') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            initNavbar();
             await loadUsers();
             await loadEntitlements();
             await loadPendingRequests();

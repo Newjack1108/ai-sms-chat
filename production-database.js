@@ -137,7 +137,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
             is_driver INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -1346,6 +1346,54 @@ function initializeSQLite() {
         console.log('⚠️ Installer role migration check skipped:', error.message);
     }
     
+    // Migrate production_users role constraint to include 'supervisor' role
+    try {
+        const tableInfoSupervisor = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
+        if (tableInfoSupervisor && tableInfoSupervisor.sql && !tableInfoSupervisor.sql.includes("'supervisor'")) {
+            console.log('🔄 Migrating production_users table to support supervisor role...');
+            const supervisorUserCols = db.prepare("PRAGMA table_info(production_users)").all();
+            const colNames = supervisorUserCols.map(c => c.name);
+            const hasStatus = colNames.includes('status');
+            const hasIsDriver = colNames.includes('is_driver');
+            
+            const extraCols = [];
+            if (hasStatus) extraCols.push("status TEXT DEFAULT 'active'");
+            if (hasIsDriver) extraCols.push('is_driver INTEGER DEFAULT 0');
+            const extraColSql = extraCols.length ? ',\n                        ' + extraCols.join(',\n                        ') : '';
+            
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS production_users_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP${extraColSql}
+                )
+            `);
+            
+            const selectExtras = [];
+            if (hasStatus) selectExtras.push('COALESCE(status, \'active\')');
+            if (hasIsDriver) selectExtras.push('COALESCE(is_driver, 0)');
+            const selectExtraSql = selectExtras.length ? ', ' + selectExtras.join(', ') : '';
+            const insertExtras = [];
+            if (hasStatus) insertExtras.push('status');
+            if (hasIsDriver) insertExtras.push('is_driver');
+            const insertExtraSql = insertExtras.length ? ', ' + insertExtras.join(', ') : '';
+            
+            db.exec(`
+                INSERT INTO production_users_new (id, username, password_hash, role, created_at${insertExtraSql})
+                SELECT id, username, password_hash, role, created_at${selectExtraSql}
+                FROM production_users
+            `);
+            
+            db.exec('DROP TABLE production_users');
+            db.exec('ALTER TABLE production_users_new RENAME TO production_users');
+            console.log('✅ Migrated production_users table to support supervisor role');
+        }
+    } catch (error) {
+        console.log('⚠️ Supervisor role migration check skipped:', error.message);
+    }
+    
     // Migrate timesheet_entries to add hour calculation columns
     try {
         const columns = db.prepare("PRAGMA table_info(timesheet_entries)").all();
@@ -1813,7 +1861,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'staff', 'installer')),
+                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
                 is_driver BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -2951,9 +2999,9 @@ async function initializePostgreSQL() {
                 await pool.query(`
                     ALTER TABLE production_users 
                     ADD CONSTRAINT production_users_role_check 
-                    CHECK (role IN ('admin', 'office', 'staff', 'installer'))
+                    CHECK (role IN ('admin', 'office', 'supervisor', 'staff', 'installer'))
                 `);
-                console.log('✅ Updated production_users role constraint (admin, office, staff, installer)');
+                console.log('✅ Updated production_users role constraint (admin, office, supervisor, staff, installer)');
             } catch (e) {
                 // Constraint might already be correct or table doesn't exist yet
                 if (!e.message.includes('does not exist')) {
@@ -3801,7 +3849,7 @@ class ProductionDatabase {
             isDriver === undefined
                 ? !!(existing.is_driver === true || existing.is_driver === 1)
                 : !!isDriver;
-        if (role === 'admin' || role === 'office') {
+        if (role === 'admin' || role === 'office' || role === 'supervisor') {
             driverVal = false;
         }
         if (isPostgreSQL) {

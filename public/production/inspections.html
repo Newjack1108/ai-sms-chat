@@ -25,8 +25,8 @@
                     <a href="weekly-report.html" class="dropdown-item">Weekly Report</a>
                 </div>
             </div>
-            <a href="tasks.html" class="btn btn-secondary btn-sm">Tasks</a>
-            <a href="reminders.html" class="btn btn-secondary btn-sm">Reminders</a>
+            <a href="tasks.html" class="btn btn-secondary btn-sm hide-from-supervisor">Tasks</a>
+            <a href="reminders.html" class="btn btn-secondary btn-sm hide-from-supervisor">Reminders</a>
             <a href="inspections.html" class="btn btn-secondary btn-sm admin-or-office">Inspections</a>
             <div class="navbar-dropdown admin-only">
                 <button class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">Admin</button>
@@ -311,7 +311,7 @@
             if (await restrictStaffAccess()) return;
             currentUser = await checkAuth();
             if (!currentUser) return;
-            if (currentUser.role !== 'admin' && currentUser.role !== 'office') {
+            if (!isAdminOfficeOrSupervisor(currentUser)) {
                 window.location.href = 'dashboard.html';
                 return;
             }

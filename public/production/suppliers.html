@@ -113,7 +113,7 @@
                                 <td>${s.phone ? formatPhoneLink(s.phone) : '-'}</td>
                                 <td><span class="badge ${s.is_active ? 'badge-success' : 'badge-secondary'}">${s.is_active ? 'active' : 'inactive'}</span></td>
                                 <td>
-                                    ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
+                                    ${(currentUser && isAdminOfficeOrSupervisor(currentUser)) ? `
                                         <button class="btn btn-secondary btn-sm" onclick="editSupplier(${s.id})">Edit</button>
                                         <button class="btn btn-danger btn-sm" onclick="deleteSupplier(${s.id})">Delete</button>
                                     ` : '-'}

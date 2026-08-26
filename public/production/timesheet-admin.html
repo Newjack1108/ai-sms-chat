@@ -13,11 +13,11 @@
     <nav class="navbar">
         <div class="navbar-logo">
             <img src="logo.png" alt="Company Logo" onerror="this.style.display='none'">
-            <h1>Clock ON/OFF Admin</h1>
+            <h1 id="pageTitle">Clock ON/OFF Admin</h1>
         </div>
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
-            <a href="nfc-admin.html" class="btn btn-secondary btn-sm">NFC Clock</a>
+            <a href="nfc-admin.html" class="btn btn-secondary btn-sm clock-holiday-admin">NFC Clock</a>
             <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
@@ -25,7 +25,7 @@
     
     <div class="container">
         <!-- Admin Clock In/Out -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>My Clock Status</h2>
             </div>
@@ -35,7 +35,7 @@
         </div>
         
         <!-- Active Staff Clock Ins -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Staff Currently On Clock</h2>
                 <button onclick="loadActiveClockIns()" class="btn btn-secondary btn-sm">Refresh</button>
@@ -46,7 +46,7 @@
         </div>
         
         <!-- Staff Currently Off Clock -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Staff Currently Off Clock</h2>
                 <button onclick="loadOffClockStaff()" class="btn btn-secondary btn-sm">Refresh</button>
@@ -57,7 +57,7 @@
         </div>
         
         <!-- Jobs/Sites Management -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Jobs/Sites Management</h2>
                 <button onclick="showAddJobModal()" class="btn btn-primary">Add Job</button>
@@ -68,7 +68,7 @@
         </div>
         
         <!-- Notices Management -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Notice Board Management</h2>
                 <button onclick="showAddNoticeModal()" class="btn btn-primary">Add Notice</button>
@@ -78,7 +78,7 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Daily Vehicle Inspection Compliance (drivers only)</h2>
                 <button onclick="loadDailyInspectionDashboard()" class="btn btn-secondary btn-sm">Refresh</button>
@@ -93,7 +93,7 @@
         </div>
         
         <!-- Time Amendment Review -->
-        <div class="card">
+        <div class="card clock-holiday-admin">
             <div class="card-header">
                 <h2>Time Amendment Requests</h2>
                 <button onclick="loadPendingAmendments()" class="btn btn-secondary btn-sm">Refresh</button>
@@ -104,7 +104,7 @@
         </div>
         
         <!-- Payroll Processing -->
-        <div class="card">
+        <div class="card" id="payrollSection">
             <div class="card-header">
                 <h2>Payroll Processing</h2>
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -540,34 +540,43 @@
             if (!currentUser) return;
             initNavbar();
             
-            // Check if user is admin or office
-            if (currentUser.role !== 'admin' && currentUser.role !== 'office') {
-                showAlert('Access denied. Admin or Office privileges required.', 'error');
+            // Admin, office, or supervisor (payroll only for supervisor)
+            if (!canAccessPayroll(currentUser)) {
+                showAlert('Access denied. Admin, Office, or Supervisor privileges required.', 'error');
                 setTimeout(() => window.location.href = 'dashboard.html', 2000);
                 return;
             }
-            
-            // Request location permission for clock in/out
-            requestLocation();
 
-            const inspectionDate = document.getElementById('inspectionDashboardDate');
-            const selectedInspectionDate = localStorage.getItem('inspectionDashboardDate');
-            if (inspectionDate) {
-                inspectionDate.value = selectedInspectionDate || londonYmd(new Date());
-                if (selectedInspectionDate) {
-                    localStorage.removeItem('inspectionDashboardDate');
-                }
+            const isSupervisorOnly = currentUser.role === 'supervisor';
+            if (isSupervisorOnly) {
+                const titleEl = document.getElementById('pageTitle');
+                if (titleEl) titleEl.textContent = 'Payroll';
+                document.title = 'Payroll - Production System';
             }
             
-            await Promise.all([
-                loadAdminClockStatus(),
-                loadActiveClockIns(),
-                loadOffClockStaff(),
-                loadJobs(),
-                loadNotices(),
-                loadPendingAmendments(),
-                loadDailyInspectionDashboard()
-            ]);
+            // Request location / load clock-admin sections only for admin/office
+            if (isClockHolidayAdmin(currentUser)) {
+                requestLocation();
+
+                const inspectionDate = document.getElementById('inspectionDashboardDate');
+                const selectedInspectionDate = localStorage.getItem('inspectionDashboardDate');
+                if (inspectionDate) {
+                    inspectionDate.value = selectedInspectionDate || londonYmd(new Date());
+                    if (selectedInspectionDate) {
+                        localStorage.removeItem('inspectionDashboardDate');
+                    }
+                }
+                
+                await Promise.all([
+                    loadAdminClockStatus(),
+                    loadActiveClockIns(),
+                    loadOffClockStaff(),
+                    loadJobs(),
+                    loadNotices(),
+                    loadPendingAmendments(),
+                    loadDailyInspectionDashboard()
+                ]);
+            }
             
             // Initialize payroll week selector to current week
             const weekSelect = document.getElementById('payrollWeekSelect');
@@ -583,6 +592,14 @@
                 // Load payroll summary for selected week
                 await loadPayrollSummary();
             }
+
+            // Scroll to payroll when linked from dashboard (#payroll) or supervisor
+            if (window.location.hash === '#payroll' || isSupervisorOnly) {
+                const payrollSection = document.getElementById('payrollSection');
+                if (payrollSection) {
+                    setTimeout(() => payrollSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+                }
+            }
             
             // Add event listener for staff dropdown change
             const staffSelect = document.getElementById('payrollStaffSelect');
@@ -592,12 +609,14 @@
                 });
             }
             
-            // Auto-refresh active clock-ins every 30s while the tab is visible
-            refreshInterval = setInterval(() => {
-                if (document.visibilityState === 'visible') {
-                    loadActiveClockIns();
-                }
-            }, 30000);
+            // Auto-refresh active clock-ins every 30s while the tab is visible (admin/office only)
+            if (isClockHolidayAdmin(currentUser)) {
+                refreshInterval = setInterval(() => {
+                    if (document.visibilityState === 'visible') {
+                        loadActiveClockIns();
+                    }
+                }, 30000);
+            }
             
             // Check for weekly approval reminder (on Saturdays)
             await checkWeeklyApprovalReminder();

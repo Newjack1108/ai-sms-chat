@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireManager, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, denySupervisor, requireManager, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const { v2: cloudinary } = require('cloudinary');
@@ -463,7 +463,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        if (!['admin', 'office', 'staff', 'installer'].includes(role)) {
+        if (!['admin', 'office', 'supervisor', 'staff', 'installer'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
 
@@ -472,7 +472,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             req.body.is_driver === 'true' ||
             req.body.is_driver === 1 ||
             req.body.is_driver === '1';
-        if (role === 'admin' || role === 'office') {
+        if (role === 'admin' || role === 'office' || role === 'supervisor') {
             isDriver = false;
         }
         
@@ -513,7 +513,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
         const { username, role, password } = req.body;
         const userId = parseInt(req.params.id);
         
-        if (role && !['admin', 'office', 'staff', 'installer'].includes(role)) {
+        if (role && !['admin', 'office', 'supervisor', 'staff', 'installer'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -544,7 +544,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
                     req.body.is_driver === 1 ||
                     req.body.is_driver === '1';
             }
-            if (nextRole === 'admin' || nextRole === 'office') {
+            if (nextRole === 'admin' || nextRole === 'office' || nextRole === 'supervisor') {
                 isDriverUpdate = false;
             }
             const updatedUser = await ProductionDatabase.updateUser(
@@ -682,7 +682,7 @@ router.get('/stock/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/stock', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
         if (!name || !unit) {
@@ -714,7 +714,7 @@ router.post('/stock', requireProductionAuth, requireAdminOrOffice, async (req, r
     }
 });
 
-router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/stock/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
@@ -743,7 +743,7 @@ router.put('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req
     }
 });
 
-router.delete('/stock/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/stock/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         await ProductionDatabase.deleteStockItem(itemId);
@@ -772,7 +772,7 @@ router.get('/stock/:id/suppliers', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id, 10);
         if (Number.isNaN(itemId)) {
@@ -794,7 +794,7 @@ router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOrOffice, 
     }
 });
 
-router.put('/stock/:id/suppliers/preferred', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/stock/:id/suppliers/preferred', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id, 10);
         const supplierId = parseInt(req.body.supplier_id, 10);
@@ -893,7 +893,7 @@ router.get('/suppliers', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const { name, code, contact_name, email, phone, address, notes, is_active } = req.body;
         if (!name || !String(name).trim()) {
@@ -918,7 +918,7 @@ router.post('/suppliers', requireProductionAuth, requireAdminOrOffice, async (re
     }
 });
 
-router.put('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/suppliers/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const supplierId = parseInt(req.params.id, 10);
         if (Number.isNaN(supplierId)) {
@@ -950,7 +950,7 @@ router.put('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, async 
     }
 });
 
-router.delete('/suppliers/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/suppliers/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const supplierId = parseInt(req.params.id, 10);
         if (Number.isNaN(supplierId)) {
@@ -1056,7 +1056,7 @@ router.get('/purchase-orders/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/purchase-orders', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const normalized = normalizePurchaseOrderPayload(req.body);
         if (normalized.error) {
@@ -1076,7 +1076,7 @@ router.post('/purchase-orders', requireProductionAuth, requireAdminOrOffice, asy
     }
 });
 
-router.put('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/purchase-orders/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         if (Number.isNaN(poId)) {
@@ -1097,7 +1097,7 @@ router.put('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffice, 
     }
 });
 
-router.patch('/purchase-orders/:id/status', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.patch('/purchase-orders/:id/status', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         const status = String(req.body.status || '').trim();
@@ -1118,7 +1118,7 @@ router.patch('/purchase-orders/:id/status', requireProductionAuth, requireAdminO
     }
 });
 
-router.post('/purchase-orders/:id/items', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/purchase-orders/:id/items', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         const stockItemId = parseInt(req.body.stock_item_id, 10);
@@ -1154,7 +1154,7 @@ router.post('/purchase-orders/:id/items', requireProductionAuth, requireAdminOrO
     }
 });
 
-router.delete('/purchase-orders/:id/items/:itemId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/purchase-orders/:id/items/:itemId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         const itemId = parseInt(req.params.itemId, 10);
@@ -1169,7 +1169,7 @@ router.delete('/purchase-orders/:id/items/:itemId', requireProductionAuth, requi
     }
 });
 
-router.delete('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/purchase-orders/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         if (Number.isNaN(poId)) {
@@ -1186,7 +1186,7 @@ router.delete('/purchase-orders/:id', requireProductionAuth, requireAdminOrOffic
     }
 });
 
-router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/purchase-orders/:id/receive', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const poId = parseInt(req.params.id, 10);
         if (Number.isNaN(poId)) {
@@ -1288,7 +1288,7 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/panels', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
@@ -1351,7 +1351,7 @@ router.get('/panels/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
@@ -1374,7 +1374,7 @@ router.put('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (re
     }
 });
 
-router.delete('/panels/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         await ProductionDatabase.deletePanel(panelId);
@@ -1403,7 +1403,7 @@ router.delete('/panels/:id', requireProductionAuth, requireAdminOrOffice, async 
     }
 });
 
-router.post('/panels/:id/duplicate', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/panels/:id/duplicate', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const panel = await ProductionDatabase.duplicatePanel(panelId);
@@ -1471,7 +1471,7 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels/:id/bom', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/panels/:id/bom', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { item_type, item_id, quantity_required, unit } = req.body;
@@ -1512,7 +1512,7 @@ router.post('/panels/:id/bom', requireProductionAuth, requireAdminOrOffice, asyn
     }
 });
 
-router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteBOMItem(bomId);
@@ -1615,7 +1615,7 @@ router.get('/components', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/components', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
@@ -1656,7 +1656,7 @@ router.get('/components/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/components/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
@@ -1678,7 +1678,7 @@ router.put('/components/:id', requireProductionAuth, requireAdminOrOffice, async
     }
 });
 
-router.delete('/components/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/components/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         await ProductionDatabase.deleteComponent(componentId);
@@ -1713,7 +1713,7 @@ router.get('/components/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components/:id/bom', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/components/:id/bom', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { stock_item_id, quantity_required, unit } = req.body;
@@ -1757,7 +1757,7 @@ router.post('/components/:id/bom', requireProductionAuth, requireAdminOrOffice, 
     }
 });
 
-router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteComponentBOMItem(bomId);
@@ -1881,7 +1881,7 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
 });
 
 // Weekly Production Manager Report (installs, stock, hours)
-router.get('/reports/weekly-manager', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/reports/weekly-manager', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const rawWeekStart = (req.query.week_start || '').toString().trim();
         const ymdPattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -2017,7 +2017,7 @@ router.get('/products/export', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/products', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
@@ -2069,7 +2069,7 @@ router.get('/products/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/products/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
@@ -2102,7 +2102,7 @@ router.put('/products/:id', requireProductionAuth, requireAdminOrOffice, async (
     }
 });
 
-router.put('/products/:id/management-checked', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/products/:id/management-checked', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id, 10);
         if (Number.isNaN(productId)) {
@@ -2123,7 +2123,7 @@ router.put('/products/:id/management-checked', requireProductionAuth, requireAdm
     }
 });
 
-router.delete('/products/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/products/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         await ProductionDatabase.deleteProduct(productId);
@@ -2150,7 +2150,7 @@ router.get('/products/:id/suppliers', requireProductionAuth, async (req, res) =>
     }
 });
 
-router.put('/products/:id/suppliers', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/products/:id/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id, 10);
         if (Number.isNaN(productId)) {
@@ -2190,7 +2190,7 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/products/push-to-sales-bulk', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/products/push-to-sales-bulk', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const salesApiUrl = process.env.SALES_APP_API_URL;
         const salesApiKey = process.env.SALES_APP_API_KEY;
@@ -2321,7 +2321,7 @@ router.post('/products/push-to-sales-bulk', requireProductionAuth, requireAdminO
     }
 });
 
-router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const salesApiUrl = process.env.SALES_APP_API_URL;
@@ -2360,7 +2360,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOr
     }
 });
 
-router.post('/products/:id/components', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/products/:id/components', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { component_type, component_id, quantity_required, unit } = req.body;
@@ -2387,7 +2387,7 @@ router.post('/products/:id/components', requireProductionAuth, requireAdminOrOff
     }
 });
 
-router.put('/products/:id/components/:compId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/products/:id/components/:compId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
         const { component_type, component_id, quantity_required, unit } = req.body;
@@ -2413,7 +2413,7 @@ router.put('/products/:id/components/:compId', requireProductionAuth, requireAdm
     }
 });
 
-router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
         await ProductionDatabase.deleteProductComponent(compId);
@@ -2424,7 +2424,7 @@ router.delete('/products/:id/components/:compId', requireProductionAuth, require
     }
 });
 
-router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const originalProduct = await ProductionDatabase.getProductById(productId);
@@ -2571,7 +2571,7 @@ router.get('/orders/:id/leadlock/status-sync', requireProductionAuth, async (req
     }
 });
 
-router.post('/orders/:id/leadlock/install-booked', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/leadlock/install-booked', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         if (Number.isNaN(orderId)) {
@@ -2670,7 +2670,7 @@ router.get('/orders/:id/install-cost', requireProductionAuth, async (req, res) =
     }
 });
 
-router.post('/orders/:id/install-cost/scenarios', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/install-cost/scenarios', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         if (Number.isNaN(orderId)) {
@@ -2696,7 +2696,7 @@ router.post('/orders/:id/install-cost/scenarios', requireProductionAuth, require
     }
 });
 
-router.put('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         const scenarioId = parseInt(req.params.scenarioId, 10);
@@ -2716,7 +2716,7 @@ router.put('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAu
     }
 });
 
-router.post('/orders/:id/install-cost/scenarios/:scenarioId/set-planned', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/install-cost/scenarios/:scenarioId/set-planned', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         const scenarioId = parseInt(req.params.scenarioId, 10);
@@ -2735,7 +2735,7 @@ router.post('/orders/:id/install-cost/scenarios/:scenarioId/set-planned', requir
     }
 });
 
-router.delete('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/orders/:id/install-cost/scenarios/:scenarioId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         const scenarioId = parseInt(req.params.scenarioId, 10);
@@ -2755,7 +2755,7 @@ router.delete('/orders/:id/install-cost/scenarios/:scenarioId', requireProductio
     }
 });
 
-router.put('/orders/:id/install-cost/actual', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/orders/:id/install-cost/actual', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         if (Number.isNaN(orderId)) {
@@ -2774,7 +2774,7 @@ router.put('/orders/:id/install-cost/actual', requireProductionAuth, requireAdmi
     }
 });
 
-router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         if (Number.isNaN(orderId)) {
@@ -2852,7 +2852,7 @@ router.post('/orders/:id/leadlock/completed', requireProductionAuth, requireAdmi
     }
 });
 
-router.post('/orders/:id/leadlock/balance-paid', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/leadlock/balance-paid', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         if (Number.isNaN(orderId)) {
@@ -2998,7 +2998,7 @@ router.get('/orders/:id/production-setup', requireProductionAuth, async (req, re
 router.post(
     '/orders/:id/leadlock-items/:itemId/link',
     requireProductionAuth,
-    requireAdminOrOffice,
+    requireAdminOfficeOrSupervisor,
     async (req, res) => {
         try {
             const orderId = parseInt(req.params.id, 10);
@@ -3025,7 +3025,7 @@ router.post(
     }
 );
 
-router.post('/orders/:id/bespoke-products', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/bespoke-products', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id, 10);
         const { leadlock_item_id, name, description, leadlock_category, product_type, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra } = req.body;
@@ -3068,7 +3068,7 @@ router.get('/orders/:id/spares', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/orders/:id/spares', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/spares', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const orderId = parseInt(req.params.id);
         const { item_type, item_id, quantity_needed, notes } = req.body;
@@ -3094,7 +3094,7 @@ router.post('/orders/:id/spares', requireProductionAuth, requireAdminOrOffice, a
     }
 });
 
-router.put('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const spareId = parseInt(req.params.spareId);
         const { quantity_needed, quantity_loaded, quantity_used, quantity_returned, notes } = req.body;
@@ -3114,7 +3114,7 @@ router.put('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOrO
     }
 });
 
-router.post('/orders/:id/spares/:spareId/return', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/orders/:id/spares/:spareId/return', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const spareId = parseInt(req.params.spareId);
         const { quantity } = req.body;
@@ -3132,7 +3132,7 @@ router.post('/orders/:id/spares/:spareId/return', requireProductionAuth, require
     }
 });
 
-router.delete('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/orders/:id/spares/:spareId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const spareId = parseInt(req.params.spareId);
         await ProductionDatabase.deleteOrderSpare(spareId);
@@ -3478,7 +3478,7 @@ function getCompletionGateResult(installation) {
 }
 
 function isManagerLikeRole(role) {
-    return role === 'admin' || role === 'office' || role === 'manager';
+    return role === 'admin' || role === 'office' || role === 'supervisor' || role === 'manager';
 }
 
 function normalizeInspectionAnswer(value) {
@@ -3968,7 +3968,7 @@ router.put('/installations/:id', requireProductionAuth, async (req, res) => {
 
         // Admin/office can mark completed without checklist/sign-off (soft reminder is UI-only).
         // Installers and managers still require the full completion gate.
-        const canBypassCompletionGate = user?.role === 'admin' || user?.role === 'office';
+        const canBypassCompletionGate = user?.role === 'admin' || user?.role === 'office' || user?.role === 'supervisor';
         if (updateData.status === 'completed' && !canBypassCompletionGate) {
             const currentInstallation = await ProductionDatabase.getInstallationById(installationId);
             const gate = getCompletionGateResult(currentInstallation);
@@ -5098,7 +5098,7 @@ router.put('/clock/weekly/:weekStart/day/:date', requireProductionAuth, async (r
 });
 
 // Admin endpoint to update day_type for any user
-router.put('/clock/weekly/:weekStart/day/:date/user/:targetUserId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/clock/weekly/:weekStart/day/:date/user/:targetUserId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const targetUserId = parseInt(req.params.targetUserId);
         const weekStartDate = req.params.weekStart;
@@ -5515,7 +5515,7 @@ router.post('/clock/amendments', requireProductionAuth, async (req, res) => {
 });
 
 // Admin-only: Directly amend staff timesheet entry (applies immediately, no approval needed)
-router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const adminId = req.session.production_user.id;
         const { entry_id, amended_clock_in_time, amended_clock_out_time, reason, overnight_away, day_type, date, user_id, week_start } = req.body;
@@ -5736,7 +5736,7 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOrOffi
 });
 
 // Admin-only: Directly create timesheet entry for a user (applies immediately, no approval needed)
-router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/clock/entries/admin/create', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const adminId = req.session.production_user.id;
         const { user_id, job_id, clock_in_time, clock_out_time, reason, overnight_away, day_type } = req.body;
@@ -6050,7 +6050,7 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
 });
 
 // Delete timesheet entry (admin only)
-router.delete('/clock/entries/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/clock/entries/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const entryId = parseInt(req.params.id);
         const entry = await ProductionDatabase.deleteTimesheetEntry(entryId);
@@ -6072,7 +6072,7 @@ router.delete('/clock/entries/:id', requireProductionAuth, requireAdminOrOffice,
 });
 
 // Payroll routes
-router.get('/clock/payroll/:weekStart', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/clock/payroll/:weekStart', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
@@ -6083,7 +6083,7 @@ router.get('/clock/payroll/:weekStart', requireProductionAuth, requireAdminOrOff
     }
 });
 
-router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const userId = parseInt(req.params.userId);
@@ -6124,7 +6124,7 @@ router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, re
     }
 });
 
-router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const userId = parseInt(req.params.userId);
@@ -6136,7 +6136,7 @@ router.get('/clock/payroll/:weekStart/user/:userId/daily', requireProductionAuth
     }
 });
 
-router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/clock/payroll/:weekStart/export', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const weekStartDate = req.params.weekStart;
         const summary = await ProductionDatabase.getPayrollSummary(weekStartDate);
@@ -6213,7 +6213,7 @@ router.get('/clock/weekly/user/:userId/:weekStart', requireProductionAuth, requi
 
 // ============ STOCK CHECK REMINDERS ROUTES ============
 
-router.get('/reminders', requireProductionAuth, async (req, res) => {
+router.get('/reminders', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const userRole = req.session.production_user.role;
@@ -6240,7 +6240,7 @@ router.get('/reminders', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
+router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const userId = parseInt(req.session.production_user.id);
         const userRole = req.session.production_user.role;
@@ -6328,7 +6328,7 @@ router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.get('/reminders/:id', requireProductionAuth, async (req, res) => {
+router.get('/reminders/:id', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id, 10);
         if (Number.isNaN(reminderId)) {
@@ -6364,7 +6364,7 @@ router.get('/reminders/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/reminders', requireProductionAuth, async (req, res) => {
+router.post('/reminders', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const { stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, assign_to, reminder_text, reminder_type } = req.body;
         
@@ -6445,7 +6445,7 @@ router.post('/reminders', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/reminders/:id', requireProductionAuth, async (req, res) => {
+router.put('/reminders/:id', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         const currentUser = req.session.production_user;
@@ -6516,7 +6516,7 @@ router.put('/reminders/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/reminders/:id/check', requireProductionAuth, async (req, res) => {
+router.post('/reminders/:id/check', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         const reminder = await ProductionDatabase.markReminderChecked(reminderId);
@@ -6527,7 +6527,7 @@ router.post('/reminders/:id/check', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.delete('/reminders/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/reminders/:id', requireProductionAuth, denySupervisor, requireAdminOrOffice, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         await ProductionDatabase.deleteReminder(reminderId);
@@ -6540,7 +6540,7 @@ router.delete('/reminders/:id', requireProductionAuth, requireAdminOrOffice, asy
 
 // ============ COMPLIANCE INSPECTIONS ============
 
-router.get('/inspections/checklists', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/checklists', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         res.json({ success: true, checklists: ProductionDatabase.INSPECTION_CHECKLISTS });
     } catch (error) {
@@ -6549,7 +6549,7 @@ router.get('/inspections/checklists', requireProductionAuth, requireAdminOrOffic
     }
 });
 
-router.get('/inspections/records/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/records/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const recordId = parseInt(req.params.id, 10);
         if (Number.isNaN(recordId)) {
@@ -6566,7 +6566,7 @@ router.get('/inspections/records/:id', requireProductionAuth, requireAdminOrOffi
     }
 });
 
-router.get('/inspections/overdue', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/overdue', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const inspections = await ProductionDatabase.getInspectionsDashboardDue();
         res.json({ success: true, inspections });
@@ -6576,7 +6576,7 @@ router.get('/inspections/overdue', requireProductionAuth, requireAdminOrOffice, 
     }
 });
 
-router.get('/inspections/assets', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/assets', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const asset_type = req.query.asset_type || null;
         const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
@@ -6590,7 +6590,7 @@ router.get('/inspections/assets', requireProductionAuth, requireAdminOrOffice, a
     }
 });
 
-router.post('/inspections/assets', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/inspections/assets', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const body = req.body || {};
         const asset = await ProductionDatabase.createInspectionAsset({
@@ -6605,7 +6605,7 @@ router.post('/inspections/assets', requireProductionAuth, requireAdminOrOffice, 
     }
 });
 
-router.get('/inspections/assets/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/assets/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const assetId = parseInt(req.params.id, 10);
         if (Number.isNaN(assetId)) {
@@ -6622,7 +6622,7 @@ router.get('/inspections/assets/:id', requireProductionAuth, requireAdminOrOffic
     }
 });
 
-router.put('/inspections/assets/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.put('/inspections/assets/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const assetId = parseInt(req.params.id, 10);
         if (Number.isNaN(assetId)) {
@@ -6657,7 +6657,7 @@ router.delete('/inspections/assets/:id', requireProductionAuth, requireAdmin, as
     }
 });
 
-router.get('/inspections/assets/:id/records', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/assets/:id/records', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const assetId = parseInt(req.params.id, 10);
         if (Number.isNaN(assetId)) {
@@ -6672,7 +6672,7 @@ router.get('/inspections/assets/:id/records', requireProductionAuth, requireAdmi
     }
 });
 
-router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const assetId = parseInt(req.params.id, 10);
         if (Number.isNaN(assetId)) {
@@ -6693,7 +6693,7 @@ router.post('/inspections/assets/:id/records', requireProductionAuth, requireAdm
     }
 });
 
-router.post('/inspections/batch', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.post('/inspections/batch', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const u = req.session.production_user;
         const body = req.body || {};
@@ -6717,7 +6717,7 @@ router.post('/inspections/batch', requireProductionAuth, requireAdminOrOffice, a
     }
 });
 
-router.get('/inspections/batch/sessions', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/batch/sessions', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const asset_type = req.query.asset_type || null;
         const limit = req.query.limit;
@@ -6729,7 +6729,7 @@ router.get('/inspections/batch/sessions', requireProductionAuth, requireAdminOrO
     }
 });
 
-router.get('/inspections/batch/sessions/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.get('/inspections/batch/sessions/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const sessionId = parseInt(req.params.id, 10);
         if (Number.isNaN(sessionId)) {
@@ -6870,7 +6870,7 @@ router.put('/planner/:id', requireProductionAuth, requireManager, async (req, re
     }
 });
 
-router.delete('/planner/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/planner/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const plannerId = parseInt(req.params.id);
         await ProductionDatabase.deleteWeeklyPlanner(plannerId);
@@ -7059,7 +7059,7 @@ router.delete('/planner/items/:id', requireProductionAuth, requireManager, async
 
 // ============ TASK MANAGEMENT ROUTES ============
 
-router.get('/tasks', requireProductionAuth, async (req, res) => {
+router.get('/tasks', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const filters = {};
         if (req.query.status) filters.status = req.query.status;
@@ -7084,7 +7084,7 @@ router.get('/tasks', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.get('/tasks/my', requireProductionAuth, async (req, res) => {
+router.get('/tasks/my', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const filters = { assigned_to_user_id: req.session.production_user.id };
         if (req.query.status) filters.status = req.query.status;
@@ -7098,7 +7098,7 @@ router.get('/tasks/my', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.get('/tasks/:id', requireProductionAuth, async (req, res) => {
+router.get('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id, 10);
         if (Number.isNaN(taskId)) {
@@ -7115,7 +7115,7 @@ router.get('/tasks/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/tasks', requireProductionAuth, async (req, res) => {
+router.post('/tasks', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const { title, description, assigned_to_user_id, due_date, status } = req.body;
         if (!title) {
@@ -7137,7 +7137,7 @@ router.post('/tasks', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/tasks/:id', requireProductionAuth, async (req, res) => {
+router.put('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const { title, description, assigned_to_user_id, status, due_date } = req.body;
@@ -7156,7 +7156,7 @@ router.put('/tasks/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/tasks/:id/complete', requireProductionAuth, async (req, res) => {
+router.post('/tasks/:id/complete', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const task = await ProductionDatabase.completeTask(taskId, req.session.production_user.id);
@@ -7167,7 +7167,7 @@ router.post('/tasks/:id/complete', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.delete('/tasks/:id', requireProductionAuth, requireAdminOrOffice, async (req, res) => {
+router.delete('/tasks/:id', requireProductionAuth, denySupervisor, requireAdminOrOffice, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         await ProductionDatabase.deleteTask(taskId);
@@ -7178,7 +7178,7 @@ router.delete('/tasks/:id', requireProductionAuth, requireAdminOrOffice, async (
     }
 });
 
-router.get('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
+router.get('/tasks/:id/comments', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const comments = await ProductionDatabase.getTaskComments(taskId);
@@ -7189,7 +7189,7 @@ router.get('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
+router.post('/tasks/:id/comments', requireProductionAuth, denySupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const { comment } = req.body;

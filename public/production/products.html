@@ -456,7 +456,7 @@
                     <tbody>
                         ${filteredProducts.map(product => {
                             const isInactive = (product.status || 'active') === 'inactive';
-                            const canToggleChecked = currentUser && (currentUser.role === 'admin' || currentUser.role === 'office');
+                            const canToggleChecked = currentUser && isAdminOfficeOrSupervisor(currentUser);
                             const isManagementChecked = !!(product.management_checked === true || product.management_checked === 1);
                             const statusAction = isInactive
                                 ? `<button onclick="setProductStatus(${product.id}, 'active')" class="btn btn-success btn-sm" title="Show in catalog again">Reactivate</button>`
@@ -481,7 +481,7 @@
                                 <td>
                                     <div class="action-group">
                                         <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">BOM</button>
-                                        ${(currentUser && (currentUser.role === 'admin' || currentUser.role === 'office')) ? `
+                                        ${(currentUser && isAdminOfficeOrSupervisor(currentUser)) ? `
                                         <div class="navbar-dropdown">
                                             <button type="button" class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">More</button>
                                             <div class="dropdown-menu">

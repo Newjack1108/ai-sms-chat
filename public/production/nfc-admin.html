@@ -111,11 +111,22 @@
     <script>
         document.getElementById('userInfo').textContent = 'Loading...';
         apiCall('/me').then(function (data) {
-            if (data && data.user) {
-                document.getElementById('userInfo').textContent = data.user.username || '';
+            if (!data || !data.user) {
+                window.location.href = 'login.html';
+                return;
             }
+            if (data.user.role !== 'admin' && data.user.role !== 'office') {
+                window.location.href = 'dashboard.html';
+                return;
+            }
+            document.getElementById('userInfo').textContent = data.user.username || '';
+            loadUsers();
+            loadJobs();
+            loadCards();
+            loadReaders();
         }).catch(function () {
             document.getElementById('userInfo').textContent = '';
+            window.location.href = 'login.html';
         });
 
         function logout() {
@@ -307,10 +318,6 @@
                 });
             });
         }
-
-        Promise.all([loadUsers(), loadJobs(), loadCards(), loadReaders()]).catch(function () {
-            console.error('Initial load failed');
-        });
     </script>
 </body>
 </html>

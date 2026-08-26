@@ -228,6 +228,20 @@ app.get('/production/*.html', requireProductionAuth, (req, res) => {
             return res.redirect('/production/timesheet.html');
         }
     }
+
+    // Supervisor: no tasks, reminders, holiday admin, NFC admin, users, backups
+    if (pu && role === 'supervisor') {
+        const denied =
+            req.path.includes('tasks.html') ||
+            req.path.includes('reminders.html') ||
+            req.path.includes('holidays-admin.html') ||
+            req.path.includes('nfc-admin.html') ||
+            req.path.includes('users.html') ||
+            req.path.includes('backups.html');
+        if (denied) {
+            return res.redirect('/production/dashboard.html');
+        }
+    }
     
     const fileName = req.path.replace('/production/', '') || 'dashboard.html';
     const filePath = path.join(__dirname, 'public', 'production', fileName);
