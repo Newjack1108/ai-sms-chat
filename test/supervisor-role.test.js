@@ -166,6 +166,19 @@ test('server.js redirects supervisor from denied pages', () => {
     assert.ok(src.includes('nfc-admin.html'), 'should deny nfc-admin');
 });
 
+test('GET /users allows supervisor (calendar); mutations stay admin', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync(require('path').join(__dirname, '..', 'production-routes.js'), 'utf8');
+    assert.ok(
+        /router\.get\('\/users',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(src),
+        'GET /users must allow supervisor so calendar load does not 403/logout'
+    );
+    assert.ok(
+        /router\.post\('\/users',\s*requireProductionAuth,\s*requireAdmin/.test(src),
+        'POST /users must remain admin-only'
+    );
+});
+
 if (!process.exitCode) {
     console.log('\nAll supervisor role smoke checks passed.');
 }

@@ -444,9 +444,10 @@ router.post('/create-admin', async (req, res) => {
     }
 });
 
-// ============ USER MANAGEMENT ROUTES (Admin only) ============
+// ============ USER MANAGEMENT ROUTES ============
 
-router.get('/users', requireProductionAuth, requireAdmin, async (req, res) => {
+// Read user list: admin, office, supervisor (calendar assignment, task pickers, etc.)
+router.get('/users', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const users = await ProductionDatabase.getAllUsers();
         res.json({ success: true, users });
