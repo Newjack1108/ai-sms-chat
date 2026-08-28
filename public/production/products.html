@@ -119,6 +119,13 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
+                        <label class="form-label" for="productSalesGrossMarginPct">LeadLock gross margin %</label>
+                        <input type="number" step="0.1" min="0" max="99.99" id="productSalesGrossMarginPct" class="form-input" placeholder="Company default">
+                        <span class="help-text">Leave blank to use the LeadLock company default. Enter 0 to sell at cost.</span>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
                         <label class="form-label" for="productLoadTime">Estimated Load Time (hours)</label>
                         <input type="number" step="0.01" min="0" id="productLoadTime" class="form-input" value="0">
                     </div>
@@ -543,6 +550,7 @@
             document.getElementById('productStatus').value = 'active';
             document.getElementById('productType').value = 'other';
             document.getElementById('leadlockCategory').value = 'sheds';
+            document.getElementById('productSalesGrossMarginPct').value = '';
             showModal('productModal');
         }
         
@@ -566,6 +574,11 @@
                 document.getElementById('productTravelTime').value = product.estimated_travel_time || 0;
                 document.getElementById('productNumberOfBoxes').value = product.number_of_boxes ?? 1;
                 document.getElementById('productCost').value = parseFloat(product.cost_gbp || 0).toFixed(2);
+                const marginVal = product.sales_gross_margin_pct;
+                document.getElementById('productSalesGrossMarginPct').value =
+                    marginVal !== null && marginVal !== undefined && marginVal !== ''
+                        ? String(marginVal)
+                        : '';
                 showModal('productModal');
             } catch (error) {
                 showAlert('Error loading product', 'error');
@@ -850,6 +863,7 @@
                 }
                 managementChecked = isManagementCheckedValue(existing);
             }
+            const marginRaw = document.getElementById('productSalesGrossMarginPct').value;
             const data = {
                 name: document.getElementById('productName').value,
                 description: document.getElementById('productDescription').value,
@@ -862,7 +876,8 @@
                 estimated_load_time: parseFloat(document.getElementById('productLoadTime').value) || 0,
                 estimated_install_time: parseFloat(document.getElementById('productInstallTime').value) || 0,
                 estimated_travel_time: parseFloat(document.getElementById('productTravelTime').value) || 0,
-                number_of_boxes: Math.max(0, parseInt(document.getElementById('productNumberOfBoxes').value, 10) || 1)
+                number_of_boxes: Math.max(0, parseInt(document.getElementById('productNumberOfBoxes').value, 10) || 1),
+                sales_gross_margin_pct: marginRaw === '' ? null : parseFloat(marginRaw)
             };
             
             try {

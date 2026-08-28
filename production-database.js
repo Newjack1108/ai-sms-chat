@@ -500,6 +500,11 @@ function initializeSQLite() {
             `);
             console.log('✅ Added leadlock_category column to finished_products table');
         }
+        const hasSalesGrossMarginPct = tableInfo.some(col => col.name === 'sales_gross_margin_pct');
+        if (!hasSalesGrossMarginPct) {
+            db.exec('ALTER TABLE finished_products ADD COLUMN sales_gross_margin_pct REAL');
+            console.log('✅ Added sales_gross_margin_pct column to finished_products table');
+        }
     } catch (error) {
         console.log('⚠️ Finished products migration check skipped:', error.message);
     }
@@ -2234,6 +2239,15 @@ async function initializePostgreSQL() {
                     END
                 `);
                 console.log('✅ Added leadlock_category column to finished_products table');
+            }
+            const salesGrossMarginPctCheck = await pool.query(`
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'finished_products' AND column_name = 'sales_gross_margin_pct'
+            `);
+            if (salesGrossMarginPctCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE finished_products ADD COLUMN sales_gross_margin_pct DECIMAL(5,2)`);
+                console.log('✅ Added sales_gross_margin_pct column to finished_products table');
             }
         } catch (error) {
             console.log('⚠️ Finished products migration check skipped:', error.message);
@@ -6916,12 +6930,15 @@ class ProductionDatabase {
         const numberOfBoxes = parseInt(data.number_of_boxes || 1, 10) || 1;
         const isOptionalExtra = !!data.is_optional_extra;
         const managementChecked = !!data.management_checked;
+        const salesGrossMarginPct = data.sales_gross_margin_pct !== undefined && data.sales_gross_margin_pct !== null
+            ? data.sales_gross_margin_pct
+            : null;
         
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-                [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes]
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, sales_gross_margin_pct)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+                [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes, salesGrossMarginPct]
             );
             const product = result.rows[0];
             // Recalculate cost after creation (will update if components exist and includes load time)
@@ -6929,10 +6946,10 @@ class ProductionDatabase {
             return await this.getProductById(product.id);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO finished_products (name, description, product_type, leadlock_category, is_optional_extra, management_checked, category, status, cost_gbp, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, sales_gross_margin_pct)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes);
+            const info = stmt.run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, category, data.status || 'active', initialCost, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes, salesGrossMarginPct);
             const product = await this.getProductById(info.lastInsertRowid);
             // Recalculate cost after creation (includes load time)
             await this.updateProductCost(product.id);
@@ -7158,15 +7175,30 @@ class ProductionDatabase {
         const isOptionalExtra = !!data.is_optional_extra;
         const managementChecked = !!data.management_checked;
         const leadlockCategory = data.leadlock_category || 'sheds';
+        const salesGrossMarginPct = Object.prototype.hasOwnProperty.call(data, 'sales_gross_margin_pct')
+            ? (data.sales_gross_margin_pct === null || data.sales_gross_margin_pct === undefined
+                ? null
+                : data.sales_gross_margin_pct)
+            : undefined;
         
         if (isPostgreSQL) {
             let query;
             let params;
             
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
-                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8, estimated_load_time = $9, estimated_install_time = $10, estimated_travel_time = $11, number_of_boxes = $12
-                         WHERE id = $13 RETURNING *`;
-                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
+                if (salesGrossMarginPct !== undefined) {
+                    query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8, estimated_load_time = $9, estimated_install_time = $10, estimated_travel_time = $11, number_of_boxes = $12, sales_gross_margin_pct = $13
+                             WHERE id = $14 RETURNING *`;
+                    params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, salesGrossMarginPct, id];
+                } else {
+                    query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8, estimated_load_time = $9, estimated_install_time = $10, estimated_travel_time = $11, number_of_boxes = $12
+                             WHERE id = $13 RETURNING *`;
+                    params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, numberOfBoxes !== null ? numberOfBoxes : 1, id];
+                }
+            } else if (salesGrossMarginPct !== undefined) {
+                query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8, sales_gross_margin_pct = $9
+                         WHERE id = $10 RETURNING *`;
+                params = [data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra, managementChecked, data.category || 'Other', data.status, salesGrossMarginPct, id];
             } else {
                 query = `UPDATE finished_products SET name = $1, description = $2, product_type = $3, leadlock_category = $4, is_optional_extra = $5, management_checked = $6, category = $7, status = $8
                          WHERE id = $9 RETURNING *`;
@@ -7180,10 +7212,22 @@ class ProductionDatabase {
         } else {
             if (estimatedLoadTime !== null && estimatedInstallTime !== null && estimatedTravelTime !== null) {
                 const boxes = numberOfBoxes !== null ? numberOfBoxes : 1;
+                if (salesGrossMarginPct !== undefined) {
+                    db.prepare(
+                        `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?, sales_gross_margin_pct = ?
+                         WHERE id = ?`
+                    ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, salesGrossMarginPct, id);
+                } else {
+                    db.prepare(
+                        `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
+                         WHERE id = ?`
+                    ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
+                }
+            } else if (salesGrossMarginPct !== undefined) {
                 db.prepare(
-                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?, estimated_load_time = ?, estimated_install_time = ?, estimated_travel_time = ?, number_of_boxes = ?
+                    `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?, sales_gross_margin_pct = ?
                      WHERE id = ?`
-                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, estimatedLoadTime, estimatedInstallTime, estimatedTravelTime, boxes, id);
+                ).run(data.name, data.description, data.product_type, leadlockCategory, isOptionalExtra ? 1 : 0, managementChecked ? 1 : 0, data.category || 'Other', data.status, salesGrossMarginPct, id);
             } else {
                 db.prepare(
                     `UPDATE finished_products SET name = ?, description = ?, product_type = ?, leadlock_category = ?, is_optional_extra = ?, management_checked = ?, category = ?, status = ?

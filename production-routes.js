@@ -171,6 +171,23 @@ function normalizeLeadlockCategory(rawCategory) {
     return 'sheds';
 }
 
+/**
+ * Parse optional per-product LeadLock gross margin %.
+ * Returns { ok: true, value: number|null } or { ok: false, error: string }.
+ * Blank/null/undefined → null (use LeadLock company default on push).
+ * 0 is a valid override (sell at cost).
+ */
+function parseSalesGrossMarginPct(raw) {
+    if (raw === undefined || raw === null || raw === '') {
+        return { ok: true, value: null };
+    }
+    const n = typeof raw === 'number' ? raw : parseFloat(String(raw).trim());
+    if (!Number.isFinite(n) || n < 0 || n >= 100) {
+        return { ok: false, error: 'sales_gross_margin_pct must be a number from 0 to 99.99, or blank to use the LeadLock company default' };
+    }
+    return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
 const BULK_PUSH_CATEGORIES = new Set([
     'Standard Product',
     'Customer Product',
@@ -193,7 +210,7 @@ function buildSalesProductPayload(product) {
         isFinishedProductMarkedOptionalExtra(product)
     );
     const leadlockCategory = normalizeLeadlockCategory(product.leadlock_category || product.product_type);
-    return {
+    const payload = {
         product_id: productId,
         name: product.name,
         description: product.description || '',
@@ -203,6 +220,14 @@ function buildSalesProductPayload(product) {
         product_type: salesProductType,
         category: LEADLOCK_CATEGORY_VALUES.has(leadlockCategory) ? leadlockCategory : 'sheds'
     };
+    const marginRaw = product.sales_gross_margin_pct;
+    if (marginRaw !== undefined && marginRaw !== null && marginRaw !== '') {
+        const margin = typeof marginRaw === 'number' ? marginRaw : parseFloat(String(marginRaw));
+        if (Number.isFinite(margin)) {
+            payload.gross_margin_pct = margin;
+        }
+    }
+    return payload;
 }
 
 function salesAppAuthHeaders(salesApiKey) {
@@ -2020,15 +2045,19 @@ router.get('/products/export', requireProductionAuth, async (req, res) => {
 
 router.post('/products', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
-        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked, sales_gross_margin_pct } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         const normalizedStatus = normalizeProductStatus(status);
+        const marginParsed = parseSalesGrossMarginPct(sales_gross_margin_pct);
         if (!name) {
             return res.status(400).json({ success: false, error: 'Name is required' });
         }
         if (status != null && String(status).trim() !== '' && !normalizedStatus) {
             return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
+        }
+        if (!marginParsed.ok) {
+            return res.status(400).json({ success: false, error: marginParsed.error });
         }
         
         // Cost is calculated automatically from components (panels + materials) + load time labour
@@ -2044,7 +2073,8 @@ router.post('/products', requireProductionAuth, requireAdminOfficeOrSupervisor, 
             estimated_load_time,
             estimated_install_time,
             estimated_travel_time,
-            number_of_boxes
+            number_of_boxes,
+            sales_gross_margin_pct: marginParsed.value
         });
         res.json({ success: true, product });
     } catch (error) {
@@ -2073,12 +2103,16 @@ router.get('/products/:id', requireProductionAuth, async (req, res) => {
 router.put('/products/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
-        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked } = req.body;
+        const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked, sales_gross_margin_pct } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
         const normalizedLeadlockCategory = normalizeLeadlockCategory(leadlock_category || product_type);
         const normalizedStatus = normalizeProductStatus(status);
+        const marginParsed = parseSalesGrossMarginPct(sales_gross_margin_pct);
         if (status != null && String(status).trim() !== '' && !normalizedStatus) {
             return res.status(400).json({ success: false, error: 'Status must be "active" or "inactive"' });
+        }
+        if (!marginParsed.ok) {
+            return res.status(400).json({ success: false, error: marginParsed.error });
         }
         
         // Cost is calculated automatically from components + load time labour
@@ -2094,7 +2128,8 @@ router.put('/products/:id', requireProductionAuth, requireAdminOfficeOrSuperviso
             estimated_load_time,
             estimated_install_time,
             estimated_travel_time,
-            number_of_boxes
+            number_of_boxes,
+            sales_gross_margin_pct: marginParsed.value
         });
         res.json({ success: true, product });
     } catch (error) {
