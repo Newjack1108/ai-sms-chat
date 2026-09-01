@@ -358,9 +358,9 @@
                     </div>
                     
                     <div class="text-right" style="margin-top: 20px;">
-                        <button type="button" onclick="hideModal('amendmentReviewModal')" class="btn btn-secondary">Cancel</button>
-                        <button type="button" onclick="submitAmendmentReview('rejected')" class="btn btn-danger">Reject</button>
-                        <button type="button" onclick="submitAmendmentReview('approved')" class="btn btn-success">Approve</button>
+                        <button type="button" onclick="hideModal('amendmentReviewModal')" class="btn btn-secondary" id="amendmentCancelBtn">Cancel</button>
+                        <button type="button" onclick="submitAmendmentReview('rejected')" class="btn btn-danger" id="amendmentRejectBtn">Reject</button>
+                        <button type="button" onclick="submitAmendmentReview('approved')" class="btn btn-success" id="amendmentApproveBtn">Approve</button>
                     </div>
                 </form>
             </div>
@@ -606,6 +606,13 @@
             if (staffSelect) {
                 staffSelect.addEventListener('change', () => {
                     loadPayrollSummary();
+                });
+            }
+
+            // Saturday reminder only on init / week change — not on every payroll reload
+            if (weekSelect) {
+                weekSelect.addEventListener('change', () => {
+                    checkWeeklyApprovalReminder();
                 });
             }
             
@@ -1313,10 +1320,13 @@
         }
         
         // Time amendment functions
+        let pendingAmendmentsCache = [];
+
         async function loadPendingAmendments() {
             try {
                 const data = await apiCall('/clock/amendments/pending');
                 const amendments = data.amendments || [];
+                pendingAmendmentsCache = amendments;
                 const listEl = document.getElementById('amendmentsList');
                 
                 if (amendments.length === 0) {
@@ -1360,6 +1370,7 @@
                     </table>
                 `;
             } catch (error) {
+                pendingAmendmentsCache = [];
                 document.getElementById('amendmentsList').innerHTML = 
                     '<p style="text-align: center; padding: 20px; color: #e74c3c;">Error loading amendments</p>';
             }
@@ -1369,9 +1380,13 @@
         
         async function showAmendmentReviewModal(amendmentId) {
             try {
-                // Get amendment details
-                const amendments = await apiCall('/clock/amendments/pending');
-                const amendment = amendments.amendments.find(a => a.id === amendmentId);
+                // Prefer cached pending list; fall back to fetch if cache is empty
+                let amendment = pendingAmendmentsCache.find(a => a.id === amendmentId);
+                if (!amendment) {
+                    const amendments = await apiCall('/clock/amendments/pending');
+                    pendingAmendmentsCache = amendments.amendments || [];
+                    amendment = pendingAmendmentsCache.find(a => a.id === amendmentId);
+                }
                 
                 if (!amendment) {
                     showAlert('Amendment not found', 'error');
@@ -1446,6 +1461,22 @@
             // Convert to ISO strings
             const clockInISO = new Date(approvedClockIn).toISOString();
             const clockOutISO = new Date(approvedClockOut).toISOString();
+
+            const approveBtn = document.getElementById('amendmentApproveBtn');
+            const rejectBtn = document.getElementById('amendmentRejectBtn');
+            const cancelBtn = document.getElementById('amendmentCancelBtn');
+            const approveOriginal = approveBtn ? approveBtn.textContent : 'Approve';
+            const rejectOriginal = rejectBtn ? rejectBtn.textContent : 'Reject';
+
+            if (approveBtn) {
+                approveBtn.disabled = true;
+                approveBtn.textContent = status === 'approved' ? 'Processing...' : approveOriginal;
+            }
+            if (rejectBtn) {
+                rejectBtn.disabled = true;
+                rejectBtn.textContent = status === 'rejected' ? 'Processing...' : rejectOriginal;
+            }
+            if (cancelBtn) cancelBtn.disabled = true;
             
             try {
                 await apiCall(`/clock/amendments/${amendmentId}/review`, {
@@ -1460,8 +1491,22 @@
                 showAlert(`Amendment ${status} successfully`);
                 hideModal('amendmentReviewModal');
                 await loadPendingAmendments();
+                // Keep payroll totals in sync after approved amendments (preserve expanded rows)
+                if (status === 'approved') {
+                    await loadPayrollSummary(getExpandedUserIds());
+                }
             } catch (error) {
                 showAlert('Error reviewing amendment: ' + error.message, 'error');
+            } finally {
+                if (approveBtn) {
+                    approveBtn.disabled = false;
+                    approveBtn.textContent = approveOriginal;
+                }
+                if (rejectBtn) {
+                    rejectBtn.disabled = false;
+                    rejectBtn.textContent = rejectOriginal;
+                }
+                if (cancelBtn) cancelBtn.disabled = false;
             }
         }
         
@@ -1936,12 +1981,6 @@
                 exportBtn.style.display = 'inline-block';
                 exportBtn.onclick = () => exportPayroll(weekStart);
                 
-                // Check if this is Saturday and show reminder for previous week if needed
-                const today = new Date();
-                if (today.getDay() === 6) { // Saturday
-                    await checkWeeklyApprovalReminder();
-                }
-                
                 // Calculate totals (with rounding to 15-minute intervals)
                 let totalRegular = 0, totalOvertime = 0, totalWeekend = 0, totalOvernight = 0, totalHours = 0;
                 summary.forEach(row => {
@@ -2097,16 +2136,114 @@
             }
         }
         
+        function updateApprovalRowUI(userId, weeklyTimesheet) {
+            const row = document.querySelector(`tr.payroll-row[data-user-id="${userId}"]`);
+            if (!row) return;
+
+            const isApproved = weeklyTimesheet.manager_approved === true || weeklyTimesheet.manager_approved === 1;
+            const approvedBy = weeklyTimesheet.approved_by_username
+                || (isApproved && currentUser ? currentUser.username : '')
+                || '';
+            const approvedAt = weeklyTimesheet.approved_at
+                ? new Date(weeklyTimesheet.approved_at).toLocaleDateString('en-GB')
+                : (isApproved ? new Date().toLocaleDateString('en-GB') : '');
+
+            row.style.backgroundColor = isApproved ? '#e8f5e9' : '';
+
+            const approvalCell = row.querySelector('td:last-child');
+            if (!approvalCell) return;
+
+            const checkbox = approvalCell.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.checked = isApproved;
+            }
+
+            // Update checkmark next to checkbox
+            const label = approvalCell.querySelector('label');
+            if (label) {
+                let checkmark = label.querySelector('span');
+                if (isApproved) {
+                    if (!checkmark) {
+                        checkmark = document.createElement('span');
+                        checkmark.style.color = '#28a745';
+                        checkmark.style.fontWeight = 'bold';
+                        checkmark.textContent = '✓';
+                        label.appendChild(checkmark);
+                    }
+                } else if (checkmark) {
+                    checkmark.remove();
+                }
+            }
+
+            // Approver info is a direct child div of the approval cell (not inside the label)
+            let infoDiv = Array.from(approvalCell.children).find(el => el.tagName === 'DIV');
+
+            if (isApproved && approvedBy) {
+                if (!infoDiv) {
+                    infoDiv = document.createElement('div');
+                    infoDiv.style.fontSize = '11px';
+                    infoDiv.style.color = '#666';
+                    infoDiv.style.marginTop = '2px';
+                    approvalCell.appendChild(infoDiv);
+                }
+                infoDiv.innerHTML = `${escapeHtml(approvedBy)}<br>${approvedAt}`;
+            } else if (infoDiv) {
+                infoDiv.remove();
+            }
+        }
+
+        function updateApprovalTotalsRow() {
+            const summaryEl = document.getElementById('payrollSummary');
+            if (!summaryEl) return;
+
+            const rows = summaryEl.querySelectorAll('tr.payroll-row');
+            if (rows.length === 0) return;
+
+            let approvedCount = 0;
+            rows.forEach(row => {
+                const checkbox = row.querySelector('input[type="checkbox"]');
+                if (checkbox && checkbox.checked) {
+                    approvedCount++;
+                }
+            });
+
+            // Totals row is the last row in tbody that is not a payroll or daily-breakdown row
+            const tbody = summaryEl.querySelector('tbody');
+            if (!tbody) return;
+            const lastRow = tbody.lastElementChild;
+            if (!lastRow || lastRow.classList.contains('payroll-row') || (lastRow.id && lastRow.id.startsWith('daily-'))) {
+                return;
+            }
+            const countCell = lastRow.querySelector('td:last-child');
+            if (countCell) {
+                countCell.textContent = `${approvedCount} / ${rows.length}`;
+                countCell.style.textAlign = 'center';
+            }
+        }
+
         async function toggleManagerApproval(userId, weekStart) {
+            const row = document.querySelector(`tr.payroll-row[data-user-id="${userId}"]`);
+            const checkbox = row?.querySelector('input[type="checkbox"]');
+            // Browser already toggled the checkbox; capture intended state and revert on failure
+            const intendedChecked = checkbox ? checkbox.checked : null;
+
             try {
-                await apiCall(`/clock/weekly/${weekStart}/approve/${userId}`, {
+                if (checkbox) checkbox.disabled = true;
+
+                const result = await apiCall(`/clock/weekly/${weekStart}/approve/${userId}`, {
                     method: 'PUT'
                 });
-                // Reload payroll summary to refresh approval status
-                await loadPayrollSummary();
+                // Update only this row — avoid full payroll reload
+                updateApprovalRowUI(userId, result.weeklyTimesheet || {});
+                updateApprovalTotalsRow();
             } catch (error) {
                 console.error('Error toggling manager approval:', error);
+                if (checkbox && intendedChecked !== null) {
+                    checkbox.checked = !intendedChecked;
+                }
                 showAlert('Error updating approval: ' + (error.message || 'Unknown error'), 'error');
+            } finally {
+                if (checkbox) checkbox.disabled = false;
             }
         }
         

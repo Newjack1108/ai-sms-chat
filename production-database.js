@@ -13640,29 +13640,30 @@ class ProductionDatabase {
         }
     }
     
-    // Helper function to calculate hours based on day_type, overriding aggregated hours if needed
-    // Always fetches the latest daily entry from database to ensure day_type is current
-    static async calculateHoursForDailyEntry(dailyEntry, aggregatedHours, userId, entryDate) {
-        // Always fetch the latest daily entry from database to ensure we have the most current day_type
-        // This ensures admin-set day_type always overrides any clock entry hours
+    // Helper function to calculate hours based on day_type, overriding aggregated hours if needed.
+    // By default refreshes the daily entry so admin-set day_type wins; pass { skipRefresh: true }
+    // when the caller already has a fresh dailyEntry (e.g. applyAmendment).
+    static async calculateHoursForDailyEntry(dailyEntry, aggregatedHours, userId, entryDate, options = {}) {
         let currentDailyEntry = dailyEntry;
-        try {
-            const weekStartDate = londonMondayYmdFromYmd(
-                typeof entryDate === 'string' ? entryDate.slice(0, 10) : londonYmd(entryDate)
-            );
-            
-            // Get weekly timesheet
-            const weeklyTimesheet = await this.getWeeklyTimesheet(userId, weekStartDate);
-            if (weeklyTimesheet) {
-                // Fetch fresh daily entry from database
-                const freshDailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, entryDate);
-                if (freshDailyEntry) {
-                    currentDailyEntry = freshDailyEntry;
+        if (!options.skipRefresh) {
+            try {
+                const weekStartDate = londonMondayYmdFromYmd(
+                    typeof entryDate === 'string' ? entryDate.slice(0, 10) : londonYmd(entryDate)
+                );
+                
+                // Get weekly timesheet
+                const weeklyTimesheet = await this.getWeeklyTimesheet(userId, weekStartDate);
+                if (weeklyTimesheet) {
+                    // Fetch fresh daily entry from database
+                    const freshDailyEntry = await this.getDailyEntryByDate(weeklyTimesheet.id, entryDate);
+                    if (freshDailyEntry) {
+                        currentDailyEntry = freshDailyEntry;
+                    }
                 }
+            } catch (error) {
+                console.error('Error fetching fresh daily entry for day_type check:', error);
+                // Fall back to passed-in dailyEntry if fetch fails
             }
-        } catch (error) {
-            console.error('Error fetching fresh daily entry for day_type check:', error);
-            // Fall back to passed-in dailyEntry if fetch fails
         }
         
         // If day_type is set, use day_type rules instead of aggregated hours
@@ -14463,8 +14464,9 @@ class ProductionDatabase {
         }
     }
     
-    static async applyAmendment(amendmentId, approvedClockIn = null, approvedClockOut = null) {
-        const amendment = await this.getAmendmentById(amendmentId);
+    static async applyAmendment(amendmentId, approvedClockIn = null, approvedClockOut = null, preloaded = {}) {
+        // Prefer caller-provided rows to avoid duplicate SELECTs on the review path
+        const amendment = preloaded.amendment || await this.getAmendmentById(amendmentId);
         if (!amendment || amendment.status !== 'approved') {
             throw new Error('Amendment not found or not approved');
         }
@@ -14474,7 +14476,7 @@ class ProductionDatabase {
         const finalClockOut = approvedClockOut || amendment.amended_clock_out_time;
         
         // Get the entry to find user_id
-        const entry = await this.getTimesheetEntryById(amendment.timesheet_entry_id);
+        const entry = preloaded.entry || await this.getTimesheetEntryById(amendment.timesheet_entry_id);
         if (!entry) {
             throw new Error('Timesheet entry not found');
         }
@@ -14518,8 +14520,10 @@ class ProductionDatabase {
         // Aggregate hours from ALL entries for this day
         const aggregatedHours = await this.aggregateDailyHours(entry.user_id, clockInDateStr, overnightAway);
         
-        // Calculate final hours based on day_type (unpaid days override aggregated hours)
-        const finalHours = await this.calculateHoursForDailyEntry(dailyEntryRecord, aggregatedHours, entry.user_id, clockInDateStr);
+        // dailyEntryRecord was just loaded — skip the internal re-fetch
+        const finalHours = await this.calculateHoursForDailyEntry(
+            dailyEntryRecord, aggregatedHours, entry.user_id, clockInDateStr, { skipRefresh: true }
+        );
         
         // Update daily entry with final hours
         await this.updateDailyEntry(dailyEntryRecord.id, {

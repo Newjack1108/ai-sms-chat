@@ -6044,10 +6044,12 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
         if (!amendment) {
             return res.status(404).json({ success: false, error: 'Amendment not found' });
         }
+
+        // Load entry once for duplicate checks and applyAmendment (avoids re-fetch)
+        const entry = await ProductionDatabase.getTimesheetEntryById(amendment.timesheet_entry_id);
         
         // If approved, check for duplicate or overlapping times (excluding the current entry being amended)
         if (status === 'approved') {
-            const entry = await ProductionDatabase.getTimesheetEntryById(amendment.timesheet_entry_id);
             if (entry) {
                 const duplicates = await ProductionDatabase.checkDuplicateTimes(
                     entry.user_id, 
@@ -6075,7 +6077,12 @@ router.put('/clock/amendments/:id/review', requireProductionAuth, requireManager
         
         // If approved, apply the amendment with the approved times
         if (status === 'approved') {
-            await ProductionDatabase.applyAmendment(amendmentId, approved_clock_in_time, approved_clock_out_time);
+            await ProductionDatabase.applyAmendment(
+                amendmentId,
+                approved_clock_in_time,
+                approved_clock_out_time,
+                { amendment: reviewedAmendment, entry }
+            );
         }
         
         res.json({ success: true, amendment: reviewedAmendment });
@@ -6148,10 +6155,19 @@ router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, re
             manager_approved: newApproved,
             approved_by: newApproved ? adminId : null
         });
+
+        // Include approver username so the UI can update in place without a full payroll reload
+        const approvedByUsername = newApproved
+            ? (req.session.production_user.username || null)
+            : null;
+        const weeklyTimesheetResponse = {
+            ...updated,
+            approved_by_username: approvedByUsername
+        };
         
         res.json({ 
             success: true, 
-            weeklyTimesheet: updated,
+            weeklyTimesheet: weeklyTimesheetResponse,
             message: newApproved ? 'Timesheet approved' : 'Timesheet approval removed'
         });
     } catch (error) {
