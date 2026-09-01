@@ -98,8 +98,9 @@ function requireAuth(req, res, next) {
         return next();
     }
     
-    // Allow public access to login page, login endpoints, webhooks, and lead creation (for external integrations)
+    // Allow public access to login page, login endpoints, healthcheck, webhooks, and lead creation (for external integrations)
     if (req.path === '/login' || 
+        req.path === '/health' ||
         req.path === '/api/login' || 
         req.path === '/api/auth/check' ||
         req.path === '/api/logout' ||
@@ -128,10 +129,16 @@ app.get('/login', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
+// Healthcheck for Railway (must return 200 — `/` redirects to login with 302)
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // Serve static assets (CSS, JS, images) and public routes without auth
 app.use((req, res, next) => {
-    // Allow login page, webhooks, and static assets
+    // Allow login page, healthcheck, webhooks, and static assets
     if (req.path === '/login' || 
+        req.path === '/health' ||
         req.path.startsWith('/webhook/') ||
         req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg)$/)) {
         return next();
