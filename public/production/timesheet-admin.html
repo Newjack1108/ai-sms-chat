@@ -375,7 +375,7 @@
                 <button class="modal-close" onclick="hideAdminEditModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="adminEditForm">
+                <form id="adminEditForm" novalidate>
                     <input type="hidden" id="adminEditEntryId">
                     
                     <div class="form-group">
@@ -400,6 +400,7 @@
                     <div class="form-group">
                         <label for="adminEditReason">Reason for Edit *</label>
                         <textarea id="adminEditReason" class="form-control" rows="3" required placeholder="Enter reason for editing this timesheet entry"></textarea>
+                        <small id="adminEditReasonHint" style="color: #666; display: block; margin-top: 4px;">Required — a short note is enough (e.g. "finished at 17:38, could not clock out").</small>
                     </div>
                     
                     <div class="form-group">
@@ -422,6 +423,7 @@
                         <small style="color: #666; display: block; margin-top: 4px;">For holidays and sick days, clock times are optional</small>
                     </div>
                     
+                    <div id="adminEditFormError" class="alert alert-error" style="display: none; margin-bottom: 15px;"></div>
                     <div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #ffc107;">
                         <strong>⚠️ Admin Edit:</strong> This change will be applied immediately and will be marked as "Edited by Admin" on the timesheet.
                     </div>
@@ -1624,6 +1626,7 @@
                 reasonField.value = '';
                 reasonField.classList.remove('error');
             }
+            setAdminEditError('');
             
             const modal = document.getElementById('adminEditModal');
             if (modal) {
@@ -1654,8 +1657,20 @@
             });
         }
         
+        function setAdminEditError(message) {
+            const el = document.getElementById('adminEditFormError');
+            if (!el) return;
+            if (message) {
+                el.textContent = message;
+                el.style.display = 'block';
+            } else {
+                el.textContent = '';
+                el.style.display = 'none';
+            }
+        }
+        
         async function submitAdminEdit() {
-            const entryId = parseInt(document.getElementById('adminEditEntryId').value);
+            const entryId = parseInt(document.getElementById('adminEditEntryId').value, 10);
             const amendedClockIn = document.getElementById('adminAmendedClockIn').value;
             const amendedClockOut = document.getElementById('adminAmendedClockOut').value;
             const reasonField = document.getElementById('adminEditReason');
@@ -1669,14 +1684,20 @@
             
             const isHolidayOrSick = dayType === 'holiday_paid' || dayType === 'holiday_unpaid' || 
                                    dayType === 'sick_paid' || dayType === 'sick_unpaid';
+
+            setAdminEditError('');
+            
+            if (!Number.isFinite(entryId)) {
+                setAdminEditError('This timesheet row has no clock entry id, so it cannot be saved. Reload the page and try again.');
+                showAlert('This timesheet row has no clock entry id, so it cannot be saved.', 'error');
+                return;
+            }
             
             // Enhanced validation for reason field with prominent error
             if (!reason) {
-                // Add error styling
                 reasonField.classList.add('error');
-                // Focus the field
                 reasonField.focus();
-                // Show prominent error message
+                setAdminEditError('Reason for edit is required. Please type a short note (e.g. finished at 17:38).');
                 showAlert('Reason for edit is required. Please provide a reason before saving.', 'error');
                 return;
             }
@@ -1687,12 +1708,14 @@
             // Clock times only required if not holiday/sick
             if (!isHolidayOrSick) {
                 if (!amendedClockIn || !amendedClockOut) {
+                    setAdminEditError('Please fill in clock in and clock out times.');
                     showAlert('Please fill in clock in and clock out times', 'error');
                     return;
                 }
                 
                 // Validate clock out is after clock in
                 if (new Date(amendedClockOut) <= new Date(amendedClockIn)) {
+                    setAdminEditError('Clock out time must be after clock in time.');
                     showAlert('Clock out time must be after clock in time', 'error');
                     return;
                 }
@@ -1701,6 +1724,18 @@
             // Convert local datetime to ISO string (only if times provided)
             const clockInISO = amendedClockIn ? new Date(amendedClockIn).toISOString() : null;
             const clockOutISO = amendedClockOut ? new Date(amendedClockOut).toISOString() : null;
+            if ((amendedClockIn && Number.isNaN(Date.parse(amendedClockIn))) ||
+                (amendedClockOut && Number.isNaN(Date.parse(amendedClockOut)))) {
+                setAdminEditError('Clock times are not a valid date. Re-enter them and try again.');
+                showAlert('Clock times are not a valid date. Re-enter them and try again.', 'error');
+                return;
+            }
+            
+            const saveBtn = document.querySelector('#adminEditModal .btn-primary');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
+            }
             
             try {
                 const result = await apiCall('/clock/amendments/admin', {
@@ -1759,11 +1794,20 @@
                     }
                 } else {
                     console.error('Admin edit failed:', result);
-                    showAlert('Error updating timesheet entry: ' + (result?.error || 'Unknown error'), 'error');
+                    const msg = 'Error updating timesheet entry: ' + (result?.error || 'Unknown error');
+                    setAdminEditError(msg);
+                    showAlert(msg, 'error');
                 }
             } catch (error) {
                 console.error('Admin edit error:', error);
-                showAlert('Error updating timesheet entry: ' + (error.message || 'Unknown error'), 'error');
+                const msg = 'Error updating timesheet entry: ' + (error.message || 'Unknown error');
+                setAdminEditError(msg);
+                showAlert(msg, 'error');
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Changes';
+                }
             }
         }
         

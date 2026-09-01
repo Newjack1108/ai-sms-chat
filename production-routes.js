@@ -5601,22 +5601,32 @@ router.post('/clock/amendments/admin', requireProductionAuth, requireAdminOffice
                 });
             }
             
-            // Check for duplicate or overlapping times (excluding the current entry being amended)
-            const duplicates = await ProductionDatabase.checkDuplicateTimes(
-                entry.user_id, 
-                amended_clock_in_time, 
-                amended_clock_out_time, 
-                entry_id // Exclude the current entry
-            );
-            
-            // Filter out auto-clocked-out entries from duplicates (they can be replaced)
-            const realDuplicates = duplicates.filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
-            
-            if (realDuplicates && realDuplicates.length > 0) {
-                return res.status(400).json({ 
-                    success: false, 
-                    error: 'The amended times would create a duplicate or overlap with an existing timesheet entry. Please choose different times.' 
-                });
+            // Same rule as staff amendments: auto-clock-out (23:59 / midnight) entries
+            // must always be editable so admins can correct the real finish time.
+            const isAutoClockedOut = ProductionDatabase.isAutoClockedOutEntry(entry);
+            if (!isAutoClockedOut) {
+                const duplicates = await ProductionDatabase.checkDuplicateTimes(
+                    entry.user_id,
+                    amended_clock_in_time,
+                    amended_clock_out_time,
+                    parseInt(entry_id, 10)
+                );
+
+                const realDuplicates = (duplicates || []).filter(d => !ProductionDatabase.isAutoClockedOutEntry(d));
+
+                if (realDuplicates.length > 0) {
+                    const overlapSummary = realDuplicates.slice(0, 3).map(d => {
+                        const inn = d.clock_in_time ? new Date(d.clock_in_time).toISOString() : 'unknown';
+                        const out = d.clock_out_time ? new Date(d.clock_out_time).toISOString() : 'open';
+                        return `entry ${d.id} (${inn} → ${out})`;
+                    }).join('; ');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'The amended times would overlap another timesheet entry for this person' +
+                            (overlapSummary ? `: ${overlapSummary}.` : '.') +
+                            ' Delete or shorten the other entry first, then retry.'
+                    });
+                }
             }
             
             // Apply the amendment immediately

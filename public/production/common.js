@@ -927,13 +927,19 @@ function showAlert(message, type = 'success') {
     const alertDiv = document.createElement('div');
     alertDiv.className = `alert alert-${type}`;
     alertDiv.textContent = message;
-    
-    const container = document.querySelector('.container') || document.body;
-    container.insertBefore(alertDiv, container.firstChild);
-    
+
+    const modalOpen = document.querySelector('.modal.show');
+    if (modalOpen) {
+        alertDiv.classList.add('alert-toast');
+        document.body.appendChild(alertDiv);
+    } else {
+        const container = document.querySelector('.container') || document.body;
+        container.insertBefore(alertDiv, container.firstChild);
+    }
+
     setTimeout(() => {
         alertDiv.remove();
-    }, 5000);
+    }, 8000);
 }
 
 // Show modal

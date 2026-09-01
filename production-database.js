@@ -13252,8 +13252,8 @@ class ProductionDatabase {
         
         const endOfDayDiff = Math.abs(clockOut.getTime() - endOfDayMs);
         const midnightDiff = Math.abs(clockOut.getTime() - nextDayMs);
-        
-        return endOfDayDiff < 1000 || midnightDiff < 1000;
+        // datetime-local stores 23:59:00; midnight job stores 23:59:59.999 — both are auto clock-out
+        return endOfDayDiff < 60000 || midnightDiff < 1000;
     }
     
     // Check for duplicate or overlapping timesheet entries
@@ -13283,9 +13283,10 @@ class ProductionDatabase {
             `;
             const params = [userId, clockInTime, clockOutTime];
             
-            if (excludeEntryId) {
-                query += ` AND te.id != $4`;
-                params.push(excludeEntryId);
+            const excludeId = parseInt(excludeEntryId, 10);
+            if (Number.isFinite(excludeId)) {
+                query += ` AND te.id <> $4`;
+                params.push(excludeId);
             }
             
             const result = await pool.query(query, params);
@@ -13323,9 +13324,10 @@ class ProductionDatabase {
                 clockInTime, clockOutTime   // contained by (2 params)
             ];
             
-            if (excludeEntryId) {
+            const excludeId = parseInt(excludeEntryId, 10);
+            if (Number.isFinite(excludeId)) {
                 query += ` AND te.id != ?`;
-                params.push(excludeEntryId);
+                params.push(excludeId);
             }
             
             return db.prepare(query).all(...params);
@@ -14553,6 +14555,24 @@ class ProductionDatabase {
         });
         
         const now = new Date().toISOString();
+
+        // Drop any staff amendment still waiting on this entry so admin save is not blocked
+        if (isPostgreSQL) {
+            await pool.query(
+                `UPDATE timesheet_amendments
+                 SET status = 'rejected', reviewed_by = $1, reviewed_at = $2,
+                     review_notes = 'Superseded by admin edit'
+                 WHERE timesheet_entry_id = $3 AND status = 'pending'`,
+                [adminId, now, entryId]
+            );
+        } else {
+            db.prepare(
+                `UPDATE timesheet_amendments
+                 SET status = 'rejected', reviewed_by = ?, reviewed_at = ?,
+                     review_notes = 'Superseded by admin edit'
+                 WHERE timesheet_entry_id = ? AND status = 'pending'`
+            ).run(adminId, now, entryId);
+        }
         
         // Update the timesheet entry directly with admin edit tracking
         if (isPostgreSQL) {
