@@ -276,8 +276,20 @@
                     <p class="kpi-value">${formatCurrency(stock.total_value || 0)}</p>
                 </div>
                 <div class="kpi-card">
-                    <h3>Total Stock on Hand</h3>
-                    <p class="kpi-value">${formatCurrency(stock.current_total_stock_value || 0)}</p>
+                    <h3>Raw Materials (end of week)</h3>
+                    <p class="kpi-value">${formatCurrency(stock.as_of_raw_materials_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Built Items (end of week)</h3>
+                    <p class="kpi-value">${formatCurrency(stock.as_of_built_items_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Components (end of week)</h3>
+                    <p class="kpi-value">${formatCurrency(stock.as_of_components_value || 0)}</p>
+                </div>
+                <div class="kpi-card">
+                    <h3>Total Stock on Hand (end of week)</h3>
+                    <p class="kpi-value">${formatCurrency(stock.as_of_total_stock_value || 0)}</p>
                 </div>
                 <div class="kpi-card">
                     <h3>Total Clocked Hours</h3>
@@ -371,10 +383,11 @@
                     · Value added: <strong>${formatCurrency(stock.total_value || 0)}</strong>
                 </p>
                 <p class="section-note">
-                    Current stock on hand —
-                    Raw materials: <strong>${formatCurrency(stock.current_raw_materials_value || 0)}</strong>
-                    · Built items: <strong>${formatCurrency(stock.current_built_items_value || 0)}</strong>
-                    · Total: <strong>${formatCurrency(stock.current_total_stock_value || 0)}</strong>
+                    Stock on hand (end of week) —
+                    Raw materials: <strong>${formatCurrency(stock.as_of_raw_materials_value || 0)}</strong>
+                    · Built items: <strong>${formatCurrency(stock.as_of_built_items_value || 0)}</strong>
+                    · Components: <strong>${formatCurrency(stock.as_of_components_value || 0)}</strong>
+                    · Total: <strong>${formatCurrency(stock.as_of_total_stock_value || 0)}</strong>
                 </p>
                 ${items.length === 0 ? '<p>No stock-in movements this week.</p>' : `
                 <table class="table">
@@ -557,9 +570,10 @@
                     ['D&I cost variance %', formatPct(installs.cost_variance_pct)],
                     ['Quoted install hours', formatHours(installs.quoted_hours_total || 0)],
                     ['Stock added value', formatCurrency(stock.total_value || 0)],
-                    ['Raw materials on hand', formatCurrency(stock.current_raw_materials_value || 0)],
-                    ['Built items on hand', formatCurrency(stock.current_built_items_value || 0)],
-                    ['Total stock on hand', formatCurrency(stock.current_total_stock_value || 0)],
+                    ['Raw materials (end of week)', formatCurrency(stock.as_of_raw_materials_value || 0)],
+                    ['Built items (end of week)', formatCurrency(stock.as_of_built_items_value || 0)],
+                    ['Components (end of week)', formatCurrency(stock.as_of_components_value || 0)],
+                    ['Total stock on hand (end of week)', formatCurrency(stock.as_of_total_stock_value || 0)],
                     ['Total clocked hours', formatHours(totals.total_hours)],
                     ['Installer clocked hours', formatHours(installerTotals.total_hours)],
                     ['Planner hours used', planner ? formatHours(planner.hours_used) : 'No planner']

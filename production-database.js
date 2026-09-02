@@ -6526,6 +6526,308 @@ class ProductionDatabase {
         ).get();
         return parseFloat(row?.total || 0);
     }
+
+    static async getTotalComponentValue() {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT COALESCE(SUM(COALESCE(built_quantity, 0)::numeric * COALESCE(cost_gbp, 0)::numeric), 0) AS total
+                 FROM components`
+            );
+            return parseFloat(result.rows[0]?.total || 0);
+        }
+        const row = db.prepare(
+            `SELECT COALESCE(SUM(COALESCE(built_quantity, 0) * COALESCE(cost_gbp, 0)), 0) AS total
+             FROM components`
+        ).get();
+        return parseFloat(row?.total || 0);
+    }
+
+    /**
+     * Inventory value as of end of a London civil day (weekEnd inclusive).
+     * Reverses movements after the cut-off from current on-hand; adjustments after
+     * the cut-off trigger a forward replay of that item's earlier movements.
+     */
+    static async getStockValueAsOf(weekEndYmd) {
+        const weekEndExclusive = londonNextDayStartUtc(weekEndYmd);
+
+        const valueFromQtyCost = (items) => {
+            let total = 0;
+            for (const item of items) {
+                const qty = Math.max(0, parseFloat(item.qty || 0));
+                const cost = parseFloat(item.cost || 0) || 0;
+                total += qty * cost;
+            }
+            return Math.round(total * 100) / 100;
+        };
+
+        const applyAsOfQty = (itemsById, movements, opts) => {
+            const {
+                idKey,
+                addTypes,
+                subtractTypes,
+                adjustmentType = 'adjustment'
+            } = opts;
+            const byId = new Map();
+            for (const item of itemsById) {
+                byId.set(Number(item.id), {
+                    id: Number(item.id),
+                    qty: parseFloat(item.qty || 0) || 0,
+                    cost: parseFloat(item.cost || 0) || 0
+                });
+            }
+
+            const movementsByItem = new Map();
+            const hasAdjustmentAfter = new Set();
+            for (const m of movements || []) {
+                const id = Number(m[idKey]);
+                if (!byId.has(id)) continue;
+                if (!movementsByItem.has(id)) movementsByItem.set(id, []);
+                movementsByItem.get(id).push(m);
+                if (m.movement_type === adjustmentType) hasAdjustmentAfter.add(id);
+            }
+
+            for (const [id, item] of byId) {
+                const itemMoves = movementsByItem.get(id) || [];
+                if (hasAdjustmentAfter.has(id)) {
+                    // Forward-replay all movements before cut-off (loaded separately below).
+                    continue;
+                }
+                // Reverse post-cut-off movements (newest first already not required for commutative in/out)
+                for (const m of itemMoves) {
+                    const q = parseFloat(m.quantity || 0) || 0;
+                    if (addTypes.includes(m.movement_type)) {
+                        item.qty -= q;
+                    } else if (subtractTypes.includes(m.movement_type)) {
+                        item.qty += q;
+                    }
+                }
+            }
+
+            return { byId, hasAdjustmentAfter };
+        };
+
+        const forwardReplayBeforeCutOff = (byId, hasAdjustmentAfter, earlyMoves, opts) => {
+            const { idKey, addTypes, subtractTypes, adjustmentType = 'adjustment' } = opts;
+            if (hasAdjustmentAfter.size === 0) return;
+
+            for (const id of hasAdjustmentAfter) {
+                const item = byId.get(id);
+                if (!item) continue;
+                item.qty = 0;
+            }
+
+            const sorted = [...(earlyMoves || [])].sort((a, b) => {
+                const ta = String(a.timestamp || '');
+                const tb = String(b.timestamp || '');
+                if (ta !== tb) return ta < tb ? -1 : 1;
+                return Number(a.id || 0) - Number(b.id || 0);
+            });
+
+            for (const m of sorted) {
+                const id = Number(m[idKey]);
+                if (!hasAdjustmentAfter.has(id)) continue;
+                const item = byId.get(id);
+                if (!item) continue;
+                const q = parseFloat(m.quantity || 0) || 0;
+                if (m.movement_type === adjustmentType) {
+                    item.qty = q;
+                } else if (addTypes.includes(m.movement_type)) {
+                    item.qty += q;
+                } else if (subtractTypes.includes(m.movement_type)) {
+                    item.qty -= q;
+                }
+            }
+        };
+
+        let stockItems;
+        let panels;
+        let components;
+        let stockMovesAfter;
+        let panelMovesAfter;
+        let componentMovesAfter;
+        let stockMovesBefore = [];
+        let panelMovesBefore = [];
+        let componentMovesBefore = [];
+
+        if (isPostgreSQL) {
+            const [stockRes, panelRes, compRes, smAfter, pmAfter, cmAfter] = await Promise.all([
+                pool.query(`SELECT id, COALESCE(current_quantity, 0) AS qty, COALESCE(cost_per_unit_gbp, 0) AS cost FROM stock_items`),
+                pool.query(`SELECT id, COALESCE(built_quantity, 0) AS qty, COALESCE(cost_gbp, 0) AS cost FROM panels`),
+                pool.query(`SELECT id, COALESCE(built_quantity, 0) AS qty, COALESCE(cost_gbp, 0) AS cost FROM components`),
+                pool.query(
+                    `SELECT id, stock_item_id, movement_type, quantity, timestamp
+                     FROM stock_movements
+                     WHERE timestamp >= $1::timestamptz
+                     ORDER BY timestamp DESC, id DESC`,
+                    [weekEndExclusive]
+                ),
+                pool.query(
+                    `SELECT id, panel_id, movement_type, quantity, timestamp
+                     FROM panel_movements
+                     WHERE timestamp >= $1::timestamptz
+                     ORDER BY timestamp DESC, id DESC`,
+                    [weekEndExclusive]
+                ),
+                pool.query(
+                    `SELECT id, component_id, movement_type, quantity, timestamp
+                     FROM component_movements
+                     WHERE timestamp >= $1::timestamptz
+                     ORDER BY timestamp DESC, id DESC`,
+                    [weekEndExclusive]
+                )
+            ]);
+            stockItems = stockRes.rows;
+            panels = panelRes.rows;
+            components = compRes.rows;
+            stockMovesAfter = smAfter.rows;
+            panelMovesAfter = pmAfter.rows;
+            componentMovesAfter = cmAfter.rows;
+
+            const stockAdjIds = [...new Set(
+                (stockMovesAfter || [])
+                    .filter(m => m.movement_type === 'adjustment')
+                    .map(m => Number(m.stock_item_id))
+            )];
+            const panelAdjIds = [...new Set(
+                (panelMovesAfter || [])
+                    .filter(m => m.movement_type === 'adjustment')
+                    .map(m => Number(m.panel_id))
+            )];
+            const compAdjIds = [...new Set(
+                (componentMovesAfter || [])
+                    .filter(m => m.movement_type === 'adjustment')
+                    .map(m => Number(m.component_id))
+            )];
+
+            if (stockAdjIds.length) {
+                const r = await pool.query(
+                    `SELECT id, stock_item_id, movement_type, quantity, timestamp
+                     FROM stock_movements
+                     WHERE stock_item_id = ANY($1::int[]) AND timestamp < $2::timestamptz
+                     ORDER BY timestamp ASC, id ASC`,
+                    [stockAdjIds, weekEndExclusive]
+                );
+                stockMovesBefore = r.rows;
+            }
+            if (panelAdjIds.length) {
+                const r = await pool.query(
+                    `SELECT id, panel_id, movement_type, quantity, timestamp
+                     FROM panel_movements
+                     WHERE panel_id = ANY($1::int[]) AND timestamp < $2::timestamptz
+                     ORDER BY timestamp ASC, id ASC`,
+                    [panelAdjIds, weekEndExclusive]
+                );
+                panelMovesBefore = r.rows;
+            }
+            if (compAdjIds.length) {
+                const r = await pool.query(
+                    `SELECT id, component_id, movement_type, quantity, timestamp
+                     FROM component_movements
+                     WHERE component_id = ANY($1::int[]) AND timestamp < $2::timestamptz
+                     ORDER BY timestamp ASC, id ASC`,
+                    [compAdjIds, weekEndExclusive]
+                );
+                componentMovesBefore = r.rows;
+            }
+        } else {
+            stockItems = db.prepare(
+                `SELECT id, COALESCE(current_quantity, 0) AS qty, COALESCE(cost_per_unit_gbp, 0) AS cost FROM stock_items`
+            ).all();
+            panels = db.prepare(
+                `SELECT id, COALESCE(built_quantity, 0) AS qty, COALESCE(cost_gbp, 0) AS cost FROM panels`
+            ).all();
+            components = db.prepare(
+                `SELECT id, COALESCE(built_quantity, 0) AS qty, COALESCE(cost_gbp, 0) AS cost FROM components`
+            ).all();
+            stockMovesAfter = db.prepare(
+                `SELECT id, stock_item_id, movement_type, quantity, timestamp
+                 FROM stock_movements WHERE timestamp >= ? ORDER BY timestamp DESC, id DESC`
+            ).all(weekEndExclusive);
+            panelMovesAfter = db.prepare(
+                `SELECT id, panel_id, movement_type, quantity, timestamp
+                 FROM panel_movements WHERE timestamp >= ? ORDER BY timestamp DESC, id DESC`
+            ).all(weekEndExclusive);
+            componentMovesAfter = db.prepare(
+                `SELECT id, component_id, movement_type, quantity, timestamp
+                 FROM component_movements WHERE timestamp >= ? ORDER BY timestamp DESC, id DESC`
+            ).all(weekEndExclusive);
+
+            const stockAdjIds = [...new Set(
+                (stockMovesAfter || []).filter(m => m.movement_type === 'adjustment').map(m => Number(m.stock_item_id))
+            )];
+            const panelAdjIds = [...new Set(
+                (panelMovesAfter || []).filter(m => m.movement_type === 'adjustment').map(m => Number(m.panel_id))
+            )];
+            const compAdjIds = [...new Set(
+                (componentMovesAfter || []).filter(m => m.movement_type === 'adjustment').map(m => Number(m.component_id))
+            )];
+
+            if (stockAdjIds.length) {
+                const placeholders = stockAdjIds.map(() => '?').join(',');
+                stockMovesBefore = db.prepare(
+                    `SELECT id, stock_item_id, movement_type, quantity, timestamp
+                     FROM stock_movements
+                     WHERE stock_item_id IN (${placeholders}) AND timestamp < ?
+                     ORDER BY timestamp ASC, id ASC`
+                ).all(...stockAdjIds, weekEndExclusive);
+            }
+            if (panelAdjIds.length) {
+                const placeholders = panelAdjIds.map(() => '?').join(',');
+                panelMovesBefore = db.prepare(
+                    `SELECT id, panel_id, movement_type, quantity, timestamp
+                     FROM panel_movements
+                     WHERE panel_id IN (${placeholders}) AND timestamp < ?
+                     ORDER BY timestamp ASC, id ASC`
+                ).all(...panelAdjIds, weekEndExclusive);
+            }
+            if (compAdjIds.length) {
+                const placeholders = compAdjIds.map(() => '?').join(',');
+                componentMovesBefore = db.prepare(
+                    `SELECT id, component_id, movement_type, quantity, timestamp
+                     FROM component_movements
+                     WHERE component_id IN (${placeholders}) AND timestamp < ?
+                     ORDER BY timestamp ASC, id ASC`
+                ).all(...compAdjIds, weekEndExclusive);
+            }
+        }
+
+        const stockOpts = {
+            idKey: 'stock_item_id',
+            addTypes: ['in'],
+            subtractTypes: ['out']
+        };
+        const panelOpts = {
+            idKey: 'panel_id',
+            addTypes: ['build'],
+            subtractTypes: ['use']
+        };
+        const compOpts = {
+            idKey: 'component_id',
+            addTypes: ['build'],
+            subtractTypes: ['use']
+        };
+
+        const stockState = applyAsOfQty(stockItems, stockMovesAfter, stockOpts);
+        forwardReplayBeforeCutOff(stockState.byId, stockState.hasAdjustmentAfter, stockMovesBefore, stockOpts);
+
+        const panelState = applyAsOfQty(panels, panelMovesAfter, panelOpts);
+        forwardReplayBeforeCutOff(panelState.byId, panelState.hasAdjustmentAfter, panelMovesBefore, panelOpts);
+
+        const compState = applyAsOfQty(components, componentMovesAfter, compOpts);
+        forwardReplayBeforeCutOff(compState.byId, compState.hasAdjustmentAfter, componentMovesBefore, compOpts);
+
+        const rawMaterialsValue = valueFromQtyCost([...stockState.byId.values()]);
+        const builtItemsValue = valueFromQtyCost([...panelState.byId.values()]);
+        const componentsValue = valueFromQtyCost([...compState.byId.values()]);
+        const totalValue = Math.round((rawMaterialsValue + builtItemsValue + componentsValue) * 100) / 100;
+
+        return {
+            raw_materials_value: rawMaterialsValue,
+            built_items_value: builtItemsValue,
+            components_value: componentsValue,
+            total_value: totalValue
+        };
+    }
     
     static async getLastWeekPlannerSummary() {
         const thisMonday = londonMondayYmd(new Date());
@@ -6785,18 +7087,16 @@ class ProductionDatabase {
 
         const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
         const totalValue = items.reduce((s, i) => s + i.line_value, 0);
-        const [rawMaterialsValue, builtItemsValue] = await Promise.all([
-            this.getTotalStockValue(),
-            this.getTotalPanelValue()
-        ]);
+        const asOf = await this.getStockValueAsOf(weekEnd);
 
         return {
             movement_count: items.length,
             total_quantity: totalQuantity,
             total_value: totalValue,
-            current_raw_materials_value: rawMaterialsValue,
-            current_built_items_value: builtItemsValue,
-            current_total_stock_value: rawMaterialsValue + builtItemsValue,
+            as_of_raw_materials_value: asOf.raw_materials_value,
+            as_of_built_items_value: asOf.built_items_value,
+            as_of_components_value: asOf.components_value,
+            as_of_total_stock_value: asOf.total_value,
             items
         };
     }
