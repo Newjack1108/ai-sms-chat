@@ -353,7 +353,7 @@
                             ${data.items.map(item => {
                                 const currentQty = parseFloat(item.current_quantity) || 0;
                                 const minQty = parseFloat(item.min_quantity) || 0;
-                                const isLow = currentQty <= minQty;
+                                const isLow = minQty > 0 && currentQty <= minQty;
                                 const category = item.category ? escapeHtml(String(item.category)) : null;
                                 return `
                                     <tr>

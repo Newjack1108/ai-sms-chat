@@ -3961,7 +3961,8 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             const result = await pool.query(
                 `SELECT * FROM stock_items
-                 WHERE current_quantity::numeric <= min_quantity::numeric
+                 WHERE min_quantity::numeric > 0
+                   AND current_quantity::numeric <= min_quantity::numeric
                  ORDER BY name ASC
                  LIMIT $1`,
                 [cap]
@@ -3970,7 +3971,8 @@ class ProductionDatabase {
         }
         return db.prepare(
             `SELECT * FROM stock_items
-             WHERE CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)
+             WHERE CAST(min_quantity AS REAL) > 0
+               AND CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)
              ORDER BY name ASC
              LIMIT ?`
         ).all(cap);
@@ -3982,7 +3984,7 @@ class ProductionDatabase {
      * @param {number} opts.page
      * @param {number} opts.pageSize
      * @param {string|null} opts.category exact or null
-     * @param {boolean} opts.lowOnly rows where current_quantity <= min_quantity
+     * @param {boolean} opts.lowOnly rows where min_quantity > 0 and current_quantity <= min_quantity
      */
     static async getStockItemsPaged(opts = {}) {
         const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
@@ -4003,9 +4005,9 @@ class ProductionDatabase {
         }
         if (lowOnly) {
             if (isPostgreSQL) {
-                conds.push('current_quantity::numeric <= min_quantity::numeric');
+                conds.push('min_quantity::numeric > 0 AND current_quantity::numeric <= min_quantity::numeric');
             } else {
-                conds.push('CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)');
+                conds.push('CAST(min_quantity AS REAL) > 0 AND CAST(current_quantity AS REAL) <= CAST(min_quantity AS REAL)');
             }
         }
         const whereSql = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
