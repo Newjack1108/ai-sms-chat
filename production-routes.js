@@ -2226,6 +2226,21 @@ router.get('/products/:id/cost', requireProductionAuth, async (req, res) => {
     }
 });
 
+router.post('/products/:id/cost/refresh', requireProductionAuth, async (req, res) => {
+    try {
+        const productId = parseInt(req.params.id);
+        const product = await ProductionDatabase.getProductById(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, error: 'Product not found' });
+        }
+        const cost = await ProductionDatabase.updateProductCost(productId);
+        res.json({ success: true, cost: parseFloat(cost || 0) });
+    } catch (error) {
+        console.error('Refresh product cost error:', error);
+        res.status(500).json({ success: false, error: 'Failed to refresh product cost' });
+    }
+});
+
 router.post('/products/push-to-sales-bulk', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const salesApiUrl = process.env.SALES_APP_API_URL;

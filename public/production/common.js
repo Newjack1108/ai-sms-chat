@@ -512,8 +512,9 @@ ${
             if (!el) return;
             try {
                 el.textContent = '…';
-                const cd = await apiCall(`/products/${productId}/cost`);
+                const cd = await apiCall(`/products/${productId}/cost/refresh`, { method: 'POST' });
                 el.textContent = formatCurrency(cd && typeof cd.cost === 'number' ? cd.cost : 0);
+                if (onChange) onChange();
             } catch (err) {
                 el.textContent = '—';
                 showAlert(err.message || 'Failed to refresh total', 'error');
