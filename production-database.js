@@ -19,7 +19,8 @@ const {
     roundClockUpLondon15,
     roundClockDownLondon15,
     londonLocalTimeToUtc,
-    ymdFromDbOrInstant
+    ymdFromDbOrInstant,
+    latestApprovableTimesheetWeekStart
 } = require('./uk-datetime');
 const {
     parseBool: leadlockParseBool,
@@ -15921,20 +15922,12 @@ class ProductionDatabase {
     }
     
     // Get unapproved timesheet weeks (for reminders)
-    // Returns weeks that have ended and still have unapproved timesheets
-    // Only returns complete weeks (weeks that have finished)
+    // Returns weeks that are already approvable (from that week's Saturday onward) and still unapproved
     // Only counts timesheets with actual hours worked (matching getPayrollSummary logic)
     static async getUnapprovedTimesheetWeeks() {
-        const today = new Date();
-        const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
+        const latestApprovableWeekStart = latestApprovableTimesheetWeekStart(new Date());
         
-        // Calculate current week's Monday
-        const currentWeekMonday = new Date(today);
-        currentWeekMonday.setDate(currentWeekMonday.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1));
-        currentWeekMonday.setHours(0, 0, 0, 0);
-        const currentWeekStartStr = currentWeekMonday.toISOString().split('T')[0];
-        
-        // Only get weeks that are complete (week_start_date < current week start)
+        // Include current week on Sat/Sun via <= latest approvable Monday
         // Only count timesheets with actual hours (matching getPayrollSummary filter)
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -15942,7 +15935,7 @@ class ProductionDatabase {
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
-                 WHERE wt.week_start_date < $1
+                 WHERE wt.week_start_date <= $1
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = FALSE)
                    AND ${payrollEligibleRoleClause('u')}
                    AND tde.total_hours > 0
@@ -15950,7 +15943,7 @@ class ProductionDatabase {
                  HAVING COUNT(DISTINCT wt.user_id) > 0
                  ORDER BY wt.week_start_date DESC
                  LIMIT 2`,
-                [currentWeekStartStr]
+                [latestApprovableWeekStart]
             );
             return result.rows;
         } else {
@@ -15959,7 +15952,7 @@ class ProductionDatabase {
                  FROM weekly_timesheets wt
                  INNER JOIN production_users u ON wt.user_id = u.id
                  INNER JOIN timesheet_daily_entries tde ON wt.id = tde.weekly_timesheet_id
-                 WHERE wt.week_start_date < ?
+                 WHERE wt.week_start_date <= ?
                    AND (wt.manager_approved IS NULL OR wt.manager_approved = 0)
                    AND ${payrollEligibleRoleClause('u')}
                    AND tde.total_hours > 0
@@ -15967,7 +15960,7 @@ class ProductionDatabase {
                  HAVING COUNT(DISTINCT wt.user_id) > 0
                  ORDER BY wt.week_start_date DESC
                  LIMIT 2`
-            ).all(currentWeekStartStr);
+            ).all(latestApprovableWeekStart);
         }
     }
     

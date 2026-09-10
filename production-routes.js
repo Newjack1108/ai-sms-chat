@@ -13,7 +13,8 @@ const {
     londonYmdAddDays,
     londonLocalTimeToUtc,
     londonHour,
-    londonWeekdaySun0FromYmd
+    londonWeekdaySun0FromYmd,
+    isTimesheetWeekApprovable
 } = require('./uk-datetime');
 const {
     validateLeadLockWebhookBody,
@@ -6157,14 +6158,11 @@ router.put('/clock/weekly/:weekStart/approve/:userId', requireProductionAuth, re
         const userId = parseInt(req.params.userId);
         const adminId = req.session.production_user.id;
         
-        // Check if week is complete (only allow approval of completed weeks)
-        const currentWeekStartStr = londonMondayYmd(new Date());
-        
-        // Week is complete if its start date is before current week's start
-        if (weekStartDate >= currentWeekStartStr) {
+        // Approval unlocks from that week's Saturday (London); Mon–Fri stay blocked
+        if (!isTimesheetWeekApprovable(weekStartDate)) {
             return res.status(400).json({ 
                 success: false, 
-                error: 'Cannot approve timesheet for week in progress. Week must be complete before approval.' 
+                error: 'Cannot approve timesheet before Saturday of that week.' 
             });
         }
         

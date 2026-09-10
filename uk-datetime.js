@@ -240,6 +240,34 @@ function ymdFromDbOrInstant(val) {
     return londonYmd(new Date(val));
 }
 
+/**
+ * Manager timesheet approval unlocks from that week's Saturday (London).
+ * Mon–Fri of the week remain blocked; Sat/Sun and all later days are allowed.
+ * @param {string} weekStartYmd Monday YYYY-MM-DD
+ * @param {Date|string|number} [date]
+ * @returns {boolean}
+ */
+function isTimesheetWeekApprovable(weekStartYmd, date = new Date()) {
+    if (!weekStartYmd) {
+        return false;
+    }
+    const todayYmd = londonYmd(date instanceof Date ? date : new Date(date));
+    return todayYmd >= londonYmdAddDays(weekStartYmd, 5);
+}
+
+/**
+ * Monday YYYY-MM-DD of the most recent week that is already approvable.
+ * @param {Date|string|number} [date]
+ * @returns {string}
+ */
+function latestApprovableTimesheetWeekStart(date = new Date()) {
+    const thisMonday = londonMondayYmd(date);
+    if (isTimesheetWeekApprovable(thisMonday, date)) {
+        return thisMonday;
+    }
+    return londonYmdAddDays(thisMonday, -7);
+}
+
 module.exports = {
     UK_TZ,
     londonYmd,
@@ -257,5 +285,7 @@ module.exports = {
     londonMondayYmdFromYmd,
     roundClockUpLondon15,
     roundClockDownLondon15,
-    ymdFromDbOrInstant
+    ymdFromDbOrInstant,
+    isTimesheetWeekApprovable,
+    latestApprovableTimesheetWeekStart
 };

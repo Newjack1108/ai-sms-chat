@@ -1915,9 +1915,8 @@
         }
         
         function isWeekComplete(weekStartDate) {
-            // A week is complete if its start date is before the current week's start date
-            const currentWeekStart = getCurrentWeekStart();
-            return weekStartDate < currentWeekStart;
+            // Approval available from that week's Saturday (London)
+            return isTimesheetWeekApprovable(weekStartDate);
         }
         
         // Round hours down to 15-minute intervals (0.25 hour increments)
@@ -2089,8 +2088,8 @@
                                         </label>
                                         ${isApproved && approvedBy ? `<div style="font-size: 11px; color: #666; margin-top: 2px;">${escapeHtml(approvedBy)}<br>${approvedAt}</div>` : ''}
                                         ` : `
-                                        <div style="color: #999; font-size: 11px; padding: 5px;" title="Week in progress - approval available after week ends">
-                                            <span style="opacity: 0.6;">Week in progress</span>
+                                        <div style="color: #999; font-size: 11px; padding: 5px;" title="Approval available from Saturday of this week">
+                                            <span style="opacity: 0.6;">Available from Saturday</span>
                                         </div>
                                         `}
                                     </td>
@@ -2293,18 +2292,15 @@
         
         async function checkWeeklyApprovalReminder() {
             try {
-                const today = new Date();
-                const dayOfWeek = today.getDay(); // 0 = Sunday, 6 = Saturday
-                
-                // Only show reminder on Saturday
-                if (dayOfWeek !== 6) {
+                // Only show reminder on Saturday (London)
+                if (londonWeekdayOffsetFromMonday(new Date()) !== 5) {
                     return;
                 }
                 
-                // Previous completed week (London): Monday before this week
-                const weekStartStr = londonYmdAddDays(londonMondayYmd(new Date()), -7);
+                // Current week (now approvable from Saturday)
+                const weekStartStr = londonMondayYmd(new Date());
                 
-                // Get payroll summary for previous week
+                // Get payroll summary for this week
                 const data = await apiCall(`/clock/payroll/${weekStartStr}`);
                 const summary = data.summary || [];
                 
