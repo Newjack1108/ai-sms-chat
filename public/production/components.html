@@ -27,6 +27,9 @@
                 <h2>Components</h2>
                 <button onclick="showAddComponentModal()" class="btn btn-primary admin-only">Add Component</button>
             </div>
+            <div class="page-toolbar">
+                <input id="componentSearchInput" type="text" class="form-input" placeholder="Search name, description, type or status..." autocomplete="off">
+            </div>
             <div id="componentsList">
                 <div class="loading">Loading...</div>
             </div>
@@ -102,7 +105,9 @@
         let stockItems = [];
         let componentsPage = 1;
         let componentsTotal = 0;
-        const COMPONENTS_PAGE_SIZE = 25;
+        let componentSearchQuery = '';
+        let componentSearchDebounce = null;
+        const COMPONENTS_PAGE_SIZE = 50;
         
         async function init() {
             // Redirect staff users
@@ -111,8 +116,21 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
+            document.getElementById('componentSearchInput').addEventListener('input', onComponentSearchInput);
             await loadStockItems();
             loadComponents();
+        }
+
+        function onComponentSearchInput() {
+            const next = (document.getElementById('componentSearchInput').value || '').trim();
+            if (componentSearchDebounce) clearTimeout(componentSearchDebounce);
+            componentSearchDebounce = setTimeout(() => {
+                componentSearchDebounce = null;
+                if (next === componentSearchQuery) return;
+                componentSearchQuery = next;
+                componentsPage = 1;
+                loadComponents();
+            }, 300);
         }
         
         async function loadStockItems() {
@@ -142,7 +160,12 @@
         
         async function loadComponents() {
             try {
-                const data = await apiCall(`/components?page=${componentsPage}&page_size=${COMPONENTS_PAGE_SIZE}`);
+                const qs = new URLSearchParams({
+                    page: String(componentsPage),
+                    page_size: String(COMPONENTS_PAGE_SIZE)
+                });
+                if (componentSearchQuery) qs.set('search', componentSearchQuery);
+                const data = await apiCall(`/components?${qs.toString()}`);
                 const componentsList = document.getElementById('componentsList');
                 const clist = data.components || [];
                 componentsTotal = typeof data.total === 'number' ? data.total : clist.length;
@@ -152,7 +175,10 @@
                 }
                 
                 if (clist.length === 0) {
-                    componentsList.innerHTML = '<p>No components found</p>' + renderComponentsPager();
+                    const emptyMsg = componentSearchQuery
+                        ? `No components match "${escapeHtml(componentSearchQuery)}"`
+                        : 'No components found';
+                    componentsList.innerHTML = `<p>${emptyMsg}</p>` + renderComponentsPager();
                     return;
                 }
                 

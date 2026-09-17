@@ -390,7 +390,7 @@
                     <span>Per page</span>
                     <select id="ordersPageSizeSelect" class="form-select" style="width:auto; min-width:72px; flex:0 0 auto;" onchange="onOrdersPageSizeChange()">
                         <option value="25">25</option>
-                        <option value="50">50</option>
+                        <option value="50" selected>50</option>
                         <option value="100">100</option>
                     </select>
                 </label>
@@ -613,7 +613,7 @@
         const ORDERS_PAGE_SIZE_KEY = 'production_orders_page_size';
         let ordersPageSize = (() => {
             const n = parseInt(localStorage.getItem(ORDERS_PAGE_SIZE_KEY), 10);
-            return [25, 50, 100].includes(n) ? n : 25;
+            return [25, 50, 100].includes(n) ? n : 50;
         })();
         let orderSearchQuery = '';
         let orderSearchDebounce = null;

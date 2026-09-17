@@ -27,6 +27,9 @@
                 <h2>Built Items</h2>
                 <button onclick="showAddPanelModal()" class="btn btn-primary admin-only">Add Built Item</button>
             </div>
+            <div class="page-toolbar">
+                <input id="panelSearchInput" type="text" class="form-input" placeholder="Search name, description, type or status..." autocomplete="off">
+            </div>
             <div id="panelsList">
                 <div class="loading">Loading...</div>
             </div>
@@ -103,7 +106,9 @@
         let components = [];
         let panelsPage = 1;
         let panelsTotal = 0;
-        const PANELS_PAGE_SIZE = 25;
+        let panelSearchQuery = '';
+        let panelSearchDebounce = null;
+        const PANELS_PAGE_SIZE = 50;
         
         async function init() {
             // Redirect staff users
@@ -112,8 +117,21 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
+            document.getElementById('panelSearchInput').addEventListener('input', onPanelSearchInput);
             await Promise.all([loadStockItems(), loadComponents()]);
             loadPanels();
+        }
+
+        function onPanelSearchInput() {
+            const next = (document.getElementById('panelSearchInput').value || '').trim();
+            if (panelSearchDebounce) clearTimeout(panelSearchDebounce);
+            panelSearchDebounce = setTimeout(() => {
+                panelSearchDebounce = null;
+                if (next === panelSearchQuery) return;
+                panelSearchQuery = next;
+                panelsPage = 1;
+                loadPanels();
+            }, 300);
         }
         
         async function loadStockItems() {
@@ -152,7 +170,12 @@
         
         async function loadPanels() {
             try {
-                const data = await apiCall(`/panels?page=${panelsPage}&page_size=${PANELS_PAGE_SIZE}`);
+                const qs = new URLSearchParams({
+                    page: String(panelsPage),
+                    page_size: String(PANELS_PAGE_SIZE)
+                });
+                if (panelSearchQuery) qs.set('search', panelSearchQuery);
+                const data = await apiCall(`/panels?${qs.toString()}`);
                 const panelsList = document.getElementById('panelsList');
                 const plist = data.panels || [];
                 panelsTotal = typeof data.total === 'number' ? data.total : plist.length;
@@ -162,7 +185,10 @@
                 }
                 
                 if (plist.length === 0) {
-                    panelsList.innerHTML = '<p>No built items found</p>' + renderPanelsPager();
+                    const emptyMsg = panelSearchQuery
+                        ? `No built items match "${escapeHtml(panelSearchQuery)}"`
+                        : 'No built items found';
+                    panelsList.innerHTML = `<p>${emptyMsg}</p>` + renderPanelsPager();
                     return;
                 }
                 

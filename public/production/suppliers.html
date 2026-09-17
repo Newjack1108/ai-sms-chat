@@ -27,8 +27,8 @@
                 <h2>Supplier Database</h2>
                 <button class="btn btn-primary admin-or-office" onclick="showAddSupplierModal()">Add Supplier</button>
             </div>
-            <div style="margin-bottom: 12px;">
-                <input id="searchInput" type="text" class="form-input" placeholder="Search supplier, code, contact or email..." oninput="renderSuppliers()">
+            <div class="page-toolbar">
+                <input id="searchInput" type="text" class="form-input" placeholder="Search supplier, code, contact, email or phone..." autocomplete="off">
             </div>
             <div id="suppliersList"><div class="loading">Loading...</div></div>
         </div>
@@ -67,19 +67,63 @@
     <script>
         let currentUser = null;
         let suppliers = [];
+        let suppliersPage = 1;
+        let suppliersTotal = 0;
+        let supplierSearchQuery = '';
+        let supplierSearchDebounce = null;
+        const SUPPLIERS_PAGE_SIZE = 50;
 
         async function init() {
             if (await restrictStaffAccess()) return;
             currentUser = await checkAuth();
             if (!currentUser) return;
             await initNavbar();
+            document.getElementById('searchInput').addEventListener('input', onSupplierSearchInput);
             await loadSuppliers();
+        }
+
+        function onSupplierSearchInput() {
+            const next = (document.getElementById('searchInput').value || '').trim();
+            if (supplierSearchDebounce) clearTimeout(supplierSearchDebounce);
+            supplierSearchDebounce = setTimeout(() => {
+                supplierSearchDebounce = null;
+                if (next === supplierSearchQuery) return;
+                supplierSearchQuery = next;
+                suppliersPage = 1;
+                loadSuppliers();
+            }, 300);
+        }
+
+        function goSuppliersPage(p) {
+            suppliersPage = Math.max(1, p);
+            loadSuppliers();
+        }
+
+        function renderSuppliersPager() {
+            const totalPages = Math.max(1, Math.ceil(suppliersTotal / SUPPLIERS_PAGE_SIZE));
+            if (suppliersTotal <= SUPPLIERS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination">
+                    <span>Page ${suppliersPage} of ${totalPages} (${suppliersTotal} suppliers)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${suppliersPage <= 1 ? 'disabled' : ''} onclick="goSuppliersPage(${suppliersPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${suppliersPage >= totalPages ? 'disabled' : ''} onclick="goSuppliersPage(${suppliersPage + 1})">Next</button>
+                </div>`;
         }
 
         async function loadSuppliers() {
             try {
-                const data = await apiCall('/suppliers');
+                const qs = new URLSearchParams({
+                    page: String(suppliersPage),
+                    page_size: String(SUPPLIERS_PAGE_SIZE)
+                });
+                if (supplierSearchQuery) qs.set('search', supplierSearchQuery);
+                const data = await apiCall(`/suppliers?${qs.toString()}`);
                 suppliers = data.suppliers || [];
+                suppliersTotal = typeof data.total === 'number' ? data.total : suppliers.length;
+                if (suppliers.length === 0 && suppliersTotal > 0 && suppliersPage > 1) {
+                    suppliersPage--;
+                    return loadSuppliers();
+                }
                 renderSuppliers();
             } catch (error) {
                 document.getElementById('suppliersList').innerHTML = '<p>Error loading suppliers</p>';
@@ -87,15 +131,12 @@
         }
 
         function renderSuppliers() {
-            const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
-            const rows = suppliers.filter((s) => {
-                if (!q) return true;
-                const hay = `${s.name || ''} ${s.code || ''} ${s.contact_name || ''} ${s.email || ''}`.toLowerCase();
-                return hay.includes(q);
-            });
             const el = document.getElementById('suppliersList');
-            if (!rows.length) {
-                el.innerHTML = '<p>No suppliers found</p>';
+            if (!suppliers.length) {
+                const emptyMsg = supplierSearchQuery
+                    ? `No suppliers match "${escapeHtml(supplierSearchQuery)}"`
+                    : 'No suppliers found';
+                el.innerHTML = `<p>${emptyMsg}</p>`;
                 return;
             }
             el.innerHTML = `
@@ -104,7 +145,7 @@
                         <tr><th>Name</th><th>Code</th><th>Contact</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
-                        ${rows.map((s) => `
+                        ${suppliers.map((s) => `
                             <tr>
                                 <td><strong>${escapeHtml(s.name)}</strong></td>
                                 <td>${escapeHtml(s.code || '-')}</td>
@@ -121,7 +162,8 @@
                             </tr>
                         `).join('')}
                     </tbody>
-                </table>`;
+                </table>
+                ${renderSuppliersPager()}`;
         }
 
         function showAddSupplierModal() {

@@ -667,11 +667,13 @@ router.get('/stock', requireProductionAuth, async (req, res) => {
         }
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
         const category = req.query.category ? String(req.query.category).trim() : null;
+        const search = req.query.search ? String(req.query.search).trim() : null;
         const lowOnly = String(req.query.low_only) === '1' || req.query.low_only === 'true';
         const { items, total, page: p, page_size } = await ProductionDatabase.getStockItemsPaged({
             page,
             pageSize,
             category: category || null,
+            search: search || null,
             lowOnly
         });
         res.json({ success: true, items, total, page: p, page_size });
@@ -912,8 +914,19 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
 
 router.get('/suppliers', requireProductionAuth, async (req, res) => {
     try {
-        const suppliers = await ProductionDatabase.getAllSuppliers();
-        res.json({ success: true, suppliers });
+        // Unpaged when page omitted so dropdowns (PO, stock) keep working
+        if (req.query.page === undefined && req.query.page_size === undefined && req.query.pageSize === undefined) {
+            const suppliers = await ProductionDatabase.getAllSuppliers();
+            return res.json({ success: true, suppliers });
+        }
+        const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
+        const search = req.query.search ? String(req.query.search).trim() : null;
+        const { suppliers, total, page: p, page_size } = await ProductionDatabase.getSuppliersPaged({
+            page,
+            pageSize,
+            search: search || null
+        });
+        res.json({ success: true, suppliers, total, page: p, page_size });
     } catch (error) {
         console.error('Get suppliers error:', error);
         res.status(500).json({ success: false, error: 'Failed to get suppliers' });
@@ -1058,7 +1071,13 @@ router.get('/purchase-orders', requireProductionAuth, async (req, res) => {
     try {
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
         const status = req.query.status ? String(req.query.status).trim() : null;
-        const { orders, total, page: p, page_size } = await ProductionDatabase.getPurchaseOrdersPaged({ page, pageSize, status });
+        const search = req.query.search ? String(req.query.search).trim() : null;
+        const { orders, total, page: p, page_size } = await ProductionDatabase.getPurchaseOrdersPaged({
+            page,
+            pageSize,
+            status: status || null,
+            search: search || null
+        });
         res.json({ success: true, orders, total, page: p, page_size });
     } catch (error) {
         console.error('Get purchase orders error:', error);
@@ -1307,7 +1326,12 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
             });
         }
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
-        const { panels, total, page: p, page_size } = await ProductionDatabase.getPanelsPaged({ page, pageSize });
+        const search = req.query.search ? String(req.query.search).trim() : null;
+        const { panels, total, page: p, page_size } = await ProductionDatabase.getPanelsPaged({
+            page,
+            pageSize,
+            search: search || null
+        });
         res.json({ success: true, panels, total, page: p, page_size });
     } catch (error) {
         console.error('Get panels error:', error);
@@ -1634,7 +1658,12 @@ router.get('/components', requireProductionAuth, async (req, res) => {
             });
         }
         const { page, pageSize } = parsePaginationQuery(req, { defaultPageSize: 25, maxPageSize: 100 });
-        const { components, total, page: p, page_size } = await ProductionDatabase.getComponentsPaged({ page, pageSize });
+        const search = req.query.search ? String(req.query.search).trim() : null;
+        const { components, total, page: p, page_size } = await ProductionDatabase.getComponentsPaged({
+            page,
+            pageSize,
+            search: search || null
+        });
         res.json({ success: true, components, total, page: p, page_size });
     } catch (error) {
         console.error('Get components error:', error);

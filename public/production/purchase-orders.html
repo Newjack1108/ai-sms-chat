@@ -28,6 +28,20 @@
                 <h2>Purchase Orders</h2>
                 <button class="btn btn-primary admin-or-office" onclick="showCreatePoModal()">Create Purchase Order</button>
             </div>
+            <div class="page-toolbar">
+                <input id="poSearchInput" type="text" class="form-input" placeholder="Search PO number, supplier, status, notes, line item..." autocomplete="off">
+                <label class="form-label" style="margin:0; display:flex; align-items:center; gap:8px; white-space:nowrap;">
+                    <span>Status</span>
+                    <select id="poStatusFilter" class="form-select" style="width:auto; min-width:120px; flex:0 0 auto;" onchange="onPoStatusFilterChange()">
+                        <option value="">All</option>
+                        <option value="draft">Draft</option>
+                        <option value="sent">Sent</option>
+                        <option value="partial">Partial</option>
+                        <option value="received">Received</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </label>
+            </div>
             <div id="ordersList"><div class="loading">Loading...</div></div>
         </div>
     </div>
@@ -100,6 +114,12 @@
         let lineItems = [];
         let currentReceiveOrder = null;
         let editingPoId = null;
+        let poPage = 1;
+        let poTotal = 0;
+        let poSearchQuery = '';
+        let poSearchDebounce = null;
+        let poStatusFilter = '';
+        const PO_PAGE_SIZE = 50;
 
         function setPoModalMode(mode, poNumber) {
             const isEdit = mode === 'edit';
@@ -141,7 +161,96 @@
             const user = await checkAuth();
             if (!user) return;
             await initNavbar();
+            document.getElementById('poSearchInput').addEventListener('input', onPoSearchInput);
             await Promise.all([loadSuppliers(), loadStockItems(), loadOrders()]);
+        }
+
+        function onPoSearchInput() {
+            const next = (document.getElementById('poSearchInput').value || '').trim();
+            if (poSearchDebounce) clearTimeout(poSearchDebounce);
+            poSearchDebounce = setTimeout(() => {
+                poSearchDebounce = null;
+                if (next === poSearchQuery) return;
+                poSearchQuery = next;
+                poPage = 1;
+                loadOrders();
+            }, 300);
+        }
+
+        function onPoStatusFilterChange() {
+            poStatusFilter = (document.getElementById('poStatusFilter').value || '').trim();
+            poPage = 1;
+            loadOrders();
+        }
+
+        function goPoPage(p) {
+            poPage = Math.max(1, p);
+            loadOrders();
+        }
+
+        function renderPoPager() {
+            const totalPages = Math.max(1, Math.ceil(poTotal / PO_PAGE_SIZE));
+            if (poTotal <= PO_PAGE_SIZE) return '';
+            return `
+                <div class="pagination">
+                    <span>Page ${poPage} of ${totalPages} (${poTotal} orders)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${poPage <= 1 ? 'disabled' : ''} onclick="goPoPage(${poPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${poPage >= totalPages ? 'disabled' : ''} onclick="goPoPage(${poPage + 1})">Next</button>
+                </div>`;
+        }
+
+        async function loadOrders() {
+            try {
+                const qs = new URLSearchParams({
+                    page: String(poPage),
+                    page_size: String(PO_PAGE_SIZE)
+                });
+                if (poSearchQuery) qs.set('search', poSearchQuery);
+                if (poStatusFilter) qs.set('status', poStatusFilter);
+                const data = await apiCall(`/purchase-orders?${qs.toString()}`);
+                const rows = data.orders || [];
+                poTotal = typeof data.total === 'number' ? data.total : rows.length;
+                if (rows.length === 0 && poTotal > 0 && poPage > 1) {
+                    poPage--;
+                    return loadOrders();
+                }
+                const container = document.getElementById('ordersList');
+                if (!rows.length) {
+                    const emptyMsg = poSearchQuery || poStatusFilter
+                        ? `No purchase orders match${poSearchQuery ? ` "${escapeHtml(poSearchQuery)}"` : ''}${poStatusFilter ? ` with status "${escapeHtml(poStatusFilter)}"` : ''}`
+                        : 'No purchase orders yet';
+                    container.innerHTML = `<p>${emptyMsg}</p>`;
+                    return;
+                }
+                container.innerHTML = `
+                    <table class="table">
+                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Type</th><th>Status</th><th>Order Date</th><th>Expected</th><th>Subtotal</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            ${rows.map((o) => `
+                                <tr>
+                                    <td><strong>${escapeHtml(o.po_number)}</strong></td>
+                                    <td>${escapeHtml(o.supplier_name || '-')}</td>
+                                    <td>${o.is_one_off_purchase ? '<span class="badge badge-warning">One-off</span>' : '<span class="badge badge-secondary">Standard</span>'}</td>
+                                    <td><span class="badge badge-info">${escapeHtml(o.status || '')}</span></td>
+                                    <td>${formatDate(o.order_date)}</td>
+                                    <td>${formatDate(o.expected_date)}</td>
+                                    <td>${formatCurrency(o.subtotal_gbp || 0)}</td>
+                                    <td>
+                                        <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
+                                        <button class="btn btn-secondary btn-sm admin-or-office" onclick="showEditPoModal(${o.id})">Edit</button>
+                                        <button class="btn btn-primary btn-sm" onclick="downloadPoPdf(${o.id})">Download PDF</button>
+                                        <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
+                                        <button class="btn btn-danger btn-sm admin-or-office" onclick="deletePo(${o.id}, '${escapeHtml(o.po_number)}')">Delete</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                    ${renderPoPager()}
+                `;
+            } catch (error) {
+                document.getElementById('ordersList').innerHTML = '<p>Error loading purchase orders</p>';
+            }
         }
 
         async function loadStockItems() {
@@ -377,45 +486,6 @@
                 showModal('poModal');
             } catch (error) {
                 showAlert(error.message || 'Failed to load purchase order', 'error');
-            }
-        }
-
-        async function loadOrders() {
-            try {
-                const data = await apiCall('/purchase-orders?page=1&page_size=100');
-                const rows = data.orders || [];
-                const container = document.getElementById('ordersList');
-                if (!rows.length) {
-                    container.innerHTML = '<p>No purchase orders yet</p>';
-                    return;
-                }
-                container.innerHTML = `
-                    <table class="table">
-                        <thead><tr><th>PO Number</th><th>Supplier</th><th>Type</th><th>Status</th><th>Order Date</th><th>Expected</th><th>Subtotal</th><th>Actions</th></tr></thead>
-                        <tbody>
-                            ${rows.map((o) => `
-                                <tr>
-                                    <td><strong>${escapeHtml(o.po_number)}</strong></td>
-                                    <td>${escapeHtml(o.supplier_name || '-')}</td>
-                                    <td>${o.is_one_off_purchase ? '<span class="badge badge-warning">One-off</span>' : '<span class="badge badge-secondary">Standard</span>'}</td>
-                                    <td><span class="badge badge-info">${escapeHtml(o.status || '')}</span></td>
-                                    <td>${formatDate(o.order_date)}</td>
-                                    <td>${formatDate(o.expected_date)}</td>
-                                    <td>${formatCurrency(o.subtotal_gbp || 0)}</td>
-                                    <td>
-                                        <button class="btn btn-secondary btn-sm" onclick="viewPo(${o.id})">View</button>
-                                        <button class="btn btn-secondary btn-sm admin-or-office" onclick="showEditPoModal(${o.id})">Edit</button>
-                                        <button class="btn btn-primary btn-sm" onclick="downloadPoPdf(${o.id})">Download PDF</button>
-                                        <button class="btn btn-success btn-sm admin-or-office" onclick="receivePo(${o.id})">Receive</button>
-                                        <button class="btn btn-danger btn-sm admin-or-office" onclick="deletePo(${o.id}, '${escapeHtml(o.po_number)}')">Delete</button>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-            } catch (error) {
-                document.getElementById('ordersList').innerHTML = '<p>Error loading purchase orders</p>';
             }
         }
 

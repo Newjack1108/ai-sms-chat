@@ -27,6 +27,9 @@
                 <h2>Production Users</h2>
                 <button onclick="showAddUserModal()" class="btn btn-primary">Add User</button>
             </div>
+            <div class="page-toolbar">
+                <input id="userSearchInput" type="text" class="form-input" placeholder="Search username or role..." autocomplete="off">
+            </div>
             <div id="usersList">
                 <div class="loading">Loading...</div>
             </div>
@@ -79,6 +82,11 @@
     <script src="common.js"></script>
     <script>
         let currentUser = null;
+        let allUsers = [];
+        let usersPage = 1;
+        let userSearchQuery = '';
+        let userSearchDebounce = null;
+        const USERS_PAGE_SIZE = 50;
         
         async function init() {
             // Redirect staff users
@@ -91,71 +99,125 @@
                 return;
             }
             initNavbar();
+            document.getElementById('userSearchInput').addEventListener('input', onUserSearchInput);
             loadUsers();
+        }
+
+        function onUserSearchInput() {
+            const next = (document.getElementById('userSearchInput').value || '').trim();
+            if (userSearchDebounce) clearTimeout(userSearchDebounce);
+            userSearchDebounce = setTimeout(() => {
+                userSearchDebounce = null;
+                if (next === userSearchQuery) return;
+                userSearchQuery = next;
+                usersPage = 1;
+                renderUsers();
+            }, 300);
+        }
+
+        function getFilteredUsers() {
+            const q = userSearchQuery.toLowerCase();
+            if (!q) return allUsers;
+            return allUsers.filter((u) => {
+                const role = u.role === 'manager' ? 'office' : (u.role || '');
+                const hay = `${u.username || ''} ${role}`.toLowerCase();
+                return hay.includes(q);
+            });
+        }
+
+        function goUsersPage(p) {
+            usersPage = Math.max(1, p);
+            renderUsers();
+        }
+
+        function renderUsersPager(total) {
+            const totalPages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+            if (total <= USERS_PAGE_SIZE) return '';
+            return `
+                <div class="pagination">
+                    <span>Page ${usersPage} of ${totalPages} (${total} users)</span>
+                    <button type="button" class="btn btn-secondary btn-sm" ${usersPage <= 1 ? 'disabled' : ''} onclick="goUsersPage(${usersPage - 1})">Previous</button>
+                    <button type="button" class="btn btn-secondary btn-sm" ${usersPage >= totalPages ? 'disabled' : ''} onclick="goUsersPage(${usersPage + 1})">Next</button>
+                </div>`;
         }
         
         async function loadUsers() {
             try {
                 const data = await apiCall('/users');
-                const usersList = document.getElementById('usersList');
-                
-                if (data.users.length === 0) {
-                    usersList.innerHTML = '<p>No users found</p>';
-                    return;
-                }
-                
-                usersList.innerHTML = `
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Username</th>
-                                <th>Role</th>
-                                <th>Driver</th>
-                                <th>Status</th>
-                                <th>Created</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${data.users.map(user => {
-                                const status = user.status || 'active';
-                                const isLeft = status === 'left_company';
-                                const isSelf = user.id === currentUser.id;
-                                let statusBtn = '';
-                                if (!isSelf) {
-                                    if (isLeft) {
-                                        statusBtn = `<button onclick="setUserStatus(${user.id}, 'active')" class="btn btn-secondary btn-sm">Reactivate</button>`;
-                                    } else {
-                                        statusBtn = `<button onclick="setUserStatus(${user.id}, 'left_company')" class="btn btn-warning btn-sm">Mark as left company</button>`;
-                                    }
-                                }
-                                const isDriver = !!(user.is_driver === true || user.is_driver === 1);
-                                const driverCell =
-                                    user.role === 'staff' || user.role === 'installer'
-                                        ? isDriver
-                                            ? '<span class="badge badge-warning">Yes</span>'
-                                            : '<span class="badge badge-secondary">No</span>'
-                                        : '—';
-                                return `
-                                <tr>
-                                    <td><strong>${user.username}</strong></td>
-                                    <td><span class="badge badge-info">${user.role === 'manager' ? 'office' : user.role}</span></td>
-                                    <td>${driverCell}</td>
-                                    <td><span class="badge ${isLeft ? 'badge-secondary' : 'badge-success'}">${isLeft ? 'Left company' : 'Active'}</span></td>
-                                    <td>${formatDate(user.created_at)}</td>
-                                    <td>
-                                        <button onclick="editUser(${user.id})" class="btn btn-secondary btn-sm">Edit</button>
-                                        ${statusBtn}
-                                        ${!isSelf ? `<button onclick="deleteUser(${user.id})" class="btn btn-danger btn-sm">Delete</button>` : ''}
-                                    </td>
-                                </tr>
-                            `}).join('')}
-                        </tbody>
-                    </table>
-                `;
+                allUsers = data.users || [];
+                renderUsers();
             } catch (error) {
                 document.getElementById('usersList').innerHTML = '<p>Error loading users</p>';
             }
+        }
+
+        function renderUsers() {
+            const usersList = document.getElementById('usersList');
+            const filtered = getFilteredUsers();
+            const total = filtered.length;
+            const totalPages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+            if (usersPage > totalPages) usersPage = totalPages;
+            const start = (usersPage - 1) * USERS_PAGE_SIZE;
+            const pageUsers = filtered.slice(start, start + USERS_PAGE_SIZE);
+
+            if (total === 0) {
+                const emptyMsg = userSearchQuery
+                    ? `No users match "${escapeHtml(userSearchQuery)}"`
+                    : 'No users found';
+                usersList.innerHTML = `<p>${emptyMsg}</p>`;
+                return;
+            }
+            
+            usersList.innerHTML = `
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th>Driver</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${pageUsers.map(user => {
+                            const status = user.status || 'active';
+                            const isLeft = status === 'left_company';
+                            const isSelf = user.id === currentUser.id;
+                            let statusBtn = '';
+                            if (!isSelf) {
+                                if (isLeft) {
+                                    statusBtn = `<button onclick="setUserStatus(${user.id}, 'active')" class="btn btn-secondary btn-sm">Reactivate</button>`;
+                                } else {
+                                    statusBtn = `<button onclick="setUserStatus(${user.id}, 'left_company')" class="btn btn-warning btn-sm">Mark as left company</button>`;
+                                }
+                            }
+                            const isDriver = !!(user.is_driver === true || user.is_driver === 1);
+                            const driverCell =
+                                user.role === 'staff' || user.role === 'installer'
+                                    ? isDriver
+                                        ? '<span class="badge badge-warning">Yes</span>'
+                                        : '<span class="badge badge-secondary">No</span>'
+                                    : '—';
+                            return `
+                            <tr>
+                                <td><strong>${escapeHtml(user.username)}</strong></td>
+                                <td><span class="badge badge-info">${escapeHtml(user.role === 'manager' ? 'office' : user.role)}</span></td>
+                                <td>${driverCell}</td>
+                                <td><span class="badge ${isLeft ? 'badge-secondary' : 'badge-success'}">${isLeft ? 'Left company' : 'Active'}</span></td>
+                                <td>${formatDate(user.created_at)}</td>
+                                <td>
+                                    <button onclick="editUser(${user.id})" class="btn btn-secondary btn-sm">Edit</button>
+                                    ${statusBtn}
+                                    ${!isSelf ? `<button onclick="deleteUser(${user.id})" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                </td>
+                            </tr>
+                        `}).join('')}
+                    </tbody>
+                </table>
+                ${renderUsersPager(total)}
+            `;
         }
         
         function updateDriverFieldVisibility() {
@@ -182,8 +244,7 @@
         
         async function editUser(id) {
             try {
-                const data = await apiCall('/users');
-                const user = data.users.find(u => u.id === id);
+                const user = allUsers.find(u => u.id === id);
                 if (!user) return;
                 
                 document.getElementById('userModalTitle').textContent = 'Edit User';

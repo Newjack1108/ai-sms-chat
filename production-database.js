@@ -4095,6 +4095,7 @@ class ProductionDatabase {
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
         const category = opts.category && String(opts.category).trim() ? String(opts.category).trim() : null;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
         const lowOnly = !!opts.lowOnly;
         const conds = [];
         const params = [];
@@ -4105,6 +4106,28 @@ class ProductionDatabase {
             } else {
                 params.push(category);
                 conds.push('category = ?');
+            }
+        }
+        if (search) {
+            if (isPostgreSQL) {
+                const pattern = `%${search}%`;
+                params.push(pattern);
+                const p = params.length;
+                conds.push(`(
+                    name ILIKE $${p}
+                    OR COALESCE(description, '') ILIKE $${p}
+                    OR COALESCE(category, '') ILIKE $${p}
+                    OR COALESCE(location, '') ILIKE $${p}
+                )`);
+            } else {
+                const patternLite = `%${search.toLowerCase()}%`;
+                conds.push(`(
+                    LOWER(name) LIKE ?
+                    OR LOWER(COALESCE(description, '')) LIKE ?
+                    OR LOWER(COALESCE(category, '')) LIKE ?
+                    OR LOWER(COALESCE(location, '')) LIKE ?
+                )`);
+                params.push(patternLite, patternLite, patternLite, patternLite);
             }
         }
         if (lowOnly) {
@@ -4341,15 +4364,47 @@ class ProductionDatabase {
         const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
-        let total;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
         if (isPostgreSQL) {
-            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM panels`);
-            total = c.rows[0].c;
-            const r = await pool.query(`SELECT * FROM panels ORDER BY name ASC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+            const conds = [];
+            const params = [];
+            if (search) {
+                const pattern = `%${search}%`;
+                params.push(pattern);
+                const p = params.length;
+                conds.push(`(
+                    name ILIKE $${p}
+                    OR COALESCE(description, '') ILIKE $${p}
+                    OR COALESCE(panel_type, '') ILIKE $${p}
+                    OR COALESCE(status, '') ILIKE $${p}
+                )`);
+            }
+            const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM panels${where}`, params);
+            const total = c.rows[0].c;
+            const r = await pool.query(
+                `SELECT * FROM panels${where} ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+                [...params, pageSize, offset]
+            );
             return { panels: r.rows, total, page, page_size: pageSize };
         }
-        const row = db.prepare(`SELECT COUNT(*) AS c FROM panels`).get();
-        const rows = db.prepare(`SELECT * FROM panels ORDER BY name ASC LIMIT ? OFFSET ?`).all(pageSize, offset);
+        const conds = [];
+        const params = [];
+        if (search) {
+            const patternLite = `%${search.toLowerCase()}%`;
+            conds.push(`(
+                LOWER(name) LIKE ?
+                OR LOWER(COALESCE(description, '')) LIKE ?
+                OR LOWER(COALESCE(panel_type, '')) LIKE ?
+                OR LOWER(COALESCE(status, '')) LIKE ?
+            )`);
+            params.push(patternLite, patternLite, patternLite, patternLite);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+        const row = db.prepare(`SELECT COUNT(*) AS c FROM panels${where}`).get(...params);
+        const rows = db.prepare(
+            `SELECT * FROM panels${where} ORDER BY name ASC LIMIT ? OFFSET ?`
+        ).all(...params, pageSize, offset);
         return { panels: rows, total: row.c, page, page_size: pageSize };
     }
     
@@ -5309,14 +5364,47 @@ class ProductionDatabase {
         const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
         if (isPostgreSQL) {
-            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM components`);
+            const conds = [];
+            const params = [];
+            if (search) {
+                const pattern = `%${search}%`;
+                params.push(pattern);
+                const p = params.length;
+                conds.push(`(
+                    name ILIKE $${p}
+                    OR COALESCE(description, '') ILIKE $${p}
+                    OR COALESCE(component_type, '') ILIKE $${p}
+                    OR COALESCE(status, '') ILIKE $${p}
+                )`);
+            }
+            const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+            const c = await pool.query(`SELECT COUNT(*)::int AS c FROM components${where}`, params);
             const total = c.rows[0].c;
-            const r = await pool.query(`SELECT * FROM components ORDER BY name ASC LIMIT $1 OFFSET $2`, [pageSize, offset]);
+            const r = await pool.query(
+                `SELECT * FROM components${where} ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+                [...params, pageSize, offset]
+            );
             return { components: r.rows, total, page, page_size: pageSize };
         }
-        const row = db.prepare(`SELECT COUNT(*) AS c FROM components`).get();
-        const rows = db.prepare(`SELECT * FROM components ORDER BY name ASC LIMIT ? OFFSET ?`).all(pageSize, offset);
+        const conds = [];
+        const params = [];
+        if (search) {
+            const patternLite = `%${search.toLowerCase()}%`;
+            conds.push(`(
+                LOWER(name) LIKE ?
+                OR LOWER(COALESCE(description, '')) LIKE ?
+                OR LOWER(COALESCE(component_type, '')) LIKE ?
+                OR LOWER(COALESCE(status, '')) LIKE ?
+            )`);
+            params.push(patternLite, patternLite, patternLite, patternLite);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+        const row = db.prepare(`SELECT COUNT(*) AS c FROM components${where}`).get(...params);
+        const rows = db.prepare(
+            `SELECT * FROM components${where} ORDER BY name ASC LIMIT ? OFFSET ?`
+        ).all(...params, pageSize, offset);
         return { components: rows, total: row.c, page, page_size: pageSize };
     }
     
@@ -7882,6 +7970,56 @@ class ProductionDatabase {
         return db.prepare(`SELECT * FROM suppliers ORDER BY name ASC`).all();
     }
 
+    static async getSuppliersPaged(opts = {}) {
+        const page = Math.max(1, parseInt(String(opts.page), 10) || 1);
+        const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
+        const offset = (page - 1) * pageSize;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
+        if (isPostgreSQL) {
+            const conds = [];
+            const params = [];
+            if (search) {
+                const pattern = `%${search}%`;
+                params.push(pattern);
+                const p = params.length;
+                conds.push(`(
+                    name ILIKE $${p}
+                    OR COALESCE(code, '') ILIKE $${p}
+                    OR COALESCE(contact_name, '') ILIKE $${p}
+                    OR COALESCE(email, '') ILIKE $${p}
+                    OR COALESCE(phone, '') ILIKE $${p}
+                )`);
+            }
+            const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+            const countResult = await pool.query(`SELECT COUNT(*)::int AS c FROM suppliers${where}`, params);
+            const total = countResult.rows[0].c;
+            const rowsResult = await pool.query(
+                `SELECT * FROM suppliers${where} ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+                [...params, pageSize, offset]
+            );
+            return { suppliers: rowsResult.rows, total, page, page_size: pageSize };
+        }
+        const conds = [];
+        const params = [];
+        if (search) {
+            const patternLite = `%${search.toLowerCase()}%`;
+            conds.push(`(
+                LOWER(name) LIKE ?
+                OR LOWER(COALESCE(code, '')) LIKE ?
+                OR LOWER(COALESCE(contact_name, '')) LIKE ?
+                OR LOWER(COALESCE(email, '')) LIKE ?
+                OR LOWER(COALESCE(phone, '')) LIKE ?
+            )`);
+            params.push(patternLite, patternLite, patternLite, patternLite, patternLite);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+        const countRow = db.prepare(`SELECT COUNT(*) AS c FROM suppliers${where}`).get(...params);
+        const suppliers = db.prepare(
+            `SELECT * FROM suppliers${where} ORDER BY name ASC LIMIT ? OFFSET ?`
+        ).all(...params, pageSize, offset);
+        return { suppliers, total: countRow.c, page, page_size: pageSize };
+    }
+
     static async updateSupplier(id, data) {
         if (isPostgreSQL) {
             const result = await pool.query(
@@ -8243,39 +8381,82 @@ class ProductionDatabase {
         const pageSize = Math.min(100, Math.max(1, parseInt(String(opts.pageSize), 10) || 25));
         const offset = (page - 1) * pageSize;
         const status = opts.status && String(opts.status).trim() ? String(opts.status).trim() : null;
+        const search = opts.search && String(opts.search).trim() ? String(opts.search).trim() : null;
+        const baseFrom = `FROM purchase_orders po INNER JOIN suppliers s ON s.id = po.supplier_id`;
         let total = 0;
         if (isPostgreSQL) {
-            const countParams = [];
-            let where = '';
+            const conds = [];
+            const params = [];
             if (status) {
-                countParams.push(status);
-                where = ` WHERE po.status = $1`;
+                params.push(status);
+                conds.push(`po.status = $${params.length}`);
             }
-            const countResult = await pool.query(`SELECT COUNT(*)::int AS c FROM purchase_orders po${where}`, countParams);
+            if (search) {
+                const pattern = `%${search}%`;
+                params.push(pattern);
+                const p = params.length;
+                conds.push(`(
+                    po.po_number ILIKE $${p}
+                    OR COALESCE(po.notes, '') ILIKE $${p}
+                    OR COALESCE(po.status, '') ILIKE $${p}
+                    OR COALESCE(s.name, '') ILIKE $${p}
+                    OR COALESCE(s.code, '') ILIKE $${p}
+                    OR EXISTS (
+                        SELECT 1 FROM purchase_order_items poi
+                        LEFT JOIN stock_items si ON si.id = poi.stock_item_id
+                        WHERE poi.purchase_order_id = po.id
+                          AND (
+                              COALESCE(si.name, '') ILIKE $${p}
+                              OR COALESCE(poi.custom_item_name, '') ILIKE $${p}
+                          )
+                    )
+                )`);
+            }
+            const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+            const countResult = await pool.query(`SELECT COUNT(*)::int AS c ${baseFrom}${where}`, params);
             total = countResult.rows[0].c;
             const rowsResult = await pool.query(
                 `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
-                 FROM purchase_orders po
-                 INNER JOIN suppliers s ON s.id = po.supplier_id
+                 ${baseFrom}
                  ${where}
                  ORDER BY po.created_at DESC
-                 LIMIT $${countParams.length + 1} OFFSET $${countParams.length + 2}`,
-                [...countParams, pageSize, offset]
+                 LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+                [...params, pageSize, offset]
             );
             return { orders: rowsResult.rows, total, page, page_size: pageSize };
         }
-        let where = '';
+        const conds = [];
         const params = [];
         if (status) {
-            where = ' WHERE po.status = ?';
+            conds.push('po.status = ?');
             params.push(status);
         }
-        const countRow = db.prepare(`SELECT COUNT(*) AS c FROM purchase_orders po${where}`).get(...params);
+        if (search) {
+            const patternLite = `%${search.toLowerCase()}%`;
+            conds.push(`(
+                LOWER(po.po_number) LIKE ?
+                OR LOWER(COALESCE(po.notes, '')) LIKE ?
+                OR LOWER(COALESCE(po.status, '')) LIKE ?
+                OR LOWER(COALESCE(s.name, '')) LIKE ?
+                OR LOWER(COALESCE(s.code, '')) LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM purchase_order_items poi
+                    LEFT JOIN stock_items si ON si.id = poi.stock_item_id
+                    WHERE poi.purchase_order_id = po.id
+                      AND (
+                          LOWER(COALESCE(si.name, '')) LIKE ?
+                          OR LOWER(COALESCE(poi.custom_item_name, '')) LIKE ?
+                      )
+                )
+            )`);
+            params.push(patternLite, patternLite, patternLite, patternLite, patternLite, patternLite, patternLite);
+        }
+        const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+        const countRow = db.prepare(`SELECT COUNT(*) AS c ${baseFrom}${where}`).get(...params);
         total = countRow.c;
         const orders = db.prepare(
             `SELECT po.*, s.name AS supplier_name, s.code AS supplier_code
-             FROM purchase_orders po
-             INNER JOIN suppliers s ON s.id = po.supplier_id
+             ${baseFrom}
              ${where}
              ORDER BY po.created_at DESC
              LIMIT ? OFFSET ?`

@@ -29,9 +29,10 @@
                 <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Raw Material</button>
             </div>
             <div style="padding: 15px 20px; background: #f8f9fa; border-bottom: 1px solid #ddd;">
-                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                    <label for="categoryFilter" style="font-weight: 600; color: #2c3e50;">Filter by Category:</label>
-                    <select id="categoryFilter" class="form-select" style="width: auto; min-width: 200px;" onchange="stockPage=1; loadStock()">
+                <div class="page-toolbar" style="margin-bottom: 0;">
+                    <input id="stockSearchInput" type="text" class="form-input" placeholder="Search name, description, category or location..." autocomplete="off">
+                    <label for="categoryFilter" style="font-weight: 600; color: #2c3e50; margin:0; white-space:nowrap;">Category</label>
+                    <select id="categoryFilter" class="form-select" style="width: auto; min-width: 160px; flex:0 0 auto;" onchange="stockPage=1; loadStock()">
                         <option value="">All Categories</option>
                     </select>
                     <span id="filterStatus" style="color: #666; font-size: 14px;"></span>
@@ -163,7 +164,9 @@
         
         let currentUser = null;
         let stockPage = 1;
-        const STOCK_PAGE_SIZE = 25;
+        const STOCK_PAGE_SIZE = 50;
+        let stockSearchQuery = '';
+        let stockSearchDebounce = null;
         let stockTotal = 0;
         let allSuppliers = [];
         let movementLinkedSuppliers = [];
@@ -294,9 +297,22 @@
             
             // Wait a bit for DOM to be fully ready
             setTimeout(async () => {
+                document.getElementById('stockSearchInput').addEventListener('input', onStockSearchInput);
                 await Promise.all([loadStockCategories(), loadAllSuppliers()]);
                 loadStock();
             }, 100);
+        }
+
+        function onStockSearchInput() {
+            const next = (document.getElementById('stockSearchInput').value || '').trim();
+            if (stockSearchDebounce) clearTimeout(stockSearchDebounce);
+            stockSearchDebounce = setTimeout(() => {
+                stockSearchDebounce = null;
+                if (next === stockSearchQuery) return;
+                stockSearchQuery = next;
+                stockPage = 1;
+                loadStock();
+            }, 300);
         }
         
         async function loadStock() {
@@ -308,6 +324,7 @@
                     page_size: String(STOCK_PAGE_SIZE)
                 });
                 if (selectedCategory) qs.set('category', selectedCategory);
+                if (stockSearchQuery) qs.set('search', stockSearchQuery);
                 const data = await apiCall(`/stock?${qs.toString()}`);
                 const stockList = document.getElementById('stockList');
                 const filterStatus = document.getElementById('filterStatus');
@@ -326,11 +343,15 @@
                 
                 if (filterStatus) {
                     const catPart = selectedCategory ? ` in category "${selectedCategory}"` : '';
-                    filterStatus.textContent = `Showing ${data.items.length} of ${stockTotal} item(s)${catPart} (page ${stockPage})`;
+                    const searchPart = stockSearchQuery ? ` matching "${stockSearchQuery}"` : '';
+                    filterStatus.textContent = `Showing ${data.items.length} of ${stockTotal} item(s)${catPart}${searchPart} (page ${stockPage})`;
                 }
                 
                 if (data.items.length === 0) {
-                    stockList.innerHTML = `<p>No raw materials found${selectedCategory ? ` in category "${selectedCategory}"` : ''}</p>` + renderStockPager();
+                    const emptyMsg = stockSearchQuery
+                        ? `No raw materials match "${escapeHtml(stockSearchQuery)}"${selectedCategory ? ` in category "${escapeHtml(selectedCategory)}"` : ''}`
+                        : `No raw materials found${selectedCategory ? ` in category "${escapeHtml(selectedCategory)}"` : ''}`;
+                    stockList.innerHTML = `<p>${emptyMsg}</p>` + renderStockPager();
                     return;
                 }
                 
