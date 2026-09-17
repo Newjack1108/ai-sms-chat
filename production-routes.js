@@ -6867,7 +6867,8 @@ router.get('/planner/summary', requireProductionAuth, async (req, res) => {
 
 router.post('/planner', requireProductionAuth, requireManager, async (req, res) => {
     try {
-        const { week_start_date, staff_available, hours_available, notes } = req.body;
+        const { week_start_date, staff_available, hours_available, notes,
+            hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, hours_by_day } = req.body;
         if (!week_start_date) {
             return res.status(400).json({ success: false, error: 'Week start date is required' });
         }
@@ -6878,6 +6879,8 @@ router.post('/planner', requireProductionAuth, requireManager, async (req, res) 
             week_start_date: weekStartMonday,
             staff_available: parseInt(staff_available) || 1,
             hours_available: parseFloat(hours_available) || 40,
+            hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat,
+            hours_by_day,
             notes
         });
         res.json({ success: true, planner, week_start_date: weekStartMonday });
@@ -6911,12 +6914,14 @@ router.get('/planner/:id', requireProductionAuth, async (req, res) => {
             buildRate = {
                 hours_available: parseFloat(planner.hours_available || 0),
                 hours_required: 0,
+                hours_used: 0,
                 hours_shortfall: 0,
                 hours_excess: parseFloat(planner.hours_available || 0),
                 build_rate_percent: 100,
                 is_feasible: true,
                 indicator: 'green',
-                emoji: '😊'
+                emoji: '😊',
+                hours_by_day: planner.hours_by_day || [0, 0, 0, 0, 0, 0]
             };
         }
         
@@ -6931,11 +6936,14 @@ router.get('/planner/:id', requireProductionAuth, async (req, res) => {
 router.put('/planner/:id', requireProductionAuth, requireManager, async (req, res) => {
     try {
         const plannerId = parseInt(req.params.id);
-        const { staff_available, hours_available, notes } = req.body;
+        const { staff_available, hours_available, notes,
+            hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, hours_by_day } = req.body;
         
         const planner = await ProductionDatabase.updateWeeklyPlanner(plannerId, {
             staff_available: parseInt(staff_available),
             hours_available: parseFloat(hours_available),
+            hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat,
+            hours_by_day,
             notes
         });
         res.json({ success: true, planner });

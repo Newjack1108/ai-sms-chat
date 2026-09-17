@@ -1021,6 +1021,12 @@ function initializeSQLite() {
             week_start_date TEXT NOT NULL UNIQUE,
             staff_available INTEGER DEFAULT 1,
             hours_available REAL DEFAULT 40,
+            hours_mon REAL DEFAULT 0,
+            hours_tue REAL DEFAULT 0,
+            hours_wed REAL DEFAULT 0,
+            hours_thu REAL DEFAULT 0,
+            hours_fri REAL DEFAULT 0,
+            hours_sat REAL DEFAULT 0,
             notes TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -1220,6 +1226,38 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Planner items migration check skipped:', error.message);
+    }
+
+    // Migrate weekly_planner to add per-day hours columns
+    try {
+        const weeklyPlannerColumns = db.prepare("PRAGMA table_info(weekly_planner)").all();
+        const weeklyPlannerColumnNames = weeklyPlannerColumns.map(col => col.name);
+        const dayHourColumns = ['hours_mon', 'hours_tue', 'hours_wed', 'hours_thu', 'hours_fri', 'hours_sat'];
+        for (const col of dayHourColumns) {
+            if (!weeklyPlannerColumnNames.includes(col)) {
+                db.exec(`ALTER TABLE weekly_planner ADD COLUMN ${col} REAL DEFAULT 0`);
+                console.log(`✅ Added ${col} column to weekly_planner`);
+            }
+        }
+        // Backfill: split hours_available across Mon–Fri when all day columns are still 0
+        db.exec(`
+            UPDATE weekly_planner
+            SET hours_mon = hours_available / 5.0,
+                hours_tue = hours_available / 5.0,
+                hours_wed = hours_available / 5.0,
+                hours_thu = hours_available / 5.0,
+                hours_fri = hours_available / 5.0,
+                hours_sat = 0
+            WHERE COALESCE(hours_available, 0) > 0
+              AND COALESCE(hours_mon, 0) = 0
+              AND COALESCE(hours_tue, 0) = 0
+              AND COALESCE(hours_wed, 0) = 0
+              AND COALESCE(hours_thu, 0) = 0
+              AND COALESCE(hours_fri, 0) = 0
+              AND COALESCE(hours_sat, 0) = 0
+        `);
+    } catch (error) {
+        console.log('⚠️ Weekly planner day hours migration skipped:', error.message);
     }
     
     // Insert default labour rate if not exists
@@ -2805,6 +2843,12 @@ async function initializePostgreSQL() {
                 week_start_date DATE NOT NULL UNIQUE,
                 staff_available INTEGER DEFAULT 1,
                 hours_available DECIMAL(10,2) DEFAULT 40,
+                hours_mon DECIMAL(10,2) DEFAULT 0,
+                hours_tue DECIMAL(10,2) DEFAULT 0,
+                hours_wed DECIMAL(10,2) DEFAULT 0,
+                hours_thu DECIMAL(10,2) DEFAULT 0,
+                hours_fri DECIMAL(10,2) DEFAULT 0,
+                hours_sat DECIMAL(10,2) DEFAULT 0,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -3167,6 +3211,65 @@ async function initializePostgreSQL() {
                 ) THEN
                     ALTER TABLE planner_items ADD COLUMN end_day INTEGER;
                 END IF;
+            END $$;
+        `);
+
+        // Migrate weekly_planner to add per-day hours columns
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_mon'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_mon DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_tue'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_tue DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_wed'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_wed DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_thu'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_thu DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_fri'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_fri DECIMAL(10,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'weekly_planner' AND column_name = 'hours_sat'
+                ) THEN
+                    ALTER TABLE weekly_planner ADD COLUMN hours_sat DECIMAL(10,2) DEFAULT 0;
+                END IF;
+
+                -- Backfill: split hours_available across Mon–Fri when all day columns are still 0
+                UPDATE weekly_planner
+                SET hours_mon = hours_available / 5.0,
+                    hours_tue = hours_available / 5.0,
+                    hours_wed = hours_available / 5.0,
+                    hours_thu = hours_available / 5.0,
+                    hours_fri = hours_available / 5.0,
+                    hours_sat = 0
+                WHERE COALESCE(hours_available, 0) > 0
+                  AND COALESCE(hours_mon, 0) = 0
+                  AND COALESCE(hours_tue, 0) = 0
+                  AND COALESCE(hours_wed, 0) = 0
+                  AND COALESCE(hours_thu, 0) = 0
+                  AND COALESCE(hours_fri, 0) = 0
+                  AND COALESCE(hours_sat, 0) = 0;
             END $$;
         `);
         
@@ -5507,13 +5610,85 @@ class ProductionDatabase {
     
     // ============ PLANNER OPERATIONS ============
 
+    static normalizeWeeklyPlannerDayHours(data = {}) {
+        const parseDay = (value, fallback = 0) => {
+            if (value === undefined || value === null || value === '') {
+                return fallback;
+            }
+            const parsed = parseFloat(value);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+        };
+
+        const hasAnyDay =
+            data.hours_mon != null || data.hours_tue != null || data.hours_wed != null ||
+            data.hours_thu != null || data.hours_fri != null || data.hours_sat != null ||
+            (Array.isArray(data.hours_by_day) && data.hours_by_day.length > 0);
+
+        let hoursMon; let hoursTue; let hoursWed; let hoursThu; let hoursFri; let hoursSat;
+
+        if (Array.isArray(data.hours_by_day) && data.hours_by_day.length >= 6) {
+            hoursMon = parseDay(data.hours_by_day[0], 0);
+            hoursTue = parseDay(data.hours_by_day[1], 0);
+            hoursWed = parseDay(data.hours_by_day[2], 0);
+            hoursThu = parseDay(data.hours_by_day[3], 0);
+            hoursFri = parseDay(data.hours_by_day[4], 0);
+            hoursSat = parseDay(data.hours_by_day[5], 0);
+        } else if (hasAnyDay) {
+            hoursMon = parseDay(data.hours_mon, 0);
+            hoursTue = parseDay(data.hours_tue, 0);
+            hoursWed = parseDay(data.hours_wed, 0);
+            hoursThu = parseDay(data.hours_thu, 0);
+            hoursFri = parseDay(data.hours_fri, 0);
+            hoursSat = parseDay(data.hours_sat, 0);
+        } else {
+            const total = parseFloat(data.hours_available);
+            const weekTotal = Number.isFinite(total) && total >= 0 ? total : 40;
+            const weekday = weekTotal / 5;
+            hoursMon = weekday;
+            hoursTue = weekday;
+            hoursWed = weekday;
+            hoursThu = weekday;
+            hoursFri = weekday;
+            hoursSat = 0;
+        }
+
+        const hoursAvailable = hoursMon + hoursTue + hoursWed + hoursThu + hoursFri + hoursSat;
+        return {
+            hours_mon: hoursMon,
+            hours_tue: hoursTue,
+            hours_wed: hoursWed,
+            hours_thu: hoursThu,
+            hours_fri: hoursFri,
+            hours_sat: hoursSat,
+            hours_available: hoursAvailable
+        };
+    }
+
     static normalizeWeeklyPlannerRow(row) {
         if (!row) {
             return null;
         }
+        const hoursMon = parseFloat(row.hours_mon || 0);
+        const hoursTue = parseFloat(row.hours_tue || 0);
+        const hoursWed = parseFloat(row.hours_wed || 0);
+        const hoursThu = parseFloat(row.hours_thu || 0);
+        const hoursFri = parseFloat(row.hours_fri || 0);
+        const hoursSat = parseFloat(row.hours_sat || 0);
+        const daySum = hoursMon + hoursTue + hoursWed + hoursThu + hoursFri + hoursSat;
+        const hoursAvailable = row.hours_available != null
+            ? parseFloat(row.hours_available)
+            : daySum;
         return {
             ...row,
-            week_start_date: ymdFromDbOrInstant(row.week_start_date)
+            week_start_date: ymdFromDbOrInstant(row.week_start_date),
+            hours_mon: hoursMon,
+            hours_tue: hoursTue,
+            hours_wed: hoursWed,
+            hours_thu: hoursThu,
+            hours_fri: hoursFri,
+            hours_sat: hoursSat,
+            hours_available: Number.isFinite(hoursAvailable) ? hoursAvailable : daySum,
+            hours_by_day: [hoursMon, hoursTue, hoursWed, hoursThu, hoursFri, hoursSat]
         };
     }
 
@@ -5635,19 +5810,36 @@ class ProductionDatabase {
             throw err;
         }
 
+        const dayHours = this.normalizeWeeklyPlannerDayHours(data);
+        const staffAvailable = data.staff_available || 1;
+
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
-                 VALUES ($1, $2, $3, $4) RETURNING *`,
-                [weekStartMonday, data.staff_available || 1, data.hours_available || 40, data.notes]
+                `INSERT INTO weekly_planner (
+                    week_start_date, staff_available, hours_available,
+                    hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, notes
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+                [
+                    weekStartMonday, staffAvailable, dayHours.hours_available,
+                    dayHours.hours_mon, dayHours.hours_tue, dayHours.hours_wed,
+                    dayHours.hours_thu, dayHours.hours_fri, dayHours.hours_sat,
+                    data.notes
+                ]
             );
             return this.normalizeWeeklyPlannerRow(result.rows[0]);
         } else {
             const stmt = db.prepare(
-                `INSERT INTO weekly_planner (week_start_date, staff_available, hours_available, notes)
-                 VALUES (?, ?, ?, ?)`
+                `INSERT INTO weekly_planner (
+                    week_start_date, staff_available, hours_available,
+                    hours_mon, hours_tue, hours_wed, hours_thu, hours_fri, hours_sat, notes
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(weekStartMonday, data.staff_available || 1, data.hours_available || 40, data.notes);
+            const info = stmt.run(
+                weekStartMonday, staffAvailable, dayHours.hours_available,
+                dayHours.hours_mon, dayHours.hours_tue, dayHours.hours_wed,
+                dayHours.hours_thu, dayHours.hours_fri, dayHours.hours_sat,
+                data.notes
+            );
             return this.getWeeklyPlannerById(info.lastInsertRowid);
         }
     }
@@ -5794,18 +5986,39 @@ class ProductionDatabase {
     }
     
     static async updateWeeklyPlanner(id, data) {
+        const dayHours = this.normalizeWeeklyPlannerDayHours(data);
         if (isPostgreSQL) {
             await pool.query(
-                `UPDATE weekly_planner SET staff_available = $1, hours_available = $2, notes = $3
-                 WHERE id = $4`,
-                [data.staff_available, data.hours_available, data.notes, id]
+                `UPDATE weekly_planner SET
+                    staff_available = $1,
+                    hours_available = $2,
+                    hours_mon = $3, hours_tue = $4, hours_wed = $5,
+                    hours_thu = $6, hours_fri = $7, hours_sat = $8,
+                    notes = $9
+                 WHERE id = $10`,
+                [
+                    data.staff_available, dayHours.hours_available,
+                    dayHours.hours_mon, dayHours.hours_tue, dayHours.hours_wed,
+                    dayHours.hours_thu, dayHours.hours_fri, dayHours.hours_sat,
+                    data.notes, id
+                ]
             );
             return this.getWeeklyPlannerById(id);
         } else {
             db.prepare(
-                `UPDATE weekly_planner SET staff_available = ?, hours_available = ?, notes = ?
+                `UPDATE weekly_planner SET
+                    staff_available = ?,
+                    hours_available = ?,
+                    hours_mon = ?, hours_tue = ?, hours_wed = ?,
+                    hours_thu = ?, hours_fri = ?, hours_sat = ?,
+                    notes = ?
                  WHERE id = ?`
-            ).run(data.staff_available, data.hours_available, data.notes, id);
+            ).run(
+                data.staff_available, dayHours.hours_available,
+                dayHours.hours_mon, dayHours.hours_tue, dayHours.hours_wed,
+                dayHours.hours_thu, dayHours.hours_fri, dayHours.hours_sat,
+                data.notes, id
+            );
             return this.getWeeklyPlannerById(id);
         }
     }
@@ -6365,6 +6578,7 @@ class ProductionDatabase {
         
         const items = await this.getPlannerItems(plannerId);
         let totalHoursRequired = 0;
+        let totalHoursUsed = 0;
         
         for (const item of items) {
             if (item.item_type === 'job') {
@@ -6375,6 +6589,9 @@ class ProductionDatabase {
                 const labourHours = parseFloat(item.labour_hours || 0);
                 const quantity = parseFloat(item.quantity_to_build || 0);
                 totalHoursRequired += labourHours * quantity;
+            }
+            if (item.status === 'completed') {
+                totalHoursUsed += parseFloat(item.hours_used || 0);
             }
         }
         
@@ -6390,12 +6607,21 @@ class ProductionDatabase {
         return {
             hours_available: hoursAvailable,
             hours_required: totalHoursRequired,
+            hours_used: totalHoursUsed,
             hours_shortfall: Math.max(0, totalHoursRequired - hoursAvailable),
             hours_excess: Math.max(0, hoursAvailable - totalHoursRequired),
             build_rate_percent: buildRate,
             is_feasible: totalHoursRequired <= hoursAvailable,
             indicator: indicator,
-            emoji: emoji
+            emoji: emoji,
+            hours_by_day: planner.hours_by_day || [
+                parseFloat(planner.hours_mon || 0),
+                parseFloat(planner.hours_tue || 0),
+                parseFloat(planner.hours_wed || 0),
+                parseFloat(planner.hours_thu || 0),
+                parseFloat(planner.hours_fri || 0),
+                parseFloat(planner.hours_sat || 0)
+            ]
         };
     }
     

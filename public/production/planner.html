@@ -215,6 +215,31 @@
             padding-top: 8px;
             border-top: 1px solid #e5e7eb;
         }
+        .day-hours-summary.over-capacity {
+            color: #991b1b;
+            font-weight: 650;
+        }
+        .planner-day-hours-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 8px;
+        }
+        .planner-day-hour-field label {
+            display: block;
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+            text-align: center;
+        }
+        .planner-day-hour-field .form-input {
+            text-align: center;
+            padding: 6px 4px;
+        }
+        @media (max-width: 600px) {
+            .planner-day-hours-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
         .unassigned-items {
             background: #fff8e6;
             border: 1px dashed #f59e0b;
@@ -282,8 +307,38 @@
                     <input type="number" id="plannerStaff" class="form-input" value="1" min="1">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Hours Available</label>
-                    <input type="number" step="0.01" id="plannerHours" class="form-input" value="40" min="0">
+                    <label class="form-label">Hours Available (by day)</label>
+                    <div class="planner-day-hours-grid" id="plannerDayHoursGrid">
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursMon">Mon</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursMon" class="form-input planner-day-hours-input" value="8">
+                        </div>
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursTue">Tue</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursTue" class="form-input planner-day-hours-input" value="8">
+                        </div>
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursWed">Wed</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursWed" class="form-input planner-day-hours-input" value="8">
+                        </div>
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursThu">Thu</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursThu" class="form-input planner-day-hours-input" value="8">
+                        </div>
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursFri">Fri</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursFri" class="form-input planner-day-hours-input" value="8">
+                        </div>
+                        <div class="planner-day-hour-field">
+                            <label for="plannerHoursSat">Sat</label>
+                            <input type="number" step="0.01" min="0" id="plannerHoursSat" class="form-input planner-day-hours-input" value="0">
+                        </div>
+                    </div>
+                    <div class="planner-hours-total" style="margin-top: 8px;">
+                        <strong>Hours Available:</strong>
+                        <span id="plannerHoursTotal">40.0</span>
+                    </div>
+                    <small class="text-muted">Daily hours total to the week's Hours Available. This total stays fixed; completing jobs records Hours Used instead of reducing capacity.</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Notes</label>
@@ -464,6 +519,84 @@
             return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
         }
 
+        const PLANNER_DAY_HOUR_IDS = [
+            'plannerHoursMon', 'plannerHoursTue', 'plannerHoursWed',
+            'plannerHoursThu', 'plannerHoursFri', 'plannerHoursSat'
+        ];
+        const DEFAULT_DAY_HOURS = [8, 8, 8, 8, 8, 0];
+
+        function parseDayHourInput(value) {
+            const n = parseFloat(value);
+            return Number.isFinite(n) && n >= 0 ? n : 0;
+        }
+
+        function getPlannerDayHoursFromForm() {
+            return PLANNER_DAY_HOUR_IDS.map((id) => parseDayHourInput(document.getElementById(id).value));
+        }
+
+        function updatePlannerHoursTotalDisplay() {
+            const total = getPlannerDayHoursFromForm().reduce((sum, h) => sum + h, 0);
+            const el = document.getElementById('plannerHoursTotal');
+            if (el) el.textContent = total.toFixed(1);
+            return total;
+        }
+
+        function setPlannerDayHoursForm(hoursByDay) {
+            const values = Array.isArray(hoursByDay) && hoursByDay.length >= 6
+                ? hoursByDay.map((h) => parseDayHourInput(h))
+                : DEFAULT_DAY_HOURS.slice();
+            PLANNER_DAY_HOUR_IDS.forEach((id, i) => {
+                document.getElementById(id).value = values[i];
+            });
+            updatePlannerHoursTotalDisplay();
+        }
+
+        function getPlannerDayHoursFromPlanner(planner) {
+            if (!planner) return DEFAULT_DAY_HOURS.slice();
+            if (Array.isArray(planner.hours_by_day) && planner.hours_by_day.length >= 6) {
+                return planner.hours_by_day.map((h) => parseDayHourInput(h));
+            }
+            const days = [
+                planner.hours_mon, planner.hours_tue, planner.hours_wed,
+                planner.hours_thu, planner.hours_fri, planner.hours_sat
+            ].map((h) => parseDayHourInput(h));
+            const daySum = days.reduce((s, h) => s + h, 0);
+            if (daySum > 0) return days;
+            // Legacy: split hours_available across Mon–Fri
+            const total = parseDayHourInput(planner.hours_available);
+            if (total > 0) {
+                const weekday = total / 5;
+                return [weekday, weekday, weekday, weekday, weekday, 0];
+            }
+            return DEFAULT_DAY_HOURS.slice();
+        }
+
+        function buildPlannerCapacityPayload() {
+            const dayHours = getPlannerDayHoursFromForm();
+            return {
+                hours_mon: dayHours[0],
+                hours_tue: dayHours[1],
+                hours_wed: dayHours[2],
+                hours_thu: dayHours[3],
+                hours_fri: dayHours[4],
+                hours_sat: dayHours[5],
+                hours_by_day: dayHours,
+                hours_available: dayHours.reduce((s, h) => s + h, 0)
+            };
+        }
+
+        function itemHoursForDay(item) {
+            const qty = parseFloat(item.quantity_to_build || 0);
+            const startDay = item.start_day !== null && item.start_day !== undefined ? parseInt(item.start_day, 10) : 0;
+            const endDay = item.end_day !== null && item.end_day !== undefined ? parseInt(item.end_day, 10) : startDay;
+            const daySpan = Math.max(1, (endDay - startDay) + 1);
+            if (item.item_type === 'job') {
+                return qty / daySpan;
+            }
+            const hoursPerUnit = parseFloat(item.labour_hours || 0);
+            return (hoursPerUnit * qty) / daySpan;
+        }
+
         function formatPlannerWeekRangeLabel(weekStartYmd, weekEndYmd) {
             const start = plannerWeekMonday(weekStartYmd);
             const end = weekEndYmd || londonYmdAddDays(start, 5);
@@ -553,7 +686,14 @@
                 body: JSON.stringify({
                     week_start_date: weekStart,
                     staff_available: 1,
-                    hours_available: 40
+                    hours_mon: DEFAULT_DAY_HOURS[0],
+                    hours_tue: DEFAULT_DAY_HOURS[1],
+                    hours_wed: DEFAULT_DAY_HOURS[2],
+                    hours_thu: DEFAULT_DAY_HOURS[3],
+                    hours_fri: DEFAULT_DAY_HOURS[4],
+                    hours_sat: DEFAULT_DAY_HOURS[5],
+                    hours_by_day: DEFAULT_DAY_HOURS.slice(),
+                    hours_available: DEFAULT_DAY_HOURS.reduce((s, h) => s + h, 0)
                 })
             });
             return result.planner;
@@ -724,13 +864,19 @@
                 const buildRate = data.build_rate || {
                     hours_available: parseFloat(planner.hours_available || 0),
                     hours_required: 0,
+                    hours_used: 0,
                     hours_shortfall: 0,
                     hours_excess: parseFloat(planner.hours_available || 0),
                     build_rate_percent: 100,
                     is_feasible: true,
                     indicator: 'green',
-                    emoji: '😊'
+                    emoji: '😊',
+                    hours_by_day: getPlannerDayHoursFromPlanner(planner)
                 };
+                const hoursUsed = parseFloat(buildRate.hours_used != null ? buildRate.hours_used : 0);
+                const dayCapacity = Array.isArray(buildRate.hours_by_day) && buildRate.hours_by_day.length >= 6
+                    ? buildRate.hours_by_day.map((h) => parseDayHourInput(h))
+                    : getPlannerDayHoursFromPlanner(planner);
                 
                 const weekStartYmd = normalizePlannerWeekDate(planner.week_start_date);
                 const weekStart = new Date(`${weekStartYmd}T12:00:00`);
@@ -760,6 +906,10 @@
                             <div class="summary-card">
                                 <h4>Hours Available</h4>
                                 <p>${buildRate.hours_available.toFixed(1)}</p>
+                            </div>
+                            <div class="summary-card">
+                                <h4>Hours Used</h4>
+                                <p>${hoursUsed.toFixed(1)}</p>
                             </div>
                             <div class="summary-card">
                                 <h4>Hours Required</h4>
@@ -803,24 +953,15 @@
                                         return dayIndex >= startDay && dayIndex <= (endDay !== null ? endDay : startDay);
                                     });
                                     
-                                    const dayHours = dayItems.reduce((total, item) => {
-                                        const hoursPerUnit = parseFloat(item.labour_hours || 0);
-                                        const qty = parseFloat(item.quantity_to_build || 0);
-                                        if (item.item_type === 'job') {
-                                            return total + qty; // For jobs, quantity_to_build is hours
-                                        }
-                                        // Distribute hours across days for multi-day items
-                                        const startDay = item.start_day !== null ? parseInt(item.start_day) : 0;
-                                        const endDay = item.end_day !== null ? parseInt(item.end_day) : startDay;
-                                        const daySpan = (endDay - startDay) + 1;
-                                        return total + (hoursPerUnit * qty / daySpan);
-                                    }, 0);
+                                    const dayHours = dayItems.reduce((total, item) => total + itemHoursForDay(item), 0);
+                                    const dayAvailable = parseDayHourInput(dayCapacity[dayIndex]);
+                                    const overCapacity = dayHours > dayAvailable && dayAvailable >= 0;
                                     
                                     return `
                                         <div class="planner-day-column ${dayIndex === 5 ? 'saturday' : ''}">
                                             <div class="planner-day-header">
                                                 ${dayName}
-                                                <div class="day-hours-summary">${dayHours.toFixed(1)} hrs</div>
+                                                <div class="day-hours-summary ${overCapacity ? 'over-capacity' : ''}" title="${overCapacity ? 'Scheduled hours exceed day capacity' : ''}">${dayHours.toFixed(1)} / ${dayAvailable.toFixed(1)} hrs</div>
                                             </div>
                                             ${dayItems.length === 0 ? '<p style="color: #6c757d; font-size: 12px; text-align: center; margin-top: 20px;">No items</p>' : ''}
                                             ${dayItems.map(item => {
@@ -950,7 +1091,7 @@
                 document.getElementById('plannerId').value = '';
                 document.getElementById('plannerWeekStart').value = weekStart;
                 document.getElementById('plannerStaff').value = 1;
-                document.getElementById('plannerHours').value = 40;
+                setPlannerDayHoursForm(DEFAULT_DAY_HOURS);
                 document.getElementById('plannerNotes').value = '';
                 showModal('plannerModal');
             } catch (error) {
@@ -961,7 +1102,7 @@
                 document.getElementById('plannerId').value = '';
                 document.getElementById('plannerWeekStart').value = weekStart;
                 document.getElementById('plannerStaff').value = 1;
-                document.getElementById('plannerHours').value = 40;
+                setPlannerDayHoursForm(DEFAULT_DAY_HOURS);
                 document.getElementById('plannerNotes').value = '';
                 showModal('plannerModal');
             }
@@ -976,7 +1117,7 @@
                 document.getElementById('plannerId').value = planner.id;
                 document.getElementById('plannerWeekStart').value = planner.week_start_date;
                 document.getElementById('plannerStaff').value = planner.staff_available;
-                document.getElementById('plannerHours').value = planner.hours_available;
+                setPlannerDayHoursForm(getPlannerDayHoursFromPlanner(planner));
                 document.getElementById('plannerNotes').value = planner.notes || '';
                 showModal('plannerModal');
             } catch (error) {
@@ -1668,6 +1809,15 @@
             }
         }
         
+        PLANNER_DAY_HOUR_IDS.forEach((id) => {
+            const input = document.getElementById(id);
+            if (input) {
+                input.addEventListener('input', updatePlannerHoursTotalDisplay);
+                input.addEventListener('change', updatePlannerHoursTotalDisplay);
+            }
+        });
+        updatePlannerHoursTotalDisplay();
+
         document.getElementById('plannerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const id = document.getElementById('plannerId').value;
@@ -1682,8 +1832,8 @@
             const data = {
                 week_start_date: weekStart,
                 staff_available: parseInt(document.getElementById('plannerStaff').value) || 1,
-                hours_available: parseFloat(document.getElementById('plannerHours').value) || 40,
-                notes: document.getElementById('plannerNotes').value || ''
+                notes: document.getElementById('plannerNotes').value || '',
+                ...buildPlannerCapacityPayload()
             };
             
             try {
@@ -1899,22 +2049,6 @@
             return lines.join('\n');
         }
 
-        async function deductPlannerHours(hoursToDeduct) {
-            const plannerData = await apiCall(`/planner/${currentPlannerId}`);
-            const planner = plannerData.planner;
-            const currentHoursAvailable = parseFloat(planner.hours_available || 0);
-            const newHoursAvailable = Math.max(0, currentHoursAvailable - parseFloat(hoursToDeduct || 0));
-
-            await apiCall(`/planner/${currentPlannerId}`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                    staff_available: parseInt(planner.staff_available || 1),
-                    hours_available: newHoursAvailable,
-                    notes: planner.notes || ''
-                })
-            });
-        }
-
         async function completePlannerItem(plannerItemId) {
             if (!currentPlannerId) {
                 showAlert('Please select a week first', 'error');
@@ -1945,6 +2079,7 @@
 
                 // Mark completed (do not delete) so weekly report / efficiency can count the item.
                 // Stock build movements are handled by updatePlannerItem when status becomes completed.
+                // Hours Available stays fixed; hours_used on the item feeds Hours Used / reports.
                 await apiCall(`/planner/items/${plannerItemId}`, {
                     method: 'PUT',
                     body: JSON.stringify({
@@ -1957,8 +2092,6 @@
                         end_day: item.end_day != null ? parseInt(item.end_day, 10) : null
                     })
                 });
-
-                await deductPlannerHours(defaults.hoursUsed);
 
                 const itemTypeName = defaults.itemType === 'component'
                     ? 'component'
