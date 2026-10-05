@@ -28,6 +28,11 @@ function requireProductionAuth(req, res, next) {
     return res.redirect('/production/login.html');
 }
 
+/** Installer field rights: true installers, plus admins covering installer jobs. */
+function hasInstallerRights(role) {
+    return role === 'installer' || role === 'admin';
+}
+
 // Middleware to check if user is admin
 function requireAdmin(req, res, next) {
     if (req.session && req.session.production_user && req.session.production_user.role === 'admin') {
@@ -200,6 +205,7 @@ module.exports = {
     requireAdminOfficeOrSupervisor,
     denySupervisor,
     requireManager, // Legacy - kept for backward compatibility
+    hasInstallerRights,
     loginProductionUser,
     hashPassword,
     createDefaultAdmin

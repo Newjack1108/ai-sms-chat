@@ -687,7 +687,9 @@
                 currentUser.role === 'office' ||
                 currentUser.role === 'supervisor' ||
                 currentUser.role === 'manager';
-            canInstallerActions = currentUser.role === 'installer';
+            canInstallerActions = typeof hasInstallerRights === 'function'
+                ? hasInstallerRights(currentUser.role)
+                : currentUser.role === 'installer';
 
             if (window.innerWidth <= 768 && currentView === 'weekly') {
                 currentView = 'daily';
@@ -1010,6 +1012,20 @@
                     const usersResult = await apiCall('/users');
                     if (generation !== loadDataGeneration || !usersResult) return;
                     users = (usersResult.users || []).filter(u => u.status !== 'left_company');
+                    const fieldRoleRank = (role) => {
+                        if (typeof isAssignableFieldRole === 'function' && isAssignableFieldRole(role)) {
+                            if (role === 'installer') return 0;
+                            if (role === 'staff') return 1;
+                            if (role === 'admin') return 2;
+                            return 3;
+                        }
+                        return 10;
+                    };
+                    users.sort((a, b) => {
+                        const rankDiff = fieldRoleRank(a.role) - fieldRoleRank(b.role);
+                        if (rankDiff !== 0) return rankDiff;
+                        return String(a.username || '').localeCompare(String(b.username || ''), undefined, { sensitivity: 'base' });
+                    });
                     syncWorksOrderSearchLabelFromValue();
 
                     const userSelect = document.getElementById('addUserSelect');
@@ -1017,7 +1033,7 @@
                     users.forEach(u => {
                         const option = document.createElement('option');
                         option.value = u.id;
-                        option.textContent = u.username;
+                        option.textContent = u.role ? `${u.username} (${u.role})` : u.username;
                         userSelect.appendChild(option);
                     });
                 } else {

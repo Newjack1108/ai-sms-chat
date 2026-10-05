@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, denySupervisor, requireManager, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, denySupervisor, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const { v2: cloudinary } = require('cloudinary');
@@ -3665,7 +3665,7 @@ async function requireAssignedInstallerOrManager(req, res, installationId) {
     if (isManagerLikeRole(user?.role)) {
         return { allowed: true, installation };
     }
-    if (user?.role === 'installer' && isInstallerAssignedToInstallation(installation, user.id)) {
+    if (hasInstallerRights(user?.role) && isInstallerAssignedToInstallation(installation, user.id)) {
         return { allowed: true, installation };
     }
     res.status(403).json({ success: false, error: 'You are not assigned to this installation' });

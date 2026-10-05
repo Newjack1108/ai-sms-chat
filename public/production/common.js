@@ -423,6 +423,17 @@ function canAccessPayroll(user) {
     return isAdminOfficeOrSupervisor(user);
 }
 
+/** Installer field rights: true installers, plus admins covering installer jobs. */
+function hasInstallerRights(roleOrUser) {
+    const role = typeof roleOrUser === 'string' ? roleOrUser : roleOrUser?.role;
+    return role === 'installer' || role === 'admin';
+}
+
+/** Field roles preferred when assigning cover to installation jobs. */
+function isAssignableFieldRole(role) {
+    return role === 'installer' || role === 'staff' || role === 'admin';
+}
+
 const ProductBomCatalog = {
     stockItems: [],
     components: [],
@@ -1108,8 +1119,8 @@ async function initNavbar() {
             managerItems.forEach(item => item.style.display = 'none');
         }
         
-        // Show installer-only nav links for installers only
-        if (user.role === 'installer') {
+        // Show installer-only nav links for installers and admins covering installs
+        if (hasInstallerRights(user)) {
             document.querySelectorAll('.installer-only').forEach(item => {
                 item.style.display = '';
             });

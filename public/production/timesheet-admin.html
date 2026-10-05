@@ -857,10 +857,12 @@
                 // Get IDs of users who are currently clocked in
                 const clockedInUserIds = new Set(activeClockIns.map(entry => parseInt(entry.user_id)));
                 
-                // Filter users who are NOT clocked in (staff and installers)
+                // Filter users who are NOT clocked in (staff, installers, and admins covering installs)
                 const offClockStaff = allUsers.filter(user => 
                     !clockedInUserIds.has(parseInt(user.id)) &&
-                    (user.role === 'staff' || user.role === 'installer')
+                    (user.role === 'staff' || (typeof hasInstallerRights === 'function'
+                        ? hasInstallerRights(user.role)
+                        : (user.role === 'installer' || user.role === 'admin')))
                 );
                 
                 const offClockStaffContainer = document.getElementById('offClockStaff');
