@@ -486,6 +486,10 @@
                         <label for="vehicleRegistration">Vehicle Registration *</label>
                         <input id="vehicleRegistration" class="form-control" placeholder="e.g. AB12 CDE">
                     </div>
+                    <div class="form-group">
+                        <label for="vehicleMileage">Mileage (odometer) *</label>
+                        <input id="vehicleMileage" class="form-control" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 45230">
+                    </div>
                     <div style="margin: 10px 0;">
                         <label style="display:flex; align-items:center; gap:8px;">
                             <input type="checkbox" id="trailerAttachedCheck" style="width:auto; margin:0;" onchange="toggleTrailerInspection()">
@@ -1027,6 +1031,10 @@
                 inspectionBlockedWhileClockedIn = !!(currentStatus && isCurrentUserDriver() && !dailyInspection);
                 const responses = dailyInspection?.responses || {};
                 document.getElementById('vehicleRegistration').value = dailyInspection?.vehicle_registration || '';
+                document.getElementById('vehicleMileage').value =
+                    dailyInspection?.vehicle_mileage != null && dailyInspection?.vehicle_mileage !== ''
+                        ? dailyInspection.vehicle_mileage
+                        : '';
                 document.getElementById('trailerAttachedCheck').checked = !!dailyInspection?.trailer_attached;
                 document.getElementById('trailerRegistration').value = dailyInspection?.trailer_registration || '';
                 document.getElementById('inspectionNotes').value = dailyInspection?.notes || '';
@@ -1063,11 +1071,22 @@
 
         async function saveDailyInspection() {
             const vehicleRegistration = document.getElementById('vehicleRegistration').value.trim();
+            const mileageRaw = document.getElementById('vehicleMileage').value.trim();
             const trailerAttached = document.getElementById('trailerAttachedCheck').checked;
             const trailerRegistration = document.getElementById('trailerRegistration').value.trim();
             const notes = document.getElementById('inspectionNotes').value.trim();
             if (!vehicleRegistration) {
                 showAlert('Vehicle registration is required', 'error');
+                return;
+            }
+            const vehicleMileage = Number(mileageRaw);
+            if (
+                mileageRaw === '' ||
+                !Number.isFinite(vehicleMileage) ||
+                !Number.isInteger(vehicleMileage) ||
+                vehicleMileage < 0
+            ) {
+                showAlert('Vehicle mileage is required and must be a whole number of miles (0 or greater)', 'error');
                 return;
             }
             const vehicle = {};
@@ -1089,6 +1108,7 @@
                     method: 'PUT',
                     body: JSON.stringify({
                         vehicle_registration: vehicleRegistration,
+                        vehicle_mileage: vehicleMileage,
                         trailer_attached: trailerAttached,
                         trailer_registration: trailerRegistration || null,
                         notes,

@@ -1853,6 +1853,7 @@ function initializeSQLite() {
             inspection_date TEXT NOT NULL,
             inspected_by_user_id INTEGER NOT NULL,
             vehicle_registration TEXT,
+            vehicle_mileage INTEGER,
             trailer_attached INTEGER NOT NULL DEFAULT 0 CHECK(trailer_attached IN (0, 1)),
             trailer_registration TEXT,
             notes TEXT,
@@ -1864,6 +1865,17 @@ function initializeSQLite() {
             UNIQUE(inspection_date, inspected_by_user_id)
         )
     `);
+    // Migrate daily_vehicle_inspections to add vehicle_mileage (odometer reading)
+    try {
+        const dviColumns = db.prepare("PRAGMA table_info(daily_vehicle_inspections)").all();
+        const hasVehicleMileage = dviColumns.some(c => c.name === 'vehicle_mileage');
+        if (!hasVehicleMileage) {
+            db.exec("ALTER TABLE daily_vehicle_inspections ADD COLUMN vehicle_mileage INTEGER");
+            console.log('✅ Added vehicle_mileage column to daily_vehicle_inspections');
+        }
+    } catch (error) {
+        console.log('⚠️ vehicle_mileage column migration check skipped:', error.message);
+    }
     db.exec(`
         CREATE TABLE IF NOT EXISTS daily_vehicle_inspection_responses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3702,6 +3714,7 @@ async function initializePostgreSQL() {
                 inspection_date DATE NOT NULL,
                 inspected_by_user_id INTEGER NOT NULL REFERENCES production_users(id),
                 vehicle_registration VARCHAR(50),
+                vehicle_mileage INTEGER,
                 trailer_attached BOOLEAN NOT NULL DEFAULT FALSE,
                 trailer_registration VARCHAR(50),
                 notes TEXT,
@@ -3712,6 +3725,19 @@ async function initializePostgreSQL() {
                 UNIQUE(inspection_date, inspected_by_user_id)
             )
         `);
+        // Migrate daily_vehicle_inspections to add vehicle_mileage (odometer reading)
+        try {
+            const mileageColCheck = await pool.query(`
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'daily_vehicle_inspections' AND column_name = 'vehicle_mileage'
+            `);
+            if (mileageColCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE daily_vehicle_inspections ADD COLUMN vehicle_mileage INTEGER`);
+                console.log('✅ Added vehicle_mileage column to daily_vehicle_inspections (PostgreSQL)');
+            }
+        } catch (error) {
+            console.log('⚠️ vehicle_mileage column migration check skipped:', error.message);
+        }
         await pool.query(`
             CREATE TABLE IF NOT EXISTS daily_vehicle_inspection_responses (
                 id SERIAL PRIMARY KEY,
@@ -11554,6 +11580,7 @@ class ProductionDatabase {
             inspection_date,
             inspected_by_user_id,
             vehicle_registration,
+            vehicle_mileage,
             trailer_attached,
             trailer_registration,
             notes,
@@ -11565,11 +11592,12 @@ class ProductionDatabase {
         if (isPostgreSQL) {
             const headerResult = await pool.query(
                 `INSERT INTO daily_vehicle_inspections
-                 (inspection_date, inspected_by_user_id, vehicle_registration, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 (inspection_date, inspected_by_user_id, vehicle_registration, vehicle_mileage, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  ON CONFLICT (inspection_date, inspected_by_user_id)
                  DO UPDATE SET
                     vehicle_registration = EXCLUDED.vehicle_registration,
+                    vehicle_mileage = EXCLUDED.vehicle_mileage,
                     trailer_attached = EXCLUDED.trailer_attached,
                     trailer_registration = EXCLUDED.trailer_registration,
                     notes = EXCLUDED.notes,
@@ -11581,6 +11609,7 @@ class ProductionDatabase {
                     inspection_date,
                     inspected_by_user_id,
                     vehicle_registration || null,
+                    vehicle_mileage == null ? null : Number(vehicle_mileage),
                     this.toBooleanValue(trailer_attached),
                     trailer_registration || null,
                     notes || null,
@@ -11615,11 +11644,12 @@ class ProductionDatabase {
 
         const upsertHeader = db.prepare(
             `INSERT INTO daily_vehicle_inspections
-             (inspection_date, inspected_by_user_id, vehicle_registration, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             (inspection_date, inspected_by_user_id, vehicle_registration, vehicle_mileage, trailer_attached, trailer_registration, notes, overall_status, critical_fail_count, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
              ON CONFLICT(inspection_date, inspected_by_user_id)
              DO UPDATE SET
                 vehicle_registration = excluded.vehicle_registration,
+                vehicle_mileage = excluded.vehicle_mileage,
                 trailer_attached = excluded.trailer_attached,
                 trailer_registration = excluded.trailer_registration,
                 notes = excluded.notes,
@@ -11631,6 +11661,7 @@ class ProductionDatabase {
             inspection_date,
             inspected_by_user_id,
             vehicle_registration || null,
+            vehicle_mileage == null ? null : Number(vehicle_mileage),
             this.toBooleanValue(trailer_attached) ? 1 : 0,
             trailer_registration || null,
             notes || null,

@@ -1029,6 +1029,7 @@
                             <tr>
                                 <th>Fitter</th>
                                 <th>Vehicle</th>
+                                <th>Mileage</th>
                                 <th>Trailer</th>
                                 <th>Status</th>
                                 <th>Issues</th>
@@ -1040,6 +1041,7 @@
                                 <tr>
                                     <td>${row.inspected_by_username || row.inspected_by_user_id}</td>
                                     <td>${row.vehicle_registration || '-'}</td>
+                                    <td>${row.vehicle_mileage != null && row.vehicle_mileage !== '' ? row.vehicle_mileage : '-'}</td>
                                     <td>${row.trailer_attached ? (row.trailer_registration || 'Attached') : 'No'}</td>
                                     <td><span class="badge ${row.overall_status === 'warning' ? 'badge-warning' : 'badge-success'}">${row.overall_status}</span></td>
                                     <td>
@@ -1062,6 +1064,7 @@
                             ${missing.map(user => `
                                 <tr>
                                     <td>${user.username}</td>
+                                    <td>-</td>
                                     <td>-</td>
                                     <td>-</td>
                                     <td><span class="badge badge-danger">missing</span></td>
@@ -1132,6 +1135,7 @@
                         <div><strong>Fitter:</strong><br>${escapeHtml(inspection.inspected_by_username || '')}</div>
                         <div><strong>Date:</strong><br>${escapeHtml(inspection.inspection_date || '')}</div>
                         <div><strong>Vehicle:</strong><br>${escapeHtml(inspection.vehicle_registration || '-')}</div>
+                        <div><strong>Mileage:</strong><br>${inspection.vehicle_mileage != null && inspection.vehicle_mileage !== '' ? escapeHtml(String(inspection.vehicle_mileage)) : '-'}</div>
                         <div><strong>Trailer:</strong><br>${inspection.trailer_attached ? escapeHtml(inspection.trailer_registration || 'Attached') : 'No'}</div>
                     </div>
                     <div style="margin-bottom:16px;">

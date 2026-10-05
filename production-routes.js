@@ -4538,6 +4538,20 @@ router.put('/inspections/daily/current', requireProductionAuth, async (req, res)
             });
         }
         const date = req.body?.inspection_date || londonYmd(new Date());
+        const rawMileage = req.body?.vehicle_mileage;
+        const mileageBlank = rawMileage === undefined || rawMileage === null || String(rawMileage).trim() === '';
+        const vehicleMileage = mileageBlank ? NaN : Number(rawMileage);
+        if (
+            mileageBlank ||
+            !Number.isFinite(vehicleMileage) ||
+            !Number.isInteger(vehicleMileage) ||
+            vehicleMileage < 0
+        ) {
+            return res.status(400).json({
+                success: false,
+                error: 'Vehicle mileage is required and must be a whole number of miles (0 or greater)'
+            });
+        }
         const vehicleResponses = normalizeInspectionResponses(req.body?.vehicle, DAILY_VEHICLE_INSPECTION_VEHICLE_QUESTIONS);
         const trailerAttached = req.body?.trailer_attached === true || req.body?.trailer_attached === 1 || req.body?.trailer_attached === '1' || req.body?.trailer_attached === 'true';
         const trailerResponses = trailerAttached
@@ -4573,6 +4587,7 @@ router.put('/inspections/daily/current', requireProductionAuth, async (req, res)
             inspection_date: date,
             inspected_by_user_id: userId,
             vehicle_registration: (req.body?.vehicle_registration || '').toString().trim() || null,
+            vehicle_mileage: vehicleMileage,
             trailer_attached: trailerAttached,
             trailer_registration: trailerAttached ? ((req.body?.trailer_registration || '').toString().trim() || null) : null,
             notes: (req.body?.notes || '').toString().trim() || null,
