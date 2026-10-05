@@ -5,6 +5,8 @@ const { ProductionDatabase } = require('./production-database');
 const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, denySupervisor, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
+const twilio = require('twilio');
+const { toE164Phone, buildSignoffSmsBody } = require('./signoff-sms');
 const { v2: cloudinary } = require('cloudinary');
 const {
     londonYmd,
@@ -3774,26 +3776,95 @@ router.put('/installations/:id/checklists', requireProductionAuth, async (req, r
     }
 });
 
+async function issueInstallationSignoffLink(req, installationId, expiresAtOverride) {
+    const token = crypto.randomBytes(24).toString('hex');
+    const expiresAt = expiresAtOverride || new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+    await ProductionDatabase.createInstallationSignoffToken(
+        installationId,
+        token,
+        expiresAt,
+        req.session.production_user?.id || null
+    );
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const signoffUrl = `${baseUrl}/production/installation-completion-signoff.html?token=${encodeURIComponent(token)}`;
+    return { token, expiresAt, signoffUrl };
+}
+
+function twilioConfigError() {
+    if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_FROM_NUMBER) {
+        return 'SMS is not configured';
+    }
+    return null;
+}
+
 router.post('/installations/:id/signoff-link', requireProductionAuth, async (req, res) => {
     try {
         const installationId = parseInt(req.params.id, 10);
         const auth = await requireAssignedInstallerOrManager(req, res, installationId);
         if (!auth.allowed) return;
-        const installation = auth.installation;
-        const token = crypto.randomBytes(24).toString('hex');
-        const expiresAt = req.body.expires_at || new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
-        await ProductionDatabase.createInstallationSignoffToken(
-            installationId,
-            token,
-            expiresAt,
-            req.session.production_user?.id || null
-        );
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
-        const signoffUrl = `${baseUrl}/production/installation-completion-signoff.html?token=${encodeURIComponent(token)}`;
-        res.json({ success: true, token, expires_at: expiresAt, signoff_url: signoffUrl });
+        const issued = await issueInstallationSignoffLink(req, installationId, req.body.expires_at);
+        res.json({
+            success: true,
+            token: issued.token,
+            expires_at: issued.expiresAt,
+            signoff_url: issued.signoffUrl
+        });
     } catch (error) {
         console.error('Create installation signoff link error:', error);
         res.status(500).json({ success: false, error: 'Failed to create customer signoff link' });
+    }
+});
+
+router.post('/installations/:id/signoff-sms', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
+
+        const to = toE164Phone(auth.installation.customer_phone);
+        if (!to) {
+            return res.status(400).json({
+                success: false,
+                error: 'This works order has no valid customer phone number'
+            });
+        }
+        const configError = twilioConfigError();
+        if (configError) {
+            return res.status(503).json({ success: false, error: configError });
+        }
+
+        const issued = await issueInstallationSignoffLink(req, installationId);
+        try {
+            const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+            await client.messages.create({
+                body: buildSignoffSmsBody(issued.signoffUrl),
+                from: process.env.TWILIO_FROM_NUMBER,
+                to
+            });
+            res.json({
+                success: true,
+                sms_sent: true,
+                sent_to: to,
+                token: issued.token,
+                expires_at: issued.expiresAt,
+                signoff_url: issued.signoffUrl
+            });
+        } catch (smsError) {
+            console.error('Send installation signoff SMS error:', smsError);
+            res.json({
+                success: false,
+                sms_sent: false,
+                token: issued.token,
+                expires_at: issued.expiresAt,
+                signoff_url: issued.signoffUrl,
+                error: smsError.message
+                    ? `The sign-off link was created, but the text could not be sent: ${smsError.message}`
+                    : 'The sign-off link was created, but the text could not be sent. Share the link on screen.'
+            });
+        }
+    } catch (error) {
+        console.error('Create installation signoff SMS error:', error);
+        res.status(500).json({ success: false, error: 'Failed to text the customer sign-off link' });
     }
 });
 

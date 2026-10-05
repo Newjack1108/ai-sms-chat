@@ -11206,6 +11206,7 @@ class ProductionDatabase {
         installation.order_id = installation.works_order_id || null;
         installation.order_status = null;
         installation.product_name = null;
+        installation.customer_phone = null;
         installation.created_by_name = null;
         // Optionally enrich with order/product/creator (don't throw)
         if (installation.works_order_id) {
@@ -11213,7 +11214,7 @@ class ProductionDatabase {
                 if (isPostgreSQL) {
                     const orderResult = await pool.query(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name, po.customer_postcode, po.leadlock_order_id,
+                         po.customer_name, po.customer_postcode, po.customer_phone, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -11226,6 +11227,7 @@ class ProductionDatabase {
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
                         installation.customer_postcode = row.customer_postcode || null;
+                        installation.customer_phone = row.customer_phone || null;
                         installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null
@@ -11235,7 +11237,7 @@ class ProductionDatabase {
                 } else {
                     const row = db.prepare(
                         `SELECT po.id as order_id, po.product_id, po.quantity, po.status as order_status,
-                         po.customer_name, po.customer_postcode, po.leadlock_order_id,
+                         po.customer_name, po.customer_postcode, po.customer_phone, po.leadlock_order_id,
                          fp.name as product_name, po.travel_time_hours_round_trip
                          FROM product_orders po
                          LEFT JOIN finished_products fp ON po.product_id = fp.id
@@ -11246,6 +11248,7 @@ class ProductionDatabase {
                         installation.order_status = row.order_status;
                         installation.customer_name = row.customer_name;
                         installation.customer_postcode = row.customer_postcode || null;
+                        installation.customer_phone = row.customer_phone || null;
                         installation.leadlock_order_id = row.leadlock_order_id;
                         installation.product_name = row.product_name;
                         installation.travel_time_hours_round_trip = row.travel_time_hours_round_trip != null

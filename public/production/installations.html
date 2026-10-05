@@ -475,9 +475,13 @@
 
                 <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
                     <h4 style="margin-bottom: 10px;">Customer Sign-Off</h4>
-                    <small style="display: block; margin-bottom: 8px;">Generate and share a secure customer link for signature, consent, and emoji satisfaction.</small>
+                    <small style="display: block; margin-bottom: 8px;">Generate a secure customer link for signature, consent, and emoji satisfaction, or text that link to the phone on the works order.</small>
                     <div id="signoffReceivedDisplay" style="margin-bottom: 10px;"></div>
-                    <button type="button" id="generateSignoffLinkBtn" class="btn btn-secondary btn-sm">Generate Customer Sign-Off Link</button>
+                    <div id="signoffCustomerPhoneHint" style="margin-bottom: 8px; color: #6c757d; font-size: 13px;"></div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <button type="button" id="generateSignoffLinkBtn" class="btn btn-secondary btn-sm">Generate Customer Sign-Off Link</button>
+                        <button type="button" id="sendSignoffSmsBtn" class="btn btn-primary btn-sm" disabled>Text sign-off link</button>
+                    </div>
                     <div id="signoffLinkDisplay" style="margin-top: 8px;"></div>
                 </div>
                 
@@ -740,6 +744,10 @@
             initWorksOrderCombobox();
             const signoffBtn = document.getElementById('generateSignoffLinkBtn');
             if (signoffBtn) signoffBtn.addEventListener('click', generateSignoffLink);
+            const signoffSmsBtn = document.getElementById('sendSignoffSmsBtn');
+            if (signoffSmsBtn) {
+                signoffSmsBtn.addEventListener('click', () => sendSignoffSms(editingInstallationId, signoffSmsBtn));
+            }
 
             document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
@@ -1578,6 +1586,51 @@
             }
         }
 
+        function setSignoffPhoneHint(phone) {
+            const hint = document.getElementById('signoffCustomerPhoneHint');
+            const btn = document.getElementById('sendSignoffSmsBtn');
+            const trimmed = String(phone || '').trim();
+            if (hint) {
+                hint.textContent = trimmed
+                    ? `Customer phone: ${trimmed}`
+                    : 'No customer phone on this works order, so the link cannot be texted.';
+            }
+            if (btn && !btn.dataset.sending) btn.disabled = !trimmed;
+        }
+
+        function renderSignoffLinkBox(signoffUrl, note) {
+            const el = document.getElementById('signoffLinkDisplay');
+            if (!el || !signoffUrl) return;
+            const safeUrl = escapeHtml(signoffUrl);
+            const noteHtml = note
+                ? `<div style="font-size: 12px; margin-top: 6px;">${escapeHtml(note)}</div>`
+                : '';
+            el.innerHTML = `
+                <div style="background: #f8f9fa; border-radius: 4px; padding: 10px;">
+                    <div style="font-size: 12px; color: #6c757d;">Share this link with customer:</div>
+                    <a href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>
+                    ${noteHtml}
+                </div>
+            `;
+            const detailsOpen = document.getElementById('installationDetailsModal')?.classList.contains('show');
+            const details = document.getElementById('installationDetailsContent');
+            if (detailsOpen && details) {
+                let box = document.getElementById('signoffSmsResult');
+                if (!box) {
+                    box = document.createElement('div');
+                    box.id = 'signoffSmsResult';
+                    box.style.marginTop = '12px';
+                    details.appendChild(box);
+                }
+                box.innerHTML = `
+                    <div style="background: #f8f9fa; border-radius: 4px; padding: 10px;">
+                        <div style="font-size: 12px; color: #6c757d;">${escapeHtml(note || 'Sign-off link')}</div>
+                        <a href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>
+                    </div>
+                `;
+            }
+        }
+
         async function generateSignoffLink() {
             if (!editingInstallationId) return showAlert('Save the installation first, then generate a sign-off link.', 'error');
             try {
@@ -1585,14 +1638,47 @@
                     method: 'POST',
                     body: JSON.stringify({})
                 });
-                document.getElementById('signoffLinkDisplay').innerHTML = `
-                    <div style="background: #f8f9fa; border-radius: 4px; padding: 10px;">
-                        <div style="font-size: 12px; color: #6c757d;">Share this link with customer:</div>
-                        <a href="${result.signoff_url}" target="_blank">${result.signoff_url}</a>
-                    </div>
-                `;
+                renderSignoffLinkBox(result.signoff_url);
             } catch (error) {
                 showAlert('Could not generate sign-off link: ' + error.message, 'error');
+            }
+        }
+
+        async function sendSignoffSms(installationId, triggerBtn) {
+            const id = installationId || editingInstallationId;
+            if (!id) return showAlert('Save the installation first, then text the sign-off link.', 'error');
+            if (triggerBtn) {
+                triggerBtn.disabled = true;
+                triggerBtn.dataset.sending = '1';
+            }
+            try {
+                const result = await apiCall(`/installations/${id}/signoff-sms`, {
+                    method: 'POST',
+                    body: JSON.stringify({})
+                });
+                if (!result) return;
+                if (result.sms_sent) {
+                    const message = `Sign-off link texted to ${result.sent_to}`;
+                    renderSignoffLinkBox(result.signoff_url, message);
+                    showAlert(message);
+                } else {
+                    const message = result.error || 'The link was created, but the text was not sent.';
+                    renderSignoffLinkBox(result.signoff_url, message);
+                    showAlert(message, 'error');
+                }
+            } catch (error) {
+                showAlert(error.message || 'Could not text the sign-off link', 'error');
+            } finally {
+                if (triggerBtn) {
+                    delete triggerBtn.dataset.sending;
+                    if (triggerBtn.id === 'sendSignoffSmsBtn') {
+                        const hint = document.getElementById('signoffCustomerPhoneHint');
+                        const hasPhone = hint && hint.textContent.startsWith('Customer phone:');
+                        triggerBtn.disabled = !hasPhone;
+                    } else {
+                        triggerBtn.disabled = false;
+                    }
+                }
             }
         }
 
@@ -1635,6 +1721,7 @@
             document.getElementById('perDayTable').innerHTML = '';
             refreshWorksOrderTravelHint(null);
             loadInstallationChecklistData(null);
+            setSignoffPhoneHint('');
             showModal('installationModal');
         }
         
@@ -1705,6 +1792,7 @@
                     document.getElementById('availabilityCheck').innerHTML = '';
                 }
                 refreshWorksOrderTravelHint(inst.travel_time_hours_round_trip);
+                setSignoffPhoneHint(inst.customer_phone);
                 await loadInstallationChecklistData(inst.id);
 
                 if (isInstallerOnlySession) {
@@ -2203,6 +2291,11 @@
                         </ul>
                         <h5>Completion Sign-Off:</h5>
                         ${renderSignoffSectionHtml(inst.signoff)}
+                        ${(canManageInstallations || isAssignedInstaller) ? `
+                        <div style="margin-top: 8px;">
+                            <button type="button" onclick="sendSignoffSms(${inst.id}, this)" class="btn btn-primary btn-sm" ${String(inst.customer_phone || '').trim() ? '' : 'disabled'} title="${escapeHtml(String(inst.customer_phone || '').trim() ? `Text the sign-off link to ${String(inst.customer_phone).trim()}` : 'No customer phone on this works order')}">Text sign-off link</button>
+                            <div style="margin-top: 6px; color: #6c757d; font-size: 13px;">${String(inst.customer_phone || '').trim() ? `Customer phone: ${escapeHtml(String(inst.customer_phone).trim())}` : 'No customer phone on this works order, so the link cannot be texted.'}</div>
+                        </div>` : ''}
                         <h5>Uploaded Photos:</h5>
                         <p>${Array.isArray(inst.photos) ? inst.photos.length : 0} uploaded</p>
                         ${loadSheetSection}
