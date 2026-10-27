@@ -236,11 +236,9 @@ app.get('/production/*.html', requireProductionAuth, (req, res) => {
         }
     }
 
-    // Supervisor: no tasks, reminders, holiday admin, NFC admin, users, backups
+    // Supervisor: no holiday admin, NFC admin, users, backups
     if (pu && role === 'supervisor') {
         const denied =
-            req.path.includes('tasks.html') ||
-            req.path.includes('reminders.html') ||
             req.path.includes('holidays-admin.html') ||
             req.path.includes('nfc-admin.html') ||
             req.path.includes('users.html') ||

@@ -1,8 +1,8 @@
-// Production API Routes
+﻿// Production API Routes
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, denySupervisor, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const twilio = require('twilio');
@@ -6410,7 +6410,7 @@ router.get('/clock/weekly/user/:userId/:weekStart', requireProductionAuth, requi
 
 // ============ STOCK CHECK REMINDERS ROUTES ============
 
-router.get('/reminders', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/reminders', requireProductionAuth, async (req, res) => {
     try {
         const userId = req.session.production_user.id;
         const userRole = req.session.production_user.role;
@@ -6437,7 +6437,7 @@ router.get('/reminders', requireProductionAuth, denySupervisor, async (req, res)
     }
 });
 
-router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/reminders/overdue', requireProductionAuth, async (req, res) => {
     try {
         const userId = parseInt(req.session.production_user.id);
         const userRole = req.session.production_user.role;
@@ -6454,9 +6454,9 @@ router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (r
             // Continue with empty array instead of failing completely
         }
         
-        // Get failed daily vehicle inspection reminders (only for admin/office roles)
+        // Get failed daily vehicle inspection reminders (admin / office / supervisor)
         let vehicleInspectionReminders = [];
-        if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
+        if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office' || req.session.production_user.role === 'supervisor')) {
             try {
                 const today = londonYmd(new Date());
                 const inspectionRows = await ProductionDatabase.getDailyVehicleInspectionHistory({
@@ -6505,7 +6505,7 @@ router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (r
     }
 });
 
-router.get('/reminders/:id', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/reminders/:id', requireProductionAuth, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id, 10);
         if (Number.isNaN(reminderId)) {
@@ -6541,7 +6541,7 @@ router.get('/reminders/:id', requireProductionAuth, denySupervisor, async (req, 
     }
 });
 
-router.post('/reminders', requireProductionAuth, denySupervisor, async (req, res) => {
+router.post('/reminders', requireProductionAuth, async (req, res) => {
     try {
         const { stock_item_id, check_frequency_days, last_checked_date, next_check_date, is_active, user_id, target_role, assign_to, reminder_text, reminder_type } = req.body;
         
@@ -6622,7 +6622,7 @@ router.post('/reminders', requireProductionAuth, denySupervisor, async (req, res
     }
 });
 
-router.put('/reminders/:id', requireProductionAuth, denySupervisor, async (req, res) => {
+router.put('/reminders/:id', requireProductionAuth, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         const currentUser = req.session.production_user;
@@ -6693,7 +6693,7 @@ router.put('/reminders/:id', requireProductionAuth, denySupervisor, async (req, 
     }
 });
 
-router.post('/reminders/:id/check', requireProductionAuth, denySupervisor, async (req, res) => {
+router.post('/reminders/:id/check', requireProductionAuth, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         const reminder = await ProductionDatabase.markReminderChecked(reminderId);
@@ -6704,7 +6704,7 @@ router.post('/reminders/:id/check', requireProductionAuth, denySupervisor, async
     }
 });
 
-router.delete('/reminders/:id', requireProductionAuth, denySupervisor, requireAdminOrOffice, async (req, res) => {
+router.delete('/reminders/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const reminderId = parseInt(req.params.id);
         await ProductionDatabase.deleteReminder(reminderId);
@@ -7244,7 +7244,7 @@ router.delete('/planner/items/:id', requireProductionAuth, requireManager, async
 
 // ============ TASK MANAGEMENT ROUTES ============
 
-router.get('/tasks', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/tasks', requireProductionAuth, async (req, res) => {
     try {
         const filters = {};
         if (req.query.status) filters.status = req.query.status;
@@ -7269,7 +7269,7 @@ router.get('/tasks', requireProductionAuth, denySupervisor, async (req, res) => 
     }
 });
 
-router.get('/tasks/my', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/tasks/my', requireProductionAuth, async (req, res) => {
     try {
         const filters = { assigned_to_user_id: req.session.production_user.id };
         if (req.query.status) filters.status = req.query.status;
@@ -7283,7 +7283,7 @@ router.get('/tasks/my', requireProductionAuth, denySupervisor, async (req, res) 
     }
 });
 
-router.get('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/tasks/:id', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id, 10);
         if (Number.isNaN(taskId)) {
@@ -7300,7 +7300,7 @@ router.get('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res)
     }
 });
 
-router.post('/tasks', requireProductionAuth, denySupervisor, async (req, res) => {
+router.post('/tasks', requireProductionAuth, async (req, res) => {
     try {
         const { title, description, assigned_to_user_id, due_date, status } = req.body;
         if (!title) {
@@ -7322,7 +7322,7 @@ router.post('/tasks', requireProductionAuth, denySupervisor, async (req, res) =>
     }
 });
 
-router.put('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res) => {
+router.put('/tasks/:id', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const { title, description, assigned_to_user_id, status, due_date } = req.body;
@@ -7341,7 +7341,7 @@ router.put('/tasks/:id', requireProductionAuth, denySupervisor, async (req, res)
     }
 });
 
-router.post('/tasks/:id/complete', requireProductionAuth, denySupervisor, async (req, res) => {
+router.post('/tasks/:id/complete', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const task = await ProductionDatabase.completeTask(taskId, req.session.production_user.id);
@@ -7352,7 +7352,7 @@ router.post('/tasks/:id/complete', requireProductionAuth, denySupervisor, async 
     }
 });
 
-router.delete('/tasks/:id', requireProductionAuth, denySupervisor, requireAdminOrOffice, async (req, res) => {
+router.delete('/tasks/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         await ProductionDatabase.deleteTask(taskId);
@@ -7363,7 +7363,7 @@ router.delete('/tasks/:id', requireProductionAuth, denySupervisor, requireAdminO
     }
 });
 
-router.get('/tasks/:id/comments', requireProductionAuth, denySupervisor, async (req, res) => {
+router.get('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const comments = await ProductionDatabase.getTaskComments(taskId);
@@ -7374,7 +7374,7 @@ router.get('/tasks/:id/comments', requireProductionAuth, denySupervisor, async (
     }
 });
 
-router.post('/tasks/:id/comments', requireProductionAuth, denySupervisor, async (req, res) => {
+router.post('/tasks/:id/comments', requireProductionAuth, async (req, res) => {
     try {
         const taskId = parseInt(req.params.id);
         const { comment } = req.body;

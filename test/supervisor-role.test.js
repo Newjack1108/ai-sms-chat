@@ -87,7 +87,7 @@ test('requireAdmin denies supervisor', () => {
     assert.strictEqual(res.statusCode, 403);
 });
 
-test('denySupervisor blocks supervisor only', () => {
+test('denySupervisor middleware still exists but is unused on tasks/reminders', () => {
     const blocked = runMiddleware(denySupervisor, 'supervisor');
     assert.strictEqual(blocked.nextCalled, false);
     assert.strictEqual(blocked.res.statusCode, 403);
@@ -96,6 +96,10 @@ test('denySupervisor blocks supervisor only', () => {
         const { nextCalled } = runMiddleware(denySupervisor, role);
         assert.strictEqual(nextCalled, true, role + ' should pass denySupervisor');
     }
+
+    const fs = require('fs');
+    const src = fs.readFileSync(require('path').join(__dirname, '..', 'production-routes.js'), 'utf8');
+    assert.ok(!src.includes('denySupervisor'), 'tasks/reminders routes must not deny supervisor');
 });
 
 test('requireManager includes supervisor', () => {
@@ -108,7 +112,14 @@ test('production-routes role lists include supervisor', () => {
     const src = fs.readFileSync(require('path').join(__dirname, '..', 'production-routes.js'), 'utf8');
     assert.ok(src.includes("'supervisor'"), 'routes should mention supervisor');
     assert.ok(src.includes('requireAdminOfficeOrSupervisor'), 'should use new middleware');
-    assert.ok(src.includes('denySupervisor'), 'should deny supervisor on tasks/reminders');
+    assert.ok(
+        /router\.get\('\/reminders\/overdue',\s*requireProductionAuth,\s*async/.test(src),
+        'overdue reminders must allow supervisor'
+    );
+    assert.ok(
+        /router\.get\('\/tasks\/my',\s*requireProductionAuth,\s*async/.test(src),
+        'my tasks must allow supervisor'
+    );
     // Payroll gated for supervisor
     assert.ok(
         /router\.get\('\/clock\/payroll\/:weekStart',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(src),
@@ -146,7 +157,7 @@ test('timesheet-admin has clock-holiday-admin sections and payrollSection', () =
     assert.ok(html.includes('canAccessPayroll'), 'init should use canAccessPayroll');
 });
 
-test('dashboard has Payroll nav and hide-from-supervisor', () => {
+test('dashboard gives supervisors full admin widgets including tasks/reminders', () => {
     const fs = require('fs');
     const html = fs.readFileSync(
         require('path').join(__dirname, '..', 'public', 'production', 'dashboard.html'),
@@ -155,15 +166,24 @@ test('dashboard has Payroll nav and hide-from-supervisor', () => {
     assert.ok(html.includes('payroll-access'), 'payroll nav class');
     assert.ok(html.includes('timesheet-admin.html#payroll'), 'payroll deep link');
     assert.ok(html.includes('clock-holiday-admin'), 'clock/holiday admin class');
-    assert.ok(html.includes('hide-from-supervisor'), 'hide tasks/reminders');
+    assert.ok(html.includes('href="tasks.html"'), 'tasks nav for supervisor');
+    assert.ok(html.includes('href="reminders.html"'), 'reminders nav for supervisor');
+    assert.ok(html.includes('id="overdueReminders"'), 'overdue reminders widget');
+    assert.ok(html.includes('id="myTasks"'), 'my tasks widget');
+    assert.ok(!html.includes('hide-from-supervisor'), 'dashboard must not hide widgets from supervisor');
+    assert.ok(!html.includes("user.role === 'supervisor' ? Promise.resolve(null)"), 'must load reminders/tasks for supervisor');
 });
 
-test('server.js redirects supervisor from denied pages', () => {
+test('server.js allows supervisor tasks/reminders but denies admin-only pages', () => {
     const fs = require('fs');
     const src = fs.readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
     assert.ok(src.includes("role === 'supervisor'"), 'server should special-case supervisor');
     assert.ok(src.includes('holidays-admin.html'), 'should deny holidays-admin');
     assert.ok(src.includes('nfc-admin.html'), 'should deny nfc-admin');
+    const deniedBlock = src.match(/role === 'supervisor'[\s\S]*?if \(denied\)/);
+    assert.ok(deniedBlock, 'supervisor denied-pages block should exist');
+    assert.ok(!deniedBlock[0].includes('tasks.html'), 'tasks.html must not be denied for supervisor');
+    assert.ok(!deniedBlock[0].includes('reminders.html'), 'reminders.html must not be denied for supervisor');
 });
 
 test('GET /users allows supervisor (calendar); mutations stay admin', () => {
