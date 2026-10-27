@@ -255,6 +255,30 @@
             flex-wrap: wrap;
             margin: 0 0 12px;
         }
+        .planner-search-toolbar {
+            margin-bottom: 14px;
+        }
+        .planner-search-toolbar .form-input {
+            max-width: 420px;
+        }
+        .planner-search-meta {
+            font-size: 13px;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+        .planner-item-card.planner-search-hidden {
+            display: none !important;
+        }
+        .planner-day-column.planner-search-empty .planner-search-empty-msg {
+            display: block;
+            color: #6c757d;
+            font-size: 12px;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .planner-day-column .planner-search-empty-msg {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -282,6 +306,13 @@
             <button onclick="loadPlanner()" class="btn btn-secondary btn-sm">Refresh</button>
         </div>
         <div id="plannerRecentWeeks" class="planner-recent-weeks" style="display: none;"></div>
+
+        <div id="plannerSearchToolbar" class="page-toolbar planner-search-toolbar" style="display: none;">
+            <input id="plannerSearchInput" type="search" class="form-input"
+                   placeholder="Search planned items by name, type, status or priority..."
+                   autocomplete="off">
+            <span id="plannerSearchMeta" class="planner-search-meta" aria-live="polite"></span>
+        </div>
         
         <div id="plannerContent">
             <div class="loading">Select a week to view planner</div>
@@ -476,6 +507,7 @@
         let lowStockPanels = [];
         let lowStockComponents = [];
         let plannerWeekSummaries = [];
+        let plannerSearchQuery = '';
 
         function normalizePlannerWeekDate(value) {
             if (!value) return '';
@@ -664,6 +696,7 @@
         function renderEmptyPlannerState(weekStart) {
             const weekLabel = formatPlannerWeekRangeLabel(weekStart);
             const banner = renderPreviousWeekBanner(weekStart, 0, { showCopy: true });
+            setPlannerSearchVisible(false);
             document.getElementById('plannerContent').innerHTML = `
                 ${banner}
                 <div class="planner-empty-state card">
@@ -672,6 +705,29 @@
                     <button type="button" onclick="createNewWeek()" class="btn btn-primary">Create planner for this week</button>
                 </div>
             `;
+        }
+
+        function plannerItemSearchText(item) {
+            const typeLabel = item.item_type === 'component'
+                ? 'component'
+                : item.item_type === 'job'
+                    ? 'job'
+                    : 'built item';
+            return [
+                item.item_name || '',
+                typeLabel,
+                item.item_type || '',
+                item.priority || '',
+                item.status || ''
+            ].join(' ').trim();
+        }
+
+        function escapeAttr(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
         }
 
         async function ensurePlannerForCurrentWeek() {
@@ -746,12 +802,79 @@
             currentUser = await checkAuth();
             if (!currentUser) return;
             initNavbar();
+
+            document.getElementById('plannerSearchInput').addEventListener('input', onPlannerSearchInput);
             
             const savedWeek = localStorage.getItem(PLANNER_LAST_WEEK_KEY);
             setPlannerWeekStart(savedWeek ? plannerWeekMonday(savedWeek) : londonMondayYmd());
             
             await Promise.all([loadAllPanels(), loadAllComponents()]);
             loadPlanner();
+        }
+
+        function onPlannerSearchInput() {
+            plannerSearchQuery = (document.getElementById('plannerSearchInput').value || '').trim();
+            applyPlannerSearchFilter();
+        }
+
+        function setPlannerSearchVisible(visible) {
+            const toolbar = document.getElementById('plannerSearchToolbar');
+            if (!toolbar) return;
+            toolbar.style.display = visible ? '' : 'none';
+            if (!visible) {
+                const meta = document.getElementById('plannerSearchMeta');
+                if (meta) meta.textContent = '';
+            }
+        }
+
+        function applyPlannerSearchFilter() {
+            const query = plannerSearchQuery.toLowerCase();
+            const cards = document.querySelectorAll('#plannerContent .planner-item-card');
+            const meta = document.getElementById('plannerSearchMeta');
+            if (!cards.length) {
+                if (meta) meta.textContent = '';
+                return;
+            }
+
+            let visibleCount = 0;
+            cards.forEach((card) => {
+                const haystack = (card.dataset.searchText || card.textContent || '').toLowerCase();
+                const match = !query || haystack.includes(query);
+                card.classList.toggle('planner-search-hidden', !match);
+                if (match) visibleCount++;
+            });
+
+            document.querySelectorAll('#plannerContent .planner-day-column').forEach((column) => {
+                const itemCards = column.querySelectorAll('.planner-item-card');
+                const hasVisible = column.querySelector('.planner-item-card:not(.planner-search-hidden)');
+                const allHidden = !!query && itemCards.length > 0 && !hasVisible;
+                column.classList.toggle('planner-search-empty', allHidden);
+                let emptyMsg = column.querySelector('.planner-search-empty-msg');
+                if (allHidden) {
+                    if (!emptyMsg) {
+                        emptyMsg = document.createElement('p');
+                        emptyMsg.className = 'planner-search-empty-msg';
+                        emptyMsg.textContent = 'No matching items';
+                        column.appendChild(emptyMsg);
+                    }
+                } else if (emptyMsg) {
+                    emptyMsg.remove();
+                }
+            });
+
+            const unassigned = document.querySelector('#plannerContent .unassigned-items');
+            if (unassigned) {
+                const hasVisible = unassigned.querySelector('.planner-item-card:not(.planner-search-hidden)');
+                unassigned.style.display = (!query || hasVisible) ? '' : 'none';
+            }
+
+            if (meta) {
+                if (!query) {
+                    meta.textContent = `${cards.length} item${cards.length === 1 ? '' : 's'}`;
+                } else {
+                    meta.textContent = `${visibleCount} of ${cards.length} match${visibleCount === 1 ? '' : 'es'}`;
+                }
+            }
         }
         
         async function loadAllPanels() {
@@ -829,6 +952,7 @@
 
             weekStart = plannerWeekMonday(weekStart);
             setPlannerWeekStart(weekStart);
+            setPlannerSearchVisible(false);
             document.getElementById('plannerContent').innerHTML = '<div class="loading">Loading planner...</div>';
             
             try {
@@ -852,6 +976,7 @@
                 await displayPlanner(planner.id);
             } catch (error) {
                 console.error('Error loading planner:', error);
+                setPlannerSearchVisible(false);
                 showAlert('Error loading planner: ' + (error.message || 'Unknown error'), 'error');
             }
         }
@@ -989,7 +1114,7 @@
                                                 }
                                                 
                                                 return `
-                                                    <div class="${cardClass}" data-item-id="${item.id}">
+                                                    <div class="${cardClass}" data-item-id="${item.id}" data-search-text="${escapeAttr(plannerItemSearchText(item))}">
                                                         <div class="planner-item-name">
                                                             ${item.item_name || 'Unknown'}
                                                             <span class="badge badge-info" style="font-size: 10px; margin-left: 5px;">
@@ -1034,7 +1159,7 @@
                                         const hoursPerUnit = parseFloat(item.labour_hours || 0);
                                         const qtyPlanned = parseFloat(item.quantity_to_build || 0);
                                         return `
-                                            <div class="planner-item-card" style="display: inline-block; margin: 5px; min-width: 200px;">
+                                            <div class="planner-item-card" style="display: inline-block; margin: 5px; min-width: 200px;" data-item-id="${item.id}" data-search-text="${escapeAttr(plannerItemSearchText(item))}">
                                                 <div class="planner-item-name">${item.item_name || 'Unknown'}</div>
                                                 <div class="planner-item-details">Qty: ${qtyPlanned.toFixed(1)} | Hours: ${hoursPerUnit.toFixed(1)}</div>
                                                 <div class="planner-item-actions">
@@ -1058,11 +1183,20 @@
                 `;
                 
                 document.getElementById('plannerContent').innerHTML = content;
+                setPlannerSearchVisible(items.length > 0);
+                if (items.length > 0) {
+                    const searchInput = document.getElementById('plannerSearchInput');
+                    if (searchInput && searchInput.value !== plannerSearchQuery) {
+                        searchInput.value = plannerSearchQuery;
+                    }
+                    applyPlannerSearchFilter();
+                }
                 if (items.length === 0) {
                     await maybeOfferCopyFromPreviousWeek(weekStartYmd, items.length);
                 }
             } catch (error) {
                 console.error('Error displaying planner:', error);
+                setPlannerSearchVisible(false);
                 showAlert('Error displaying planner', 'error');
             }
         }

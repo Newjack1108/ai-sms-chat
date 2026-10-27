@@ -26,7 +26,7 @@
         <div class="card">
             <div class="card-header">
                 <h2>Raw Materials</h2>
-                <button onclick="showAddStockModal()" class="btn btn-primary admin-only">Add Raw Material</button>
+                <button onclick="showAddStockModal()" class="btn btn-primary admin-or-office">Add Raw Material</button>
             </div>
             <div style="padding: 15px 20px; background: #f8f9fa; border-bottom: 1px solid #ddd;">
                 <div class="page-toolbar" style="margin-bottom: 0;">
@@ -388,8 +388,8 @@
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                         <td>
                                             <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
-                                            ${currentUser && currentUser.role === 'admin' ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                            ${currentUser && currentUser.role === 'admin' ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                            ${isAdminOfficeOrSupervisor(currentUser) ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                            ${isAdminOfficeOrSupervisor(currentUser) ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                         </td>
                                     </tr>
                                 `;

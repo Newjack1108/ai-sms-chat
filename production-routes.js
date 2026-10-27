@@ -1908,11 +1908,11 @@ router.get('/wip', requireProductionAuth, async (req, res) => {
 router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
     try {
         // Panel/WIP totals use stored cost_gbp (same metric); avoid live BOM recompute + double work.
-        const [totalPanelValue, totalStockValue, lastWeekSummary, lowStockPreview, recentOrders] = await Promise.all([
+        const [totalPanelValue, totalStockValue, lastWeekSummary, lowStockPanels, recentOrders] = await Promise.all([
             ProductionDatabase.getTotalPanelValue(),
             ProductionDatabase.getTotalStockValue(),
             ProductionDatabase.getLastWeekPlannerSummary(),
-            ProductionDatabase.getLowStockItemsPreview(20),
+            ProductionDatabase.getLowStockPanels(),
             ProductionDatabase.getProductOrdersPaged({
                 page: 1,
                 pageSize: 10,
@@ -1920,6 +1920,13 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
                 includeProducts: false
             })
         ]);
+
+        const panel_stock_shortages = lowStockPanels.map(panel => ({
+            name: panel.name,
+            current_quantity: panel.current_quantity,
+            min_stock: panel.min_stock,
+            shortfall: panel.shortfall
+        }));
         
         res.json({
             success: true,
@@ -1928,7 +1935,7 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
                 total_stock_value: totalStockValue,
                 total_panel_value: totalPanelValue,
                 last_week: lastWeekSummary,
-                low_stock_preview: lowStockPreview,
+                panel_stock_shortages,
                 recent_orders: recentOrders.orders
             }
         });
@@ -6447,25 +6454,6 @@ router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (r
             // Continue with empty array instead of failing completely
         }
         
-        // Get timesheet approval reminders (only for admin/office roles)
-        let timesheetReminders = [];
-        if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
-            try {
-                const unapprovedWeeks = await ProductionDatabase.getUnapprovedTimesheetWeeks();
-                timesheetReminders = unapprovedWeeks.map(week => ({
-                    type: 'timesheet_approval',
-                    week_start_date: week.week_start_date,
-                    unapproved_count: week.unapproved_count,
-                    reminder_text: `${week.unapproved_count} timesheet${week.unapproved_count > 1 ? 's' : ''} need${week.unapproved_count === 1 ? 's' : ''} approval`
-                }));
-                console.log('Timesheet reminders found:', timesheetReminders.length);
-            } catch (timesheetError) {
-                console.error('Error getting timesheet reminders:', timesheetError);
-                console.error('Stack:', timesheetError.stack);
-                // Continue with empty array instead of failing completely
-            }
-        }
-
         // Get failed daily vehicle inspection reminders (only for admin/office roles)
         let vehicleInspectionReminders = [];
         if (req.session.production_user && (req.session.production_user.role === 'admin' || req.session.production_user.role === 'office')) {
@@ -6503,11 +6491,10 @@ router.get('/reminders/overdue', requireProductionAuth, denySupervisor, async (r
             }
         }
         
-        // Combine both types of reminders
+        // Combine vehicle inspection and stock-check reminders
         const allReminders = [
             ...vehicleInspectionReminders,
-            ...stockReminders.map(r => ({ ...r, type: 'stock_check' })),
-            ...timesheetReminders
+            ...stockReminders.map(r => ({ ...r, type: 'stock_check' }))
         ];
         
         res.json({ success: true, reminders: allReminders });

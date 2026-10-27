@@ -105,7 +105,7 @@
             
             <div class="card">
                 <div class="card-header">
-                    <h2>Stock Alerts</h2>
+                    <h2>Panel Stock Shortages</h2>
                 </div>
                 <div id="stockAlerts" class="dashboard-card-scroll">
                     <div class="loading">Loading...</div>
@@ -174,7 +174,7 @@
             
             await initNavbar();
             
-            // Load dashboard summary (includes low-stock preview and recent orders)
+            // Load dashboard summary (includes panel stock shortages and recent orders)
             try {
                 const summaryData = await apiCall('/dashboard/summary');
                 const summary = summaryData.summary;
@@ -183,15 +183,15 @@
                 document.getElementById('totalStockValue').textContent = formatCurrency(summary.total_stock_value);
                 document.getElementById('totalPanelValue').textContent = formatCurrency(summary.total_panel_value);
                 
-                const lowStock = summary.low_stock_preview || [];
+                const panelShortages = summary.panel_stock_shortages || [];
                 const alertsDiv = document.getElementById('stockAlerts');
-                if (!lowStock.length) {
-                    alertsDiv.innerHTML = '<div class="empty-state"><p>No low stock alerts</p></div>';
+                if (!panelShortages.length) {
+                    alertsDiv.innerHTML = '<div class="empty-state"><p>No panel stock shortages</p></div>';
                 } else {
-                    alertsDiv.innerHTML = lowStock.map(item => `
+                    alertsDiv.innerHTML = panelShortages.map(item => `
                         <div class="list-row">
                             <strong>${item.name}</strong>
-                            <span class="text-muted">Current: ${item.current_quantity} ${item.unit} (Min: ${item.min_quantity})</span>
+                            <span class="text-muted">Current: ${Number(item.current_quantity).toFixed(2)} (Min: ${Number(item.min_stock).toFixed(2)}, Shortfall: ${Number(item.shortfall).toFixed(2)})</span>
                         </div>
                     `).join('');
                 }
@@ -302,19 +302,6 @@
                                        onclick="localStorage.setItem('inspectionDashboardDate', '${reminder.inspection_date}');"
                                        class="btn btn-danger btn-sm" style="margin-top:6px;">
                                         Review Checklist
-                                    </a>
-                                </div>
-                            `;
-                        } else if (reminder.type === 'timesheet_approval') {
-                            const weekStart = new Date(reminder.week_start_date);
-                            const weekStartFormatted = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-                            return `
-                                <div class="list-row" style="background:#fff8e6; margin:0 -4px; padding:10px 8px; border-radius:6px;">
-                                    <strong style="color:#92400e;">${reminder.reminder_text}</strong>
-                                    <span class="text-muted" style="color:#92400e;">Week: ${weekStartFormatted}</span>
-                                    <a href="timesheet-admin.html" onclick="localStorage.setItem('selectedWeek', '${reminder.week_start_date}');"
-                                       class="btn btn-warning btn-sm" style="margin-top:6px;">
-                                        Review Timesheets
                                     </a>
                                 </div>
                             `;

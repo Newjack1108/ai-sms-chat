@@ -179,6 +179,60 @@ test('GET /users allows supervisor (calendar); mutations stay admin', () => {
     );
 });
 
+test('stock UI grants supervisor add/edit/delete (matches API)', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'production', 'stock.html'), 'utf8');
+    const routes = fs.readFileSync(path.join(__dirname, '..', 'production-routes.js'), 'utf8');
+    assert.ok(
+        html.includes('admin-or-office">Add Raw Material'),
+        'Add Raw Material should be visible to supervisor via admin-or-office'
+    );
+    assert.ok(
+        html.includes('isAdminOfficeOrSupervisor(currentUser)'),
+        'stock edit/delete should use isAdminOfficeOrSupervisor'
+    );
+    assert.ok(
+        !/role === 'admin' \? `<button onclick="editStock/.test(html),
+        'stock edit must not be admin-only'
+    );
+    assert.ok(
+        /router\.post\('\/stock',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(routes),
+        'POST /stock must allow supervisor'
+    );
+    assert.ok(
+        /router\.put\('\/stock\/:id',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(routes),
+        'PUT /stock/:id must allow supervisor'
+    );
+});
+
+test('planner and works-order writes already allow supervisor via requireManager', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const routes = fs.readFileSync(path.join(__dirname, '..', 'production-routes.js'), 'utf8');
+    const common = fs.readFileSync(path.join(__dirname, '..', 'public', 'production', 'common.js'), 'utf8');
+    assert.ok(
+        /router\.post\('\/planner',\s*requireProductionAuth,\s*requireManager/.test(routes),
+        'POST /planner must use requireManager (includes supervisor)'
+    );
+    assert.ok(
+        /router\.post\('\/planner\/:id\/items',\s*requireProductionAuth,\s*requireManager/.test(routes),
+        'POST /planner/:id/items must use requireManager'
+    );
+    assert.ok(
+        /router\.post\('\/orders',\s*requireProductionAuth,\s*requireManager/.test(routes),
+        'POST /orders must use requireManager'
+    );
+    assert.ok(
+        /router\.put\('\/orders\/:id',\s*requireProductionAuth,\s*requireManager/.test(routes),
+        'PUT /orders/:id must use requireManager'
+    );
+    assert.ok(
+        /function canManageOrderProducts\(user\)[\s\S]*?role === 'supervisor'/.test(common),
+        'canManageOrderProducts must include supervisor'
+    );
+});
+
 if (!process.exitCode) {
     console.log('\nAll supervisor role smoke checks passed.');
 }
