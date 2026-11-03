@@ -103,6 +103,38 @@
             border-radius: 4px;
             margin-top: 6px;
         }
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            margin: 8px 0 4px 0;
+        }
+        .doc-card {
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 8px;
+        }
+        .doc-card img,
+        .doc-file-fallback {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            border-radius: 4px;
+            background: #f5f5f5;
+            display: block;
+        }
+        .doc-file-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 650;
+            color: #444;
+        }
+        .doc-name {
+            margin-top: 6px;
+            font-size: 0.85rem;
+            word-break: break-word;
+        }
         .maps-link,
         .w3w-link {
             display: inline-block;
@@ -252,6 +284,39 @@
                         <tbody>${rows}</tbody>
                     </table>
                     </div>`;
+        }
+
+        function safeHttpsUrl(url) {
+            const value = String(url || '').trim();
+            return /^https:\/\//i.test(value) ? value : '';
+        }
+
+        function renderJobDocumentGroup(documents, category, title) {
+            const items = (documents || []).filter(doc => doc.category === category);
+            if (!items.length) {
+                return `<h3>${title}</h3><p class="muted">None added yet.</p>`;
+            }
+            const cards = items.map(doc => {
+                const name = esc(doc.file_name || 'Document');
+                const url = safeHttpsUrl(doc.file_url);
+                const href = url ? esc(url) : '';
+                const isImage = String(doc.mime_type || '').toLowerCase().startsWith('image/');
+                const preview = href && isImage
+                    ? `<a href="${href}" target="_blank" rel="noopener noreferrer"><img src="${href}" alt="${name}"></a>`
+                    : `<div class="doc-file-fallback">${category === 'plan' ? 'Plan' : 'File'}</div>`;
+                const open = href
+                    ? `<div><a href="${href}" target="_blank" rel="noopener noreferrer">Open</a></div>`
+                    : '';
+                return `<div class="doc-card">${preview}<div class="doc-name">${name}</div>${open}</div>`;
+            }).join('');
+            return `<h3>${title}</h3><div class="doc-grid">${cards}</div>`;
+        }
+
+        function renderJobDocuments(documents) {
+            return `
+                <h2>Plans and site pictures</h2>
+                ${renderJobDocumentGroup(documents, 'plan', 'Plans')}
+                ${renderJobDocumentGroup(documents, 'site_picture', 'Site pictures')}`;
         }
 
         function renderJobSheet(data) {
@@ -409,6 +474,7 @@
                         ${row('Duration (hours)', inst.duration_hours != null ? esc(String(inst.duration_hours)) : '—')}
                     </table>
                     ${daysHtml}
+                    ${renderJobDocuments(inst.documents)}
 
                     <h2>Assigned fitters</h2>
                     <p>${assigned}</p>

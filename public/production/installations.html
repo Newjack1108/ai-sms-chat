@@ -316,6 +316,64 @@
                 max-width: none;
             }
         }
+        .doc-category {
+            margin-top: 12px;
+        }
+        .doc-category-title {
+            font-weight: 650;
+            margin-bottom: 2px;
+        }
+        .doc-hint {
+            display: block;
+            margin: 0 0 8px 0;
+            font-size: 13px;
+        }
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .doc-card {
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 8px;
+            background: #fff;
+        }
+        .doc-card img,
+        .doc-file-fallback {
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+            border-radius: 4px;
+            background: #f1f3f5;
+        }
+        .doc-file-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 650;
+            color: #495057;
+        }
+        .doc-name {
+            margin-top: 6px;
+            font-size: 13px;
+            word-break: break-word;
+        }
+        .doc-meta {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .doc-actions,
+        .doc-upload {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            margin-top: 8px;
+        }
+        .doc-upload .form-input {
+            flex: 1 1 180px;
+        }
     </style>
 </head>
 <body>
@@ -455,6 +513,12 @@
                 <div class="form-group">
                     <label class="form-label">Notes</label>
                     <textarea id="installationNotes" class="form-input" rows="3"></textarea>
+                </div>
+
+                <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
+                    <h4 style="margin-bottom: 6px;">Plans and site pictures</h4>
+                    <small class="doc-hint">Drawings and site photos for the installers on this job.</small>
+                    <div id="jobDocumentsEditor"></div>
                 </div>
 
                 <div class="form-group" style="border-top: 1px solid #dee2e6; padding-top: 16px;">
@@ -643,6 +707,8 @@
         ];
         let checklistData = { pre_fitting: {}, completion: {} };
         let installationPhotos = [];
+        let installationDocuments = [];
+        let jobDocumentUploadInFlight = false;
 
         function isAdminOrOfficeRole() {
             return currentUser && (currentUser.role === 'admin' || currentUser.role === 'office' || currentUser.role === 'supervisor');
@@ -1699,6 +1765,180 @@
             renderYesNoChecklist('completionChecklistContainer', COMPLETION_QUESTIONS, 'completion');
             bindChecklistInputs();
             renderPhotoUploadRows();
+            try {
+                await loadInstallationDocuments(id);
+            } catch (error) {
+                installationDocuments = [];
+                paintJobDocumentsEditor(id);
+                showAlert('Could not load job documents: ' + error.message, 'error');
+            }
+        }
+
+        function canManageJobDocuments() {
+            return !!(currentUser && (
+                currentUser.role === 'admin' ||
+                currentUser.role === 'supervisor' ||
+                currentUser.role === 'manager'
+            ));
+        }
+
+        function safeJobDocumentUrl(url) {
+            const value = String(url || '').trim();
+            return /^https:\/\//i.test(value) ? value : '';
+        }
+
+        function isImageJobDocument(doc) {
+            return String(doc?.mime_type || '').toLowerCase().startsWith('image/');
+        }
+
+        function renderJobDocumentCards(documents, category, installationId, allowManage) {
+            const items = (documents || []).filter(doc => doc.category === category);
+            if (!items.length) {
+                return '<p class="text-muted" style="margin: 0;">None yet</p>';
+            }
+            return `<div class="doc-grid">${items.map(doc => {
+                const name = escapeHtml(doc.file_name || 'Document');
+                const url = safeJobDocumentUrl(doc.file_url);
+                const href = url ? escapeHtml(url) : '';
+                const preview = href && isImageJobDocument(doc)
+                    ? `<a href="${href}" target="_blank" rel="noopener"><img src="${href}" alt="${name}" loading="lazy"></a>`
+                    : `<div class="doc-file-fallback">${category === 'plan' ? 'Plan' : 'File'}</div>`;
+                const view = href
+                    ? `<a href="${href}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Open</a>`
+                    : '';
+                const remove = allowManage
+                    ? `<button type="button" class="btn btn-danger btn-sm" onclick="deleteInstallationDocument(${Number(installationId)}, ${Number(doc.id)})">Remove</button>`
+                    : '';
+                const who = doc.uploaded_by_name
+                    ? `<div class="doc-meta">Added by ${escapeHtml(doc.uploaded_by_name)}</div>`
+                    : '';
+                return `<div class="doc-card">${preview}<div class="doc-name">${name}</div>${who}<div class="doc-actions">${view}${remove}</div></div>`;
+            }).join('')}</div>`;
+        }
+
+        function renderJobDocumentsInner(documents, { installationId, allowManage, inputSuffix }) {
+            if (!installationId) {
+                return '<p class="text-muted" style="margin: 8px 0 0 0;">Save the installation first, then add plans and site pictures.</p>';
+            }
+            const upload = (category, label, accept) => {
+                if (!allowManage) return '';
+                const inputId = `jobDocInput_${inputSuffix}_${category}`;
+                return `<div class="doc-upload">
+                    <input type="file" id="${inputId}" class="form-input" accept="${accept}" multiple>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="uploadInstallationDocuments(${Number(installationId)}, '${category}', '${inputId}')">${label}</button>
+                </div>`;
+            };
+            return `
+                <div class="doc-category">
+                    <div class="doc-category-title">Plans</div>
+                    <p class="text-muted doc-hint">Drawings and PDFs for this job.</p>
+                    ${renderJobDocumentCards(documents, 'plan', installationId, allowManage)}
+                    ${upload('plan', 'Upload plans', 'application/pdf,image/jpeg,image/png,image/webp,.pdf')}
+                </div>
+                <div class="doc-category">
+                    <div class="doc-category-title">Site pictures</div>
+                    <p class="text-muted doc-hint">Photos of the site, access, and existing buildings.</p>
+                    ${renderJobDocumentCards(documents, 'site_picture', installationId, allowManage)}
+                    ${upload('site_picture', 'Upload site pictures', 'image/jpeg,image/png,image/webp,image/gif')}
+                </div>`;
+        }
+
+        function paintJobDocumentsEditor(installationId) {
+            const editor = document.getElementById('jobDocumentsEditor');
+            if (!editor) return;
+            editor.dataset.installationId = installationId ? String(installationId) : '';
+            editor.innerHTML = renderJobDocumentsInner(installationDocuments, {
+                installationId: installationId || null,
+                allowManage: canManageJobDocuments(),
+                inputSuffix: 'editor'
+            });
+        }
+
+        function repaintJobDocumentMounts(installationId) {
+            const editor = document.getElementById('jobDocumentsEditor');
+            if (editor && editor.dataset.installationId && Number(editor.dataset.installationId) === Number(installationId)) {
+                editor.innerHTML = renderJobDocumentsInner(installationDocuments, {
+                    installationId,
+                    allowManage: canManageJobDocuments(),
+                    inputSuffix: 'editor'
+                });
+            }
+            const details = document.getElementById('jobDocumentsMount');
+            if (details && Number(details.dataset.installationId) === Number(installationId)) {
+                details.innerHTML = renderJobDocumentsInner(installationDocuments, {
+                    installationId,
+                    allowManage: canManageJobDocuments(),
+                    inputSuffix: 'details'
+                });
+            }
+        }
+
+        async function loadInstallationDocuments(id) {
+            if (!id) {
+                installationDocuments = [];
+            } else {
+                const result = await apiCall(`/installations/${id}/documents`);
+                installationDocuments = result?.documents || [];
+            }
+            paintJobDocumentsEditor(id);
+        }
+
+        async function uploadInstallationDocuments(installationId, category, inputId) {
+            if (!installationId) {
+                showAlert('Save the installation first, then add plans and site pictures.', 'error');
+                return;
+            }
+            if (jobDocumentUploadInFlight) return;
+            const input = document.getElementById(inputId);
+            const files = Array.from(input?.files || []);
+            if (!files.length) {
+                showAlert('Choose a file to upload.', 'error');
+                return;
+            }
+            const maxBytes = 12 * 1024 * 1024;
+            for (const file of files) {
+                if (file.size > maxBytes) {
+                    showAlert(`${file.name} is larger than 12 MB.`, 'error');
+                    return;
+                }
+            }
+            jobDocumentUploadInFlight = true;
+            try {
+                let documents = installationDocuments;
+                for (const file of files) {
+                    const fileDataUrl = await fileToDataUrl(file);
+                    const result = await apiCall(`/installations/${installationId}/documents`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            category,
+                            file_name: file.name,
+                            file_data_url: fileDataUrl
+                        })
+                    });
+                    if (result?.documents) documents = result.documents;
+                }
+                installationDocuments = documents;
+                repaintJobDocumentMounts(installationId);
+                showAlert(files.length === 1 ? 'Document uploaded' : `${files.length} documents uploaded`);
+            } catch (error) {
+                showAlert('Upload failed: ' + error.message, 'error');
+            } finally {
+                jobDocumentUploadInFlight = false;
+            }
+        }
+
+        async function deleteInstallationDocument(installationId, documentId) {
+            if (!confirm('Remove this document from the job?')) return;
+            try {
+                const result = await apiCall(`/installations/${installationId}/documents/${documentId}`, {
+                    method: 'DELETE'
+                });
+                installationDocuments = result?.documents || [];
+                repaintJobDocumentMounts(installationId);
+                showAlert('Document removed');
+            } catch (error) {
+                showAlert('Could not remove document: ' + error.message, 'error');
+            }
         }
         
         function showAddInstallationModal() {
@@ -2275,6 +2515,15 @@
                             <tr><th>Status:</th><td><span class="${statusBadgeClass}">${escapeHtml(inst.status || '-')}</span></td></tr>
                             <tr><th>Created By:</th><td>${inst.created_by_name || '-'}</td></tr>
                         </table>
+                        </div>
+                        <h5>Plans and site pictures</h5>
+                        <p class="text-muted" style="margin-top: 0;">Drawings and site photos for the installers on this job.</p>
+                        <div id="jobDocumentsMount" data-installation-id="${inst.id}">
+                            ${renderJobDocumentsInner(inst.documents || [], {
+                                installationId: inst.id,
+                                allowManage: canManageJobDocuments(),
+                                inputSuffix: 'details'
+                            })}
                         </div>
                         <h5>Notes</h5>
                         ${(canManageInstallations || isAssignedInstaller) ? `

@@ -7,6 +7,10 @@ const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const twilio = require('twilio');
 const { toE164Phone, buildSignoffSmsBody } = require('./signoff-sms');
+const {
+    canManageInstallationDocuments,
+    validateInstallationDocumentUpload
+} = require('./installation-documents');
 const { v2: cloudinary } = require('cloudinary');
 const {
     londonYmd,
@@ -3707,6 +3711,10 @@ router.get('/installations/:id/job-sheet', requireProductionAuth, async (req, re
         if (!data) {
             return res.status(404).json({ success: false, error: 'Installation not found' });
         }
+        const user = req.session.production_user;
+        if (user?.role === 'installer' && !isInstallerAssignedToInstallation(data.installation, user.id)) {
+            return res.status(403).json({ success: false, error: 'You are not assigned to this installation' });
+        }
         res.json({
             success: true,
             installation: data.installation,
@@ -3927,6 +3935,108 @@ router.post('/installations/:id/photos', requireProductionAuth, async (req, res)
     } catch (error) {
         console.error('Upload installation photo error:', error);
         res.status(500).json({ success: false, error: 'Failed to upload installation photo' });
+    }
+});
+
+async function requireInstallationDocumentManager(req, res, installationId) {
+    const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+    if (!auth.allowed) return auth;
+    if (!canManageInstallationDocuments(req.session.production_user?.role)) {
+        res.status(403).json({ success: false, error: 'Only managers can add or remove job documents' });
+        return { allowed: false, installation: auth.installation };
+    }
+    return auth;
+}
+
+async function destroyInstallationDocumentAsset(documentRow) {
+    const publicId = documentRow?.cloudinary_public_id;
+    if (!publicId) return;
+    const resourceTypes = documentRow.resource_type ? [documentRow.resource_type] : ['image', 'raw'];
+    for (const resourceType of resourceTypes) {
+        try {
+            const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+            if (result?.result === 'ok' || result?.result === 'not found') return;
+        } catch (error) {
+            console.error('Destroy installation document asset error:', error.message);
+        }
+    }
+}
+
+router.get('/installations/:id/documents', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const auth = await requireAssignedInstallerOrManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const documents = await ProductionDatabase.getInstallationDocuments(installationId);
+        res.json({ success: true, documents });
+    } catch (error) {
+        console.error('Get installation documents error:', error);
+        res.status(500).json({ success: false, error: 'Failed to get job documents' });
+    }
+});
+
+router.post('/installations/:id/documents', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const auth = await requireInstallationDocumentManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const validated = validateInstallationDocumentUpload(req.body || {});
+        if (!validated.ok) {
+            return res.status(400).json({ success: false, error: validated.error });
+        }
+        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+            return res.status(503).json({ success: false, error: 'Cloudinary is not configured on this server' });
+        }
+
+        let customerName = null;
+        if (auth.installation.works_order_id) {
+            const order = await ProductionDatabase.getProductOrderById(auth.installation.works_order_id);
+            customerName = order?.customer_name || null;
+        }
+        const customerSlug = slugifyFolderName(customerName, 'unknown_customer');
+        const category = req.body.category;
+        const uploadResult = await cloudinary.uploader.upload(req.body.file_data_url, {
+            folder: `installation_documents/${customerSlug}_${installationId}`,
+            public_id: `${category}_${installationId}_${Date.now()}`,
+            resource_type: 'auto'
+        });
+
+        const documents = await ProductionDatabase.addInstallationDocument(installationId, {
+            category,
+            file_name: validated.fileName,
+            file_url: uploadResult.secure_url,
+            cloudinary_public_id: uploadResult.public_id,
+            resource_type: uploadResult.resource_type || null,
+            mime_type: validated.mimeType,
+            uploaded_by: req.session.production_user?.id || null
+        });
+
+        res.json({ success: true, documents });
+    } catch (error) {
+        console.error('Upload installation document error:', error);
+        res.status(500).json({ success: false, error: 'Failed to upload job document' });
+    }
+});
+
+router.delete('/installations/:id/documents/:documentId', requireProductionAuth, async (req, res) => {
+    try {
+        const installationId = parseInt(req.params.id, 10);
+        const documentId = parseInt(req.params.documentId, 10);
+        if (Number.isNaN(documentId)) {
+            return res.status(400).json({ success: false, error: 'Invalid document id' });
+        }
+        const auth = await requireInstallationDocumentManager(req, res, installationId);
+        if (!auth.allowed) return;
+        const existing = await ProductionDatabase.deleteInstallationDocument(installationId, documentId);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: 'Document not found' });
+        }
+        await destroyInstallationDocumentAsset(existing);
+        const documents = await ProductionDatabase.getInstallationDocuments(installationId);
+        res.json({ success: true, documents });
+    } catch (error) {
+        console.error('Delete installation document error:', error);
+        res.status(500).json({ success: false, error: 'Failed to remove job document' });
     }
 });
 

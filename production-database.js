@@ -1781,6 +1781,24 @@ function initializeSQLite() {
             FOREIGN KEY (uploaded_by) REFERENCES production_users(id)
         )
     `);
+
+    // Plans and site pictures managers attach for installers on a job
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS installation_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            installation_id INTEGER NOT NULL,
+            category TEXT NOT NULL CHECK(category IN ('plan', 'site_picture')),
+            file_name TEXT NOT NULL,
+            file_url TEXT NOT NULL,
+            cloudinary_public_id TEXT,
+            resource_type TEXT,
+            mime_type TEXT,
+            uploaded_by INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (installation_id) REFERENCES installations(id) ON DELETE CASCADE,
+            FOREIGN KEY (uploaded_by) REFERENCES production_users(id)
+        )
+    `);
     
     // Migrate installations table to support multi-day
     try {
@@ -1844,6 +1862,7 @@ function initializeSQLite() {
         CREATE INDEX IF NOT EXISTS idx_installation_checklist_installation ON installation_checklist_responses(installation_id, checklist_type);
         CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token);
         CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id);
+        CREATE INDEX IF NOT EXISTS idx_installation_documents_installation ON installation_documents(installation_id);
     `);
 
     // Daily fitter vehicle/trailer inspections
@@ -3633,6 +3652,21 @@ async function initializePostgreSQL() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS installation_documents (
+                id SERIAL PRIMARY KEY,
+                installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+                category VARCHAR(32) NOT NULL CHECK(category IN ('plan', 'site_picture')),
+                file_name VARCHAR(255) NOT NULL,
+                file_url TEXT NOT NULL,
+                cloudinary_public_id VARCHAR(255),
+                resource_type VARCHAR(32),
+                mime_type VARCHAR(128),
+                uploaded_by INTEGER REFERENCES production_users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
         
         // Migrate installations table to support multi-day
         try {
@@ -3707,6 +3741,7 @@ async function initializePostgreSQL() {
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_checklist_installation ON installation_checklist_responses(installation_id, checklist_type)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_signoff_tokens_token ON installation_signoff_tokens(token)`);
         await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_photos_installation ON installation_photos(installation_id)`);
+        await pool.query(`CREATE INDEX IF NOT EXISTS idx_installation_documents_installation ON installation_documents(installation_id)`);
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS daily_vehicle_inspections (
@@ -11299,6 +11334,11 @@ class ProductionDatabase {
         } catch (err) {
             installation.photos = [];
         }
+        try {
+            installation.documents = await this.getInstallationDocuments(id);
+        } catch (err) {
+            installation.documents = [];
+        }
         return installation;
     }
 
@@ -11490,6 +11530,109 @@ class ProductionDatabase {
              WHERE installation_id = ?
              ORDER BY created_at ASC`
         ).all(installationId);
+    }
+
+    static presentInstallationDocument(row) {
+        if (!row) return null;
+        return {
+            id: row.id,
+            installation_id: row.installation_id,
+            category: row.category,
+            file_name: row.file_name,
+            file_url: row.file_url,
+            mime_type: row.mime_type || null,
+            uploaded_by_name: row.uploaded_by_name || null,
+            created_at: row.created_at
+        };
+    }
+
+    static async addInstallationDocument(installationId, data) {
+        if (isPostgreSQL) {
+            await pool.query(
+                `INSERT INTO installation_documents
+                 (installation_id, category, file_name, file_url, cloudinary_public_id, resource_type, mime_type, uploaded_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [
+                    installationId,
+                    data.category,
+                    data.file_name,
+                    data.file_url,
+                    data.cloudinary_public_id || null,
+                    data.resource_type || null,
+                    data.mime_type || null,
+                    data.uploaded_by || null
+                ]
+            );
+        } else {
+            db.prepare(
+                `INSERT INTO installation_documents
+                 (installation_id, category, file_name, file_url, cloudinary_public_id, resource_type, mime_type, uploaded_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            ).run(
+                installationId,
+                data.category,
+                data.file_name,
+                data.file_url,
+                data.cloudinary_public_id || null,
+                data.resource_type || null,
+                data.mime_type || null,
+                data.uploaded_by || null
+            );
+        }
+        return this.getInstallationDocuments(installationId);
+    }
+
+    static async getInstallationDocuments(installationId) {
+        let rows;
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT d.*, u.username AS uploaded_by_name
+                 FROM installation_documents d
+                 LEFT JOIN production_users u ON u.id = d.uploaded_by
+                 WHERE d.installation_id = $1
+                 ORDER BY d.created_at ASC, d.id ASC`,
+                [installationId]
+            );
+            rows = result.rows;
+        } else {
+            rows = db.prepare(
+                `SELECT d.*, u.username AS uploaded_by_name
+                 FROM installation_documents d
+                 LEFT JOIN production_users u ON u.id = d.uploaded_by
+                 WHERE d.installation_id = ?
+                 ORDER BY d.created_at ASC, d.id ASC`
+            ).all(installationId);
+        }
+        return rows.map(row => this.presentInstallationDocument(row));
+    }
+
+    static async getInstallationDocumentById(installationId, documentId) {
+        if (isPostgreSQL) {
+            const result = await pool.query(
+                `SELECT * FROM installation_documents WHERE installation_id = $1 AND id = $2`,
+                [installationId, documentId]
+            );
+            return result.rows[0] || null;
+        }
+        return db.prepare(
+            `SELECT * FROM installation_documents WHERE installation_id = ? AND id = ?`
+        ).get(installationId, documentId) || null;
+    }
+
+    static async deleteInstallationDocument(installationId, documentId) {
+        const existing = await this.getInstallationDocumentById(installationId, documentId);
+        if (!existing) return null;
+        if (isPostgreSQL) {
+            await pool.query(
+                `DELETE FROM installation_documents WHERE installation_id = $1 AND id = $2`,
+                [installationId, documentId]
+            );
+        } else {
+            db.prepare(
+                `DELETE FROM installation_documents WHERE installation_id = ? AND id = ?`
+            ).run(installationId, documentId);
+        }
+        return existing;
     }
 
     static async getDailyVehicleInspection(userId, inspectionDate) {

@@ -38,6 +38,7 @@ console.log(`   Password: "${ADMIN_PASSWORD ? '***' : 'empty'}"`);
 app.use(cors());
 // More lenient JSON parser for webhooks (allows empty bodies, etc.)
 app.use(express.json({ 
+    limit: '20mb',
     strict: false,
     verify: (req, res, buf, encoding) => {
         // Log raw body for webhook endpoints for debugging
