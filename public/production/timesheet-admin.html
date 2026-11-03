@@ -542,9 +542,9 @@
             if (!currentUser) return;
             initNavbar();
             
-            // Admin, office, or supervisor (payroll only for supervisor)
+            // Admin or supervisor (office is calendar-only and has no payroll)
             if (!canAccessPayroll(currentUser)) {
-                showAlert('Access denied. Admin, Office, or Supervisor privileges required.', 'error');
+                showAlert('Access denied. Admin or Supervisor privileges required.', 'error');
                 setTimeout(() => window.location.href = 'dashboard.html', 2000);
                 return;
             }

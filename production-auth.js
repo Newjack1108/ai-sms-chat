@@ -85,7 +85,7 @@ function requireAdminOfficeOrSupervisor(req, res, next) {
     });
 }
 
-// Block supervisors from tasks/reminders APIs
+// Legacy helper (unused): previously blocked supervisors from tasks/reminders.
 function denySupervisor(req, res, next) {
     if (req.session && req.session.production_user &&
         req.session.production_user.role === 'supervisor') {
@@ -95,6 +95,37 @@ function denySupervisor(req, res, next) {
         });
     }
     return next();
+}
+
+/** Paths office may use for calendar view + create booking only. */
+function isOfficeCalendarAllowed(method, path) {
+    const p = (path || '/').split('?')[0];
+    if (method === 'GET' && p === '/me') return true;
+    if (method === 'POST' && p === '/login') return true;
+    if (method === 'POST' && p === '/logout') return true;
+    if (method === 'GET' && p === '/installations') return true;
+    if (method === 'POST' && p === '/installations') return true;
+    if (method === 'POST' && p === '/installations/check-availability') return true;
+    if (method === 'GET' && p === '/orders/for-select') return true;
+    if (method === 'GET' && p === '/users') return true;
+    if (method === 'GET' && p === '/holidays/calendar') return true;
+    if (method === 'GET' && /^\/installations\/\d+$/.test(p)) return true;
+    return false;
+}
+
+/** Office: installation calendar view/create only; block payroll and all other APIs. */
+function restrictOfficeToCalendarBooking(req, res, next) {
+    const role = req.session && req.session.production_user && req.session.production_user.role;
+    if (role !== 'office') {
+        return next();
+    }
+    if (isOfficeCalendarAllowed(req.method, req.path)) {
+        return next();
+    }
+    return res.status(403).json({
+        success: false,
+        error: 'Office users can only access the installation calendar'
+    });
 }
 
 // Legacy middleware - kept for backward compatibility (maps manager to office)
@@ -204,6 +235,8 @@ module.exports = {
     requireAdminOrOffice,
     requireAdminOfficeOrSupervisor,
     denySupervisor,
+    restrictOfficeToCalendarBooking,
+    isOfficeCalendarAllowed,
     requireManager, // Legacy - kept for backward compatibility
     hasInstallerRights,
     loginProductionUser,

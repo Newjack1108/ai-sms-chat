@@ -406,21 +406,22 @@ function canManageOrderProducts(user) {
     return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor' || user.role === 'manager';
 }
 
-/** Admin or office (clock admin, holiday admin). Supervisor excluded. */
+/** Admin only (clock admin, holiday admin). Office and supervisor excluded. */
 function isClockHolidayAdmin(user) {
     if (!user || !user.role) return false;
-    return user.role === 'admin' || user.role === 'office';
+    return user.role === 'admin';
 }
 
-/** Admin, office, or supervisor (production writes + payroll). */
+/** Admin, office, or supervisor (legacy production writes helper). */
 function isAdminOfficeOrSupervisor(user) {
     if (!user || !user.role) return false;
     return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor';
 }
 
-/** Can access payroll processing (admin, office, supervisor). */
+/** Can access payroll processing (admin or supervisor; office excluded). */
 function canAccessPayroll(user) {
-    return isAdminOfficeOrSupervisor(user);
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'supervisor';
 }
 
 /** Installer field rights: true installers, plus admins covering installer jobs. */
@@ -1043,6 +1044,15 @@ function restrictedFieldStaffAllowedPages(user) {
     return base;
 }
 
+/** Office: installation calendar only. */
+function isOfficeCalendarOnly(user) {
+    return user && user.role === 'office';
+}
+
+function officeAllowedPages() {
+    return ['installations.html', 'login.html'];
+}
+
 // Redirect staff-like users when they open pages outside their allowlist
 async function restrictStaffAccess() {
     const user = await checkAuth();
@@ -1058,8 +1068,24 @@ async function restrictStaffAccess() {
     return false;
 }
 
+/** Redirect office users away from pages outside the installation calendar. */
+async function restrictOfficeAccess() {
+    const user = await checkAuth();
+    if (isOfficeCalendarOnly(user)) {
+        const currentPage = window.location.pathname.split('/').pop();
+        if (!officeAllowedPages().includes(currentPage) && !window.location.pathname.includes('login.html')) {
+            window.location.href = '/production/installations.html';
+            return true;
+        }
+    }
+    return false;
+}
+
 // Initialize navbar
 async function initNavbar() {
+    // Office users only belong on the installation calendar
+    if (await restrictOfficeAccess()) return null;
+
     const user = await checkAuth();
     if (user) {
         const userInfo = document.getElementById('userInfo');
@@ -1073,7 +1099,7 @@ async function initNavbar() {
             adminItems.forEach(item => item.style.display = 'none');
         }
         
-        // Hide clock/holiday admin items unless admin or office
+        // Hide clock/holiday admin items unless admin
         if (!isClockHolidayAdmin(user)) {
             document.querySelectorAll('.clock-holiday-admin').forEach(item => {
                 if (item.classList.contains('navbar-dropdown')) {
@@ -1084,23 +1110,23 @@ async function initNavbar() {
             });
         }
 
-        // Hide items supervisors must not see (tasks, reminders, etc.)
+        // Optional role-specific hides (class unused on main dashboard now)
         if (user.role === 'supervisor') {
             document.querySelectorAll('.hide-from-supervisor').forEach(item => {
                 item.style.display = 'none';
             });
         }
 
-        // Show payroll-access items for admin/office/supervisor; hide otherwise
+        // Show payroll-access items for admin/supervisor; hide otherwise (office excluded)
         if (!canAccessPayroll(user)) {
             document.querySelectorAll('.payroll-access').forEach(item => {
                 item.style.display = 'none';
             });
         }
         
-        // Hide admin-or-office items for staff and installers (including items within dropdowns)
+        // Hide admin-or-office items for staff, installers, and office (calendar-only)
         // Supervisor can see admin-or-office (production) items
-        if (isRestrictedFieldStaff(user)) {
+        if (isRestrictedFieldStaff(user) || isOfficeCalendarOnly(user)) {
             const adminOrOfficeItems = document.querySelectorAll('.admin-or-office');
             adminOrOfficeItems.forEach(item => {
                 // Check if it's a dropdown container - if so, hide the whole dropdown
@@ -1113,8 +1139,8 @@ async function initNavbar() {
             });
         }
         
-        // Hide manager-only items for staff and installers (legacy support)
-        if (isRestrictedFieldStaff(user)) {
+        // Hide manager-only items for staff, installers, and office
+        if (isRestrictedFieldStaff(user) || isOfficeCalendarOnly(user)) {
             const managerItems = document.querySelectorAll('.manager-only');
             managerItems.forEach(item => item.style.display = 'none');
         }
@@ -1126,8 +1152,8 @@ async function initNavbar() {
             });
         }
         
-        // Show office-only items only for office, admin, and supervisor
-        if (!isAdminOfficeOrSupervisor(user)) {
+        // Show office-only items only for admin and supervisor (office is calendar-only)
+        if (user.role !== 'admin' && user.role !== 'supervisor') {
             const officeOnlyItems = document.querySelectorAll('.office-only');
             officeOnlyItems.forEach(item => item.style.display = 'none');
         }

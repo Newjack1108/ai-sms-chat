@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, restrictOfficeToCalendarBooking, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const twilio = require('twilio');
@@ -296,6 +296,9 @@ function normalizeProductStatus(rawStatus) {
 }
 
 // ============ AUTHENTICATION ROUTES ============
+
+// Office role: calendar view + create booking only (runs after login; login has no office session yet)
+router.use(restrictOfficeToCalendarBooking);
 
 router.post('/login', async (req, res) => {
     try {

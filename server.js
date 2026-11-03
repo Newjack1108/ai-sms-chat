@@ -214,8 +214,15 @@ app.get('/production/login.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'production', 'login.html'));
 });
 
-// Production root - redirect to dashboard (requires auth)
+// Production root - redirect by role (requires auth)
 app.get('/production', requireProductionAuth, (req, res) => {
+    const role = req.session.production_user && req.session.production_user.role;
+    if (role === 'office') {
+        return res.redirect('/production/installations.html');
+    }
+    if (role === 'staff' || role === 'installer') {
+        return res.redirect('/production/timesheet.html');
+    }
     res.redirect('/production/dashboard.html');
 });
 
@@ -234,6 +241,16 @@ app.get('/production/*.html', requireProductionAuth, (req, res) => {
             (role === 'installer' && req.path.includes('installations.html'));
         if (!allowed) {
             return res.redirect('/production/timesheet.html');
+        }
+    }
+
+    // Office: installation calendar only
+    if (pu && role === 'office') {
+        const allowed =
+            req.path.includes('installations.html') ||
+            req.path.includes('login.html');
+        if (!allowed) {
+            return res.redirect('/production/installations.html');
         }
     }
 

@@ -595,7 +595,10 @@
         let users = [];
         let editingInstallationId = null;
         let currentUser = null;
+        /** Full edit/delete/LeadLock/checklist (admin, supervisor; not office). */
         let canManageInstallations = false;
+        /** Create new calendar bookings (admin, office, supervisor). */
+        let canAddInstallations = false;
         let canInstallerActions = false;
         let loadDataGeneration = 0;
 
@@ -638,7 +641,7 @@
         }
 
         function isInstallerMobileView() {
-            return canInstallerActions && !canManageInstallations && window.innerWidth <= 768;
+            return canInstallerActions && !canManageInstallations && !canAddInstallations && window.innerWidth <= 768;
         }
 
         function isAssignedToCurrentUser(inst) {
@@ -651,7 +654,7 @@
 
         function getVisibleInstallations() {
             let list = installations || [];
-            if (canInstallerActions && !canManageInstallations) {
+            if (canInstallerActions && !canManageInstallations && !canAddInstallations) {
                 list = list.filter(isAssignedToCurrentUser);
             }
             return list;
@@ -711,7 +714,15 @@
         let jobDocumentUploadInFlight = false;
 
         function isAdminOrOfficeRole() {
-            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'office' || currentUser.role === 'supervisor');
+            // Completion soft-reminder bypass: admin/supervisor only (office is calendar-add only)
+            return currentUser && (currentUser.role === 'admin' || currentUser.role === 'supervisor');
+        }
+
+        function canOpenInstallation(inst) {
+            if (canManageInstallations || canAddInstallations) return true;
+            if (!canInstallerActions || !currentUser || !inst) return false;
+            return Array.isArray(inst.assigned_users) &&
+                inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id));
         }
 
         /** Soft reminder list — does not block admin/office completion. */
@@ -749,12 +760,17 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', async () => {
             if (await restrictStaffAccess()) return;
+            if (typeof restrictOfficeAccess === 'function' && await restrictOfficeAccess()) return;
             currentUser = await checkAuth();
             if (!currentUser) return;
             
-            canManageInstallations =
+            canAddInstallations =
                 currentUser.role === 'admin' ||
                 currentUser.role === 'office' ||
+                currentUser.role === 'supervisor' ||
+                currentUser.role === 'manager';
+            canManageInstallations =
+                currentUser.role === 'admin' ||
                 currentUser.role === 'supervisor' ||
                 currentUser.role === 'manager';
             canInstallerActions = typeof hasInstallerRights === 'function'
@@ -774,9 +790,12 @@
                 home.href = 'timesheet.html';
                 home.textContent = 'Timesheet';
             }
+            if (home && currentUser.role === 'office') {
+                home.style.display = 'none';
+            }
             
             const addBtn = document.getElementById('addInstallationBtn');
-            if (addBtn && !canManageInstallations) {
+            if (addBtn && !canAddInstallations) {
                 addBtn.style.display = 'none';
             }
             
@@ -786,21 +805,26 @@
             
             const urlParams = new URLSearchParams(window.location.search);
             const orderIdParam = urlParams.get('order_id');
-            if (orderIdParam && canManageInstallations) {
+            if (orderIdParam && canAddInstallations) {
                 const id = parseInt(orderIdParam, 10);
                 if (!Number.isNaN(id)) {
                     try {
-                        const result = await apiCall(`/orders/${id}`);
-                        const order = result.order;
-                        if (!order) {
-                            showAlert('Works order not found.', 'error');
+                        if (canManageInstallations) {
+                            const result = await apiCall(`/orders/${id}`);
+                            const order = result.order;
+                            if (!order) {
+                                showAlert('Works order not found.', 'error');
+                            } else {
+                                showAddInstallationModal();
+                                applyOrderPrefillToInstallationForm(order);
+                            }
                         } else {
                             showAddInstallationModal();
-                            applyOrderPrefillToInstallationForm(order);
-                            const url = new URL(window.location.href);
-                            url.searchParams.delete('order_id');
-                            history.replaceState(null, '', url.pathname + url.search + url.hash);
+                            setWorksOrderSelection(id);
                         }
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('order_id');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } catch (error) {
                         showAlert('Could not load works order: ' + error.message, 'error');
                     }
@@ -1079,7 +1103,7 @@
                 if (generation !== loadDataGeneration || !holidayResult) return;
                 holidayAllocations = holidayResult.requests || [];
                 
-                if (canManageInstallations) {
+                if (canAddInstallations || canManageInstallations) {
                     const ordersResult = await apiCall('/orders/for-select');
                     if (generation !== loadDataGeneration || !ordersResult) return;
                     worksOrders = ordersResult.orders || [];
@@ -1226,7 +1250,7 @@
                 return s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
             };
             const instStatusLabel = (s) => (s == null || s === '') ? '-' : String(s).replace(/_/g, ' ');
-            const useInstallerCards = canInstallerActions && !canManageInstallations && window.innerWidth <= 768;
+            const useInstallerCards = canInstallerActions && !canManageInstallations && !canAddInstallations && window.innerWidth <= 768;
 
             if (useInstallerCards) {
                 let cardsHtml = '';
@@ -1237,7 +1261,7 @@
                         Array.isArray(inst.assigned_users) &&
                         inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
                     );
-                    const canOpen = canManageInstallations || isAssignedInstaller;
+                    const canOpen = canOpenInstallation(inst);
                     const startD = inst.start_date || inst.installation_date || '—';
                     const endD = inst.end_date || startD || '—';
                     const customerCell = (inst.customer_name || '').trim() ? escapeHtml(inst.customer_name.trim()) : '—';
@@ -1260,13 +1284,7 @@
 
             let html = '<div class="table-wrapper"><table class="table"><thead><tr><th>Start date</th><th>End date</th><th>Customer</th><th>Order / Product</th><th>Works order status</th><th>Location</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
             list.forEach(inst => {
-                const isAssignedInstaller = !!(
-                    canInstallerActions &&
-                    currentUser &&
-                    Array.isArray(inst.assigned_users) &&
-                    inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
-                );
-                const canOpen = canManageInstallations || isAssignedInstaller;
+                const canOpen = canOpenInstallation(inst);
                 const startD = inst.start_date || inst.installation_date || '—';
                 const endD = inst.end_date || startD || '—';
                 const productName = inst.product_name ? (inst.order_id ? `Order #${inst.order_id} – ${inst.product_name}` : inst.product_name) : '—';
@@ -1359,7 +1377,7 @@
                         Array.isArray(inst.assigned_users) &&
                         inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
                     );
-                    const canOpen = canManageInstallations || isAssignedInstaller;
+                    const canOpen = canOpenInstallation(inst);
                     const instStartDate = inst.start_date || inst.installation_date;
                     const instEndDate = inst.end_date || instStartDate;
                     const block = formatInstallationBlockLabel(inst);
@@ -1432,7 +1450,7 @@
                             Array.isArray(inst.assigned_users) &&
                             inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
                         );
-                        const canOpen = canManageInstallations || isAssignedInstaller;
+                        const canOpen = canOpenInstallation(inst);
                         const timeLabel = inst.start_time ? `${inst.start_time} - ` : '';
                         const block = formatInstallationBlockLabel(inst);
                         const monthTitle = (canOpen ? block.title : `${block.title} - Not allocated`).replace(/"/g, '&quot;');
@@ -1507,7 +1525,7 @@
                     Array.isArray(inst.assigned_users) &&
                     inst.assigned_users.some(u => Number(u.user_id) === Number(currentUser.id))
                 );
-                const canOpen = canManageInstallations || isAssignedInstaller;
+                        const canOpen = canOpenInstallation(inst);
                 const dateRange = inst.isMultiDay ? 
                     ` (${inst.start_date || inst.installation_date} to ${inst.end_date || inst.start_date || inst.installation_date})` : '';
                 const block = formatInstallationBlockLabel(inst);
@@ -1942,7 +1960,7 @@
         }
         
         function showAddInstallationModal() {
-            if (!canManageInstallations) return;
+            if (!canAddInstallations) return;
             editingInstallationId = null;
             assignedUsers = [];
             dayOverrides = [];
@@ -2341,6 +2359,16 @@
         
         document.getElementById('installationForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            if (editingInstallationId) {
+                if (!canManageInstallations && !canInstallerActions) {
+                    showAlert('You can view bookings but cannot edit them.', 'error');
+                    return;
+                }
+            } else if (!canAddInstallations) {
+                showAlert('You do not have permission to create installations.', 'error');
+                return;
+            }
             
             const startDate = document.getElementById('installationStartDate').value;
             const endDate = document.getElementById('installationEndDate').value;
@@ -2368,7 +2396,7 @@
                 completion: checklistData.completion || {}
             };
 
-            const isInstallerOnlySession = canInstallerActions && !canManageInstallations;
+            const isInstallerOnlySession = canInstallerActions && !canManageInstallations && !canAddInstallations;
             const payload = isInstallerOnlySession
                 ? {
                     status: formData.status,
@@ -2450,7 +2478,8 @@
 
                 let loadSheetSection = '';
                 let leadlockSyncs = {};
-                if (inst.works_order_id) {
+                // Office (add-only) must not call load-sheet / LeadLock APIs (403 would log them out)
+                if (inst.works_order_id && canManageInstallations) {
                     try {
                         const lsResult = await apiCall(`/orders/${inst.works_order_id}/load-sheet`);
                         if (lsResult && lsResult.load_sheet) {
@@ -2549,7 +2578,8 @@
                         <p>${Array.isArray(inst.photos) ? inst.photos.length : 0} uploaded</p>
                         ${loadSheetSection}
                         <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px;">
-                            <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>
+                            ${canManageInstallations || isAssignedInstaller ? `
+                            <button type="button" onclick="window.open('installation-job-sheet.html?id=${inst.id}', '_blank')" class="btn btn-secondary">Job sheet</button>` : ''}
                             ${canManageInstallations && inst.leadlock_order_id != null && String(inst.leadlock_order_id).trim() !== '' && inst.works_order_id ? `
                             <button type="button" onclick="sendInstallDateToLeadLock(${inst.works_order_id}, ${inst.id})" class="btn btn-secondary">Send install date to LeadLock</button>
                             <button type="button" onclick="sendBalancePaidToLeadLock(${inst.works_order_id})" class="btn btn-secondary">Send balance paid to LeadLock</button>

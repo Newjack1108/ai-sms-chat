@@ -204,9 +204,11 @@
                 console.log('Login response:', data);
                 
                 if (data.success) {
-                    // Redirect staff and installers to timesheet, others to dashboard
+                    // Redirect by role: field staff → timesheet, office → calendar, others → dashboard
                     if (data.user && (data.user.role === 'staff' || data.user.role === 'installer')) {
                         window.location.href = '/production/timesheet.html';
+                    } else if (data.user && data.user.role === 'office') {
+                        window.location.href = '/production/installations.html';
                     } else {
                         window.location.href = '/production/dashboard.html';
                     }
