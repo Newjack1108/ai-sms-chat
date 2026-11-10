@@ -17713,9 +17713,11 @@ class ProductionDatabase {
                  (he.total_days - he.days_used) as days_remaining,
                  u.username,
                  u.created_at AS user_created_at,
-                 u.employment_start_date
+                 u.employment_start_date,
+                 u.status
                  FROM holiday_entitlements he
                  JOIN production_users u ON he.user_id = u.id
+                 WHERE COALESCE(u.status, 'active') != 'left_company'
                  ORDER BY he.year DESC, u.username`
             );
             rows = result.rows;
@@ -17725,9 +17727,11 @@ class ProductionDatabase {
                  (he.total_days - he.days_used) as days_remaining,
                  u.username,
                  u.created_at AS user_created_at,
-                 u.employment_start_date
+                 u.employment_start_date,
+                 u.status
                  FROM holiday_entitlements he
                  JOIN production_users u ON he.user_id = u.id
+                 WHERE COALESCE(u.status, 'active') != 'left_company'
                  ORDER BY he.year DESC, u.username`
             ).all();
         }

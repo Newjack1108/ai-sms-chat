@@ -7607,6 +7607,11 @@ router.post('/holidays/entitlements', requireProductionAuth, requireAdminOrOffic
             return res.status(400).json({ success: false, error: 'User ID, year, and total days are required' });
         }
         
+        const targetUser = await ProductionDatabase.getUserById(parseInt(user_id));
+        if (!targetUser || targetUser.status === 'left_company') {
+            return res.status(400).json({ success: false, error: 'Cannot set holiday entitlement for a user who has left the company' });
+        }
+
         console.log('Creating holiday entitlement:', { user_id, year, total_days });
         
         const entitlement = await ProductionDatabase.createHolidayEntitlement(parseInt(user_id), parseInt(year), parseInt(total_days));
@@ -7634,6 +7639,11 @@ router.put('/holidays/entitlements/:userId/:year', requireProductionAuth, requir
         
         if (total_days === undefined) {
             return res.status(400).json({ success: false, error: 'Total days is required' });
+        }
+
+        const targetUser = await ProductionDatabase.getUserById(userId);
+        if (!targetUser || targetUser.status === 'left_company') {
+            return res.status(400).json({ success: false, error: 'Cannot set holiday entitlement for a user who has left the company' });
         }
         
         const entitlement = await ProductionDatabase.createHolidayEntitlement(userId, year, parseInt(total_days));
