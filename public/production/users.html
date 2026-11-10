@@ -55,6 +55,11 @@
                     <small style="color: #6c757d;">Leave blank to keep existing password</small>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Start date</label>
+                    <input type="date" id="userStartDate" class="form-input">
+                    <small style="color: #6c757d;">Company shutdown days before this date are not taken off holiday entitlement. Leave blank to use the date the account was created.</small>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Role *</label>
                     <select id="userRole" class="form-select" required onchange="updateDriverFieldVisibility()">
                         <option value="staff">Staff</option>
@@ -174,6 +179,7 @@
                         <tr>
                             <th>Username</th>
                             <th>Role</th>
+                            <th>Start date</th>
                             <th>Driver</th>
                             <th>Status</th>
                             <th>Created</th>
@@ -200,10 +206,14 @@
                                         ? '<span class="badge badge-warning">Yes</span>'
                                         : '<span class="badge badge-secondary">No</span>'
                                     : '—';
+                            const startLabel = user.employment_start_date
+                                ? formatDate(user.employment_start_date)
+                                : '—';
                             return `
                             <tr>
                                 <td><strong>${escapeHtml(user.username)}</strong></td>
                                 <td><span class="badge badge-info">${escapeHtml(user.role === 'manager' ? 'office' : user.role)}</span></td>
+                                <td>${startLabel}</td>
                                 <td>${driverCell}</td>
                                 <td><span class="badge ${isLeft ? 'badge-secondary' : 'badge-success'}">${isLeft ? 'Left company' : 'Active'}</span></td>
                                 <td>${formatDate(user.created_at)}</td>
@@ -254,6 +264,9 @@
                 document.getElementById('userRole').value = user.role === 'manager' ? 'office' : user.role;
                 document.getElementById('userIsDriver').checked = !!(user.is_driver === true || user.is_driver === 1);
                 document.getElementById('userPassword').value = '';
+                document.getElementById('userStartDate').value = user.employment_start_date
+                    ? String(user.employment_start_date).slice(0, 10)
+                    : '';
                 document.getElementById('passwordRequired').style.display = 'none';
                 document.getElementById('userPassword').required = false;
                 updateDriverFieldVisibility();
@@ -296,11 +309,12 @@
             const password = document.getElementById('userPassword').value;
             const role = document.getElementById('userRole').value;
             const isDriver = document.getElementById('userIsDriver').checked;
+            const employmentStartDate = document.getElementById('userStartDate').value || null;
             
             try {
                 if (id) {
                     // Update user
-                    const body = { username, role, password: password || null };
+                    const body = { username, role, password: password || null, employment_start_date: employmentStartDate };
                     if (role === 'staff' || role === 'installer') {
                         body.is_driver = isDriver;
                     }
@@ -315,7 +329,7 @@
                         showAlert('Password is required for new users', 'error');
                         return;
                     }
-                    const body = { username, password, role };
+                    const body = { username, password, role, employment_start_date: employmentStartDate };
                     if (role === 'staff' || role === 'installer') {
                         body.is_driver = isDriver;
                     }

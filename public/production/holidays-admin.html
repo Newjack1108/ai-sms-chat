@@ -114,6 +114,7 @@
                     <h2>Company Shutdown Periods</h2>
                     <button onclick="showAddShutdownModal()" class="btn btn-primary">Add Shutdown Period</button>
                 </div>
+                <p style="margin: 12px 16px 0; color: #495057;">Shutdown days before someone started are not deducted. Set start dates in User Management, then use Recalculate Entitlements to correct balances already applied.</p>
                 <div id="shutdownPeriodsList">
                     <div class="loading">Loading...</div>
                 </div>
@@ -624,7 +625,7 @@
         }
         
         async function recalculateEntitlements() {
-            if (!confirm('Recalculate all holiday entitlements? This will recalculate days_used for all users based on approved holiday requests and active shutdown periods. This action may take a moment.')) {
+            if (!confirm('Recalculate all holiday entitlements? Days used are rebuilt from approved holidays and shutdown periods. Shutdown days before a person\'s start date are not included.')) {
                 return;
             }
             
@@ -1109,7 +1110,7 @@
         }
         
         async function applyShutdown(periodId) {
-            if (!confirm('Apply this shutdown period to all user entitlements? This will deduct weekdays from everyone\'s entitlement for this year.')) return;
+            if (!confirm('Apply this shutdown period to holiday entitlements? People who started after it are not charged. Anyone who started during it is only charged from their start date.')) return;
             
             try {
                 const response = await apiCall(`/holidays/shutdown-periods/${periodId}/apply`, {

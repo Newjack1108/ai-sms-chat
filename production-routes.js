@@ -512,15 +512,25 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             isDriver = false;
         }
         
+        let employmentStartDate = null;
+        if (req.body.employment_start_date) {
+            const startYmd = String(req.body.employment_start_date).trim().slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd)) {
+                return res.status(400).json({ success: false, error: 'Start date must be YYYY-MM-DD' });
+            }
+            employmentStartDate = startYmd;
+        }
+
         const passwordHash = await hashPassword(password);
-        const user = await ProductionDatabase.createUser(username, passwordHash, role, isDriver);
+        const user = await ProductionDatabase.createUser(username, passwordHash, role, isDriver, employmentStartDate);
         res.json({
             success: true,
             user: {
                 id: user.id,
                 username: user.username,
                 role: user.role,
-                is_driver: !!(user.is_driver === true || user.is_driver === 1)
+                is_driver: !!(user.is_driver === true || user.is_driver === 1),
+                employment_start_date: user.employment_start_date || null
             }
         });
     } catch (error) {
@@ -564,7 +574,22 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
             req.body.is_driver !== undefined &&
             req.body.is_driver !== null;
 
-        const profileUpdate = username || role || driverFieldPresent;
+        const hasStartDate = req.body && Object.prototype.hasOwnProperty.call(req.body, 'employment_start_date');
+        let employmentStartDate = undefined;
+        if (hasStartDate) {
+            const rawStart = req.body.employment_start_date;
+            if (rawStart == null || rawStart === '') {
+                employmentStartDate = null;
+            } else {
+                const startYmd = String(rawStart).trim().slice(0, 10);
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd)) {
+                    return res.status(400).json({ success: false, error: 'Start date must be YYYY-MM-DD' });
+                }
+                employmentStartDate = startYmd;
+            }
+        }
+
+        const profileUpdate = username || role || driverFieldPresent || hasStartDate;
         
         if (profileUpdate) {
             const user = await ProductionDatabase.getUserById(userId);
@@ -587,7 +612,8 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
                 userId,
                 username || user.username,
                 nextRole,
-                isDriverUpdate
+                isDriverUpdate,
+                employmentStartDate
             );
             res.json({
                 success: true,
@@ -595,7 +621,8 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
                     id: updatedUser.id,
                     username: updatedUser.username,
                     role: updatedUser.role,
-                    is_driver: !!(updatedUser.is_driver === true || updatedUser.is_driver === 1)
+                    is_driver: !!(updatedUser.is_driver === true || updatedUser.is_driver === 1),
+                    employment_start_date: updatedUser.employment_start_date || null
                 }
             });
         } else {
@@ -8212,15 +8239,24 @@ router.post('/holidays/shutdown-periods/:id/apply', requireProductionAuth, requi
             period.end_date
         );
         
-        // Build message based on year breakdown
-        const yearMessages = Object.entries(result.yearBreakdown)
-            .map(([year, days]) => `${days} days from ${year}`)
-            .join(', ');
+        const charged = (result.usersCharged || 0) + (result.usersPartial || 0);
+        const parts = [
+            `Shutdown applied. Deducted holiday days from ${charged} entitlement${charged === 1 ? '' : 's'}.`
+        ];
+        if (result.usersSkipped) {
+            parts.push(`${result.usersSkipped} not charged because they started after this shutdown.`);
+        }
+        if (result.usersPartial) {
+            parts.push(`${result.usersPartial} only charged for shutdown days on or after their start date.`);
+        }
         
         res.json({ 
             success: true, 
-            message: `Shutdown applied. ${result.totalWeekdays} weekdays deducted from all user entitlements (${yearMessages}).`,
-            breakdown: result.yearBreakdown
+            message: parts.join(' '),
+            breakdown: result.yearBreakdown,
+            users_charged: result.usersCharged,
+            users_partial: result.usersPartial,
+            users_skipped: result.usersSkipped
         });
     } catch (error) {
         console.error('Apply shutdown period error:', error);

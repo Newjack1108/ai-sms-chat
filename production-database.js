@@ -1340,6 +1340,18 @@ function initializeSQLite() {
     } catch (error) {
         console.log('⚠️ is_driver column migration check skipped:', error.message);
     }
+
+    // Employment start date: company shutdown days before this are not holiday deductions
+    try {
+        const userColsStart = db.prepare("PRAGMA table_info(production_users)").all();
+        const hasEmploymentStart = userColsStart.some(c => c.name === 'employment_start_date');
+        if (!hasEmploymentStart) {
+            db.exec('ALTER TABLE production_users ADD COLUMN employment_start_date TEXT');
+            console.log('✅ Added employment_start_date column to production_users');
+        }
+    } catch (error) {
+        console.log('⚠️ employment_start_date column migration check skipped:', error.message);
+    }
     
     // Migrate production_users role constraint to include 'installer' role
     try {
@@ -3130,6 +3142,20 @@ async function initializePostgreSQL() {
         } catch (error) {
             console.log('⚠️ is_driver column migration check skipped:', error.message);
         }
+
+        // Employment start date: company shutdown days before this are not holiday deductions
+        try {
+            const startColCheck = await pool.query(`
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'production_users' AND column_name = 'employment_start_date'
+            `);
+            if (startColCheck.rows.length === 0) {
+                await pool.query(`ALTER TABLE production_users ADD COLUMN employment_start_date DATE`);
+                console.log('✅ Added employment_start_date column to production_users (PostgreSQL)');
+            }
+        } catch (error) {
+            console.log('⚠️ employment_start_date column migration check skipped:', error.message);
+        }
         
         // Migrate existing panels table to add new columns
         await pool.query(`
@@ -3971,19 +3997,20 @@ class ProductionDatabase {
 
     // ============ USER OPERATIONS ============
     
-    static async createUser(username, passwordHash, role, isDriver = false) {
+    static async createUser(username, passwordHash, role, isDriver = false, employmentStartDate = null) {
         const driverVal = !!isDriver;
+        const startVal = employmentStartDate || null;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `INSERT INTO production_users (username, password_hash, role, is_driver) VALUES ($1, $2, $3, $4) RETURNING *`,
-                [username, passwordHash, role, driverVal]
+                `INSERT INTO production_users (username, password_hash, role, is_driver, employment_start_date) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [username, passwordHash, role, driverVal, startVal]
             );
             return result.rows[0];
         } else {
             const stmt = db.prepare(
-                `INSERT INTO production_users (username, password_hash, role, is_driver) VALUES (?, ?, ?, ?)`
+                `INSERT INTO production_users (username, password_hash, role, is_driver, employment_start_date) VALUES (?, ?, ?, ?, ?)`
             );
-            const info = stmt.run(username, passwordHash, role, driverVal ? 1 : 0);
+            const info = stmt.run(username, passwordHash, role, driverVal ? 1 : 0, startVal);
             return this.getUserById(info.lastInsertRowid);
         }
     }
@@ -4007,21 +4034,26 @@ class ProductionDatabase {
     }
     
     static async getAllUsers() {
+        let rows;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT id, username, role, created_at, status, is_driver FROM production_users ORDER BY created_at DESC`
+                `SELECT id, username, role, created_at, status, is_driver, employment_start_date FROM production_users ORDER BY created_at DESC`
             );
-            return result.rows;
+            rows = result.rows;
         } else {
-            return db
+            rows = db
                 .prepare(
-                    `SELECT id, username, role, created_at, status, is_driver FROM production_users ORDER BY created_at DESC`
+                    `SELECT id, username, role, created_at, status, is_driver, employment_start_date FROM production_users ORDER BY created_at DESC`
                 )
                 .all();
         }
+        return rows.map(row => ({
+            ...row,
+            employment_start_date: ymdFromDbOrInstant(row.employment_start_date)
+        }));
     }
     
-    static async updateUser(id, username, role, isDriver) {
+    static async updateUser(id, username, role, isDriver, employmentStartDate = undefined) {
         const existing = await this.getUserById(id);
         if (!existing) return null;
         let driverVal =
@@ -4031,19 +4063,32 @@ class ProductionDatabase {
         if (role === 'admin' || role === 'office' || role === 'supervisor') {
             driverVal = false;
         }
+        const setStart = employmentStartDate !== undefined;
+        const startVal = setStart ? (employmentStartDate || null) : null;
         if (isPostgreSQL) {
-            const result = await pool.query(
-                `UPDATE production_users SET username = $1, role = $2, is_driver = $3 WHERE id = $4 RETURNING *`,
-                [username, role, driverVal, id]
-            );
+            const result = setStart
+                ? await pool.query(
+                    `UPDATE production_users SET username = $1, role = $2, is_driver = $3, employment_start_date = $4 WHERE id = $5 RETURNING *`,
+                    [username, role, driverVal, startVal, id]
+                )
+                : await pool.query(
+                    `UPDATE production_users SET username = $1, role = $2, is_driver = $3 WHERE id = $4 RETURNING *`,
+                    [username, role, driverVal, id]
+                );
             return result.rows[0];
         } else {
-            db.prepare(`UPDATE production_users SET username = ?, role = ?, is_driver = ? WHERE id = ?`).run(
-                username,
-                role,
-                driverVal ? 1 : 0,
-                id
-            );
+            if (setStart) {
+                db.prepare(
+                    `UPDATE production_users SET username = ?, role = ?, is_driver = ?, employment_start_date = ? WHERE id = ?`
+                ).run(username, role, driverVal ? 1 : 0, startVal, id);
+            } else {
+                db.prepare(`UPDATE production_users SET username = ?, role = ?, is_driver = ? WHERE id = ?`).run(
+                    username,
+                    role,
+                    driverVal ? 1 : 0,
+                    id
+                );
+            }
             return this.getUserById(id);
         }
     }
@@ -17339,6 +17384,54 @@ class ProductionDatabase {
         
         return count;
     }
+
+    /**
+     * Weekdays between two YYYY-MM-DD dates, inclusive, using London civil dates.
+     */
+    static calculateWorkingDaysFromYmd(startYmd, endYmd) {
+        if (!startYmd || !endYmd || startYmd > endYmd) return 0;
+        let count = 0;
+        let cur = startYmd;
+        let guard = 0;
+        while (cur <= endYmd && guard < 4000) {
+            const dow = londonWeekdaySun0FromYmd(cur);
+            if (dow >= 1 && dow <= 5) count++;
+            cur = londonYmdAddDays(cur, 1);
+            guard++;
+        }
+        return count;
+    }
+
+    /**
+     * Date the person counts as employed for shutdown deductions.
+     * Explicit start date wins; otherwise the account created date.
+     */
+    static effectiveEmploymentStartYmd(user) {
+        if (!user) return null;
+        return ymdFromDbOrInstant(user.employment_start_date)
+            || ymdFromDbOrInstant(user.user_created_at)
+            || ymdFromDbOrInstant(user.created_at);
+    }
+
+    /**
+     * Shutdown weekdays in `year` that fall on or after the employee started.
+     * Days before their start date are not deducted.
+     */
+    static shutdownWeekdaysForUserYear(periodStart, periodEnd, year, employmentStartYmd) {
+        const yearInt = parseInt(year, 10);
+        let start = ymdFromDbOrInstant(periodStart);
+        let end = ymdFromDbOrInstant(periodEnd);
+        if (!start || !end || !Number.isFinite(yearInt)) return 0;
+        const yearStart = `${yearInt}-01-01`;
+        const yearEnd = `${yearInt}-12-31`;
+        if (end < yearStart || start > yearEnd) return 0;
+        if (start < yearStart) start = yearStart;
+        if (end > yearEnd) end = yearEnd;
+        const started = ymdFromDbOrInstant(employmentStartYmd);
+        if (started && start < started) start = started;
+        if (start > end) return 0;
+        return this.calculateWorkingDaysFromYmd(start, end);
+    }
     
     // Calculate holiday entitlement days: Mon-Thu = 1, Friday = 0.75 (6hrs). Half day = 0.5 (or 0.375 for Friday).
     static calculateHolidayDaysRequested(startDate, endDate, dayType) {
@@ -17574,47 +17667,19 @@ class ProductionDatabase {
             totalDaysUsed += parseFloat(request.days_requested || 0);
         }
         
-        // Get active shutdown periods and calculate days for this specific year
+        // Shutdown days before this person started are not deducted
+        const user = await this.getUserById(userIdInt);
+        const employmentStartYmd = this.effectiveEmploymentStartYmd(user);
         const shutdownPeriods = await this.getActiveShutdownPeriods();
         let shutdownDaysForYear = 0;
         
         for (const period of shutdownPeriods) {
-            const start = new Date(period.start_date);
-            const end = new Date(period.end_date);
-            const startYear = start.getFullYear();
-            const endYear = end.getFullYear();
-            
-            // Calculate weekdays for this shutdown period in the target year
-            if (startYear === endYear && startYear === yearInt) {
-                // Single year shutdown that matches our target year
-                const weekdays = this.calculateWorkingDays(period.start_date, period.end_date);
-                shutdownDaysForYear += weekdays;
-            } else if (startYear <= yearInt && endYear >= yearInt) {
-                // Cross-year shutdown that includes our target year
-                if (startYear === yearInt) {
-                    // Target year is the start year - calculate from start_date to end of year
-                    const yearEnd = new Date(yearInt, 11, 31).toISOString().split('T')[0];
-                    const weekdays = this.calculateWorkingDays(period.start_date, yearEnd);
-                    if (weekdays > 0) {
-                        shutdownDaysForYear += weekdays;
-                    }
-                } else if (endYear === yearInt) {
-                    // Target year is the end year - calculate from start of year to end_date
-                    const yearStart = new Date(yearInt, 0, 1).toISOString().split('T')[0];
-                    const weekdays = this.calculateWorkingDays(yearStart, period.end_date);
-                    if (weekdays > 0) {
-                        shutdownDaysForYear += weekdays;
-                    }
-                } else if (startYear < yearInt && endYear > yearInt) {
-                    // Target year is in between - calculate full year weekdays
-                    const yearStart = new Date(yearInt, 0, 1).toISOString().split('T')[0];
-                    const yearEnd = new Date(yearInt, 11, 31).toISOString().split('T')[0];
-                    const weekdays = this.calculateWorkingDays(yearStart, yearEnd);
-                    if (weekdays > 0) {
-                        shutdownDaysForYear += weekdays;
-                    }
-                }
-            }
+            shutdownDaysForYear += this.shutdownWeekdaysForUserYear(
+                period.start_date,
+                period.end_date,
+                yearInt,
+                employmentStartYmd
+            );
         }
         
         // Add shutdown days to total days used
@@ -17646,7 +17711,9 @@ class ProductionDatabase {
             const result = await pool.query(
                 `SELECT he.*, 
                  (he.total_days - he.days_used) as days_remaining,
-                 u.username 
+                 u.username,
+                 u.created_at AS user_created_at,
+                 u.employment_start_date
                  FROM holiday_entitlements he
                  JOIN production_users u ON he.user_id = u.id
                  ORDER BY he.year DESC, u.username`
@@ -17656,7 +17723,9 @@ class ProductionDatabase {
             rows = db.prepare(
                 `SELECT he.*, 
                  (he.total_days - he.days_used) as days_remaining,
-                 u.username 
+                 u.username,
+                 u.created_at AS user_created_at,
+                 u.employment_start_date
                  FROM holiday_entitlements he
                  JOIN production_users u ON he.user_id = u.id
                  ORDER BY he.year DESC, u.username`
@@ -18168,61 +18237,44 @@ class ProductionDatabase {
     }
     
     static async applyShutdownToEntitlements(startDate, endDate) {
-        // Calculate which years the shutdown period spans
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const startYear = start.getFullYear();
-        const endYear = end.getFullYear();
-        
-        const yearAllocations = {};
-        
-        // If it's a single year, process it normally
-        if (startYear === endYear) {
-            const weekdays = this.calculateWorkingDays(startDate, endDate);
-            yearAllocations[startYear] = weekdays;
-        } else {
-            // Cross-year shutdown: calculate weekdays for each year separately
-            // First year: from start_date to end of that year
-            const firstYearEnd = new Date(startYear, 11, 31).toISOString().split('T')[0];
-            const firstYearWeekdays = this.calculateWorkingDays(startDate, firstYearEnd);
-            if (firstYearWeekdays > 0) {
-                yearAllocations[startYear] = firstYearWeekdays;
-            }
-            
-            // Last year: from start of that year to end_date
-            const lastYearStart = new Date(endYear, 0, 1).toISOString().split('T')[0];
-            const lastYearWeekdays = this.calculateWorkingDays(lastYearStart, endDate);
-            if (lastYearWeekdays > 0) {
-                yearAllocations[endYear] = lastYearWeekdays;
-            }
-            
-            // If there are years in between, count full year weekdays
-            for (let year = startYear + 1; year < endYear; year++) {
-                const yearStart = new Date(year, 0, 1).toISOString().split('T')[0];
-                const yearEnd = new Date(year, 11, 31).toISOString().split('T')[0];
-                const yearWeekdays = this.calculateWorkingDays(yearStart, yearEnd);
-                if (yearWeekdays > 0) {
-                    yearAllocations[year] = yearWeekdays;
-                }
-            }
-        }
-        
-        // Get all entitlements
+        const startYmd = ymdFromDbOrInstant(startDate);
+        const endYmd = ymdFromDbOrInstant(endDate);
+        const startYear = parseInt(String(startYmd).slice(0, 4), 10);
+        const endYear = parseInt(String(endYmd).slice(0, 4), 10);
+
         const entitlements = await this.getAllHolidayEntitlements();
-        
-        // Deduct weekdays from each year's entitlements
-        for (const [year, weekdays] of Object.entries(yearAllocations)) {
-            const yearNum = parseInt(year);
-            const yearEntitlements = entitlements.filter(e => e.year === yearNum);
-            
+        const yearBreakdown = {};
+        let totalDeducted = 0;
+        let usersCharged = 0;
+        let usersPartial = 0;
+        let usersSkipped = 0;
+
+        for (let year = startYear; year <= endYear; year++) {
+            const fullDays = this.shutdownWeekdaysForUserYear(startYmd, endYmd, year, null);
+            if (fullDays <= 0) continue;
+            const yearEntitlements = entitlements.filter(e => parseInt(e.year) === year);
+
             for (const entitlement of yearEntitlements) {
-                await this.deductHolidayDays(entitlement.user_id, yearNum, weekdays);
+                const employmentStartYmd = this.effectiveEmploymentStartYmd(entitlement);
+                const days = this.shutdownWeekdaysForUserYear(startYmd, endYmd, year, employmentStartYmd);
+                if (days <= 0) {
+                    usersSkipped++;
+                    continue;
+                }
+                await this.deductHolidayDays(entitlement.user_id, year, days);
+                totalDeducted += days;
+                yearBreakdown[year] = (yearBreakdown[year] || 0) + days;
+                if (days < fullDays) usersPartial++;
+                else usersCharged++;
             }
         }
-        
+
         return {
-            totalWeekdays: Object.values(yearAllocations).reduce((sum, days) => sum + days, 0),
-            yearBreakdown: yearAllocations
+            totalWeekdays: totalDeducted,
+            yearBreakdown,
+            usersCharged,
+            usersPartial,
+            usersSkipped
         };
     }
     
@@ -18232,48 +18284,6 @@ class ProductionDatabase {
         const shutdownPeriods = await this.getActiveShutdownPeriods();
         const approvedRequests = await this.getAllHolidayRequests();
         const approvedRequestsList = approvedRequests.filter(req => req.status === 'approved');
-        
-        // Build a map of shutdown periods by year for quick lookup
-        const shutdownByYear = {};
-        for (const period of shutdownPeriods) {
-            const start = new Date(period.start_date);
-            const end = new Date(period.end_date);
-            const startYear = start.getFullYear();
-            const endYear = end.getFullYear();
-            
-            // Calculate weekday allocation for this shutdown period
-            if (startYear === endYear) {
-                const weekdays = this.calculateWorkingDays(period.start_date, period.end_date);
-                if (!shutdownByYear[startYear]) shutdownByYear[startYear] = 0;
-                shutdownByYear[startYear] += weekdays;
-            } else {
-                // Cross-year shutdown
-                const firstYearEnd = new Date(startYear, 11, 31).toISOString().split('T')[0];
-                const firstYearWeekdays = this.calculateWorkingDays(period.start_date, firstYearEnd);
-                if (firstYearWeekdays > 0) {
-                    if (!shutdownByYear[startYear]) shutdownByYear[startYear] = 0;
-                    shutdownByYear[startYear] += firstYearWeekdays;
-                }
-                
-                const lastYearStart = new Date(endYear, 0, 1).toISOString().split('T')[0];
-                const lastYearWeekdays = this.calculateWorkingDays(lastYearStart, period.end_date);
-                if (lastYearWeekdays > 0) {
-                    if (!shutdownByYear[endYear]) shutdownByYear[endYear] = 0;
-                    shutdownByYear[endYear] += lastYearWeekdays;
-                }
-                
-                // Years in between
-                for (let year = startYear + 1; year < endYear; year++) {
-                    const yearStart = new Date(year, 0, 1).toISOString().split('T')[0];
-                    const yearEnd = new Date(year, 11, 31).toISOString().split('T')[0];
-                    const yearWeekdays = this.calculateWorkingDays(yearStart, yearEnd);
-                    if (yearWeekdays > 0) {
-                        if (!shutdownByYear[year]) shutdownByYear[year] = 0;
-                        shutdownByYear[year] += yearWeekdays;
-                    }
-                }
-            }
-        }
         
         // Build a map of approved requests by user_id and year
         const requestsByUserAndYear = {};
@@ -18297,9 +18307,15 @@ class ProductionDatabase {
             const requestKey = `${userId}_${year}`;
             let daysUsed = requestsByUserAndYear[requestKey] || 0;
             
-            // Add shutdown period days for this year
-            if (shutdownByYear[year]) {
-                daysUsed += shutdownByYear[year];
+            // Shutdown days before this person started are not deducted
+            const employmentStartYmd = this.effectiveEmploymentStartYmd(entitlement);
+            for (const period of shutdownPeriods) {
+                daysUsed += this.shutdownWeekdaysForUserYear(
+                    period.start_date,
+                    period.end_date,
+                    year,
+                    employmentStartYmd
+                );
             }
             
             // Update the entitlement
