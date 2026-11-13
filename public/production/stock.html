@@ -71,11 +71,11 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Current Quantity</label>
-                    <input type="number" step="0.001" id="stockCurrentQty" class="form-input" value="0">
+                    <input type="number" step="0.01" id="stockCurrentQty" class="form-input" value="0">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Minimum Quantity</label>
-                    <input type="number" step="0.001" id="stockMinQty" class="form-input" value="0">
+                    <input type="number" step="0.01" id="stockMinQty" class="form-input" value="0">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Location</label>
@@ -83,8 +83,8 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Cost per Unit (GBP)</label>
-                    <input type="number" step="0.01" min="0" id="stockCost" class="form-input" value="0">
-                    <small style="color: #6c757d;">Enter 0.00 for free materials. Used as the default stored cost for BOM costing.</small>
+                    <input type="number" step="0.001" min="0" id="stockCost" class="form-input" value="0">
+                    <small style="color: #6c757d;">Enter 0.000 for free materials. Used as the default stored cost for BOM costing.</small>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Supplier Prices</label>
@@ -129,7 +129,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Quantity *</label>
-                    <input type="number" step="0.001" id="movementQty" class="form-input" required oninput="updateMovementCostDisplay()">
+                    <input type="number" step="0.01" id="movementQty" class="form-input" required oninput="updateMovementCostDisplay()">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Reference</label>
@@ -225,7 +225,7 @@
                 </div>
                 <div>
                     <label class="form-label" style="font-size: 12px; margin-bottom: 2px;">Unit Price (£)</label>
-                    <input type="number" step="0.01" min="0" class="form-input stock-supplier-price" value="${link ? (parseFloat(link.unit_price_gbp) || 0) : 0}">
+                    <input type="number" step="0.001" min="0" class="form-input stock-supplier-price" value="${link ? formatRawMaterialUnitCostInput(link.unit_price_gbp) : '0.000'}">
                 </div>
                 <div>
                     <label class="form-label" style="font-size: 12px; margin-bottom: 2px;">Supplier SKU</label>
@@ -380,11 +380,11 @@
                                     <tr>
                                         <td><strong>${escapeHtml(item.name || '')}</strong></td>
                                         <td>${category ? `<span class="badge badge-info">${category}</span>` : '<span style="color: #999;">-</span>'}</td>
-                                        <td>${formatRawMaterialQty(currentQty)}</td>
-                                        <td>${formatRawMaterialQty(minQty)}</td>
+                                        <td>${currentQty.toFixed(2)}</td>
+                                        <td>${minQty.toFixed(2)}</td>
                                         <td>${escapeHtml(item.unit || '')}</td>
                                         <td>${escapeHtml(item.location || '-')}</td>
-                                        <td>${formatCurrency(item.cost_per_unit_gbp || 0)}</td>
+                                        <td>${formatRawMaterialUnitCost(item.cost_per_unit_gbp || 0)}</td>
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                         <td>
                                             <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
@@ -426,10 +426,10 @@
                 document.getElementById('stockCategory').value = item.category || '';
                 document.getElementById('stockDescription').value = item.description || '';
                 document.getElementById('stockUnit').value = item.unit;
-                document.getElementById('stockCurrentQty').value = formatRawMaterialQty(item.current_quantity);
-                document.getElementById('stockMinQty').value = formatRawMaterialQty(item.min_quantity);
+                document.getElementById('stockCurrentQty').value = item.current_quantity;
+                document.getElementById('stockMinQty').value = item.min_quantity;
                 document.getElementById('stockLocation').value = item.location || '';
-                document.getElementById('stockCost').value = item.cost_per_unit_gbp;
+                document.getElementById('stockCost').value = formatRawMaterialUnitCostInput(item.cost_per_unit_gbp);
                 clearStockSupplierRows();
                 (item.suppliers || []).forEach(link => addStockSupplierRow(link));
                 showModal('stockModal');
@@ -491,8 +491,8 @@
             select.innerHTML = '<option value="">Select supplier...</option>' +
                 movementLinkedSuppliers.map(l => {
                     const label = l.supplier_code
-                        ? `${l.supplier_name} (${l.supplier_code}) — ${formatCurrency(l.unit_price_gbp || 0)}`
-                        : `${l.supplier_name} — ${formatCurrency(l.unit_price_gbp || 0)}`;
+                        ? `${l.supplier_name} (${l.supplier_code}) — ${formatRawMaterialUnitCost(l.unit_price_gbp || 0)}`
+                        : `${l.supplier_name} — ${formatRawMaterialUnitCost(l.unit_price_gbp || 0)}`;
                     const selected = preferred && String(preferred.supplier_id) === String(l.supplier_id) ? 'selected' : '';
                     return `<option value="${l.supplier_id}" ${selected}>${escapeHtml(label)}</option>`;
                 }).join('');
@@ -536,7 +536,7 @@
             document.getElementById('movementCost').value = total.toFixed(2);
             const costHint = document.getElementById('movementCostHint');
             if (link) {
-                costHint.textContent = `Unit price from supplier: ${formatCurrency(unitPrice)} × qty = ${formatCurrency(total)}`;
+                costHint.textContent = `Unit price from supplier: ${formatRawMaterialUnitCost(unitPrice)} × qty = ${formatCurrency(total)}`;
                 costHint.style.display = '';
             } else {
                 costHint.textContent = 'Select a linked supplier to use their unit price.';
@@ -584,14 +584,14 @@
                     showAlert('Link at least one supplier to this raw material before recording stock in', 'error');
                     return;
                 }
-                const supplierUnitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 100) / 100;
-                const currentCost = Math.round((parseFloat(document.getElementById('movementCurrentCost').value) || 0) * 100) / 100;
+                const supplierUnitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 1000) / 1000;
+                const currentCost = Math.round((parseFloat(document.getElementById('movementCurrentCost').value) || 0) * 1000) / 1000;
                 data.supplier_id = parseInt(link.supplier_id, 10);
                 data.update_material_cost = false;
                 if (supplierUnitPrice !== currentCost) {
                     const updateCost = confirm(
-                        `Supplier unit price (${formatCurrency(supplierUnitPrice)}) differs from the raw material cost (${formatCurrency(currentCost)}).\n\n` +
-                        `Update the raw material cost to ${formatCurrency(supplierUnitPrice)}?`
+                        `Supplier unit price (${formatRawMaterialUnitCost(supplierUnitPrice)}) differs from the raw material cost (${formatRawMaterialUnitCost(currentCost)}).\n\n` +
+                        `Update the raw material cost to ${formatRawMaterialUnitCost(supplierUnitPrice)}?`
                     );
                     data.update_material_cost = updateCost;
                 }

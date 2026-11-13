@@ -218,6 +218,21 @@ function formatCurrency(amount) {
     }).format(amount || 0);
 }
 
+function formatRawMaterialUnitCost(amount) {
+    return new Intl.NumberFormat('en-GB', {
+        style: 'currency',
+        currency: 'GBP',
+        minimumFractionDigits: 3,
+        maximumFractionDigits: 3
+    }).format(amount || 0);
+}
+
+function formatRawMaterialUnitCostInput(amount) {
+    const n = parseFloat(amount);
+    if (!Number.isFinite(n)) return '0.000';
+    return n.toFixed(3);
+}
+
 // Format date
 function formatDate(dateString) {
     if (!dateString) return '-';

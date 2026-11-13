@@ -1962,10 +1962,10 @@ async function initializePostgreSQL() {
                 description TEXT,
                 category VARCHAR(255),
                 unit VARCHAR(50) NOT NULL,
-                current_quantity DECIMAL(14,3) DEFAULT 0,
-                min_quantity DECIMAL(14,3) DEFAULT 0,
+                current_quantity DECIMAL(10,2) DEFAULT 0,
+                min_quantity DECIMAL(10,2) DEFAULT 0,
                 location VARCHAR(255),
-                cost_per_unit_gbp DECIMAL(10,2) DEFAULT 0,
+                cost_per_unit_gbp DECIMAL(12,3) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -2010,7 +2010,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 component_id INTEGER NOT NULL REFERENCES components(id) ON DELETE CASCADE,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-                quantity_required DECIMAL(14,3) NOT NULL,
+                quantity_required DECIMAL(10,2) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2035,7 +2035,7 @@ async function initializePostgreSQL() {
                 panel_id INTEGER NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
                 item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('raw_material', 'component')),
                 item_id INTEGER NOT NULL,
-                quantity_required DECIMAL(14,3) NOT NULL,
+                quantity_required DECIMAL(10,2) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2064,7 +2064,7 @@ async function initializePostgreSQL() {
                 product_id INTEGER NOT NULL REFERENCES finished_products(id) ON DELETE CASCADE,
                 component_type VARCHAR(20) NOT NULL CHECK(component_type IN ('raw_material', 'component', 'built_item')),
                 component_id INTEGER NOT NULL,
-                quantity_required DECIMAL(14,3) NOT NULL,
+                quantity_required DECIMAL(10,2) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2103,7 +2103,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-                unit_price_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
+                unit_price_gbp DECIMAL(14,3) NOT NULL DEFAULT 0,
                 supplier_sku VARCHAR(255),
                 is_preferred BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2138,8 +2138,8 @@ async function initializePostgreSQL() {
                 stock_item_id INTEGER REFERENCES stock_items(id),
                 custom_item_name VARCHAR(255),
                 custom_unit VARCHAR(100),
-                quantity DECIMAL(14,3) NOT NULL,
-                unit_cost_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
+                quantity DECIMAL(12,2) NOT NULL,
+                unit_cost_gbp DECIMAL(14,3) NOT NULL DEFAULT 0,
                 line_total_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2217,10 +2217,10 @@ async function initializePostgreSQL() {
                 order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
                 item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('component', 'built_item', 'raw_material')),
                 item_id INTEGER NOT NULL,
-                quantity_needed DECIMAL(14,3) NOT NULL,
-                quantity_loaded DECIMAL(14,3) DEFAULT 0,
-                quantity_used DECIMAL(14,3) DEFAULT 0,
-                quantity_returned DECIMAL(14,3) DEFAULT 0,
+                quantity_needed DECIMAL(10,2) NOT NULL,
+                quantity_loaded DECIMAL(10,2) DEFAULT 0,
+                quantity_used DECIMAL(10,2) DEFAULT 0,
+                quantity_returned DECIMAL(10,2) DEFAULT 0,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -2571,13 +2571,13 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
                 movement_type VARCHAR(20) NOT NULL CHECK(movement_type IN ('in', 'out', 'adjustment')),
-                quantity DECIMAL(14,3) NOT NULL,
+                quantity DECIMAL(10,2) NOT NULL,
                 reference TEXT,
                 user_id INTEGER REFERENCES production_users(id),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
                 supplier_id INTEGER REFERENCES suppliers(id),
-                unit_cost_gbp DECIMAL(12,2)
+                unit_cost_gbp DECIMAL(14,3)
             )
         `);
 
@@ -2598,48 +2598,64 @@ async function initializePostgreSQL() {
                 WHERE table_schema = 'public' AND table_name = 'stock_movements' AND column_name = 'unit_cost_gbp'
             `);
             if (smUnitCostCheck.rows.length === 0) {
-                await pool.query(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp DECIMAL(12,2)`);
+                await pool.query(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp DECIMAL(14,3)`);
                 console.log('✅ Added unit_cost_gbp column to stock_movements');
             }
         } catch (error) {
             console.log('⚠️ Stock movements supplier/unit cost migration skipped:', error.message);
         }
 
-        // Raw material quantities need 3 decimal places (existing DBs were DECIMAL scale 2)
+        // Undo the brief quantity widening, and store raw-material unit costs to 3 decimal places.
         try {
-            const rawMaterialQtyColumns = [
-                ['stock_items', 'current_quantity'],
-                ['stock_items', 'min_quantity'],
-                ['stock_movements', 'quantity'],
-                ['purchase_order_items', 'quantity'],
-                ['component_bom_items', 'quantity_required'],
-                ['bom_items', 'quantity_required'],
-                ['product_components', 'quantity_required'],
-                ['order_spares', 'quantity_needed'],
-                ['order_spares', 'quantity_loaded'],
-                ['order_spares', 'quantity_used'],
-                ['order_spares', 'quantity_returned']
+            const quantityColumns = [
+                ['stock_items', 'current_quantity', 'DECIMAL(10,2)'],
+                ['stock_items', 'min_quantity', 'DECIMAL(10,2)'],
+                ['stock_movements', 'quantity', 'DECIMAL(10,2)'],
+                ['purchase_order_items', 'quantity', 'DECIMAL(12,2)'],
+                ['component_bom_items', 'quantity_required', 'DECIMAL(10,2)'],
+                ['bom_items', 'quantity_required', 'DECIMAL(10,2)'],
+                ['product_components', 'quantity_required', 'DECIMAL(10,2)'],
+                ['order_spares', 'quantity_needed', 'DECIMAL(10,2)'],
+                ['order_spares', 'quantity_loaded', 'DECIMAL(10,2)'],
+                ['order_spares', 'quantity_used', 'DECIMAL(10,2)'],
+                ['order_spares', 'quantity_returned', 'DECIMAL(10,2)']
             ];
-            for (const [table, column] of rawMaterialQtyColumns) {
+            const unitCostColumns = [
+                ['stock_items', 'cost_per_unit_gbp', 'DECIMAL(12,3)'],
+                ['supplier_stock_items', 'unit_price_gbp', 'DECIMAL(14,3)'],
+                ['purchase_order_items', 'unit_cost_gbp', 'DECIMAL(14,3)'],
+                ['stock_movements', 'unit_cost_gbp', 'DECIMAL(14,3)']
+            ];
+            const alterNumericColumn = async (table, column, targetType, shouldAlter) => {
+                const scaleCheck = await pool.query(
+                    `SELECT numeric_precision, numeric_scale
+                     FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+                    [table, column]
+                );
+                if (scaleCheck.rows.length === 0) return;
+                const scale = scaleCheck.rows[0].numeric_scale;
+                const precision = scaleCheck.rows[0].numeric_precision;
+                if (scale === null || !shouldAlter(Number(precision), Number(scale))) return;
+                await pool.query(`ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${targetType}`);
+                console.log(`✅ Set ${table}.${column} to ${targetType}`);
+            };
+            for (const [table, column, targetType] of quantityColumns) {
                 try {
-                    const scaleCheck = await pool.query(
-                        `SELECT numeric_scale
-                         FROM information_schema.columns
-                         WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
-                        [table, column]
-                    );
-                    if (scaleCheck.rows.length === 0) continue;
-                    const scale = scaleCheck.rows[0].numeric_scale;
-                    if (scale !== null && Number(scale) < 3) {
-                        await pool.query(`ALTER TABLE ${table} ALTER COLUMN ${column} TYPE DECIMAL(14,3)`);
-                        console.log(`✅ Widened ${table}.${column} to 3 decimal places`);
-                    }
+                    await alterNumericColumn(table, column, targetType, (precision, scale) => precision === 14 && scale === 3);
+                } catch (columnError) {
+                    console.log(`⚠️ Could not restore ${table}.${column}:`, columnError.message);
+                }
+            }
+            for (const [table, column, targetType] of unitCostColumns) {
+                try {
+                    await alterNumericColumn(table, column, targetType, (_precision, scale) => scale < 3);
                 } catch (columnError) {
                     console.log(`⚠️ Could not widen ${table}.${column}:`, columnError.message);
                 }
             }
         } catch (error) {
-            console.log('⚠️ Raw material quantity precision migration skipped:', error.message);
+            console.log('⚠️ Raw material unit cost precision migration skipped:', error.message);
         }
         
         // Stock check reminders
@@ -4368,7 +4384,7 @@ class ProductionDatabase {
     static async recordStockMovement(data) {
         const supplierId = data.supplier_id != null ? parseInt(data.supplier_id, 10) : null;
         const unitCostGbp = data.unit_cost_gbp != null && data.unit_cost_gbp !== ''
-            ? Math.round((parseFloat(data.unit_cost_gbp) || 0) * 100) / 100
+            ? Math.round((parseFloat(data.unit_cost_gbp) || 0) * 1000) / 1000
             : null;
         const costGbp = Math.round((parseFloat(data.cost_gbp) || 0) * 100) / 100;
         const updateMaterialCost = !!data.update_material_cost;
@@ -8263,7 +8279,7 @@ class ProductionDatabase {
                 throw new Error('Duplicate suppliers are not allowed for a raw material');
             }
             seen.add(supplierId);
-            const unitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 100) / 100;
+            const unitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 1000) / 1000;
             if (unitPrice < 0) {
                 throw new Error('Supplier unit price cannot be negative');
             }
@@ -8657,7 +8673,7 @@ class ProductionDatabase {
                 let subtotal = 0;
                 for (const item of items) {
                     const qty = parseFloat(item.quantity || 0);
-                    const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
                     const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                     subtotal += lineTotal;
                     await pool.query(
@@ -8711,7 +8727,7 @@ class ProductionDatabase {
             );
             for (const item of payload.items) {
                 const qty = parseFloat(item.quantity || 0);
-                const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
                 const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                 subtotal += lineTotal;
                 insertItem.run(poId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
@@ -8761,7 +8777,7 @@ class ProductionDatabase {
                 let subtotal = 0;
                 for (const item of items) {
                     const qty = parseFloat(item.quantity || 0);
-                    const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
                     const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                     subtotal += lineTotal;
                     await pool.query(
@@ -8803,7 +8819,7 @@ class ProductionDatabase {
             );
             for (const item of payload.items) {
                 const qty = parseFloat(item.quantity || 0);
-                const unitCost = parseFloat(item.unit_cost_gbp || 0);
+                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
                 const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                 subtotal += lineTotal;
                 insertItem.run(id, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
@@ -8817,7 +8833,7 @@ class ProductionDatabase {
 
     static async addPurchaseOrderItem(purchaseOrderId, item) {
         const qty = parseFloat(item.quantity || 0);
-        const unitCost = parseFloat(item.unit_cost_gbp || 0);
+        const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
         const lineTotal = parseFloat((qty * unitCost).toFixed(2));
         if (isPostgreSQL) {
             await pool.query(
