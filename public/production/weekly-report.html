@@ -379,7 +379,7 @@
             document.getElementById('stockSection').innerHTML = `
                 <p class="section-note">
                     Movements in: <strong>${stock.movement_count || 0}</strong>
-                    · Qty added: <strong>${(stock.total_quantity || 0).toFixed(2)}</strong>
+                    · Qty added: <strong>${formatRawMaterialQty(stock.total_quantity)}</strong>
                     · Value added: <strong>${formatCurrency(stock.total_value || 0)}</strong>
                 </p>
                 <p class="section-note">
@@ -407,7 +407,7 @@
                                 <td>${formatDate(item.timestamp)}</td>
                                 <td>${escapeHtml(item.item_name)}</td>
                                 <td>${escapeHtml(item.unit || '-')}</td>
-                                <td class="text-right">${(item.quantity || 0).toFixed(2)}</td>
+                                <td class="text-right">${formatRawMaterialQty(item.quantity)}</td>
                                 <td class="text-right">${formatCurrency(item.line_value || 0)}</td>
                                 <td>${escapeHtml(item.reference || '-')}</td>
                             </tr>
@@ -637,7 +637,7 @@
                 const stockRows = ((stock.items) || []).map(item => [
                     formatDate(item.timestamp),
                     item.item_name || '-',
-                    (item.quantity || 0).toFixed(2),
+                    formatRawMaterialQty(item.quantity),
                     formatCurrency(item.line_value || 0),
                     item.reference || '-'
                 ]);

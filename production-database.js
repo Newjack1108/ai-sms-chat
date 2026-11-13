@@ -1962,8 +1962,8 @@ async function initializePostgreSQL() {
                 description TEXT,
                 category VARCHAR(255),
                 unit VARCHAR(50) NOT NULL,
-                current_quantity DECIMAL(10,2) DEFAULT 0,
-                min_quantity DECIMAL(10,2) DEFAULT 0,
+                current_quantity DECIMAL(14,3) DEFAULT 0,
+                min_quantity DECIMAL(14,3) DEFAULT 0,
                 location VARCHAR(255),
                 cost_per_unit_gbp DECIMAL(10,2) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2010,7 +2010,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 component_id INTEGER NOT NULL REFERENCES components(id) ON DELETE CASCADE,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-                quantity_required DECIMAL(10,2) NOT NULL,
+                quantity_required DECIMAL(14,3) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2035,7 +2035,7 @@ async function initializePostgreSQL() {
                 panel_id INTEGER NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
                 item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('raw_material', 'component')),
                 item_id INTEGER NOT NULL,
-                quantity_required DECIMAL(10,2) NOT NULL,
+                quantity_required DECIMAL(14,3) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2064,7 +2064,7 @@ async function initializePostgreSQL() {
                 product_id INTEGER NOT NULL REFERENCES finished_products(id) ON DELETE CASCADE,
                 component_type VARCHAR(20) NOT NULL CHECK(component_type IN ('raw_material', 'component', 'built_item')),
                 component_id INTEGER NOT NULL,
-                quantity_required DECIMAL(10,2) NOT NULL,
+                quantity_required DECIMAL(14,3) NOT NULL,
                 unit VARCHAR(50) NOT NULL
             )
         `);
@@ -2138,7 +2138,7 @@ async function initializePostgreSQL() {
                 stock_item_id INTEGER REFERENCES stock_items(id),
                 custom_item_name VARCHAR(255),
                 custom_unit VARCHAR(100),
-                quantity DECIMAL(12,2) NOT NULL,
+                quantity DECIMAL(14,3) NOT NULL,
                 unit_cost_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
                 line_total_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
                 notes TEXT,
@@ -2217,10 +2217,10 @@ async function initializePostgreSQL() {
                 order_id INTEGER NOT NULL REFERENCES product_orders(id) ON DELETE CASCADE,
                 item_type VARCHAR(20) NOT NULL CHECK(item_type IN ('component', 'built_item', 'raw_material')),
                 item_id INTEGER NOT NULL,
-                quantity_needed DECIMAL(10,2) NOT NULL,
-                quantity_loaded DECIMAL(10,2) DEFAULT 0,
-                quantity_used DECIMAL(10,2) DEFAULT 0,
-                quantity_returned DECIMAL(10,2) DEFAULT 0,
+                quantity_needed DECIMAL(14,3) NOT NULL,
+                quantity_loaded DECIMAL(14,3) DEFAULT 0,
+                quantity_used DECIMAL(14,3) DEFAULT 0,
+                quantity_returned DECIMAL(14,3) DEFAULT 0,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -2571,7 +2571,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id),
                 movement_type VARCHAR(20) NOT NULL CHECK(movement_type IN ('in', 'out', 'adjustment')),
-                quantity DECIMAL(10,2) NOT NULL,
+                quantity DECIMAL(14,3) NOT NULL,
                 reference TEXT,
                 user_id INTEGER REFERENCES production_users(id),
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2603,6 +2603,43 @@ async function initializePostgreSQL() {
             }
         } catch (error) {
             console.log('⚠️ Stock movements supplier/unit cost migration skipped:', error.message);
+        }
+
+        // Raw material quantities need 3 decimal places (existing DBs were DECIMAL scale 2)
+        try {
+            const rawMaterialQtyColumns = [
+                ['stock_items', 'current_quantity'],
+                ['stock_items', 'min_quantity'],
+                ['stock_movements', 'quantity'],
+                ['purchase_order_items', 'quantity'],
+                ['component_bom_items', 'quantity_required'],
+                ['bom_items', 'quantity_required'],
+                ['product_components', 'quantity_required'],
+                ['order_spares', 'quantity_needed'],
+                ['order_spares', 'quantity_loaded'],
+                ['order_spares', 'quantity_used'],
+                ['order_spares', 'quantity_returned']
+            ];
+            for (const [table, column] of rawMaterialQtyColumns) {
+                try {
+                    const scaleCheck = await pool.query(
+                        `SELECT numeric_scale
+                         FROM information_schema.columns
+                         WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+                        [table, column]
+                    );
+                    if (scaleCheck.rows.length === 0) continue;
+                    const scale = scaleCheck.rows[0].numeric_scale;
+                    if (scale !== null && Number(scale) < 3) {
+                        await pool.query(`ALTER TABLE ${table} ALTER COLUMN ${column} TYPE DECIMAL(14,3)`);
+                        console.log(`✅ Widened ${table}.${column} to 3 decimal places`);
+                    }
+                } catch (columnError) {
+                    console.log(`⚠️ Could not widen ${table}.${column}:`, columnError.message);
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Raw material quantity precision migration skipped:', error.message);
         }
         
         // Stock check reminders

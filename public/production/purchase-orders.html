@@ -306,7 +306,7 @@
                                 : `<span>${escapeHtml(selectedStock?.unit || '-')}</span>`
                             }
                         </td>
-                        <td><input type="text" inputmode="decimal" class="form-input" value="${item.quantity || ''}" oninput="updateLineItem(${i}, 'quantity', this.value)"></td>
+                        <td><input type="text" inputmode="decimal" class="form-input" value="${item.quantity === '' || item.quantity == null ? '' : formatRawMaterialQty(item.quantity)}" oninput="updateLineItem(${i}, 'quantity', this.value)"></td>
                         <td><input type="text" inputmode="decimal" class="form-input" value="${item.unit_cost_gbp || ''}" oninput="updateLineItem(${i}, 'unit_cost_gbp', this.value)"></td>
                         <td>${formatCurrency(total)}</td>
                         <td><button type="button" class="btn btn-danger btn-sm" onclick="removeLineItem(${i})">Remove</button></td>
@@ -515,7 +515,7 @@
                                     <td>${it.is_custom_item ? '<span class="badge badge-warning">Custom</span>' : '<span class="badge badge-secondary">Raw Material</span>'}</td>
                                     <td>${escapeHtml(it.stock_item_name || '-')}</td>
                                     <td>${escapeHtml(it.stock_item_unit || '-')}</td>
-                                    <td>${it.quantity}</td>
+                                    <td>${formatRawMaterialQty(it.quantity)}</td>
                                     <td>${formatCurrency(it.unit_cost_gbp || 0)}</td>
                                     <td>${formatCurrency(it.line_total_gbp || 0)}</td>
                                 </tr>
@@ -555,10 +555,10 @@
                             ${(order.items || []).map((item) => `
                                 <tr>
                                     <td>${escapeHtml(item.stock_item_name || '-')}</td>
-                                    <td>${item.quantity}</td>
+                                    <td>${formatRawMaterialQty(item.quantity)}</td>
                                     <td>
-                                        <input type="number" min="0.01" step="0.01" class="form-input receive-qty"
-                                            data-item-id="${item.id}" value="${item.quantity}" style="max-width: 140px;">
+                                        <input type="number" min="0.001" step="0.001" class="form-input receive-qty"
+                                            data-item-id="${item.id}" value="${formatRawMaterialQty(item.quantity)}" style="max-width: 140px;">
                                     </td>
                                     <td>
                                         ${item.is_custom_item
@@ -647,7 +647,7 @@
                     <tr>
                         <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_name || '-')}</td>
                         <td style="padding: 8px; border: 1px solid #ccc;">${escapeHtml(it.stock_item_unit || '-')}</td>
-                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${it.quantity}</td>
+                        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">${formatRawMaterialQty(it.quantity)}</td>
                     </tr>
                 `).join('');
             const notesBlock = order.notes
