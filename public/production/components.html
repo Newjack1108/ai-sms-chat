@@ -416,7 +416,7 @@
                                     return `
                                         <tr>
                                             <td>${item.stock_item_name}</td>
-                                            <td>${formatRawMaterialQty(item.quantity_required)}</td>
+                                            <td>${item.quantity_required}</td>
                                             <td>${item.stock_item_unit || item.unit}</td>
                                             <td>${formatCurrency(itemCost)}</td>
                                             ${currentUser.role === 'admin' ? `
@@ -457,7 +457,7 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Quantity Required *</label>
-                        <input type="number" step="0.001" id="bomQty" class="form-input" required>
+                        <input type="number" step="0.01" id="bomQty" class="form-input" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Unit *</label>

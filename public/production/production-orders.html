@@ -1587,10 +1587,10 @@
                                 return `
                                     <tr>
                                         <td><strong>${m.name}</strong></td>
-                                        <td>${formatRawMaterialQty(required)}</td>
+                                        <td>${required.toFixed(2)}</td>
                                         <td>${m.unit}</td>
-                                        <td>${formatRawMaterialQty(available)}</td>
-                                        <td><span class="badge ${statusClass}">${formatRawMaterialQty(shortfall)}</span></td>
+                                        <td>${available.toFixed(2)}</td>
+                                        <td><span class="badge ${statusClass}">${shortfall.toFixed(2)}</span></td>
                                         <td>${formatCurrency(m.cost_gbp || 0)}</td>
                                     </tr>
                                 `;
@@ -1899,7 +1899,7 @@
                                                 <tr style="background: #fff3cd;">
                                                     <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                     <td><em>Spare: ${rm.name}</em></td>
-                                                    <td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+                                                    <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                     <td>${rm.unit}</td>
                                                     ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                                     ${loadSheet.raw_materials.some(mat => mat.spares && mat.spares.length > 0) ? '<td></td>' : ''}
@@ -1912,7 +1912,7 @@
                                             <tr>
                                                 <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                                 <td><strong>${rm.name}</strong></td>
-                                                <td>${formatRawMaterialQty(rm.quantity)}</td>
+                                                <td>${parseFloat(rm.quantity).toFixed(2)}</td>
                                                 <td>${rm.unit}</td>
                                                 ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                                 ${loadSheet.raw_materials.some(mat => mat.spares && mat.spares.length > 0) ? '<td></td>' : ''}
@@ -2016,7 +2016,7 @@
                                         <tr style="background: #fff3cd;">
                                             <td><input type="checkbox" class="load-sheet-checkbox" id="${checkboxId}" ${isChecked ? 'checked' : ''}></td>
                                             <td><strong>${rm.name}</strong></td>
-                                            <td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${rm.unit}</td>
                                             ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                         </tr>
@@ -2220,7 +2220,7 @@
                                         <tr>
                                             <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${rm.name}</strong></td>
-                                            <td>${formatRawMaterialQty(rm.quantity)}</td>
+                                            <td>${parseFloat(rm.quantity).toFixed(2)}</td>
                                             <td>${rm.unit}</td>
                                             ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                         </tr>
@@ -2235,7 +2235,7 @@
                                             <tr style="background: #fff3cd;">
                                                 <td style="text-align: center; font-size: 18px;">${spareChecked ? '☑' : '☐'}</td>
                                                 <td><em>Spare: ${rm.name}</em></td>
-                                                <td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+                                                <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                                 <td>${rm.unit}</td>
                                                 ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                             </tr>
@@ -2345,7 +2345,7 @@
                                         <tr style="background: #fff3cd;">
                                             <td style="text-align: center; font-size: 18px;">${isChecked ? '☑' : '☐'}</td>
                                             <td><strong>${rm.name}</strong></td>
-                                            <td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
                                             <td>${rm.unit}</td>
                                             ${rm.location ? `<td>${rm.location || '-'}</td>` : ''}
                                         </tr>
@@ -2510,18 +2510,15 @@
                                     const used = parseFloat(spare.quantity_used || 0);
                                     const returned = parseFloat(spare.quantity_returned || 0);
                                     const remaining = loaded - used - returned;
-                                    const fmtQty = spare.item_type === 'raw_material'
-                                        ? formatRawMaterialQty
-                                        : (value) => parseFloat(value || 0).toFixed(2);
                                     return `
                                         <tr>
                                             <td><span class="badge badge-info">${spare.item_type === 'component' ? 'Component' : spare.item_type === 'built_item' ? 'Built Item' : 'Raw Material'}</span></td>
                                             <td><strong>${spare.item_name || 'Unknown'}</strong></td>
-                                            <td>${fmtQty(spare.quantity_needed)}</td>
-                                            <td>${fmtQty(loaded)}</td>
-                                            <td>${fmtQty(used)}</td>
-                                            <td>${fmtQty(returned)}</td>
-                                            <td><span class="badge ${remaining > 0 ? 'badge-warning' : 'badge-success'}">${fmtQty(remaining)}</span></td>
+                                            <td>${parseFloat(spare.quantity_needed || 0).toFixed(2)}</td>
+                                            <td>${loaded.toFixed(2)}</td>
+                                            <td>${used.toFixed(2)}</td>
+                                            <td>${returned.toFixed(2)}</td>
+                                            <td><span class="badge ${remaining > 0 ? 'badge-warning' : 'badge-success'}">${remaining.toFixed(2)}</span></td>
                                             <td>
                                                 <button onclick="updateSpareStatus(${spare.id}, 'loaded')" class="btn btn-sm btn-secondary">Mark Loaded</button>
                                                 <button onclick="updateSpareStatus(${spare.id}, 'used')" class="btn btn-sm btn-warning">Mark Used</button>
@@ -2607,12 +2604,6 @@
         function updateSpareItemOptions() {
             const type = document.getElementById('spareItemType').value;
             const select = document.getElementById('spareItemId');
-            const qtyInput = document.getElementById('spareQuantity');
-            if (qtyInput) {
-                const rawMaterial = type === 'raw_material';
-                qtyInput.step = rawMaterial ? '0.001' : '0.01';
-                qtyInput.min = rawMaterial ? '0.001' : '0.01';
-            }
             select.innerHTML = '<option value="">Select item</option>';
             
             if (type === 'component') {
@@ -2640,12 +2631,9 @@
                 
                 let quantity = 0;
                 let promptText = '';
-                const fmtQty = spare.item_type === 'raw_material'
-                    ? formatRawMaterialQty
-                    : (value) => parseFloat(value || 0).toFixed(2);
                 
                 if (status === 'loaded') {
-                    promptText = `Enter quantity loaded (max: ${fmtQty(spare.quantity_needed)}):`;
+                    promptText = `Enter quantity loaded (max: ${parseFloat(spare.quantity_needed || 0).toFixed(2)}):`;
                     quantity = parseFloat(prompt(promptText) || '0');
                     if (quantity <= 0 || quantity > parseFloat(spare.quantity_needed)) {
                         showAlert('Invalid quantity', 'error');
@@ -2659,7 +2647,7 @@
                     const loaded = parseFloat(spare.quantity_loaded || 0);
                     const alreadyUsed = parseFloat(spare.quantity_used || 0);
                     const available = loaded - alreadyUsed;
-                    promptText = `Enter quantity used (max: ${fmtQty(available)}):`;
+                    promptText = `Enter quantity used (max: ${available.toFixed(2)}):`;
                     quantity = parseFloat(prompt(promptText) || '0');
                     if (quantity <= 0 || quantity > available) {
                         showAlert('Invalid quantity', 'error');
@@ -2696,16 +2684,13 @@
                     return;
                 }
                 
-                const fmtQty = spare.item_type === 'raw_material'
-                    ? formatRawMaterialQty
-                    : (value) => parseFloat(value || 0).toFixed(2);
-                const quantity = parseFloat(prompt(`Enter quantity to return to stock (max: ${fmtQty(available)}):`) || '0');
+                const quantity = parseFloat(prompt(`Enter quantity to return to stock (max: ${available.toFixed(2)}):`) || '0');
                 if (quantity <= 0 || quantity > available) {
                     showAlert('Invalid quantity', 'error');
                     return;
                 }
                 
-                if (!confirm(`Return ${fmtQty(quantity)} to stock? This will update stock levels automatically.`)) {
+                if (!confirm(`Return ${quantity.toFixed(2)} to stock? This will update stock levels automatically.`)) {
                     return;
                 }
                 
@@ -2838,10 +2823,10 @@
                                         return `
                                             <tr>
                                                 <td>${m.name}</td>
-                                                <td>${formatRawMaterialQty(m.total_quantity)}</td>
+                                                <td>${parseFloat(m.total_quantity).toFixed(2)}</td>
                                                 <td>${m.unit}</td>
-                                                <td>${formatRawMaterialQty(m.available)}</td>
-                                                <td><span class="badge ${shortfall > 0 ? 'badge-danger' : 'badge-success'}">${formatRawMaterialQty(shortfall)}</span></td>
+                                                <td>${parseFloat(m.available || 0).toFixed(2)}</td>
+                                                <td><span class="badge ${shortfall > 0 ? 'badge-danger' : 'badge-success'}">${shortfall.toFixed(2)}</span></td>
                                             </tr>
                                         `;
                                     }).join('')}

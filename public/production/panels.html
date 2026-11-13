@@ -437,7 +437,7 @@
                                         <tr>
                                             <td>${item.item_type === 'raw_material' ? 'Raw Material' : 'Component'}</td>
                                             <td>${item.item_name || '-'}</td>
-                                            <td>${item.item_type === 'raw_material' ? formatRawMaterialQty(item.quantity_required) : item.quantity_required}</td>
+                                            <td>${item.quantity_required}</td>
                                             <td>${item.item_unit || item.unit}</td>
                                             <td>${formatCurrency(itemCost)}</td>
                                             ${currentUser.role === 'admin' ? `
@@ -485,7 +485,7 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Quantity Required *</label>
-                        <input type="number" step="0.001" id="bomQty" class="form-input" required>
+                        <input type="number" step="0.01" id="bomQty" class="form-input" required>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Unit *</label>

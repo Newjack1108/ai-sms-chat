@@ -218,12 +218,6 @@ function formatCurrency(amount) {
     }).format(amount || 0);
 }
 
-function formatRawMaterialQty(value) {
-    const n = parseFloat(value);
-    if (!Number.isFinite(n)) return '0.000';
-    return n.toFixed(3);
-}
-
 // Format date
 function formatDate(dateString) {
     if (!dateString) return '-';
@@ -521,17 +515,13 @@ async function renderProductBomPanel(productId, container, options = {}) {
                                                   : comp.component_type === 'component'
                                                     ? 'Component'
                                                     : 'Built Item';
-                                          const isRawMaterial = comp.component_type === 'raw_material';
-                                          const qtyText = isRawMaterial
-                                              ? formatRawMaterialQty(comp.quantity_required)
-                                              : escapeHtml(String(comp.quantity_required));
                                           return `<tr id="product-bom-row-${comp.id}">
 <td><span class="badge badge-info">${escapeHtml(typeLabel)}</span></td>
 <td>${escapeHtml(comp.component_name || 'Unknown')}</td>
 <td>${
                                               canEdit
-                                                  ? `<input type="number" step="${isRawMaterial ? '0.001' : '0.01'}" class="form-input product-bom-qty" data-comp-id="${comp.id}" value="${qtyText}" style="width: 100px;" data-original="${qtyText}" data-type="${escapeHtml(comp.component_type)}" data-cid="${comp.component_id}" data-unit="${escapeHtml(comp.unit)}">`
-                                                  : qtyText
+                                                  ? `<input type="number" step="0.01" class="form-input product-bom-qty" data-comp-id="${comp.id}" value="${comp.quantity_required}" style="width: 100px;" data-original="${comp.quantity_required}" data-type="${escapeHtml(comp.component_type)}" data-cid="${comp.component_id}" data-unit="${escapeHtml(comp.unit)}">`
+                                                  : escapeHtml(String(comp.quantity_required))
                                           }</td>
 <td>${escapeHtml(comp.unit)}</td>
 ${
@@ -670,11 +660,9 @@ function showProductBomAddForm(container, state, reloadCallback) {
 
     const typeSelect = formWrap.querySelector('.product-bom-new-type');
     const itemSelect = formWrap.querySelector('.product-bom-new-item');
-    const qtyInput = formWrap.querySelector('.product-bom-new-qty');
 
     typeSelect.addEventListener('change', () => {
         const type = typeSelect.value;
-        if (qtyInput) qtyInput.step = type === 'raw_material' ? '0.001' : '0.01';
         itemSelect.innerHTML = '<option value="">Select item</option>';
         if (type === 'raw_material') {
             ProductBomCatalog.stockItems.forEach((item) => {
@@ -834,7 +822,7 @@ ${rawHasSparesCol ? '<th>Spares</th>' : ''}
                               const returned = parseFloat(spare.quantity_returned || 0);
                               return `<tr style="background: #fff3cd;">
 <td><em>Spare: ${escapeHtml(rm.name)}</em></td>
-<td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
 <td>${escapeHtml(rm.unit)}</td>
 ${rawHasLocCol ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
 ${rawHasSparesCol ? '<td></td>' : ''}
@@ -844,7 +832,7 @@ ${rawHasSparesCol ? '<td></td>' : ''}
                     : '';
             return `<tr>
 <td><strong>${escapeHtml(rm.name)}</strong></td>
-<td>${formatRawMaterialQty(rm.quantity)}</td>
+<td>${parseFloat(rm.quantity).toFixed(2)}</td>
 <td>${escapeHtml(rm.unit)}</td>
 ${rawHasLocCol ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
 ${rawHasSparesCol ? '<td></td>' : ''}
@@ -931,7 +919,7 @@ ${stRawLoc ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
                     const returned = parseFloat(spare.quantity_returned || 0);
                     return `<tr style="background: #fff3cd;">
 <td><strong>${escapeHtml(rm.name)}</strong></td>
-<td>${formatRawMaterialQty(spare.quantity_needed)} (L:${formatRawMaterialQty(loaded)} U:${formatRawMaterialQty(used)} R:${formatRawMaterialQty(returned)})</td>
+<td>${parseFloat(spare.quantity_needed || 0).toFixed(2)} (L:${loaded.toFixed(2)} U:${used.toFixed(2)} R:${returned.toFixed(2)})</td>
 <td>${escapeHtml(rm.unit)}</td>
 ${stRawLoc ? `<td>${escapeHtml(rm.location || '-')}</td>` : ''}
 </tr>`;
