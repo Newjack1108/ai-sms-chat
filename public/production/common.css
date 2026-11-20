@@ -375,6 +375,13 @@ body.dashboard-page {
     letter-spacing: -0.02em;
 }
 
+.dashboard-kpi .kpi-note {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+    line-height: 1.3;
+}
+
 .dashboard-kpi.kpi-wip {
     border-color: #c7e0c3;
     background: linear-gradient(180deg, #ffffff 0%, #f1f8f0 100%);

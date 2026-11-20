@@ -17,6 +17,7 @@
         <div class="navbar-right">
             <span class="navbar-user" id="userInfo"></span>
             <a href="dashboard.html" class="btn btn-secondary btn-sm">Dashboard</a>
+            <a href="components.html" class="btn btn-secondary btn-sm">Components</a>
             <a href="panels.html" class="btn btn-secondary btn-sm">Panels</a>
             <button onclick="logout()" class="btn btn-danger btn-sm">Logout</button>
         </div>
@@ -25,7 +26,7 @@
     <div class="container">
         <div class="card">
             <div class="card-header">
-                <h2>Panel WIP Summary</h2>
+                <h2>WIP Summary</h2>
                 <button onclick="loadWIP()" class="btn btn-primary">Refresh</button>
             </div>
             <div id="wipSummary" style="margin-bottom: 20px;">
@@ -65,29 +66,36 @@
         async function loadWIP() {
             try {
                 const data = await apiCall('/wip');
-                const wip = data.wip;
+                const wip = data.wip || [];
+                const kindLabel = (item) => item.item_type === 'component' ? 'Component' : 'Panel';
                 
-                // Calculate totals
                 let totalWIPValue = 0;
-                let totalBuiltQty = 0;
+                let panelWIPValue = 0;
+                let componentWIPValue = 0;
                 let lowStockCount = 0;
                 
-                wip.forEach(panel => {
-                    totalWIPValue += parseFloat(panel.wip_value || 0);
-                    totalBuiltQty += parseFloat(panel.built_quantity || 0);
-                    if (panel.is_low_stock) lowStockCount++;
+                wip.forEach(item => {
+                    const value = parseFloat(item.wip_value || 0);
+                    totalWIPValue += value;
+                    if (item.item_type === 'component') {
+                        componentWIPValue += value;
+                    } else {
+                        panelWIPValue += value;
+                    }
+                    if (item.is_low_stock) lowStockCount++;
                 });
                 
-                // Summary
                 document.getElementById('wipSummary').innerHTML = `
                     <div class="grid grid-3">
                         <div class="card" style="background: #f8f9fa;">
                             <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Total WIP Value</h3>
                             <p style="font-size: 24px; font-weight: bold; color: #667eea; margin: 0;">${formatCurrency(totalWIPValue)}</p>
+                            <p style="margin: 8px 0 0 0; color: #6c757d; font-size: 12px;">Panels and components still on hand. Issued components sit in the panel value.</p>
                         </div>
                         <div class="card" style="background: #f8f9fa;">
-                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Total Built Panels</h3>
-                            <p style="font-size: 24px; font-weight: bold; color: #28a745; margin: 0;">${totalBuiltQty.toFixed(2)}</p>
+                            <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Panels / Components</h3>
+                            <p style="font-size: 24px; font-weight: bold; color: #28a745; margin: 0;">${formatCurrency(panelWIPValue)}</p>
+                            <p style="margin: 8px 0 0 0; color: #6c757d; font-size: 12px;">Components on hand: ${formatCurrency(componentWIPValue)}</p>
                         </div>
                         <div class="card" style="background: #f8f9fa;">
                             <h3 style="margin: 0 0 10px 0; color: #2c3e50;">Low Stock Alerts</h3>
@@ -96,9 +104,8 @@
                     </div>
                 `;
                 
-                // WIP List
                 if (wip.length === 0) {
-                    document.getElementById('wipList').innerHTML = '<p>No panels found</p>';
+                    document.getElementById('wipList').innerHTML = '<p>No panels or components found</p>';
                     return;
                 }
                 
@@ -106,7 +113,8 @@
                     <table class="table">
                         <thead>
                             <tr>
-                                <th>Panel Name</th>
+                                <th>Kind</th>
+                                <th>Name</th>
                                 <th>Type</th>
                                 <th>Built Qty</th>
                                 <th>Min Stock</th>
@@ -119,19 +127,21 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${wip.map(panel => {
-                                const isLow = panel.is_low_stock;
+                            ${wip.map(item => {
+                                const isLow = item.is_low_stock;
+                                const subtype = item.item_subtype || item.panel_type || '-';
                                 return `
                                     <tr style="${isLow ? 'background: #fff3cd;' : ''}">
-                                        <td><strong>${panel.panel_name}</strong></td>
-                                        <td>${panel.panel_type || '-'}</td>
-                                        <td>${panel.built_quantity.toFixed(2)}</td>
-                                        <td>${panel.min_stock.toFixed(2)}</td>
-                                        <td>${formatCurrency(panel.bom_value)}</td>
-                                        <td>${panel.labour_hours.toFixed(2)}</td>
-                                        <td>${formatCurrency(panel.labour_cost)}</td>
-                                        <td><strong>${formatCurrency(panel.true_cost)}</strong></td>
-                                        <td><strong style="color: #667eea;">${formatCurrency(panel.wip_value)}</strong></td>
+                                        <td>${kindLabel(item)}</td>
+                                        <td><strong>${item.item_name || item.panel_name}</strong></td>
+                                        <td>${subtype}</td>
+                                        <td>${Number(item.built_quantity || 0).toFixed(2)}</td>
+                                        <td>${Number(item.min_stock || 0).toFixed(2)}</td>
+                                        <td>${formatCurrency(item.bom_value)}</td>
+                                        <td>${Number(item.labour_hours || 0).toFixed(2)}</td>
+                                        <td>${formatCurrency(item.labour_cost)}</td>
+                                        <td><strong>${formatCurrency(item.true_cost)}</strong></td>
+                                        <td><strong style="color: #667eea;">${formatCurrency(item.wip_value)}</strong></td>
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                     </tr>
                                 `;

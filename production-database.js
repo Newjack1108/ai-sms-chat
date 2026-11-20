@@ -5437,28 +5437,35 @@ class ProductionDatabase {
         }
     }
     
-    // Get WIP data (panels with costs).
-    // Uses stored panels.cost_gbp (kept in sync by updatePanelCost on BOM/labour changes)
-    // instead of recalculating every BOM on each request.
+    // On-hand WIP for panels and components still on the shelf.
+    // Uses stored cost_gbp (kept in sync by updatePanelCost / updateComponentCost).
+    // Quantity already issued to a panel is not here: a component "use" movement
+    // reduces built_quantity, and that cost sits in the panel's own WIP value.
     static async getWIPData() {
-        const panels = await this.getAllPanels();
+        const [panels, components] = await Promise.all([
+            this.getAllPanels(),
+            this.getAllComponents()
+        ]);
         const labourRate = parseFloat(await this.getSetting('labour_rate_per_hour') || 25);
-        const wipData = [];
-        
-        for (const panel of panels) {
-            const labourHours = parseFloat(panel.labour_hours || 0);
+
+        const toRow = (item, itemType) => {
+            const labourHours = parseFloat(item.labour_hours || 0);
             const labourCost = labourHours * labourRate;
-            const trueCost = parseFloat(panel.cost_gbp || 0);
+            const trueCost = parseFloat(item.cost_gbp || 0);
             const bomValue = Math.max(0, trueCost - labourCost);
-            const builtQty = parseFloat(panel.built_quantity || 0);
-            const minStock = parseFloat(panel.min_stock || 0);
-            const wipValue = trueCost * builtQty;
+            const builtQty = parseFloat(item.built_quantity || 0);
+            const minStock = parseFloat(item.min_stock || 0);
+            const onHandQty = Math.max(0, builtQty);
+            const wipValue = trueCost * onHandQty;
             const isLowStock = builtQty <= minStock;
-            
-            wipData.push({
-                panel_id: panel.id,
-                panel_name: panel.name,
-                panel_type: panel.panel_type,
+            return {
+                item_type: itemType,
+                item_id: item.id,
+                item_name: item.name,
+                item_subtype: itemType === 'built_item' ? (item.panel_type || '') : (item.component_type || ''),
+                panel_id: itemType === 'built_item' ? item.id : null,
+                panel_name: item.name,
+                panel_type: itemType === 'built_item' ? item.panel_type : item.component_type,
                 built_quantity: builtQty,
                 min_stock: minStock,
                 bom_value: bomValue,
@@ -5467,10 +5474,13 @@ class ProductionDatabase {
                 true_cost: trueCost,
                 wip_value: wipValue,
                 is_low_stock: isLowStock
-            });
-        }
-        
-        return wipData;
+            };
+        };
+
+        return [
+            ...panels.map(panel => toRow(panel, 'built_item')),
+            ...components.map(component => toRow(component, 'component'))
+        ];
     }
     
     // ============ COMPONENTS OPERATIONS ============
@@ -6975,44 +6985,47 @@ class ProductionDatabase {
     static async getTotalStockValue() {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT COALESCE(SUM(COALESCE(current_quantity, 0)::numeric * COALESCE(cost_per_unit_gbp, 0)::numeric), 0) AS total
+                `SELECT COALESCE(SUM(GREATEST(COALESCE(current_quantity, 0)::numeric, 0) * COALESCE(cost_per_unit_gbp, 0)::numeric), 0) AS total
                  FROM stock_items`
             );
             return parseFloat(result.rows[0]?.total || 0);
         }
         const row = db.prepare(
-            `SELECT COALESCE(SUM(COALESCE(current_quantity, 0) * COALESCE(cost_per_unit_gbp, 0)), 0) AS total
+            `SELECT COALESCE(SUM(MAX(COALESCE(current_quantity, 0), 0) * COALESCE(cost_per_unit_gbp, 0)), 0) AS total
              FROM stock_items`
         ).get();
         return parseFloat(row?.total || 0);
     }
     
     // Inventory value of built panels using stored cost_gbp (no live BOM recompute).
+    // On-hand quantity only: a negative balance does not reduce the total.
     static async getTotalPanelValue() {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT COALESCE(SUM(COALESCE(built_quantity, 0)::numeric * COALESCE(cost_gbp, 0)::numeric), 0) AS total
+                `SELECT COALESCE(SUM(GREATEST(COALESCE(built_quantity, 0)::numeric, 0) * COALESCE(cost_gbp, 0)::numeric), 0) AS total
                  FROM panels`
             );
             return parseFloat(result.rows[0]?.total || 0);
         }
         const row = db.prepare(
-            `SELECT COALESCE(SUM(COALESCE(built_quantity, 0) * COALESCE(cost_gbp, 0)), 0) AS total
+            `SELECT COALESCE(SUM(MAX(COALESCE(built_quantity, 0), 0) * COALESCE(cost_gbp, 0)), 0) AS total
              FROM panels`
         ).get();
         return parseFloat(row?.total || 0);
     }
 
+    // Made components still on the shelf. Issued units are excluded because
+    // recordComponentMovement('use') has already reduced built_quantity.
     static async getTotalComponentValue() {
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT COALESCE(SUM(COALESCE(built_quantity, 0)::numeric * COALESCE(cost_gbp, 0)::numeric), 0) AS total
+                `SELECT COALESCE(SUM(GREATEST(COALESCE(built_quantity, 0)::numeric, 0) * COALESCE(cost_gbp, 0)::numeric), 0) AS total
                  FROM components`
             );
             return parseFloat(result.rows[0]?.total || 0);
         }
         const row = db.prepare(
-            `SELECT COALESCE(SUM(COALESCE(built_quantity, 0) * COALESCE(cost_gbp, 0)), 0) AS total
+            `SELECT COALESCE(SUM(MAX(COALESCE(built_quantity, 0), 0) * COALESCE(cost_gbp, 0)), 0) AS total
              FROM components`
         ).get();
         return parseFloat(row?.total || 0);

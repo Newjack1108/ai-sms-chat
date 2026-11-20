@@ -1941,9 +1941,12 @@ router.get('/wip', requireProductionAuth, async (req, res) => {
 
 router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
     try {
-        // Panel/WIP totals use stored cost_gbp (same metric); avoid live BOM recompute + double work.
-        const [totalPanelValue, totalStockValue, lastWeekSummary, lowStockPanels, recentOrders] = await Promise.all([
+        // Stored cost_gbp only (no live BOM recompute).
+        // WIP = panels on hand + components still on the shelf.
+        // Total stock = raw materials + that same WIP, so the two figures overlap.
+        const [totalPanelValue, totalComponentValue, rawStockValue, lastWeekSummary, lowStockPanels, recentOrders] = await Promise.all([
             ProductionDatabase.getTotalPanelValue(),
+            ProductionDatabase.getTotalComponentValue(),
             ProductionDatabase.getTotalStockValue(),
             ProductionDatabase.getLastWeekPlannerSummary(),
             ProductionDatabase.getLowStockPanels(),
@@ -1954,6 +1957,9 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
                 includeProducts: false
             })
         ]);
+        const roundMoney = (value) => Math.round((parseFloat(value) || 0) * 100) / 100;
+        const totalWipValue = roundMoney(totalPanelValue + totalComponentValue);
+        const totalStockValue = roundMoney(rawStockValue + totalWipValue);
 
         const panel_stock_shortages = lowStockPanels.map(panel => ({
             name: panel.name,
@@ -1965,9 +1971,11 @@ router.get('/dashboard/summary', requireProductionAuth, async (req, res) => {
         res.json({
             success: true,
             summary: {
-                total_wip_value: totalPanelValue,
+                total_wip_value: totalWipValue,
                 total_stock_value: totalStockValue,
-                total_panel_value: totalPanelValue,
+                total_panel_value: roundMoney(totalPanelValue),
+                total_component_value: roundMoney(totalComponentValue),
+                total_raw_stock_value: roundMoney(rawStockValue),
                 last_week: lastWeekSummary,
                 panel_stock_shortages,
                 recent_orders: recentOrders.orders
