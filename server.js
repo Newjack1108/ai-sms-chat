@@ -9,7 +9,8 @@ const session = require('express-session');
 const twilio = require('twilio');
 const OpenAI = require('openai');
 // Import database modules conditionally
-const { isPostgreSQL } = require('./database-pg');
+const { isPostgreSQL, pool: pgPool } = require('./database-pg');
+const connectPgSimple = require('connect-pg-simple');
 
 // Database will be selected at runtime
 let LeadDatabase;
@@ -81,7 +82,21 @@ app.use((error, req, res, next) => {
 });
 
 // Session middleware
+// Persist sessions in Postgres when available so logins survive deploys/restarts.
+// Falls back to express-session's in-memory store when running on SQLite (local dev).
+let sessionStore;
+if (isPostgreSQL && pgPool) {
+    const PgSessionStore = connectPgSimple(session);
+    sessionStore = new PgSessionStore({
+        pool: pgPool,
+        tableName: 'user_sessions',
+        createTableIfMissing: true
+    });
+    sessionStore.on('error', (err) => console.error('Session store error:', err.message));
+}
+
 app.use(session({
+    ...(sessionStore ? { store: sessionStore } : {}),
     secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
     resave: false,
     saveUninitialized: false,

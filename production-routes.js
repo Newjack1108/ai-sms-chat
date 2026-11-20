@@ -1779,6 +1779,16 @@ router.delete('/components/:id', requireProductionAuth, requireBasicsEditor, asy
         res.json({ success: true });
     } catch (error) {
         console.error('Delete component error:', error);
+        const isFkError = error && (error.code === '23503' || error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY');
+        if (isFkError) {
+            const hasMovements = /component_movements/.test(String(error.constraint || error.message || ''));
+            return res.status(409).json({
+                success: false,
+                error: hasMovements
+                    ? "This component has stock history (stock movements), so it can't be deleted."
+                    : "This component is still used elsewhere (e.g. in a built item, product or order), so it can't be deleted. Remove it from those first."
+            });
+        }
         res.status(500).json({ success: false, error: 'Failed to delete component' });
     }
 });
