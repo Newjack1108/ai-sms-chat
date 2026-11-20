@@ -143,6 +143,15 @@ function isBotBasicsAllowed(method, path) {
     if (/^\/products\/\d+\/duplicate$/.test(p) && m === 'POST') return true;
     if (/^\/products\/\d+\/requirements$/.test(p) && m === 'GET') return true;
 
+    // Read-only order views (GET only). Note: GET /orders/:id, /load-sheet and
+    // /production-setup already run the automatic LeadLock sync server-side.
+    // Deliberately NOT allowed: /orders/:id/leadlock/status-sync and all non-GET methods.
+    if (m === 'GET') {
+        if (p === '/orders' || p === '/orders/for-select') return true;
+        if (/^\/orders\/\d+$/.test(p)) return true;
+        if (/^\/orders\/\d+\/(products|load-sheet|production-setup|spares)$/.test(p)) return true;
+    }
+
     if (p === '/suppliers' && (m === 'GET' || m === 'POST')) return true;
     if (/^\/suppliers\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
 

@@ -90,7 +90,14 @@ test('bot cannot reach payroll, users, orders, movements, or sales push', () => 
     const denied = [
         ['GET', '/users'],
         ['GET', '/clock/payroll/2026-11-16'],
-        ['GET', '/orders'],
+        ['POST', '/orders'],
+        ['PUT', '/orders/338'],
+        ['PATCH', '/orders/338/flags'],
+        ['POST', '/orders/338/acknowledge'],
+        ['POST', '/orders/338/spares'],
+        ['GET', '/orders/338/leadlock/status-sync'],
+        ['GET', '/orders/338/install-cost'],
+        ['GET', '/orders/338/installations'],
         ['POST', '/purchase-orders'],
         ['POST', '/stock/4/movement'],
         ['POST', '/components/2/movement'],
@@ -106,6 +113,16 @@ test('bot cannot reach payroll, users, orders, movements, or sales push', () => 
         const { nextCalled, res } = runMiddleware(restrictBotToBasics, 'bot', method, reqPath);
         assert.strictEqual(nextCalled, false, method + ' ' + reqPath);
         assert.strictEqual(res.statusCode, 403);
+    }
+});
+
+test('bot can GET order read endpoints only', () => {
+    const allowed = ['/orders', '/orders/for-select', '/orders/338', '/orders/338/products',
+        '/orders/338/load-sheet', '/orders/338/production-setup', '/orders/338/spares'];
+    for (const reqPath of allowed) {
+        assert.strictEqual(isBotBasicsAllowed('GET', reqPath), true, reqPath);
+        const { nextCalled } = runMiddleware(restrictBotToBasics, 'bot', 'GET', reqPath);
+        assert.strictEqual(nextCalled, true, reqPath);
     }
 });
 
