@@ -7979,19 +7979,20 @@ class ProductionDatabase {
         ).all(...paramsLite);
     }
     
+    /** Name lookup for LeadLock matching: active products only, so inactive products are never auto-matched. */
     static async getProductByName(name) {
         if (!name || typeof name !== 'string') return null;
         const trimmed = name.trim();
         if (!trimmed) return null;
         if (isPostgreSQL) {
             const result = await pool.query(
-                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1`,
+                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER($1) AND COALESCE(status, 'active') = 'active' ORDER BY id LIMIT 1`,
                 [trimmed]
             );
             return result.rows[0] || null;
         } else {
             return db.prepare(
-                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1`
+                `SELECT * FROM finished_products WHERE LOWER(TRIM(name)) = LOWER(?) AND COALESCE(status, 'active') = 'active' ORDER BY id LIMIT 1`
             ).get(trimmed) || null;
         }
     }
