@@ -89,6 +89,10 @@ function latestApprovableTimesheetWeekStart(date = new Date()) {
 // API helper function
 async function apiCall(endpoint, options = {}) {
     try {
+        if (window.__productionRole === 'bot' && !isBotBasicsEndpoint(endpoint, options.method)) {
+            window.location.href = '/production/products.html';
+            return null;
+        }
         const response = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
             credentials: 'same-origin', // Include cookies for session
@@ -187,6 +191,7 @@ async function checkAuth() {
             }
         }
         const data = await response.json();
+        window.__productionRole = data.user && data.user.role;
         return data.user;
     } catch (error) {
         // Only redirect on network/auth errors, not on JSON parse errors
@@ -409,10 +414,38 @@ function renderLoadSheetSalesOnlyLinesHtml(loadSheet) {
 </table>`;
 }
 
-/** Whether the user may edit product BOM lines (matches API requireAdminOfficeOrSupervisor). */
+/** Whether the user may edit product BOM lines (admin, office, supervisor, or Grok bot). */
 function canEditProductBom(user) {
     if (!user || !user.role) return false;
-    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor';
+    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor' || user.role === 'bot';
+}
+
+/** Catalog basics: raw materials, components, built items, products, suppliers. */
+function canEditBasics(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'office' || user.role === 'supervisor' || user.role === 'bot';
+}
+
+/** Built-item and component record edits shown in the UI (admin, plus Grok bot). */
+function canEditBuiltBasics(user) {
+    if (!user || !user.role) return false;
+    return user.role === 'admin' || user.role === 'bot';
+}
+
+/** Client-side mirror of the Grok bot catalog allowlist. */
+function isBotBasicsEndpoint(endpoint, method) {
+    const path = String(endpoint || '').split('?')[0];
+    const m = String(method || 'GET').toUpperCase();
+    if (m === 'POST' && path === '/logout') return true;
+    if (m === 'GET' && (path === '/me' || path === '/wip')) return true;
+    if (m === 'GET' && /^\/settings\/[^/]+$/.test(path)) return true;
+    if (path.includes('push-to-sales') || path.includes('management-checked')) return false;
+    if (/\/movement$/.test(path) && m !== 'GET') return false;
+    return path === '/stock' || path.startsWith('/stock/')
+        || path === '/components' || path.startsWith('/components/')
+        || path === '/panels' || path.startsWith('/panels/')
+        || path === '/products' || path.startsWith('/products/')
+        || path === '/suppliers' || path.startsWith('/suppliers/');
 }
 
 /** Whether the user may add/remove/edit quantities on order production lines (matches API requireManager). */
@@ -1059,6 +1092,47 @@ function restrictedFieldStaffAllowedPages(user) {
     return base;
 }
 
+/** Grok bot: catalog basics only. */
+function isBasicsBot(user) {
+    return user && user.role === 'bot';
+}
+
+function botAllowedPages() {
+    return ['products.html', 'stock.html', 'components.html', 'panels.html', 'suppliers.html', 'wip.html', 'login.html'];
+}
+
+async function restrictBotAccess() {
+    const user = await checkAuth();
+    if (!isBasicsBot(user)) return false;
+    const currentPage = window.location.pathname.split('/').pop();
+    if (!botAllowedPages().includes(currentPage) && !window.location.pathname.includes('login.html')) {
+        window.location.href = '/production/products.html';
+        return true;
+    }
+    return false;
+}
+
+function ensureBotBasicsNav() {
+    const right = document.querySelector('.navbar-right');
+    if (!right || document.getElementById('botBasicsNav')) return;
+    const nav = document.createElement('span');
+    nav.id = 'botBasicsNav';
+    const links = [
+        ['stock.html', 'Raw Materials'],
+        ['components.html', 'Components'],
+        ['panels.html', 'Built Items'],
+        ['products.html', 'Products'],
+        ['suppliers.html', 'Suppliers'],
+        ['wip.html', 'WIP']
+    ];
+    nav.innerHTML = links
+        .map(([href, label]) => `<a href="${href}" class="btn btn-secondary btn-sm">${label}</a>`)
+        .join(' ');
+    const logoutBtn = right.querySelector('button');
+    if (logoutBtn) right.insertBefore(nav, logoutBtn);
+    else right.appendChild(nav);
+}
+
 /** Office: installation calendar only. */
 function isOfficeCalendarOnly(user) {
     return user && user.role === 'office';
@@ -1098,6 +1172,7 @@ async function restrictOfficeAccess() {
 
 // Initialize navbar
 async function initNavbar() {
+    if (await restrictBotAccess()) return null;
     // Office users only belong on the installation calendar
     if (await restrictOfficeAccess()) return null;
 
@@ -1108,10 +1183,14 @@ async function initNavbar() {
             userInfo.textContent = `${user.username} (${user.role})`;
         }
         
-        // Hide admin-only menu items for non-admin users
+        // Hide admin-only menu items for non-admin users.
+        // Grok bot keeps catalog add buttons marked basics-edit.
         if (user.role !== 'admin') {
             const adminItems = document.querySelectorAll('.admin-only');
-            adminItems.forEach(item => item.style.display = 'none');
+            adminItems.forEach(item => {
+                if (user.role === 'bot' && item.classList.contains('basics-edit')) return;
+                item.style.display = 'none';
+            });
         }
         
         // Hide clock/holiday admin items unless admin
@@ -1171,6 +1250,13 @@ async function initNavbar() {
         if (user.role !== 'admin' && user.role !== 'supervisor') {
             const officeOnlyItems = document.querySelectorAll('.office-only');
             officeOnlyItems.forEach(item => item.style.display = 'none');
+        }
+
+        if (isBasicsBot(user)) {
+            document.querySelectorAll('a[href="dashboard.html"], a[href="inspections.html"], .hide-from-bot').forEach(item => {
+                item.style.display = 'none';
+            });
+            ensureBotBasicsNav();
         }
     }
 }

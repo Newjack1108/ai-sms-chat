@@ -138,7 +138,7 @@ function initializeSQLite() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
+            role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer', 'bot')),
             is_driver INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -1422,7 +1422,7 @@ function initializeSQLite() {
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer', 'bot')),
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP${extraColSql}
                 )
             `);
@@ -1448,6 +1448,46 @@ function initializeSQLite() {
         }
     } catch (error) {
         console.log('⚠️ Supervisor role migration check skipped:', error.message);
+    }
+
+    // Migrate production_users role constraint to include the Grok bot role
+    try {
+        const tableInfoBot = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='production_users'").get();
+        if (tableInfoBot && tableInfoBot.sql && !tableInfoBot.sql.includes("'bot'")) {
+            console.log('🔄 Migrating production_users table to support bot role...');
+            const botUserCols = db.prepare('PRAGMA table_info(production_users)').all();
+            const colNames = botUserCols.map(c => c.name);
+            const optional = [
+                { name: 'status', def: "status TEXT DEFAULT 'active'", select: "COALESCE(status, 'active')" },
+                { name: 'is_driver', def: 'is_driver INTEGER DEFAULT 0', select: 'COALESCE(is_driver, 0)' },
+                { name: 'employment_start_date', def: 'employment_start_date TEXT', select: 'employment_start_date' }
+            ].filter(c => colNames.includes(c.name));
+            const extraColSql = optional.length
+                ? ',\n                        ' + optional.map(c => c.def).join(',\n                        ')
+                : '';
+            const insertExtraSql = optional.length ? ', ' + optional.map(c => c.name).join(', ') : '';
+            const selectExtraSql = optional.length ? ', ' + optional.map(c => c.select).join(', ') : '';
+
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS production_users_bot_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer', 'bot')),
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP${extraColSql}
+                )
+            `);
+            db.exec(`
+                INSERT INTO production_users_bot_new (id, username, password_hash, role, created_at${insertExtraSql})
+                SELECT id, username, password_hash, role, created_at${selectExtraSql}
+                FROM production_users
+            `);
+            db.exec('DROP TABLE production_users');
+            db.exec('ALTER TABLE production_users_bot_new RENAME TO production_users');
+            console.log('✅ Migrated production_users table to support bot role');
+        }
+    } catch (error) {
+        console.log('⚠️ Bot role migration check skipped:', error.message);
     }
     
     // Migrate timesheet_entries to add hour calculation columns
@@ -1948,7 +1988,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(100) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer')),
+                role VARCHAR(20) NOT NULL CHECK(role IN ('admin', 'office', 'supervisor', 'staff', 'installer', 'bot')),
                 is_driver BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -3154,9 +3194,9 @@ async function initializePostgreSQL() {
                 await pool.query(`
                     ALTER TABLE production_users 
                     ADD CONSTRAINT production_users_role_check 
-                    CHECK (role IN ('admin', 'office', 'supervisor', 'staff', 'installer'))
+                    CHECK (role IN ('admin', 'office', 'supervisor', 'staff', 'installer', 'bot'))
                 `);
-                console.log('✅ Updated production_users role constraint (admin, office, supervisor, staff, installer)');
+                console.log('✅ Updated production_users role constraint (admin, office, supervisor, staff, installer, bot)');
             } catch (e) {
                 // Constraint might already be correct or table doesn't exist yet
                 if (!e.message.includes('does not exist')) {
@@ -4113,7 +4153,7 @@ class ProductionDatabase {
             isDriver === undefined
                 ? !!(existing.is_driver === true || existing.is_driver === 1)
                 : !!isDriver;
-        if (role === 'admin' || role === 'office' || role === 'supervisor') {
+        if (role === 'admin' || role === 'office' || role === 'supervisor' || role === 'bot') {
             driverVal = false;
         }
         const setStart = employmentStartDate !== undefined;

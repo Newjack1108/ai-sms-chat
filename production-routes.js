@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { ProductionDatabase } = require('./production-database');
-const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, restrictOfficeToCalendarBooking, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
+const { requireProductionAuth, requireAdmin, requireAdminOrOffice, requireAdminOfficeOrSupervisor, requireBasicsEditor, restrictOfficeToCalendarBooking, restrictBotToBasics, requireManager, hasInstallerRights, hashPassword } = require('./production-auth');
 const BackupService = require('./backup-service');
 const crypto = require('crypto');
 const twilio = require('twilio');
@@ -299,6 +299,8 @@ function normalizeProductStatus(rawStatus) {
 
 // Office role: calendar view + create booking only (runs after login; login has no office session yet)
 router.use(restrictOfficeToCalendarBooking);
+// Grok bot: catalog basics only
+router.use(restrictBotToBasics);
 
 router.post('/login', async (req, res) => {
     try {
@@ -499,7 +501,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required fields' });
         }
         
-        if (!['admin', 'office', 'supervisor', 'staff', 'installer'].includes(role)) {
+        if (!['admin', 'office', 'supervisor', 'staff', 'installer', 'bot'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
 
@@ -508,7 +510,7 @@ router.post('/users', requireProductionAuth, requireAdmin, async (req, res) => {
             req.body.is_driver === 'true' ||
             req.body.is_driver === 1 ||
             req.body.is_driver === '1';
-        if (role === 'admin' || role === 'office' || role === 'supervisor') {
+        if (role === 'admin' || role === 'office' || role === 'supervisor' || role === 'bot') {
             isDriver = false;
         }
         
@@ -559,7 +561,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
         const { username, role, password } = req.body;
         const userId = parseInt(req.params.id);
         
-        if (role && !['admin', 'office', 'supervisor', 'staff', 'installer'].includes(role)) {
+        if (role && !['admin', 'office', 'supervisor', 'staff', 'installer', 'bot'].includes(role)) {
             return res.status(400).json({ success: false, error: 'Invalid role' });
         }
         
@@ -605,7 +607,7 @@ router.put('/users/:id', requireProductionAuth, requireAdmin, async (req, res) =
                     req.body.is_driver === 1 ||
                     req.body.is_driver === '1';
             }
-            if (nextRole === 'admin' || nextRole === 'office' || nextRole === 'supervisor') {
+            if (nextRole === 'admin' || nextRole === 'office' || nextRole === 'supervisor' || nextRole === 'bot') {
                 isDriverUpdate = false;
             }
             const updatedUser = await ProductionDatabase.updateUser(
@@ -747,7 +749,7 @@ router.get('/stock/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/stock', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/stock', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const { name, description, unit, current_quantity, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
         if (!name || !unit) {
@@ -779,7 +781,7 @@ router.post('/stock', requireProductionAuth, requireAdminOfficeOrSupervisor, asy
     }
 });
 
-router.put('/stock/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/stock/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         const { name, description, unit, min_quantity, location, cost_per_unit_gbp, category, suppliers } = req.body;
@@ -808,7 +810,7 @@ router.put('/stock/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, 
     }
 });
 
-router.delete('/stock/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/stock/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id);
         await ProductionDatabase.deleteStockItem(itemId);
@@ -837,7 +839,7 @@ router.get('/stock/:id/suppliers', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/stock/:id/suppliers', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id, 10);
         if (Number.isNaN(itemId)) {
@@ -859,7 +861,7 @@ router.put('/stock/:id/suppliers', requireProductionAuth, requireAdminOfficeOrSu
     }
 });
 
-router.put('/stock/:id/suppliers/preferred', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/stock/:id/suppliers/preferred', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const itemId = parseInt(req.params.id, 10);
         const supplierId = parseInt(req.body.supplier_id, 10);
@@ -969,7 +971,7 @@ router.get('/suppliers', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/suppliers', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const { name, code, contact_name, email, phone, address, notes, is_active } = req.body;
         if (!name || !String(name).trim()) {
@@ -994,7 +996,7 @@ router.post('/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor,
     }
 });
 
-router.put('/suppliers/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/suppliers/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const supplierId = parseInt(req.params.id, 10);
         if (Number.isNaN(supplierId)) {
@@ -1026,7 +1028,7 @@ router.put('/suppliers/:id', requireProductionAuth, requireAdminOfficeOrSupervis
     }
 });
 
-router.delete('/suppliers/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/suppliers/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const supplierId = parseInt(req.params.id, 10);
         if (Number.isNaN(supplierId)) {
@@ -1375,7 +1377,7 @@ router.get('/panels', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/panels', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
@@ -1438,7 +1440,7 @@ router.get('/panels/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/panels/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { name, description, panel_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
@@ -1461,7 +1463,7 @@ router.put('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervisor,
     }
 });
 
-router.delete('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/panels/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         await ProductionDatabase.deletePanel(panelId);
@@ -1490,7 +1492,7 @@ router.delete('/panels/:id', requireProductionAuth, requireAdminOfficeOrSupervis
     }
 });
 
-router.post('/panels/:id/duplicate', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/panels/:id/duplicate', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const panel = await ProductionDatabase.duplicatePanel(panelId);
@@ -1558,7 +1560,7 @@ router.get('/panels/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/panels/:id/bom', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/panels/:id/bom', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const panelId = parseInt(req.params.id);
         const { item_type, item_id, quantity_required, unit } = req.body;
@@ -1599,7 +1601,7 @@ router.post('/panels/:id/bom', requireProductionAuth, requireAdminOfficeOrSuperv
     }
 });
 
-router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/panels/:id/bom/:bomId', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteBOMItem(bomId);
@@ -1707,7 +1709,7 @@ router.get('/components', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/components', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
         if (!name) {
@@ -1748,7 +1750,7 @@ router.get('/components/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/components/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/components/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { name, description, component_type, status, built_quantity, min_stock, max_stock, labour_hours } = req.body;
@@ -1770,7 +1772,7 @@ router.put('/components/:id', requireProductionAuth, requireAdminOfficeOrSupervi
     }
 });
 
-router.delete('/components/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/components/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         await ProductionDatabase.deleteComponent(componentId);
@@ -1805,7 +1807,7 @@ router.get('/components/:id/bom', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/components/:id/bom', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/components/:id/bom', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const componentId = parseInt(req.params.id);
         const { stock_item_id, quantity_required, unit } = req.body;
@@ -1849,7 +1851,7 @@ router.post('/components/:id/bom', requireProductionAuth, requireAdminOfficeOrSu
     }
 });
 
-router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/components/:id/bom/:bomId', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const bomId = parseInt(req.params.bomId);
         await ProductionDatabase.deleteComponentBOMItem(bomId);
@@ -2124,7 +2126,7 @@ router.get('/products/export', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.post('/products', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/products', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked, sales_gross_margin_pct } = req.body;
         const normalizedProductType = normalizeProductType(product_type);
@@ -2181,7 +2183,7 @@ router.get('/products/:id', requireProductionAuth, async (req, res) => {
     }
 });
 
-router.put('/products/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/products/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { name, description, product_type, leadlock_category, category, status, estimated_load_time, estimated_install_time, estimated_travel_time, number_of_boxes, is_optional_extra, management_checked, sales_gross_margin_pct } = req.body;
@@ -2240,7 +2242,7 @@ router.put('/products/:id/management-checked', requireProductionAuth, requireAdm
     }
 });
 
-router.delete('/products/:id', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/products/:id', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         await ProductionDatabase.deleteProduct(productId);
@@ -2267,7 +2269,7 @@ router.get('/products/:id/suppliers', requireProductionAuth, async (req, res) =>
     }
 });
 
-router.put('/products/:id/suppliers', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/products/:id/suppliers', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id, 10);
         if (Number.isNaN(productId)) {
@@ -2492,7 +2494,7 @@ router.post('/products/:id/push-to-sales', requireProductionAuth, requireAdminOf
     }
 });
 
-router.post('/products/:id/components', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/products/:id/components', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const { component_type, component_id, quantity_required, unit } = req.body;
@@ -2519,7 +2521,7 @@ router.post('/products/:id/components', requireProductionAuth, requireAdminOffic
     }
 });
 
-router.put('/products/:id/components/:compId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.put('/products/:id/components/:compId', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
         const { component_type, component_id, quantity_required, unit } = req.body;
@@ -2545,7 +2547,7 @@ router.put('/products/:id/components/:compId', requireProductionAuth, requireAdm
     }
 });
 
-router.delete('/products/:id/components/:compId', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.delete('/products/:id/components/:compId', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const compId = parseInt(req.params.compId);
         await ProductionDatabase.deleteProductComponent(compId);
@@ -2556,7 +2558,7 @@ router.delete('/products/:id/components/:compId', requireProductionAuth, require
     }
 });
 
-router.post('/products/:id/duplicate', requireProductionAuth, requireAdminOfficeOrSupervisor, async (req, res) => {
+router.post('/products/:id/duplicate', requireProductionAuth, requireBasicsEditor, async (req, res) => {
     try {
         const productId = parseInt(req.params.id);
         const originalProduct = await ProductionDatabase.getProductById(productId);

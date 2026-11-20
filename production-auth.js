@@ -85,6 +85,85 @@ function requireAdminOfficeOrSupervisor(req, res, next) {
     });
 }
 
+/** Catalog basics: admin, office, supervisor, and the Grok bot role. */
+function requireBasicsEditor(req, res, next) {
+    const role = req.session && req.session.production_user && req.session.production_user.role;
+    if (role === 'admin' || role === 'office' || role === 'supervisor' || role === 'bot') {
+        return next();
+    }
+
+    return res.status(403).json({
+        success: false,
+        error: 'Catalog edit privileges required'
+    });
+}
+
+/**
+ * Grok bot may read and edit catalog basics only:
+ * raw materials, components, built items, products, suppliers, and WIP.
+ * Stock/build movements, sales push, payroll, orders, and user admin stay closed.
+ */
+function isBotBasicsAllowed(method, path) {
+    const p = (path || '/').split('?')[0];
+    const m = (method || 'GET').toUpperCase();
+    if (m === 'GET' && p === '/me') return true;
+    if (m === 'POST' && (p === '/login' || p === '/logout')) return true;
+    if (m === 'GET' && p === '/wip') return true;
+    if (m === 'GET' && /^\/settings\/[^/]+$/.test(p)) return true;
+
+    if (p === '/stock/low-stock' && m === 'GET') return true;
+    if (p === '/stock/categories' && m === 'GET') return true;
+    if (p === '/stock' && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/stock\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
+    if (/^\/stock\/\d+\/suppliers$/.test(p) && (m === 'GET' || m === 'PUT')) return true;
+    if (/^\/stock\/\d+\/suppliers\/preferred$/.test(p) && m === 'PUT') return true;
+    if (/^\/stock\/\d+\/movements$/.test(p) && m === 'GET') return true;
+
+    if (p === '/components' && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/components\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
+    if (/^\/components\/\d+\/bom$/.test(p) && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/components\/\d+\/bom\/\d+$/.test(p) && m === 'DELETE') return true;
+    if (/^\/components\/\d+\/(cost|true-cost|movements)$/.test(p) && m === 'GET') return true;
+
+    if (p === '/panels' && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/panels\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
+    if (/^\/panels\/\d+\/duplicate$/.test(p) && m === 'POST') return true;
+    if (/^\/panels\/\d+\/bom$/.test(p) && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/panels\/\d+\/bom\/\d+$/.test(p) && m === 'DELETE') return true;
+    if (/^\/panels\/\d+\/(bom-value|true-cost|movements)$/.test(p) && m === 'GET') return true;
+
+    if (p === '/products' && (m === 'GET' || m === 'POST')) return true;
+    if (p === '/products/export' && m === 'GET') return true;
+    if (/^\/products\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
+    if (/^\/products\/\d+\/suppliers$/.test(p) && (m === 'GET' || m === 'PUT')) return true;
+    if (/^\/products\/\d+\/components$/.test(p) && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/products\/\d+\/components\/\d+$/.test(p) && (m === 'PUT' || m === 'DELETE')) return true;
+    if (/^\/products\/\d+\/cost$/.test(p) && m === 'GET') return true;
+    if (/^\/products\/\d+\/cost\/refresh$/.test(p) && m === 'POST') return true;
+    if (/^\/products\/\d+\/duplicate$/.test(p) && m === 'POST') return true;
+    if (/^\/products\/\d+\/requirements$/.test(p) && m === 'GET') return true;
+
+    if (p === '/suppliers' && (m === 'GET' || m === 'POST')) return true;
+    if (/^\/suppliers\/\d+$/.test(p) && (m === 'GET' || m === 'PUT' || m === 'DELETE')) return true;
+
+    return false;
+}
+
+/** Grok bot: catalog basics only. Other roles are unchanged. */
+function restrictBotToBasics(req, res, next) {
+    const role = req.session && req.session.production_user && req.session.production_user.role;
+    if (role !== 'bot') {
+        return next();
+    }
+    if (isBotBasicsAllowed(req.method, req.path)) {
+        return next();
+    }
+    return res.status(403).json({
+        success: false,
+        error: 'Grok Bot can only read and edit catalog basics'
+    });
+}
+
 // Legacy helper (unused): previously blocked supervisors from tasks/reminders.
 function denySupervisor(req, res, next) {
     if (req.session && req.session.production_user &&
@@ -234,9 +313,12 @@ module.exports = {
     requireOffice,
     requireAdminOrOffice,
     requireAdminOfficeOrSupervisor,
+    requireBasicsEditor,
     denySupervisor,
     restrictOfficeToCalendarBooking,
     isOfficeCalendarAllowed,
+    restrictBotToBasics,
+    isBotBasicsAllowed,
     requireManager, // Legacy - kept for backward compatibility
     hasInstallerRights,
     loginProductionUser,

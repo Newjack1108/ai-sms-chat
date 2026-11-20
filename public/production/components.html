@@ -25,7 +25,7 @@
         <div class="card">
             <div class="card-header">
                 <h2>Components</h2>
-                <button onclick="showAddComponentModal()" class="btn btn-primary admin-only">Add Component</button>
+                <button onclick="showAddComponentModal()" class="btn btn-primary admin-only basics-edit">Add Component</button>
             </div>
             <div class="page-toolbar">
                 <input id="componentSearchInput" type="text" class="form-input" placeholder="Search name, description, type or status..." autocomplete="off">
@@ -212,8 +212,8 @@
                                     <td>
                                         <button onclick="viewBOM(${component.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewComponentDetails(${component.id})" class="btn btn-success btn-sm">Details</button>
-                                        ${currentUser.role === 'admin' ? `<button onclick="editComponent(${component.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                        ${currentUser.role === 'admin' ? `<button onclick="deleteComponent(${component.id}, event)" data-component-id="${component.id}" data-component-name="${(component.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                        ${canEditBuiltBasics(currentUser) ? `<button onclick="editComponent(${component.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        ${canEditBuiltBasics(currentUser) ? `<button onclick="deleteComponent(${component.id}, event)" data-component-id="${component.id}" data-component-name="${(component.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -299,7 +299,7 @@
                             </div>
                             
                             <h4>Component Movements</h4>
-                            <button onclick="showComponentMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>
+                            ${(currentUser && currentUser.role !== 'bot') ? `<button onclick="showComponentMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>` : ''}
                             <table class="table">
                                 <thead>
                                     <tr>
@@ -393,7 +393,7 @@
                 document.getElementById('bomModalTitle').textContent = 'Component BOM';
                 document.getElementById('bomContent').innerHTML = `
                     <div style="margin-bottom: 20px;">
-                        ${currentUser.role === 'admin' ? `
+                        ${canEditBuiltBasics(currentUser) ? `
                             <button onclick="showAddBOMItem(${componentId})" class="btn btn-primary">Add BOM Item</button>
                         ` : ''}
                     </div>
@@ -404,11 +404,11 @@
                                 <th>Quantity Required</th>
                                 <th>Unit</th>
                                 <th>Cost (GBP)</th>
-                                ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
+                                ${canEditBuiltBasics(currentUser) ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '5' : '4'}">No BOM items</td></tr>` : (() => {
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${canEditBuiltBasics(currentUser) ? '5' : '4'}">No BOM items</td></tr>` : (() => {
                                 let totalCost = 0;
                                 const rows = bomData.bom.map(item => {
                                     const itemCost = parseFloat(item.item_cost_gbp || 0);
@@ -419,7 +419,7 @@
                                             <td>${item.quantity_required}</td>
                                             <td>${item.stock_item_unit || item.unit}</td>
                                             <td>${formatCurrency(itemCost)}</td>
-                                            ${currentUser.role === 'admin' ? `
+                                            ${canEditBuiltBasics(currentUser) ? `
                                                 <td>
                                                     <button onclick="deleteBOMItem(${item.id}, ${componentId})" class="btn btn-danger btn-sm">Delete</button>
                                                 </td>
@@ -430,7 +430,7 @@
                                 return rows + `<tr style="font-weight: bold; background-color: #f8f9fa;">
                                     <td colspan="3" style="text-align: right;">Total BOM Cost:</td>
                                     <td>${formatCurrency(totalCost)}</td>
-                                    ${currentUser.role === 'admin' ? '<td></td>' : ''}
+                                    ${canEditBuiltBasics(currentUser) ? '<td></td>' : ''}
                                 </tr>`;
                             })()}
                         </tbody>

@@ -25,7 +25,7 @@
         <div class="card">
             <div class="card-header">
                 <h2>Built Items</h2>
-                <button onclick="showAddPanelModal()" class="btn btn-primary admin-only">Add Built Item</button>
+                <button onclick="showAddPanelModal()" class="btn btn-primary admin-only basics-edit">Add Built Item</button>
             </div>
             <div class="page-toolbar">
                 <input id="panelSearchInput" type="text" class="form-input" placeholder="Search name, description, type or status..." autocomplete="off">
@@ -230,9 +230,9 @@
                                     <td>
                                         <button onclick="viewBOM(${panel.id})" class="btn btn-primary btn-sm">View BOM</button>
                                         <button onclick="viewPanelDetails(${panel.id})" class="btn btn-success btn-sm">Details</button>
-                                        ${currentUser.role === 'admin' ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                        ${currentUser.role === 'admin' ? `<button onclick="duplicateBuiltItem(${panel.id})" class="btn btn-info btn-sm">Duplicate</button>` : ''}
-                                        ${currentUser.role === 'admin' ? `<button onclick="deletePanel(${panel.id}, event)" data-panel-id="${panel.id}" data-panel-name="${(panel.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                        ${canEditBuiltBasics(currentUser) ? `<button onclick="editPanel(${panel.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                        ${canEditBuiltBasics(currentUser) ? `<button onclick="duplicateBuiltItem(${panel.id})" class="btn btn-info btn-sm">Duplicate</button>` : ''}
+                                        ${canEditBuiltBasics(currentUser) ? `<button onclick="deletePanel(${panel.id}, event)" data-panel-id="${panel.id}" data-panel-name="${(panel.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                     </td>
                                 </tr>
                             `;
@@ -318,7 +318,7 @@
                             </div>
                             
                             <h4>Built Item Movements</h4>
-                            <button onclick="showPanelMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>
+                            ${(currentUser && currentUser.role !== 'bot') ? `<button onclick="showPanelMovementModal(${id})" class="btn btn-primary btn-sm mb-20">Record Movement</button>` : ''}
                             <table class="table">
                                 <thead>
                                     <tr>
@@ -412,7 +412,7 @@
                 document.getElementById('bomModalTitle').textContent = 'Built Item BOM';
                 document.getElementById('bomContent').innerHTML = `
                     <div style="margin-bottom: 20px;">
-                        ${currentUser.role === 'admin' ? `
+                        ${canEditBuiltBasics(currentUser) ? `
                             <button onclick="showAddBOMItem(${panelId})" class="btn btn-primary">Add BOM Item</button>
                         ` : ''}
                     </div>
@@ -424,11 +424,11 @@
                                 <th>Quantity Required</th>
                                 <th>Unit</th>
                                 <th>Cost (GBP)</th>
-                                ${currentUser.role === 'admin' ? '<th>Actions</th>' : ''}
+                                ${canEditBuiltBasics(currentUser) ? '<th>Actions</th>' : ''}
                             </tr>
                         </thead>
                         <tbody>
-                            ${bomData.bom.length === 0 ? `<tr><td colspan="${currentUser.role === 'admin' ? '6' : '5'}">No BOM items</td></tr>` : (() => {
+                            ${bomData.bom.length === 0 ? `<tr><td colspan="${canEditBuiltBasics(currentUser) ? '6' : '5'}">No BOM items</td></tr>` : (() => {
                                 let totalCost = 0;
                                 const rows = bomData.bom.map(item => {
                                     const itemCost = parseFloat(item.item_cost_gbp || 0);
@@ -440,7 +440,7 @@
                                             <td>${item.quantity_required}</td>
                                             <td>${item.item_unit || item.unit}</td>
                                             <td>${formatCurrency(itemCost)}</td>
-                                            ${currentUser.role === 'admin' ? `
+                                            ${canEditBuiltBasics(currentUser) ? `
                                                 <td>
                                                     <button onclick="deleteBOMItem(${item.id}, ${panelId})" class="btn btn-danger btn-sm">Delete</button>
                                                 </td>
@@ -451,7 +451,7 @@
                                 return rows + `<tr style="font-weight: bold; background-color: #f8f9fa;">
                                     <td colspan="4" style="text-align: right;">Total BOM Cost:</td>
                                     <td>${formatCurrency(totalCost)}</td>
-                                    ${currentUser.role === 'admin' ? '<td></td>' : ''}
+                                    ${canEditBuiltBasics(currentUser) ? '<td></td>' : ''}
                                 </tr>`;
                             })()}
                         </tbody>

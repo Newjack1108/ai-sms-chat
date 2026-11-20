@@ -220,6 +220,9 @@ app.get('/production', requireProductionAuth, (req, res) => {
     if (role === 'office') {
         return res.redirect('/production/installations.html');
     }
+    if (role === 'bot') {
+        return res.redirect('/production/products.html');
+    }
     if (role === 'staff' || role === 'installer') {
         return res.redirect('/production/timesheet.html');
     }
@@ -251,6 +254,21 @@ app.get('/production/*.html', requireProductionAuth, (req, res) => {
             req.path.includes('login.html');
         if (!allowed) {
             return res.redirect('/production/installations.html');
+        }
+    }
+
+    // Grok bot: catalog basics only
+    if (pu && role === 'bot') {
+        const allowed =
+            req.path.includes('products.html') ||
+            req.path.includes('stock.html') ||
+            req.path.includes('components.html') ||
+            req.path.includes('panels.html') ||
+            req.path.includes('suppliers.html') ||
+            req.path.includes('wip.html') ||
+            req.path.includes('login.html');
+        if (!allowed) {
+            return res.redirect('/production/products.html');
         }
     }
 

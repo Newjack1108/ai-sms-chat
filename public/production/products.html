@@ -27,8 +27,8 @@
                 <h2>Products</h2>
                 <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                     <button onclick="exportProductsCsv()" class="btn btn-success btn-sm">Export CSV</button>
-                    <button onclick="showBulkPushToSalesModal()" class="btn btn-secondary btn-sm admin-or-office">Push to Sales (bulk)</button>
-                    <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only">Add Product</button>
+                    <button onclick="showBulkPushToSalesModal()" class="btn btn-secondary btn-sm admin-or-office hide-from-bot">Push to Sales (bulk)</button>
+                    <button onclick="showAddProductModal()" class="btn btn-primary btn-sm admin-only basics-edit">Add Product</button>
                 </div>
             </div>
             <div class="tabs">
@@ -488,11 +488,11 @@
                                 <td>
                                     <div class="action-group">
                                         <button onclick="viewComponents(${product.id})" class="btn btn-primary btn-sm">BOM</button>
-                                        ${(currentUser && isAdminOfficeOrSupervisor(currentUser)) ? `
+                                        ${(currentUser && canEditBasics(currentUser)) ? `
                                         <div class="navbar-dropdown">
                                             <button type="button" class="dropdown-toggle btn btn-secondary btn-sm" onclick="toggleDropdown(event, this)">More</button>
                                             <div class="dropdown-menu">
-                                                <button type="button" class="dropdown-item" onclick="pushToSales(${product.id})">Push to Sales</button>
+                                                ${(currentUser && isAdminOfficeOrSupervisor(currentUser)) ? `<button type="button" class="dropdown-item" onclick="pushToSales(${product.id})">Push to Sales</button>` : ''}
                                                 <button type="button" class="dropdown-item" onclick="manageProductSuppliers(${product.id})">Suppliers</button>
                                                 <button type="button" class="dropdown-item" onclick="editProduct(${product.id})">Edit</button>
                                                 <button type="button" class="dropdown-item" onclick="duplicateProduct(${product.id})">Duplicate</button>

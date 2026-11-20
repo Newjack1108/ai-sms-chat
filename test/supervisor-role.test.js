@@ -209,19 +209,19 @@ test('stock UI grants supervisor add/edit/delete (matches API)', () => {
         'Add Raw Material should be visible to supervisor via admin-or-office'
     );
     assert.ok(
-        html.includes('isAdminOfficeOrSupervisor(currentUser)'),
-        'stock edit/delete should use isAdminOfficeOrSupervisor'
+        html.includes('canEditBasics(currentUser)'),
+        'stock edit/delete should use canEditBasics (includes supervisor)'
     );
     assert.ok(
         !/role === 'admin' \? `<button onclick="editStock/.test(html),
         'stock edit must not be admin-only'
     );
     assert.ok(
-        /router\.post\('\/stock',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(routes),
+        /router\.post\('\/stock',\s*requireProductionAuth,\s*requireBasicsEditor/.test(routes),
         'POST /stock must allow supervisor'
     );
     assert.ok(
-        /router\.put\('\/stock\/:id',\s*requireProductionAuth,\s*requireAdminOfficeOrSupervisor/.test(routes),
+        /router\.put\('\/stock\/:id',\s*requireProductionAuth,\s*requireBasicsEditor/.test(routes),
         'PUT /stock/:id must allow supervisor'
     );
 });

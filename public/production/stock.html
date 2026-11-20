@@ -387,9 +387,9 @@
                                         <td>${formatRawMaterialUnitCost(item.cost_per_unit_gbp || 0)}</td>
                                         <td>${isLow ? '<span class="badge badge-danger">Low Stock</span>' : '<span class="badge badge-success">OK</span>'}</td>
                                         <td>
-                                            <button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>
-                                            ${isAdminOfficeOrSupervisor(currentUser) ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
-                                            ${isAdminOfficeOrSupervisor(currentUser) ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
+                                            ${(currentUser && currentUser.role !== 'bot') ? `<button onclick="showMovementModal(${item.id})" class="btn btn-primary btn-sm">Movement</button>` : ''}
+                                            ${canEditBasics(currentUser) ? `<button onclick="editStock(${item.id})" class="btn btn-secondary btn-sm">Edit</button>` : ''}
+                                            ${canEditBasics(currentUser) ? `<button onclick="deleteStock(${item.id}, event)" data-stock-id="${item.id}" data-stock-name="${(item.name || '').replace(/"/g, '&quot;')}" class="btn btn-danger btn-sm">Delete</button>` : ''}
                                         </td>
                                     </tr>
                                 `;
