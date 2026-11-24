@@ -227,15 +227,15 @@ function formatRawMaterialUnitCost(amount) {
     return new Intl.NumberFormat('en-GB', {
         style: 'currency',
         currency: 'GBP',
-        minimumFractionDigits: 3,
-        maximumFractionDigits: 3
+        minimumFractionDigits: 4,
+        maximumFractionDigits: 4
     }).format(amount || 0);
 }
 
 function formatRawMaterialUnitCostInput(amount) {
     const n = parseFloat(amount);
-    if (!Number.isFinite(n)) return '0.000';
-    return n.toFixed(3);
+    if (!Number.isFinite(n)) return '0.0000';
+    return n.toFixed(4);
 }
 
 // Format date

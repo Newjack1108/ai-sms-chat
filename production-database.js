@@ -2005,7 +2005,7 @@ async function initializePostgreSQL() {
                 current_quantity DECIMAL(10,2) DEFAULT 0,
                 min_quantity DECIMAL(10,2) DEFAULT 0,
                 location VARCHAR(255),
-                cost_per_unit_gbp DECIMAL(12,3) DEFAULT 0,
+                cost_per_unit_gbp DECIMAL(12,4) DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -2143,7 +2143,7 @@ async function initializePostgreSQL() {
                 id SERIAL PRIMARY KEY,
                 supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
                 stock_item_id INTEGER NOT NULL REFERENCES stock_items(id) ON DELETE CASCADE,
-                unit_price_gbp DECIMAL(14,3) NOT NULL DEFAULT 0,
+                unit_price_gbp DECIMAL(14,4) NOT NULL DEFAULT 0,
                 supplier_sku VARCHAR(255),
                 is_preferred BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -2179,7 +2179,7 @@ async function initializePostgreSQL() {
                 custom_item_name VARCHAR(255),
                 custom_unit VARCHAR(100),
                 quantity DECIMAL(12,2) NOT NULL,
-                unit_cost_gbp DECIMAL(14,3) NOT NULL DEFAULT 0,
+                unit_cost_gbp DECIMAL(14,4) NOT NULL DEFAULT 0,
                 line_total_gbp DECIMAL(12,2) NOT NULL DEFAULT 0,
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2617,7 +2617,7 @@ async function initializePostgreSQL() {
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 cost_gbp DECIMAL(10,2) DEFAULT 0,
                 supplier_id INTEGER REFERENCES suppliers(id),
-                unit_cost_gbp DECIMAL(14,3)
+                unit_cost_gbp DECIMAL(14,4)
             )
         `);
 
@@ -2638,14 +2638,14 @@ async function initializePostgreSQL() {
                 WHERE table_schema = 'public' AND table_name = 'stock_movements' AND column_name = 'unit_cost_gbp'
             `);
             if (smUnitCostCheck.rows.length === 0) {
-                await pool.query(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp DECIMAL(14,3)`);
+                await pool.query(`ALTER TABLE stock_movements ADD COLUMN unit_cost_gbp DECIMAL(14,4)`);
                 console.log('✅ Added unit_cost_gbp column to stock_movements');
             }
         } catch (error) {
             console.log('⚠️ Stock movements supplier/unit cost migration skipped:', error.message);
         }
 
-        // Undo the brief quantity widening, and store raw-material unit costs to 3 decimal places.
+        // Undo the brief quantity widening, and store raw-material unit costs to 4 decimal places.
         try {
             const quantityColumns = [
                 ['stock_items', 'current_quantity', 'DECIMAL(10,2)'],
@@ -2661,10 +2661,10 @@ async function initializePostgreSQL() {
                 ['order_spares', 'quantity_returned', 'DECIMAL(10,2)']
             ];
             const unitCostColumns = [
-                ['stock_items', 'cost_per_unit_gbp', 'DECIMAL(12,3)'],
-                ['supplier_stock_items', 'unit_price_gbp', 'DECIMAL(14,3)'],
-                ['purchase_order_items', 'unit_cost_gbp', 'DECIMAL(14,3)'],
-                ['stock_movements', 'unit_cost_gbp', 'DECIMAL(14,3)']
+                ['stock_items', 'cost_per_unit_gbp', 'DECIMAL(12,4)'],
+                ['supplier_stock_items', 'unit_price_gbp', 'DECIMAL(14,4)'],
+                ['purchase_order_items', 'unit_cost_gbp', 'DECIMAL(14,4)'],
+                ['stock_movements', 'unit_cost_gbp', 'DECIMAL(14,4)']
             ];
             const alterNumericColumn = async (table, column, targetType, shouldAlter) => {
                 const scaleCheck = await pool.query(
@@ -2689,7 +2689,7 @@ async function initializePostgreSQL() {
             }
             for (const [table, column, targetType] of unitCostColumns) {
                 try {
-                    await alterNumericColumn(table, column, targetType, (_precision, scale) => scale < 3);
+                    await alterNumericColumn(table, column, targetType, (_precision, scale) => scale < 4);
                 } catch (columnError) {
                     console.log(`⚠️ Could not widen ${table}.${column}:`, columnError.message);
                 }
@@ -4424,7 +4424,7 @@ class ProductionDatabase {
     static async recordStockMovement(data) {
         const supplierId = data.supplier_id != null ? parseInt(data.supplier_id, 10) : null;
         const unitCostGbp = data.unit_cost_gbp != null && data.unit_cost_gbp !== ''
-            ? Math.round((parseFloat(data.unit_cost_gbp) || 0) * 1000) / 1000
+            ? Math.round((parseFloat(data.unit_cost_gbp) || 0) * 10000) / 10000
             : null;
         const costGbp = Math.round((parseFloat(data.cost_gbp) || 0) * 100) / 100;
         const updateMaterialCost = !!data.update_material_cost;
@@ -8333,7 +8333,7 @@ class ProductionDatabase {
                 throw new Error('Duplicate suppliers are not allowed for a raw material');
             }
             seen.add(supplierId);
-            const unitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 1000) / 1000;
+            const unitPrice = Math.round((parseFloat(link.unit_price_gbp) || 0) * 10000) / 10000;
             if (unitPrice < 0) {
                 throw new Error('Supplier unit price cannot be negative');
             }
@@ -8727,7 +8727,7 @@ class ProductionDatabase {
                 let subtotal = 0;
                 for (const item of items) {
                     const qty = parseFloat(item.quantity || 0);
-                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
+                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 10000) / 10000;
                     const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                     subtotal += lineTotal;
                     await pool.query(
@@ -8781,7 +8781,7 @@ class ProductionDatabase {
             );
             for (const item of payload.items) {
                 const qty = parseFloat(item.quantity || 0);
-                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
+                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 10000) / 10000;
                 const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                 subtotal += lineTotal;
                 insertItem.run(poId, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
@@ -8831,7 +8831,7 @@ class ProductionDatabase {
                 let subtotal = 0;
                 for (const item of items) {
                     const qty = parseFloat(item.quantity || 0);
-                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
+                    const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 10000) / 10000;
                     const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                     subtotal += lineTotal;
                     await pool.query(
@@ -8873,7 +8873,7 @@ class ProductionDatabase {
             );
             for (const item of payload.items) {
                 const qty = parseFloat(item.quantity || 0);
-                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
+                const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 10000) / 10000;
                 const lineTotal = parseFloat((qty * unitCost).toFixed(2));
                 subtotal += lineTotal;
                 insertItem.run(id, item.stock_item_id || null, item.custom_item_name || null, item.custom_unit || null, qty, unitCost, lineTotal, item.notes || null);
@@ -8887,7 +8887,7 @@ class ProductionDatabase {
 
     static async addPurchaseOrderItem(purchaseOrderId, item) {
         const qty = parseFloat(item.quantity || 0);
-        const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 1000) / 1000;
+        const unitCost = Math.round((parseFloat(item.unit_cost_gbp) || 0) * 10000) / 10000;
         const lineTotal = parseFloat((qty * unitCost).toFixed(2));
         if (isPostgreSQL) {
             await pool.query(

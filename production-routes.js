@@ -764,7 +764,7 @@ router.post('/stock', requireProductionAuth, requireBasicsEditor, async (req, re
             min_quantity: parseFloat(min_quantity) || 0,
             location,
             category: category && category.trim() ? category.trim() : null,
-            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 1000) / 1000
+            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 10000) / 10000
         });
         if (Array.isArray(suppliers)) {
             await ProductionDatabase.setStockItemSuppliers(item.id, suppliers);
@@ -793,7 +793,7 @@ router.put('/stock/:id', requireProductionAuth, requireBasicsEditor, async (req,
             min_quantity: parseFloat(min_quantity) || 0,
             location,
             category: category && category.trim() ? category.trim() : null,
-            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 1000) / 1000
+            cost_per_unit_gbp: Math.round((parseFloat(cost_per_unit_gbp) || 0) * 10000) / 10000
         });
         if (Array.isArray(suppliers)) {
             await ProductionDatabase.setStockItemSuppliers(itemId, suppliers);
@@ -924,9 +924,9 @@ router.post('/stock/:id/movement', requireProductionAuth, async (req, res) => {
                 return res.status(400).json({ success: false, error: 'Selected supplier is not linked to this raw material' });
             }
             resolvedSupplierId = supplierId;
-            unitCostGbp = Math.round((parseFloat(link.unit_price_gbp) || 0) * 1000) / 1000;
+            unitCostGbp = Math.round((parseFloat(link.unit_price_gbp) || 0) * 10000) / 10000;
             totalCostGbp = Math.round(unitCostGbp * parseFloat(quantity) * 100) / 100;
-            const currentCost = Math.round((parseFloat(stockItem.cost_per_unit_gbp) || 0) * 1000) / 1000;
+            const currentCost = Math.round((parseFloat(stockItem.cost_per_unit_gbp) || 0) * 10000) / 10000;
             shouldUpdateMaterialCost = !!update_material_cost && unitCostGbp !== currentCost;
         }
         
