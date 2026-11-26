@@ -80,19 +80,19 @@
     <div class="container" style="position: relative; z-index: 1;">
         <div class="grid grid-3 mb-20">
             <div class="card dashboard-kpi kpi-wip">
-                <div class="kpi-label">Total WIP Value</div>
-                <div id="totalWIPValue" class="kpi-value">£0.00</div>
-                <div id="wipValueNote" class="kpi-note">Panels and components on hand</div>
+                <div class="kpi-label">Components</div>
+                <div id="totalComponentValue" class="kpi-value">£0.00</div>
+                <div class="kpi-note">Made components on hand</div>
             </div>
             <div class="card dashboard-kpi kpi-stock">
-                <div class="kpi-label">Total Stock Value</div>
-                <div id="totalStockValue" class="kpi-value">£0.00</div>
-                <div class="kpi-note">Raw materials plus WIP</div>
+                <div class="kpi-label">Raw Materials</div>
+                <div id="totalRawStockValue" class="kpi-value">£0.00</div>
+                <div class="kpi-note">Stock items only</div>
             </div>
             <div class="card dashboard-kpi kpi-panel">
-                <div class="kpi-label">Total Panel Value</div>
+                <div class="kpi-label">Built Panels</div>
                 <div id="totalPanelValue" class="kpi-value">£0.00</div>
-                <div class="kpi-note">Built panels only. Included in WIP</div>
+                <div class="kpi-note">Built panels only</div>
             </div>
         </div>
 
@@ -182,13 +182,9 @@
                 const summaryData = await apiCall('/dashboard/summary');
                 const summary = summaryData.summary;
                 
-                document.getElementById('totalWIPValue').textContent = formatCurrency(summary.total_wip_value);
-                document.getElementById('totalStockValue').textContent = formatCurrency(summary.total_stock_value);
+                document.getElementById('totalComponentValue').textContent = formatCurrency(summary.total_component_value);
+                document.getElementById('totalRawStockValue').textContent = formatCurrency(summary.total_raw_stock_value);
                 document.getElementById('totalPanelValue').textContent = formatCurrency(summary.total_panel_value);
-                const wipNote = document.getElementById('wipValueNote');
-                if (wipNote) {
-                    wipNote.textContent = `Panels ${formatCurrency(summary.total_panel_value || 0)} · Components on hand ${formatCurrency(summary.total_component_value || 0)}`;
-                }
                 
                 const panelShortages = summary.panel_stock_shortages || [];
                 const alertsDiv = document.getElementById('stockAlerts');
